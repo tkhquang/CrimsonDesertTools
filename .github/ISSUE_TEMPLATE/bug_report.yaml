@@ -1,0 +1,81 @@
+name: Bug Report
+description: Report a bug or problem with CrimsonDesertEquipHide
+title: "[Bug] "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for using CrimsonDesertEquipHide! Please fill out this form so we can help diagnose the problem.
+
+  - type: dropdown
+    id: version
+    attributes:
+      label: What version are you using?
+      options:
+        - Latest GitHub Release
+        - Latest Nexus Release
+        - Built from source
+        - Older release
+      default: 0
+    validations:
+      required: true
+
+  - type: input
+    id: game_version
+    attributes:
+      label: Game Version
+      description: "What version of Crimson Desert are you using?"
+      placeholder: e.g., 1.0.0
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Game Platform
+      options:
+        - Steam
+        - Epic Games
+        - GOG
+        - Other
+      default: 0
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Describe the issue
+      description: What went wrong? What were you expecting?
+      placeholder: e.g., Hotkey doesn't toggle equipment visibility, or game crashes on launch.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Help us reproduce the issue.
+      placeholder: |
+        1. Launch the game
+        2. Press V (default hotkey)
+        3. Crash or no effect
+      render: markdown
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log output
+      description: Copy-paste lines from `CrimsonDesertEquipHide.log` here.
+      placeholder: |
+        [2026-03-26 14:32:45] [INFO] :: CrimsonDesertEquipHide v0.1.0
+        [2026-03-26 14:32:45] [ERROR] :: All AOB patterns failed
+      render: shell
+
+  - type: checkboxes
+    id: troubleshooting
+    attributes:
+      label: Troubleshooting steps taken
+      options:
+        - label: I set `LogLevel = DEBUG` in the INI file
+        - label: I checked `CrimsonDesertEquipHide.log`
+        - label: I verified my files are in the correct folder

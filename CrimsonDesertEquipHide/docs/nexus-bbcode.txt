@@ -1,0 +1,103 @@
+[size=6]Crimson Desert - Equip Hide[/size]
+
+[size=5]Description[/size]
+This mod allows you to hide equipped gear visually in Crimson Desert using customizable hotkeys. Toggle visibility per category — weapons, shields, bows, tools, and lanterns. Perfect for cleaner screenshots, aesthetic character builds, or simply enjoying the world without gear clutter.
+
+[size=5]Key Features[/size]
+[list]
+[*] Toggle equipment visibility per category with hotkeys (default: V)
+[*] Categories: One-Hand Weapons, Two-Hand Weapons, Shields, Bows, Special Weapons, Tools, Lanterns
+[*] Per-category configuration: enable/disable, hotkey, default hidden state, part list
+[*] Cascading AOB patterns for resilience across game updates
+[*] Fully customizable settings through INI configuration
+[*] Open-source with full transparency
+[/list]
+
+[size=5]Requirements[/size]
+[list]
+[*] Crimson Desert (Steam version)
+[/list]
+
+[size=5]Installation[/size]
+1. Make sure you have an ASI Loader installed for Crimson Desert. If you don't have one, download [code]version.dll[/code] from the [url=https://github.com/ThirteenAG/Ultimate-ASI-Loader/releases]Ultimate ASI Loader releases[/url] and place it in your Crimson Desert game directory (where the game executable is located).
+2. Extract all files from the archive to your Crimson Desert game directory:
+  [code]<Crimson Desert installation folder>/bin64/[/code]
+  Example: [code]D:\Games\SteamLibrary\steamapps\common\Crimson Desert\bin64[/code]
+3. Launch the game and press V (default) to toggle equipment visibility
+
+[size=5]Configuration[/size]
+The mod can be configured by editing the CrimsonDesertEquipHide.ini file:
+[code]
+[General]
+; Delay in milliseconds before scanning for hooks
+InitDelayMs = 3000
+; Log level: Trace, Debug, Info, Warning, Error
+LogLevel = Info
+
+[OneHandWeapons]
+Enabled = true
+Hotkey = V
+DefaultHidden = false
+Parts = CD_MainWeapon_Sword_R, CD_MainWeapon_Sword_IN_R, ...
+
+[Shields]
+Enabled = true
+Hotkey = V
+DefaultHidden = false
+Parts = CD_MainWeapon_Shield_L, CD_MainWeapon_Shield_R, ...
+[/code]
+
+[size=5]Hotkey Format[/size]
+[list]
+[*] Named keys: V, F3, Numpad1, Mouse4, Gamepad_A, etc.
+[*] Modifiers: Ctrl, Shift, Alt (or LCtrl, RCtrl, etc.)
+[*] Multiple combos: V,Gamepad_LB+Gamepad_Y (V alone OR hold LB + press Y)
+[*] Empty Hotkey = disables toggle for that category
+[/list]
+
+See the full list at the [url=https://github.com/tkhquang/DetourModKit?tab=readme-ov-file#supported-input-names]Supported Input Names[/url] reference.
+
+[size=5]Using with Controllers[/size]
+DetourModKit supports gamepad input natively via the [b]XInput[/b] API. Use gamepad button names directly in the INI file:
+
+[code]
+; Toggle with gamepad Y button
+Hotkey = Gamepad_Y
+
+; Use a modifier combo
+Hotkey = Gamepad_LB+Gamepad_Y
+
+; Multiple independent combos (comma = OR)
+Hotkey = V,Gamepad_LB+Gamepad_Y
+[/code]
+
+[b]XInput only:[/b] Xbox controllers work natively. For PS4/PS5/Switch controllers, use an XInput translation layer (e.g. DS4Windows, DualSenseX, BetterJoy) or Steam Input to present your controller as XInput. See [url=https://github.com/tkhquang/DetourModKit?tab=readme-ov-file#gamepad-compatibility]Gamepad Compatibility[/url] for details.
+
+[size=5]Known Limitations[/size]
+[list]
+[*] Toggle may take 1-3 seconds to take effect — the game caches mesh visibility and re-evaluates periodically, not per-frame
+[*] After a major game update, AOB patterns may need updating
+[*] Currently only tested with the Steam version of the game
+[/list]
+
+[size=5]Troubleshooting[/size]
+If you encounter issues:
+[list]
+[*] Set LogLevel = Debug in the INI file
+[*] Check the log file in your game directory (CrimsonDesertEquipHide.log)
+[*] For memory pattern errors, the mod needs an update for the current game version
+[/list]
+
+[b]After a game update:[/b] The AOB pattern scanning system automatically adapts to minor game changes, but major updates may require mod updates if core game functions have been modified.
+
+[size=5]Credits & Source Code[/size]
+Built with [url=https://github.com/tkhquang/DetourModKit]DetourModKit[/url] for core functionality.
+
+[list]
+[*] [url=https://github.com/ThirteenAG]ThirteenAG[/url] for the Ultimate ASI Loader
+[*] [url=https://github.com/cursey]cursey[/url] for SafetyHook
+[*] Brodie Thiesfield for SimpleIni
+[*] Pearl Abyss for creating Crimson Desert
+[/list]
+
+All Crimson Desert mods and tools can be found in this [url=https://github.com/tkhquang/CrimsonDesertTools]GitHub repository[/url]. Feel free to contribute or suggest improvements!

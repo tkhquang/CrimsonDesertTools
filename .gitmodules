@@ -1,0 +1,3 @@
+[submodule "CrimsonDesertEquipHide/external/DetourModKit"]
+	path = CrimsonDesertEquipHide/external/DetourModKit
+	url = https://github.com/tkhquang/DetourModKit.git
