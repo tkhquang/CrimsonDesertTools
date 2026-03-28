@@ -70,8 +70,9 @@ namespace EquipHide
 
         auto partHash = *reinterpret_cast<const uint32_t *>(r10);
 
-        // Quick range check before map lookup — skip obviously out-of-range hashes
-        if (partHash < 0x0F00 || (partHash > 0x0F50 && partHash < 0xAD00) || partHash > 0xBFFF)
+        // Quick range check before map lookup — skip obviously out-of-range hashes.
+        // Equipment part hashes span 0xAD00-0xBFFF with outliers at 0x0F4E and 0x12435.
+        if (partHash != 0x0F4E && partHash != 0x12435 && (partHash < 0xAD00 || partHash > 0xBFFF))
             return;
 
         const auto cat = classify_part(partHash);
@@ -192,7 +193,7 @@ namespace EquipHide
                                        { category_states()[i].hidden.store(val, std::memory_order_relaxed); }, false);
 
             DMK::Config::register_string(section, "Parts", section + " Parts", [cat](const std::string &val)
-                                         { register_parts(cat, val); }, std::string{default_parts(cat)});
+                                         { register_parts(cat, val); }, "");
         }
 
         DMK::Config::load(INI_FILE);

@@ -54,12 +54,9 @@ namespace EquipHide
     // =========================================================================
     // Part classification
     //
-    // Default ranges are hardcoded but can be overridden via INI "Parts" key.
-    // Format: "0xADC7-0xADDE, 0xAE05" (ranges and individual hex IDs).
+    // Parts are loaded exclusively from the INI file. Each category's "Parts"
+    // key contains a comma-separated list of part names or raw hex IDs.
     // =========================================================================
-
-    /// Returns the default "Parts" string for a category.
-    std::string_view default_parts(Category cat);
 
     /// Parse a "Parts" string and register all contained IDs for the given category.
     void register_parts(Category cat, const std::string& partsStr);
