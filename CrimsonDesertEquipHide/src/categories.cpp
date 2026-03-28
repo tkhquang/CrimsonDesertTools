@@ -342,7 +342,8 @@ namespace EquipHide
 
         if (partsStr.find_first_not_of(" ,") == std::string::npos)
         {
-            logger.warning("{}: no parts configured (check INI file)", category_section(cat));
+            if (!partsStr.empty())
+                logger.warning("{}: no parts configured (check INI file)", category_section(cat));
             return;
         }
 
