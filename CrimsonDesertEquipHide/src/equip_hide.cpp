@@ -1,6 +1,6 @@
 #include "equip_hide.hpp"
 #include "categories.hpp"
-#include "version.hpp"
+#include "constants.hpp"
 
 #include <DetourModKit.hpp>
 
@@ -13,12 +13,6 @@
 
 namespace EquipHide
 {
-    // =========================================================================
-    // Constants
-    // =========================================================================
-    static constexpr const char *MOD_VERSION = VERSION_STRING;
-    static uint32_t s_initDelayMs = 3000;
-
     // =========================================================================
     // Hook target: sub_140818340 — visibility decision function
     //
@@ -123,13 +117,61 @@ namespace EquipHide
 #endif
 
     // =========================================================================
+    // AOB scan with unpack retry
+    //
+    // Packed/protected binaries may decompress code into dynamically
+    // allocated memory outside the main module.  Scan all readable-
+    // executable regions in the process to find the hook target
+    // regardless of where the unpacker places the code.
+    // =========================================================================
+
+    struct CompiledCandidate
+    {
+        const AobCandidate *source;
+        DMK::Scanner::CompiledPattern compiled;
+    };
+
+    /// Scan all executable committed memory regions for the AOB patterns.
+    /// Returns the resolved hook address and sets matchedSource on success.
+    static uintptr_t scan_for_hook_target(
+        const std::vector<CompiledCandidate> &candidates,
+        const AobCandidate *&matchedSource)
+    {
+        const uint8_t *addr = nullptr;
+        MEMORY_BASIC_INFORMATION mbi;
+
+        while (VirtualQuery(addr, &mbi, sizeof(mbi)))
+        {
+            if (mbi.State == MEM_COMMIT &&
+                (mbi.Protect & (PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE |
+                                PAGE_EXECUTE_WRITECOPY)))
+            {
+                const auto regionBase = reinterpret_cast<uintptr_t>(mbi.BaseAddress);
+
+                for (const auto &c : candidates)
+                {
+                    const auto *match = DMK::Scanner::find_pattern(
+                        reinterpret_cast<const std::byte *>(regionBase),
+                        mbi.RegionSize, c.compiled);
+                    if (match)
+                    {
+                        matchedSource = c.source;
+                        return reinterpret_cast<uintptr_t>(match) + c.source->offsetToHook;
+                    }
+                }
+            }
+
+            addr = static_cast<const uint8_t *>(mbi.BaseAddress) + mbi.RegionSize;
+        }
+
+        return 0;
+    }
+
+    // =========================================================================
     // Config
     // =========================================================================
     static void load_config()
     {
-        DMK::Config::register_int("General", "InitDelayMs", "Init Delay (ms)", [](int val)
-                                  { s_initDelayMs = static_cast<uint32_t>(val); }, 3000);
-
         DMK::Config::register_string("General", "LogLevel", "Log Level", [](const std::string &val)
                                      {
                 auto& logger = DMK::Logger::get_instance();
@@ -153,7 +195,7 @@ namespace EquipHide
                                          { register_parts(cat, val); }, std::string{default_parts(cat)});
         }
 
-        DMK::Config::load("CrimsonDesertEquipHide.ini");
+        DMK::Config::load(INI_FILE);
         DMK::Config::log_all();
         build_part_lookup();
     }
@@ -239,98 +281,51 @@ namespace EquipHide
     {
         auto &logger = DMK::Logger::get_instance();
 
-        logger.info("=== CrimsonDesertEquipHide v{} ===", MOD_VERSION);
+        logger.info("=== {} v{} ===", MOD_NAME, MOD_VERSION);
 
         load_config();
 
-        // Wait for unpack: configurable delay + SizeOfImage poll
-        if (s_initDelayMs > 0)
-        {
-            logger.info("Waiting {}ms initial delay...", s_initDelayMs);
-            Sleep(s_initDelayMs);
-        }
-
-        logger.info("Polling for game unpack (SizeOfImage > 10 MB, timeout 5 min)...");
-        constexpr int kMaxPolls = 3000;
-        bool unpacked = false;
-        for (int poll = 0; poll < kMaxPolls; ++poll)
-        {
-            const auto *dh = reinterpret_cast<const IMAGE_DOS_HEADER *>(GetModuleHandleW(nullptr));
-            const auto *nh = reinterpret_cast<const IMAGE_NT_HEADERS *>(
-                reinterpret_cast<const uint8_t *>(dh) + dh->e_lfanew);
-            if (nh->OptionalHeader.SizeOfImage > 10u * 1024u * 1024u)
-            {
-                unpacked = true;
-                break;
-            }
-            Sleep(100);
-        }
-
-        if (!unpacked)
-            logger.error("Timed out waiting for game to unpack.");
-        else
-            logger.info("Game unpacked.");
-
-        HMODULE gameModule = GetModuleHandleW(nullptr);
-        const auto moduleBase = reinterpret_cast<uintptr_t>(gameModule);
-        const auto *dosHeader = reinterpret_cast<const IMAGE_DOS_HEADER *>(gameModule);
-        const auto *ntHeaders = reinterpret_cast<const IMAGE_NT_HEADERS *>(
-            reinterpret_cast<const uint8_t *>(gameModule) + dosHeader->e_lfanew);
-        auto moduleSize = static_cast<size_t>(ntHeaders->OptionalHeader.SizeOfImage);
-
-        {
-            const auto *firstSection = IMAGE_FIRST_SECTION(ntHeaders);
-            size_t maxExtent = 0;
-            for (WORD i = 0; i < ntHeaders->FileHeader.NumberOfSections; ++i)
-            {
-                auto secEnd = static_cast<size_t>(firstSection[i].VirtualAddress) + firstSection[i].Misc.VirtualSize;
-                if (secEnd > maxExtent)
-                    maxExtent = secEnd;
-            }
-            if (maxExtent > moduleSize)
-                moduleSize = maxExtent;
-        }
-
-        logger.info("Game module: base=0x{:X}, size=0x{:X} ({:.1f} MB)",
-                    moduleBase, moduleSize, moduleSize / (1024.0 * 1024.0));
-
-        // Install mid-hook using cascading AOB scan (try each pattern until one works)
-        auto &hookMgr = DMK::HookManager::get_instance();
-        bool hookInstalled = false;
-
+        // Pre-compile AOB patterns once
+        std::vector<CompiledCandidate> compiledCandidates;
         for (const auto &candidate : k_aobCandidates)
         {
-            logger.info("Trying AOB pattern '{}' (offset +0x{:X})...",
-                        candidate.name, candidate.offsetToHook);
-
-            auto hookResult = hookMgr.create_mid_hook_aob(
-                "EquipVisCheck",
-                moduleBase,
-                moduleSize,
-                candidate.pattern,
-                candidate.offsetToHook,
-                on_vis_check);
-
-            if (hookResult.has_value())
-            {
-                logger.info("Hook '{}' installed via pattern '{}' successfully",
-                            hookResult.value(), candidate.name);
-                hookInstalled = true;
-                break;
-            }
-
-            logger.warning("Pattern '{}' failed: {}",
-                           candidate.name,
-                           DetourModKit::Hook::error_to_string(hookResult.error()));
+            auto compiled = DMK::Scanner::parse_aob(candidate.pattern);
+            if (compiled)
+                compiledCandidates.push_back({&candidate, std::move(*compiled)});
+            else
+                logger.warning("Failed to parse AOB pattern '{}'", candidate.name);
         }
 
-        if (!hookInstalled)
+        if (compiledCandidates.empty())
         {
-            logger.error("All AOB patterns failed. The mod may be outdated for this game version.");
-            logger.error("The game will continue normally without equipment hiding.");
-            // Don't return false — still register hotkeys so the mod doesn't crash,
-            // and the user sees toggle messages (even though they have no effect).
+            logger.error("No valid AOB patterns available.");
+            return false;
         }
+
+        // Scan all executable memory regions for the hook target.
+        // The process gate in dllmain ensures we run after the protector
+        // has finished unpacking, so a single scan pass is sufficient.
+        const AobCandidate *matchedSource = nullptr;
+        uintptr_t hookAddr = scan_for_hook_target(compiledCandidates, matchedSource);
+
+        if (hookAddr == 0)
+        {
+            logger.error("No AOB pattern matched. The mod may be outdated for this game version.");
+            return false;
+        }
+
+        auto &hookMgr = DMK::HookManager::get_instance();
+        auto hookResult = hookMgr.create_mid_hook("EquipVisCheck", hookAddr, on_vis_check);
+
+        if (!hookResult.has_value())
+        {
+            logger.error("Hook creation failed at 0x{:X}: {}",
+                         hookAddr, DetourModKit::Hook::error_to_string(hookResult.error()));
+            return false;
+        }
+
+        logger.info("Hook installed via pattern '{}' at 0x{:X}",
+                    matchedSource->name, hookAddr);
 
         register_hotkeys();
 
@@ -343,7 +338,7 @@ namespace EquipHide
 
     void shutdown()
     {
-        DMK::Logger::get_instance().info("CrimsonDesertEquipHide shutting down...");
+        DMK::Logger::get_instance().info("{} shutting down...", MOD_NAME);
         DMK_Shutdown();
     }
 

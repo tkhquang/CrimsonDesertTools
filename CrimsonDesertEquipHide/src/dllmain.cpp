@@ -1,21 +1,48 @@
+#include "constants.hpp"
 #include "equip_hide.hpp"
 
 #include <DetourModKit.hpp>
 
 #include <Windows.h>
 
-static HMODULE g_hModule = nullptr;
+#include <cstring>
+
 static HANDLE g_shutdownEvent = nullptr;
+static HANDLE g_instanceMutex = nullptr;
 
 /// Mod lifecycle thread — runs init, waits for shutdown signal, then tears down
 /// outside the loader lock (joining threads from DllMain would deadlock).
 static DWORD WINAPI lifecycle_thread(LPVOID /*param*/)
 {
-    DMK::Logger::configure("EquipHide", "CrimsonDesertEquipHide.log", "%Y-%m-%d %H:%M:%S");
-    auto& logger = DMK::Logger::get_instance();
-    logger.enable_async_mode();
+    {
+        char exePath[MAX_PATH];
+        GetModuleFileNameA(nullptr, exePath, MAX_PATH);
+        const char *exeName = std::strrchr(exePath, '\\');
+        exeName = exeName ? exeName + 1 : exePath;
+        if (_stricmp(exeName, EquipHide::GAME_PROCESS_NAME) != 0)
+            return 0;
+    }
+
+    DMK::Logger::configure("EquipHide", EquipHide::LOG_FILE, "%Y-%m-%d %H:%M:%S");
+    auto &logger = DMK::Logger::get_instance();
+
+    DMK::AsyncLoggerConfig asyncCfg;
+    asyncCfg.overflow_policy = DMK::OverflowPolicy::SyncFallback;
+    logger.enable_async_mode(asyncCfg);
 
     logger.info("DLL loaded, runtime dir: {}", DMK::Filesystem::get_runtime_directory());
+
+    wchar_t mutexName[64];
+    wsprintfW(mutexName, L"%s%lu", EquipHide::INSTANCE_MUTEX_PREFIX, GetCurrentProcessId());
+    g_instanceMutex = CreateMutexW(nullptr, FALSE, mutexName);
+    if (g_instanceMutex && GetLastError() == ERROR_ALREADY_EXISTS)
+    {
+        logger.error("Another instance of CrimsonDesertEquipHide is already loaded. "
+                     "Check for duplicate .asi files in the game directory.");
+        CloseHandle(g_instanceMutex);
+        g_instanceMutex = nullptr;
+        return 1;
+    }
 
     if (!EquipHide::init())
     {
@@ -38,7 +65,6 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
     switch (ul_reason_for_call)
     {
     case DLL_PROCESS_ATTACH:
-        g_hModule = hModule;
         DisableThreadLibraryCalls(hModule);
 
         g_shutdownEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
@@ -68,6 +94,11 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
 
             CloseHandle(g_shutdownEvent);
             g_shutdownEvent = nullptr;
+        }
+        if (g_instanceMutex)
+        {
+            CloseHandle(g_instanceMutex);
+            g_instanceMutex = nullptr;
         }
         break;
 
