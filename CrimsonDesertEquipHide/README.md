@@ -135,8 +135,8 @@ cmake --build build --config Release --parallel
 ```bash
 git submodule update --init --recursive
 cd CrimsonDesertEquipHide
-cmake -S . -B build -G "Visual Studio 17 2022" -A x64
-cmake --build build --config Release --parallel
+cmake -S . -B build/msvc -G "Visual Studio 17 2022" -A x64
+cmake --build build/msvc --config Release --parallel
 ```
 
 The output binary (`CrimsonDesertEquipHide.asi`) will be placed in the build directory.
