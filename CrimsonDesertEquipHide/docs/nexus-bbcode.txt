@@ -5,10 +5,10 @@ This mod allows you to hide equipped gear visually in Crimson Desert using custo
 
 [size=5]Key Features[/size]
 [list]
-[*] Toggle equipment visibility per category with hotkeys (default: V)
+[*] Toggle, force-show, or force-hide equipment visibility per category with hotkeys
+[*] Global show-all / hide-all hotkeys to control every category at once
 [*] Categories: One-Hand Weapons, Two-Hand Weapons, Shields, Bows, Special Weapons, Tools, Lanterns
-[*] Per-category configuration: enable/disable, hotkey, default hidden state, part list
-[*] Cascading AOB patterns for resilience across game updates
+[*] Per-category configuration: enable/disable, toggle/show/hide hotkeys, default hidden state, part list
 [*] Fully customizable settings through INI configuration
 [*] Open-source with full transparency
 [/list]
@@ -20,39 +20,62 @@ This mod allows you to hide equipped gear visually in Crimson Desert using custo
 
 [size=5]Installation[/size]
 1. Make sure you have an ASI Loader installed for Crimson Desert. If you don't have one, download [code]version.dll[/code] from the [url=https://github.com/ThirteenAG/Ultimate-ASI-Loader/releases]Ultimate ASI Loader releases[/url] and place it in your Crimson Desert game directory (where the game executable is located).
+
 2. Extract all files from the archive to your Crimson Desert game directory:
   [code]<Crimson Desert installation folder>/bin64/[/code]
   Example: [code]D:\Games\SteamLibrary\steamapps\common\Crimson Desert\bin64[/code]
+
 3. Launch the game and press V (default) to toggle equipment visibility
 
 [size=5]Configuration[/size]
 The mod can be configured by editing the CrimsonDesertEquipHide.ini file:
 [code]
 [General]
-; Delay in milliseconds before scanning for hooks
-InitDelayMs = 3000
 ; Log level: Trace, Debug, Info, Warning, Error
 LogLevel = Info
+; Apply only to player characters
+PlayerOnly = true
+; Force all categories visible / hidden at once (empty = disabled)
+ShowAllHotkey =
+HideAllHotkey =
 
 [OneHandWeapons]
 Enabled = true
-Hotkey = V
+ToggleHotkey = V
+ShowHotkey =
+HideHotkey =
 DefaultHidden = false
 Parts = CD_MainWeapon_Sword_R, CD_MainWeapon_Sword_IN_R, ...
 
 [Shields]
 Enabled = true
-Hotkey = V
+ToggleHotkey = V
+ShowHotkey =
+HideHotkey =
 DefaultHidden = false
 Parts = CD_MainWeapon_Shield_L, CD_MainWeapon_Shield_R, ...
 [/code]
+
+[size=5]Hotkey Types[/size]
+Each category supports three independent hotkey bindings:
+[list]
+[*] [b]ToggleHotkey[/b] — flips between hidden and visible
+[*] [b]ShowHotkey[/b] — always forces visible
+[*] [b]HideHotkey[/b] — always forces hidden
+[/list]
+
+Global overrides in [General]:
+[list]
+[*] [b]ShowAllHotkey[/b] — forces ALL categories visible
+[*] [b]HideAllHotkey[/b] — forces ALL categories hidden
+[/list]
 
 [size=5]Hotkey Format[/size]
 [list]
 [*] Named keys: V, F3, Numpad1, Mouse4, Gamepad_A, etc.
 [*] Modifiers: Ctrl, Shift, Alt (or LCtrl, RCtrl, etc.)
 [*] Multiple combos: V,Gamepad_LB+Gamepad_Y (V alone OR hold LB + press Y)
-[*] Empty Hotkey = disables toggle for that category
+[*] Empty value disables the binding
 [/list]
 
 See the full list at the [url=https://github.com/tkhquang/DetourModKit?tab=readme-ov-file#supported-input-names]Supported Input Names[/url] reference.
@@ -62,13 +85,13 @@ DetourModKit supports gamepad input natively via the [b]XInput[/b] API. Use game
 
 [code]
 ; Toggle with gamepad Y button
-Hotkey = Gamepad_Y
+ToggleHotkey = Gamepad_Y
 
 ; Use a modifier combo
-Hotkey = Gamepad_LB+Gamepad_Y
+ToggleHotkey = Gamepad_LB+Gamepad_Y
 
 ; Multiple independent combos (comma = OR)
-Hotkey = V,Gamepad_LB+Gamepad_Y
+ToggleHotkey = V,Gamepad_LB+Gamepad_Y
 [/code]
 
 [b]XInput only:[/b] Xbox controllers work natively. For PS4/PS5/Switch controllers, use an XInput translation layer (e.g. DS4Windows, DualSenseX, BetterJoy) or Steam Input to present your controller as XInput. See [url=https://github.com/tkhquang/DetourModKit?tab=readme-ov-file#gamepad-compatibility]Gamepad Compatibility[/url] for details.

@@ -423,4 +423,9 @@ namespace EquipHide
                st.hidden.load(std::memory_order_relaxed);
     }
 
+    const std::unordered_map<uint32_t, Category>& get_part_map()
+    {
+        return s_partMap;
+    }
+
 } // namespace EquipHide
