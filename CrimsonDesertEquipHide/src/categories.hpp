@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <optional>
 #include <string_view>
+#include <unordered_map>
 
 namespace EquipHide
 {
@@ -46,7 +47,9 @@ namespace EquipHide
     {
         std::atomic<bool> enabled{true};
         std::atomic<bool> hidden{false};
-        DMK::Config::KeyComboList hotkeyCombos;
+        DMK::Config::KeyComboList toggleHotkeyCombos;
+        DMK::Config::KeyComboList showHotkeyCombos;
+        DMK::Config::KeyComboList hideHotkeyCombos;
     };
 
     std::array<CategoryState, CATEGORY_COUNT>& category_states();
@@ -69,6 +72,9 @@ namespace EquipHide
 
     /// Returns true if a specific category is currently hidden (and enabled).
     bool is_category_hidden(Category cat);
+
+    /// Returns the registered part-hash to category map.
+    const std::unordered_map<uint32_t, Category>& get_part_map();
 
 } // namespace EquipHide
 

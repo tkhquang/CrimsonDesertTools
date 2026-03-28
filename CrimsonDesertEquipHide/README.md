@@ -6,10 +6,10 @@
 
 ## Features
 
-- Toggle equipment visibility per category with hotkeys (default: V)
+- Toggle, force-show, or force-hide equipment visibility per category with hotkeys
+- Global show-all / hide-all hotkeys to control every category at once
 - Categories: One-Hand Weapons, Two-Hand Weapons, Shields, Bows, Special Weapons, Tools, Lanterns
-- Per-category configuration: enable/disable, hotkey, default hidden state, part list
-- Cascading AOB pattern scanning for resilience across game updates
+- Per-category configuration: enable/disable, toggle/show/hide hotkeys, default hidden state, part list
 - SEH-protected hook callback to prevent crashes if mod is outdated
 - Fully customizable settings via INI configuration
 
@@ -25,7 +25,7 @@
 
    Example: `D:\Games\SteamLibrary\steamapps\common\Crimson Desert\bin64`
 
-4. Launch the game and use the configured hotkey (default: V) to toggle equipment visibility
+4. Launch the game and use the configured hotkey (default: `V`) to toggle equipment visibility
 
 ## Configuration
 
@@ -33,30 +33,54 @@ The mod is configured via the `CrimsonDesertEquipHide.ini` file:
 
 ```ini
 [General]
-; Delay in milliseconds before scanning for hooks (game needs time to unpack)
-InitDelayMs = 3000
 ; Log level: Trace, Debug, Info, Warning, Error
 LogLevel = Info
+; Apply only to player characters
+PlayerOnly = true
+; Force all categories visible / hidden at once (empty = disabled)
+ShowAllHotkey =
+HideAllHotkey =
 
 [OneHandWeapons]
 Enabled = true
-Hotkey = V
+ToggleHotkey = V
+ShowHotkey =
+HideHotkey =
 DefaultHidden = false
 Parts = CD_MainWeapon_Sword_R, CD_MainWeapon_Sword_IN_R, ...
 
 [Shields]
 Enabled = true
-Hotkey = V
+ToggleHotkey = V
+ShowHotkey =
+HideHotkey =
 DefaultHidden = false
 Parts = CD_MainWeapon_Shield_L, CD_MainWeapon_Shield_R, ...
 ```
+
+### Hotkey Types
+
+Each category supports three independent hotkey bindings:
+
+| Key | Behavior |
+|-----|----------|
+| `ToggleHotkey` | Flips between hidden and visible |
+| `ShowHotkey` | Always forces visible |
+| `HideHotkey` | Always forces hidden |
+
+Global overrides in `[General]`:
+
+| Key | Behavior |
+|-----|----------|
+| `ShowAllHotkey` | Forces ALL categories visible |
+| `HideAllHotkey` | Forces ALL categories hidden |
 
 ### Hotkey Format
 
 - Named keys: `V`, `F3`, `Numpad1`, `Mouse4`, `Gamepad_A`, etc.
 - Modifiers: `Ctrl`, `Shift`, `Alt` (or `LCtrl`, `RCtrl`, etc.)
 - Multiple combos: `V,Gamepad_LB+Gamepad_Y` (V alone OR hold LB + press Y)
-- Empty `Hotkey =` disables toggle for that category
+- Empty value disables the binding
 
 See the full list at the [Supported Input Names](https://github.com/tkhquang/DetourModKit?tab=readme-ov-file#supported-input-names) reference.
 
@@ -65,9 +89,9 @@ See the full list at the [Supported Input Names](https://github.com/tkhquang/Det
 DetourModKit supports gamepad input natively via the **XInput** API:
 
 ```ini
-Hotkey = Gamepad_Y
-Hotkey = Gamepad_LB+Gamepad_Y
-Hotkey = V,Gamepad_LB+Gamepad_Y
+ToggleHotkey = Gamepad_Y
+ToggleHotkey = Gamepad_LB+Gamepad_Y
+ToggleHotkey = V,Gamepad_LB+Gamepad_Y
 ```
 
 > **XInput only:** Xbox controllers work natively. For PS4/PS5/Switch controllers, use an XInput translation layer (e.g. DS4Windows, DualSenseX, BetterJoy) or Steam Input. See [Gamepad Compatibility](https://github.com/tkhquang/DetourModKit?tab=readme-ov-file#gamepad-compatibility) for details.
