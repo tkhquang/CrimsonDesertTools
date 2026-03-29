@@ -364,8 +364,8 @@ namespace EquipHide
         auto partHash = *reinterpret_cast<const uint32_t *>(r10);
 
         // Quick range check before map lookup — skip obviously out-of-range hashes.
-        // Equipment part hashes span 0xAD00-0xBFFF with outliers at 0x0F4E and 0x12435.
-        if (partHash != 0x0F4E && partHash != 0x12435 && (partHash < 0xAD00 || partHash > 0xBFFF))
+        // Equipment part hashes span 0xAE03-0xBFFF with outliers at 0x0F6D and 0x12A79.
+        if (partHash != 0x0F6D && partHash != 0x12A79 && (partHash < 0xAE03 || partHash > 0xBFFF))
             return;
 
         const auto cat = classify_part(partHash);
