@@ -2,6 +2,11 @@
 
 All notable changes to the CrimsonDesertEquipHide mod will be documented in this file.
 
+## [0.2.1] - Fixed equipment hash IDs for game v1.01.00
+
+- Fix equipment hide not working on game v1.01.00 — the patch inserted ~60 new entries (bags, accessories) into the IndexedStringA table, shifting all 98 equipment part hash IDs upward and causing most categories (1H weapons, shields, bows, special weapons, lanterns) to fail silently while tools and 2H weapons appeared to work by coincidence
+- Update range filter bounds from
+
 ## [0.2.0] - Player-Only Mode, Show/Hide Hotkeys, and Reliable Hook Init
 
 ### Added
@@ -38,5 +43,6 @@ All notable changes to the CrimsonDesertEquipHide mod will be documented in this
 - Customizable part lists per category via INI configuration
 - Configurable init delay and log level
 
+[0.2.1]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/v0.2.1
 [0.2.0]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/v0.2.0
 [0.1.0]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/v0.1.0

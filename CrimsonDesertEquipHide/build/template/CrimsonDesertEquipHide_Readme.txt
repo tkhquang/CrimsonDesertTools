@@ -1,5 +1,5 @@
 CRIMSON DESERT - EQUIP HIDE
-Version 0.2.0
+Version 0.2.1
 
 REQUIREMENTS:
 - Ultimate ASI Loader from:
