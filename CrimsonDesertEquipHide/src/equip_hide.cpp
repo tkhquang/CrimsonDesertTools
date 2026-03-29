@@ -51,6 +51,12 @@ namespace EquipHide
 
     static std::atomic<bool> s_needsDirectWrite{false};
 
+    // Per-address cache of original vis bytes written before the mod overrides them.
+    // Keyed by the vis-byte address (entry + 0x1C).  Populated by the direct-write
+    // path on first hide; consumed on un-hide to restore the game's natural value.
+    // Only accessed from the direct-write call site (cold path, single-threaded).
+    static std::unordered_map<uintptr_t, uint8_t> s_originalVis;
+
     static DMK::Config::KeyComboList s_showAllCombos;
     static DMK::Config::KeyComboList s_hideAllCombos;
 
@@ -59,6 +65,17 @@ namespace EquipHide
 
     // Deferred IndexedStringA scan: set when the table isn't ready at init
     static std::atomic<bool> s_deferredScanPending{false};
+
+    // Startup direct-write enforcement deadline (ms since steady_clock epoch).
+    // While active, resolve_player_vis_ctrls() schedules direct writes on
+    // success to proactively enforce DefaultHidden during game loading.
+    static std::atomic<int64_t> s_startupWriteEnd{0};
+
+    static int64_t steady_ms() noexcept
+    {
+        return std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+    }
 
     static uintptr_t read_ptr(uintptr_t base, ptrdiff_t off) noexcept
     {
@@ -444,6 +461,20 @@ namespace EquipHide
                         "Resolve: ws={:#x} am={:#x} user={:#x} count={}",
                         ws, am, user, count);
             }
+            // Startup enforcement: after resolve succeeds, schedule a
+            // direct write so DefaultHidden takes effect even when the
+            // passive hook path missed the initial visibility setup or
+            // the PlayerOnly filter has transitional pointer data.
+            {
+                auto end = s_startupWriteEnd.load(std::memory_order_relaxed);
+                if (end > 0 && count > 0)
+                {
+                    if (steady_ms() < end)
+                        s_needsDirectWrite.store(true, std::memory_order_relaxed);
+                    else
+                        s_startupWriteEnd.store(0, std::memory_order_relaxed);
+                }
+            }
 #ifdef _MSC_VER
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
@@ -497,8 +528,24 @@ namespace EquipHide
                     if (!entry)
                         continue;
 
-                    auto *visPtr = reinterpret_cast<uint8_t *>(entry + 0x1C);
-                    *visPtr = is_category_hidden(cat) ? 2 : 0;
+                    const auto visAddr = entry + 0x1C;
+                    auto *visPtr = reinterpret_cast<uint8_t *>(visAddr);
+
+                    if (is_category_hidden(cat))
+                    {
+                        if (s_originalVis.find(visAddr) == s_originalVis.end())
+                            s_originalVis[visAddr] = *visPtr;
+                        *visPtr = 2;
+                    }
+                    else
+                    {
+                        auto it = s_originalVis.find(visAddr);
+                        if (it != s_originalVis.end())
+                        {
+                            *visPtr = it->second;
+                            s_originalVis.erase(it);
+                        }
+                    }
                     ++modified;
                 }
             }
@@ -601,8 +648,7 @@ namespace EquipHide
     /// Core logic — no SEH here so C++ objects (SafetyHookContext&) are fine.
     static void on_vis_check_impl(SafetyHookContext &ctx)
     {
-        if (s_needsDirectWrite.exchange(false, std::memory_order_relaxed) &&
-            !s_fallbackMode.load(std::memory_order_relaxed))
+        if (s_needsDirectWrite.exchange(false, std::memory_order_relaxed))
             apply_direct_vis_write();
 
         if (s_deferredScanPending.load(std::memory_order_relaxed))
@@ -663,6 +709,9 @@ namespace EquipHide
                             {
                                 s_playerVisCtrls[n].store(a1, std::memory_order_relaxed);
                                 s_playerCount.store(n + 1, std::memory_order_relaxed);
+
+                                if (s_startupWriteEnd.load(std::memory_order_relaxed) > 0)
+                                    s_needsDirectWrite.store(true, std::memory_order_relaxed);
                             }
                         }
                     }
@@ -715,7 +764,7 @@ namespace EquipHide
         if (is_category_hidden(*cat))
         {
             auto *visPtr = reinterpret_cast<uint8_t *>(r13 + 0x1C);
-            *visPtr = 2; // Force Out-only visibility
+            *visPtr = 2;
         }
     }
 
@@ -868,10 +917,8 @@ namespace EquipHide
     static void flush_visibility() noexcept
     {
         if (!s_fallbackMode.load(std::memory_order_relaxed))
-        {
             resolve_player_vis_ctrls();
-            apply_direct_vis_write();
-        }
+        apply_direct_vis_write();
         s_needsDirectWrite.store(true, std::memory_order_relaxed);
     }
 
@@ -1115,6 +1162,27 @@ namespace EquipHide
 
         auto &inputMgr = DMK::InputManager::get_instance();
         inputMgr.start();
+
+        // Schedule startup direct-write enforcement if any category starts hidden.
+        // Covers the race where the game processes initial equipment visibility
+        // before the hook is installed, or the PlayerOnly filter has transitional
+        // pointer data during game loading.
+        {
+            bool anyDefaultHidden = false;
+            for (std::size_t i = 0; i < CATEGORY_COUNT; ++i)
+            {
+                if (category_states()[i].hidden.load(std::memory_order_relaxed))
+                {
+                    anyDefaultHidden = true;
+                    break;
+                }
+            }
+            if (anyDefaultHidden)
+            {
+                s_startupWriteEnd.store(steady_ms() + 60000, std::memory_order_relaxed);
+                logger.debug("Startup direct-write enforcement scheduled (60s)");
+            }
+        }
 
         logger.info("Equip hide system initialized");
         return true;
