@@ -1,7 +1,10 @@
 #include "categories.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
+#include <limits>
+#include <vector>
 
 namespace EquipHide
 {
@@ -18,13 +21,14 @@ namespace EquipHide
     // =========================================================================
     // Hash-range classification
     //
-    // Part hashes are IndexedStringA IDs read from *(DWORD*)R10 at hook point.
-    // Ranges verified via CE runtime breakpoints + string table reads.
+    // Part hashes are IndexedStringA IDs resolved at runtime by scanning the
+    // game's string table (see equip_hide.cpp init). The compile-time values
+    // listed below are from game version 1.01.00 and serve as a fallback if
+    // the runtime scan fails.
+    //
     // See .idea/research/equip_hide_v2.md for full mapping.
     //
-    // Game version: 1.01.00
-    //
-    // ---- Complete Part Hash Reference ----
+    // ---- Complete Part Hash Reference (v1.01.00) ----
     //
     // OneHandWeapons (0xAE03 - 0xAE1A, 0xB085 - 0xB086):
     //   0xAE03  CD_MainWeapon_Sword_R         Sword (Right, drawn)
@@ -107,7 +111,7 @@ namespace EquipHide
     //   0xAE3E  CD_MainWeapon_ThrownSpear_L   Thrown Spear (Left)
     //   0xAE3F  CD_MainWeapon_Whip_R          Whip (Right)
     //
-    // Tools (0x0F6D, 0xAE42 - 0xAE59, 0xAF2B, 0xAF2E, 0xAF6B, 0x12A79):
+    // Tools (0x0F6D, 0xAE42 - 0xAE59, 0xAF2B, 0xAF2E, 0xAF6B, 0x12A8B):
     //   0x0F6D  CD_Tool_FishingRod            Fishing Rod
     //   0xAE42  CD_Tool                       Tool (generic)
     //   0xAE43  CD_Tool_01                    Tool variant
@@ -136,7 +140,7 @@ namespace EquipHide
     //   0xAF2B  CD_Tool_Pan                   Pan
     //   0xAF2E  CD_Tool_Trumpet               Trumpet
     //   0xAF6B  CD_Tool_Pipe                  Pipe
-    // 0x12A79  CD_Tool_Book                  Book
+    // 0x12A8B  CD_Tool_Book                  Book (non-deterministic slot)
     //
     // Lanterns (0xAE5A - 0xAE5C):
     //   0xAE5A  CD_Tool_Hyperspace_RemoteControl  Remote Control
@@ -207,12 +211,16 @@ namespace EquipHide
     //
     // =========================================================================
     // =========================================================================
-    // Name → hash table (all known parts)
+    // Name -> hash table
+    //
+    // Compile-time fallback hashes from game version 1.01.00. These are used
+    // only when the runtime IndexedStringA table scan fails or has not run.
+    // At runtime, set_runtime_hashes() supplies the authoritative mapping.
     // =========================================================================
     struct NamedPart
     {
         const char* name;
-        uint32_t    hash;
+        uint32_t    fallbackHash;
     };
 
     // clang-format off
@@ -297,7 +305,7 @@ namespace EquipHide
         {"CD_Tool_Hammer",              0xAE46},
         {"CD_Tool_Saw",                 0xAE47},
         {"CD_Tool_Hoe",                 0xAE48},
-        {"CD_Tool_Broom",               0xAE49},
+        {"CD_Tool_Broom",              0xAE49},
         {"CD_Tool_FarmScythe",          0xAE4A},
         {"CD_Tool_Hayfork",             0xAE4B},
         {"CD_Tool_Pickaxe",             0xAE4C},
@@ -317,7 +325,7 @@ namespace EquipHide
         {"CD_Tool_Pan",                 0xAF2B},
         {"CD_Tool_Trumpet",             0xAF2E},
         {"CD_Tool_Pipe",                0xAF6B},
-        {"CD_Tool_Book",                0x12A79},
+        {"CD_Tool_Book",                0x12A8B},
         // Lanterns
         {"CD_Tool_Hyperspace_RemoteControl", 0xAE5A},
         {"CD_Lantern",                  0xAE5B},
@@ -325,16 +333,108 @@ namespace EquipHide
     };
     // clang-format on
 
-    /// Build name→hash lookup (lazy init, populated on first use)
+    // =========================================================================
+    // Runtime hash resolution state
+    // =========================================================================
+    static std::unordered_map<std::string, uint32_t> s_runtimeHashes;
+    static bool s_hasRuntimeHashes = false;
+
+    // Per-category parts strings, stored for rebuild after deferred scan.
+    // Written during init (config load) before hooks are installed; read by
+    // rebuild_part_lookup() on the background scan thread.  Hook installation
+    // after config load provides the happens-before guarantee.
+    static std::string s_categoryParts[CATEGORY_COUNT];
+
+    void set_runtime_hashes(std::unordered_map<std::string, uint32_t>&& nameToHash)
+    {
+        s_runtimeHashes = std::move(nameToHash);
+        s_hasRuntimeHashes = true;
+    }
+
+    std::vector<std::pair<std::string, uint32_t>> get_unresolved_fallbacks(
+        const std::unordered_map<std::string, uint32_t>& resolved)
+    {
+        std::vector<std::pair<std::string, uint32_t>> result;
+        for (const auto& p : k_allParts)
+        {
+            if (!resolved.count(p.name))
+                result.emplace_back(p.name, p.fallbackHash);
+        }
+        return result;
+    }
+
+    /// Build name->hash lookup, preferring runtime-resolved hashes over fallbacks.
+    /// Written during init (name_to_hash_map() first call) before hooks; read
+    /// by rebuild_part_lookup() after deferred scan.  Happens-before is
+    /// established by hook installation following config load.
+    static std::unordered_map<std::string, uint32_t> s_nameToHash;
+    static bool s_nameToHashBuilt = false;
+
     static const std::unordered_map<std::string, uint32_t>& name_to_hash_map()
     {
-        static std::unordered_map<std::string, uint32_t> map;
-        if (map.empty())
+        if (!s_nameToHashBuilt)
         {
-            for (const auto& p : k_allParts)
-                map[p.name] = p.hash;
+            auto& logger = DMK::Logger::get_instance();
+
+            if (s_hasRuntimeHashes)
+            {
+                s_nameToHash = s_runtimeHashes;
+
+                int resolved = 0;
+                int fallback = 0;
+                for (const auto& p : k_allParts)
+                {
+                    auto it = s_nameToHash.find(p.name);
+                    if (it != s_nameToHash.end())
+                    {
+                        if (it->second != p.fallbackHash)
+                            logger.debug("Hash shifted: {} 0x{:X} -> 0x{:X}",
+                                         p.name, p.fallbackHash, it->second);
+                        ++resolved;
+                    }
+                    else
+                    {
+                        logger.warning("Part '{}' not found in runtime table, "
+                                       "using fallback 0x{:X}", p.name, p.fallbackHash);
+                        s_nameToHash[p.name] = p.fallbackHash;
+                        ++fallback;
+                    }
+                }
+                logger.info("Hash resolution: {}/{} runtime, {} fallback",
+                            resolved, std::size(k_allParts), fallback);
+            }
+            else
+            {
+                logger.info("Using compile-time fallback hashes (pending deferred scan)");
+                for (const auto& p : k_allParts)
+                    s_nameToHash[p.name] = p.fallbackHash;
+            }
+            s_nameToHashBuilt = true;
         }
-        return map;
+        return s_nameToHash;
+    }
+
+    /// Invalidate the cached name->hash map so it rebuilds on next access.
+    static void invalidate_name_to_hash_map()
+    {
+        s_nameToHash.clear();
+        s_nameToHashBuilt = false;
+    }
+
+    // =========================================================================
+    // Dynamic hash range bounds (for fast pre-filter in the hook)
+    // =========================================================================
+    static std::atomic<uint32_t> s_hashRangeMin{0};
+    static std::atomic<uint32_t> s_hashRangeMax{0};
+
+    uint32_t hash_range_min() noexcept
+    {
+        return s_hashRangeMin.load(std::memory_order_relaxed);
+    }
+
+    uint32_t hash_range_max() noexcept
+    {
+        return s_hashRangeMax.load(std::memory_order_relaxed);
     }
 
     // =========================================================================
@@ -343,10 +443,13 @@ namespace EquipHide
     // Accepts comma-separated part names (e.g. "CD_Tool_Torch, CD_Lantern").
     // Also supports raw hex IDs (e.g. "0xAE1D") for advanced users.
     // =========================================================================
-    static std::unordered_map<uint32_t, Category> s_partMap;
+    static std::unordered_map<uint32_t, Category> s_partMaps[2];
+    static std::atomic<int> s_activeMap{0};
 
     void register_parts(Category cat, const std::string& partsStr)
     {
+        s_categoryParts[static_cast<std::size_t>(cat)] = partsStr;
+
         auto& logger = DMK::Logger::get_instance();
 
         if (partsStr.find_first_not_of(" ,") == std::string::npos)
@@ -357,6 +460,7 @@ namespace EquipHide
         }
 
         const auto& nameMap = name_to_hash_map();
+        auto& writeMap = s_partMaps[1 - s_activeMap.load(std::memory_order_relaxed)];
 
         std::size_t pos = 0;
         while (pos < partsStr.size())
@@ -388,7 +492,7 @@ namespace EquipHide
             auto it = nameMap.find(token);
             if (it != nameMap.end())
             {
-                s_partMap[it->second] = cat;
+                writeMap[it->second] = cat;
                 logger.debug("  {} += {} (0x{:04X})", category_section(cat), token, it->second);
                 continue;
             }
@@ -399,7 +503,7 @@ namespace EquipHide
                 try
                 {
                     auto id = static_cast<uint32_t>(std::stoul(token.substr(2), nullptr, 16));
-                    s_partMap[id] = cat;
+                    writeMap[id] = cat;
                     logger.debug("  {} += 0x{:04X} (raw)", category_section(cat), id);
                     continue;
                 }
@@ -410,16 +514,125 @@ namespace EquipHide
         }
     }
 
+    // =========================================================================
+    // Outlier hash set
+    //
+    // Most equipment hashes fall in a contiguous 0xAExx-0xBxxx block.
+    // A few (fishing rod, book) sit far outside.  We separate them so the
+    // hot-path range check remains tight.
+    // =========================================================================
+    static constexpr std::size_t k_maxOutliers = 8;
+    static std::atomic<uint32_t> s_outliers[k_maxOutliers]{};
+    static std::atomic<int>      s_outlierCount{0};
+
+    bool is_outlier_hash(uint32_t hash) noexcept
+    {
+        const auto n = s_outlierCount.load(std::memory_order_acquire);
+        for (int i = 0; i < n; ++i)
+        {
+            if (s_outliers[i].load(std::memory_order_relaxed) == hash)
+                return true;
+        }
+        return false;
+    }
+
     void build_part_lookup()
     {
-        DMK::Logger::get_instance().info("Part lookup built: {} entries across {} categories",
-                                          s_partMap.size(), CATEGORY_COUNT);
+        // Determine the contiguous block bounds using the IQR-style approach:
+        // collect all hashes, sort them, then find the densest cluster.  In
+        // practice equipment hashes form one tight block (0xAExx-0xBxxx) with
+        // a handful of distant outliers.
+
+        const auto& writeMap = s_partMaps[1 - s_activeMap.load(std::memory_order_relaxed)];
+
+        std::vector<uint32_t> hashes;
+        hashes.reserve(writeMap.size());
+        for (const auto& [hash, cat] : writeMap)
+            hashes.push_back(hash);
+
+        std::sort(hashes.begin(), hashes.end());
+
+        uint32_t rangeMin = 0;
+        uint32_t rangeMax = 0;
+        int outlierCount = 0;
+
+        if (!hashes.empty())
+        {
+            // Find the largest gap — hashes on the far side of any gap > 0x100
+            // are considered outliers.
+            constexpr uint32_t k_gapThreshold = 0x100;
+
+            // Walk sorted hashes and find the tightest contiguous cluster
+            std::size_t bestStart = 0;
+            std::size_t bestLen   = 1;
+            std::size_t curStart  = 0;
+
+            for (std::size_t i = 1; i < hashes.size(); ++i)
+            {
+                if (hashes[i] - hashes[i - 1] > k_gapThreshold)
+                    curStart = i;
+                if (i - curStart + 1 > bestLen)
+                {
+                    bestStart = curStart;
+                    bestLen   = i - curStart + 1;
+                }
+            }
+
+            rangeMin = hashes[bestStart];
+            rangeMax = hashes[bestStart + bestLen - 1];
+
+            // Everything outside the best cluster is an outlier
+            for (std::size_t i = 0; i < hashes.size(); ++i)
+            {
+                if (i < bestStart || i >= bestStart + bestLen)
+                {
+                    if (outlierCount < static_cast<int>(k_maxOutliers))
+                        s_outliers[outlierCount++].store(
+                            hashes[i], std::memory_order_relaxed);
+                }
+            }
+        }
+
+        s_hashRangeMin.store(rangeMin, std::memory_order_relaxed);
+        s_hashRangeMax.store(rangeMax, std::memory_order_relaxed);
+        s_outlierCount.store(outlierCount, std::memory_order_release);
+
+        auto& logger = DMK::Logger::get_instance();
+        logger.info("Part lookup built: {} entries across {} categories",
+                     writeMap.size(), CATEGORY_COUNT);
+        if (!writeMap.empty())
+        {
+            logger.info("Hash range: 0x{:X} - 0x{:X} ({} outliers)",
+                         rangeMin, rangeMax, outlierCount);
+            for (int i = 0; i < outlierCount; ++i)
+                logger.debug("  outlier: 0x{:X}",
+                              s_outliers[i].load(std::memory_order_relaxed));
+        }
+
+        // Publish the new map: flip the active index so readers see it
+        s_activeMap.store(1 - s_activeMap.load(std::memory_order_relaxed),
+                          std::memory_order_release);
+    }
+
+    void rebuild_part_lookup()
+    {
+        invalidate_name_to_hash_map();
+        s_partMaps[1 - s_activeMap.load(std::memory_order_relaxed)].clear();
+
+        for (std::size_t i = 0; i < CATEGORY_COUNT; ++i)
+        {
+            if (!s_categoryParts[i].empty())
+                register_parts(static_cast<Category>(i), s_categoryParts[i]);
+        }
+
+        build_part_lookup();
     }
 
     std::optional<Category> classify_part(uint32_t hash)
     {
-        const auto it = s_partMap.find(hash);
-        if (it != s_partMap.end())
+        const auto& readMap = s_partMaps[s_activeMap.load(std::memory_order_acquire)];
+        const auto it = readMap.find(hash);
+        if (it != readMap.end())
             return it->second;
         return std::nullopt;
     }
@@ -434,7 +647,7 @@ namespace EquipHide
 
     const std::unordered_map<uint32_t, Category>& get_part_map()
     {
-        return s_partMap;
+        return s_partMaps[s_activeMap.load(std::memory_order_acquire)];
     }
 
 } // namespace EquipHide

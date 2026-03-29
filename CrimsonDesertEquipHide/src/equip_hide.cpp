@@ -6,8 +6,11 @@
 
 #include <Windows.h>
 
+#include <chrono>
 #include <cstdint>
+#include <cstring>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -53,6 +56,9 @@ namespace EquipHide
 
     // d8-based fallback: activates when global pointer chain AOBs fail
     static std::atomic<bool> s_fallbackMode{false};
+
+    // Deferred IndexedStringA scan: set when the table isn't ready at init
+    static std::atomic<bool> s_deferredScanPending{false};
 
     static uintptr_t read_ptr(uintptr_t base, ptrdiff_t off) noexcept
     {
@@ -192,6 +198,188 @@ namespace EquipHide
 
         logger.warning("{} AOB scan failed — feature disabled", label);
         return 0;
+    }
+
+    // =========================================================================
+    // IndexedStringA table scan
+    //
+    // Reads the game's global IndexedStringA table to build a name->hash map
+    // at init time. This makes hash IDs resilient to table reordering across
+    // game patches.
+    //
+    // Table layout (verified via CE):
+    //   globalPtr      = *(qword*)(mapLookupFunc + 20 + rip_disp)
+    //   tableArray     = *(qword*)(globalPtr + 0x58)
+    //   entry[hash]    = tableArray + hash * 16
+    //   entry[hash]+0  = pointer to null-terminated string (or 0)
+    // =========================================================================
+    // Scan only the range where equipment parts are known to cluster.
+    // Outlier hashes (e.g. CD_Tool_FishingRod, CD_Tool_Book) are resolved
+    // via targeted probes around their fallback hashes.
+    static constexpr uint32_t k_tableScanMin = 0xAD00;
+    static constexpr uint32_t k_tableScanMax = 0xBFFF;
+
+    // SEH-protected table entry reader.  Returns the string length (excluding
+    // null terminator) or 0 on any access fault.  Separate function so that
+    // __try/__except does not conflict with C++ objects in the caller.
+    static constexpr std::size_t k_maxStringLen = 64;
+
+#ifdef _MSC_VER
+    static std::size_t read_table_entry(uintptr_t tableArray, uint32_t hash,
+                                        char *buf, std::size_t bufSize) noexcept
+    {
+        __try
+        {
+            const auto entryAddr = tableArray + static_cast<uintptr_t>(hash) * 16;
+            const auto strPtr = *reinterpret_cast<const uintptr_t *>(entryAddr);
+            if (strPtr < 0x10000)
+                return 0;
+
+            const auto *src = reinterpret_cast<const char *>(strPtr);
+            std::size_t len = 0;
+            while (len < bufSize - 1 && src[len] != '\0')
+            {
+                buf[len] = src[len];
+                ++len;
+            }
+            buf[len] = '\0';
+            return len;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return 0;
+        }
+    }
+#else
+    static std::size_t read_table_entry(uintptr_t tableArray, uint32_t hash,
+                                        char *buf, std::size_t bufSize) noexcept
+    {
+        const auto entryAddr = tableArray + static_cast<uintptr_t>(hash) * 16;
+        if (!DMK::Memory::is_readable(reinterpret_cast<const void *>(entryAddr),
+                                       sizeof(uintptr_t)))
+            return 0;
+
+        const auto strPtr = *reinterpret_cast<const uintptr_t *>(entryAddr);
+        if (strPtr < 0x10000)
+            return 0;
+
+        if (!DMK::Memory::is_readable(reinterpret_cast<const void *>(strPtr), bufSize))
+            return 0;
+
+        const auto *src = reinterpret_cast<const char *>(strPtr);
+        std::size_t len = 0;
+        while (len < bufSize - 1 && src[len] != '\0')
+        {
+            buf[len] = src[len];
+            ++len;
+        }
+        buf[len] = '\0';
+        return len;
+    }
+#endif
+
+    static std::unordered_map<std::string, uint32_t> scan_indexed_string_table(
+        uintptr_t mapLookupFunc)
+    {
+        auto& logger = DMK::Logger::get_instance();
+        std::unordered_map<std::string, uint32_t> nameToHash;
+
+        // The MapLookup function contains: mov rax, [rip+disp] at offset +20
+        // (opcode 48 8B 05 xx xx xx xx). Extract the RIP-relative displacement.
+        const auto ripInstr = mapLookupFunc + 20;
+        const auto* instrBytes = reinterpret_cast<const uint8_t*>(ripInstr);
+
+        // Verify REX.W MOV RAX opcode: 48 8B 05
+        if (instrBytes[0] != 0x48 || instrBytes[1] != 0x8B || instrBytes[2] != 0x05)
+        {
+            logger.warning("IndexedStringA scan: unexpected opcode at +20 "
+                           "(expected 48 8B 05, got {:02X} {:02X} {:02X})",
+                           instrBytes[0], instrBytes[1], instrBytes[2]);
+            return nameToHash;
+        }
+
+        int32_t disp = 0;
+        std::memcpy(&disp, instrBytes + 3, sizeof(int32_t));
+        const auto instrEnd = ripInstr + 7;
+        const auto globalPtrAddr = static_cast<uintptr_t>(
+            static_cast<int64_t>(instrEnd) + disp);
+
+        const auto globalPtr = *reinterpret_cast<const uintptr_t*>(globalPtrAddr);
+        if (globalPtr < 0x10000)
+        {
+            logger.debug("IndexedStringA scan: global pointer not yet initialized ({:#x})",
+                         globalPtr);
+            return nameToHash;
+        }
+
+        const auto tableArray = *reinterpret_cast<const uintptr_t*>(globalPtr + 0x58);
+        if (tableArray < 0x10000)
+        {
+            logger.warning("IndexedStringA scan: tableArray is null/invalid ({:#x})",
+                           tableArray);
+            return nameToHash;
+        }
+
+        logger.debug("IndexedStringA scan: globalPtr={:#x} tableArray={:#x}",
+                      globalPtr, tableArray);
+
+        const auto t0 = std::chrono::steady_clock::now();
+        uint32_t cdEntries = 0;
+        uint32_t probeHits = 0;
+
+        char buf[k_maxStringLen + 1];
+
+        for (uint32_t hash = k_tableScanMin; hash <= k_tableScanMax; ++hash)
+        {
+            auto len = read_table_entry(tableArray, hash, buf, sizeof(buf));
+            if (len == 0 || len >= k_maxStringLen)
+                continue;
+
+            if (buf[0] != 'C' || buf[1] != 'D' || buf[2] != '_')
+                continue;
+
+            nameToHash[std::string(buf, len)] = hash;
+            ++cdEntries;
+        }
+
+        // Targeted probe for known parts not found in the linear sweep.
+        // Outlier hashes can shift between game launches, so we search a
+        // small window around each fallback hash.
+        const auto unresolved = get_unresolved_fallbacks(nameToHash);
+        if (!unresolved.empty())
+        {
+            constexpr uint32_t k_probeRadius = 0x100;
+            for (const auto& [name, fallback] : unresolved)
+            {
+                const uint32_t lo = (fallback > k_probeRadius)
+                                        ? fallback - k_probeRadius : 1;
+                const uint32_t hi = fallback + k_probeRadius;
+
+                for (uint32_t h = lo; h <= hi; ++h)
+                {
+                    auto len = read_table_entry(tableArray, h, buf, sizeof(buf));
+                    if (len != name.size())
+                        continue;
+
+                    if (std::memcmp(buf, name.c_str(), len) == 0)
+                    {
+                        nameToHash[name] = h;
+                        ++probeHits;
+                        logger.debug("Outlier probe: {} found at 0x{:X} "
+                                     "(fallback was 0x{:X})", name, h, fallback);
+                        break;
+                    }
+                }
+            }
+        }
+
+        const auto t1 = std::chrono::steady_clock::now();
+        const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
+
+        logger.info("IndexedStringA scan complete: {} CD_ entries ({} range, {} probed) in {}ms",
+                     cdEntries + probeHits, cdEntries, probeHits, ms);
+
+        return nameToHash;
     }
 
     static uintptr_t body_to_vis_ctrl(uintptr_t body) noexcept
@@ -350,12 +538,75 @@ namespace EquipHide
     // for hidden categories.  Wrapped in SEH to prevent game crash if the
     // mod is outdated and register layout has changed.
     // =========================================================================
+    /// Launch a background thread to scan the IndexedStringA table.
+    /// Retries with increasing delays until all parts resolve or limit is hit.
+    static constexpr int k_maxScanAttempts = 10;
+
+    static void deferred_scan_thread() noexcept
+    {
+        auto& logger = DMK::Logger::get_instance();
+
+        for (int attempt = 0; attempt < k_maxScanAttempts; ++attempt)
+        {
+            // Wait before retrying (2s, 4s, 6s, ...)
+            if (attempt > 0)
+                std::this_thread::sleep_for(std::chrono::seconds(2 * attempt));
+
+            auto runtimeHashes = scan_indexed_string_table(s_mapLookupAddr);
+            if (runtimeHashes.empty())
+                continue;
+
+            auto unresolved = get_unresolved_fallbacks(runtimeHashes);
+
+            if (unresolved.empty() || attempt == k_maxScanAttempts - 1)
+            {
+                set_runtime_hashes(std::move(runtimeHashes));
+                rebuild_part_lookup();
+                s_deferredScanPending.store(false, std::memory_order_relaxed);
+
+                if (!unresolved.empty())
+                {
+                    for (const auto& [name, fallback] : unresolved)
+                        logger.warning("Part '{}' unresolved after {} scan attempts, "
+                                       "using fallback 0x{:X}",
+                                       name, attempt + 1, fallback);
+                }
+                return;
+            }
+
+            logger.debug("Deferred scan attempt {}: {} parts unresolved, retrying",
+                          attempt + 1, unresolved.size());
+        }
+
+        logger.warning("IndexedStringA deferred scan exhausted {} attempts",
+                         k_maxScanAttempts);
+        s_deferredScanPending.store(false, std::memory_order_relaxed);
+    }
+
+    static void launch_deferred_scan() noexcept
+    {
+        if (!s_deferredScanPending.load(std::memory_order_relaxed))
+            return;
+        if (!s_mapLookupAddr)
+            return;
+
+        // Launch once — the flag prevents re-entry
+        static std::atomic<bool> s_launched{false};
+        if (s_launched.exchange(true, std::memory_order_relaxed))
+            return;
+
+        std::thread(deferred_scan_thread).detach();
+    }
+
     /// Core logic — no SEH here so C++ objects (SafetyHookContext&) are fine.
     static void on_vis_check_impl(SafetyHookContext &ctx)
     {
         if (s_needsDirectWrite.exchange(false, std::memory_order_relaxed) &&
             !s_fallbackMode.load(std::memory_order_relaxed))
             apply_direct_vis_write();
+
+        if (s_deferredScanPending.load(std::memory_order_relaxed))
+            launch_deferred_scan();
 
         auto r10 = ctx.r10;
         if (r10 < 0x10000)
@@ -364,8 +615,11 @@ namespace EquipHide
         auto partHash = *reinterpret_cast<const uint32_t *>(r10);
 
         // Quick range check before map lookup — skip obviously out-of-range hashes.
-        // Equipment part hashes span 0xAE03-0xBFFF with outliers at 0x0F6D and 0x12A79.
-        if (partHash != 0x0F6D && partHash != 0x12A79 && (partHash < 0xAE03 || partHash > 0xBFFF))
+        // Bounds cover the contiguous block; outliers are checked separately.
+        const auto rangeMin = hash_range_min();
+        const auto rangeMax = hash_range_max();
+        if (rangeMin != 0 && (partHash < rangeMin || partHash > rangeMax)
+            && !is_outlier_hash(partHash))
             return;
 
         const auto cat = classify_part(partHash);
@@ -789,6 +1043,28 @@ namespace EquipHide
         else
         {
             logger.info("Player identification: global pointer chain");
+        }
+
+        // Attempt IndexedStringA table scan for runtime hash resolution.
+        // The game's global pointer may not be populated yet during DllMain,
+        // so we also schedule a deferred retry in the hook callback.
+        if (s_mapLookupAddr)
+        {
+            auto runtimeHashes = scan_indexed_string_table(s_mapLookupAddr);
+            if (!runtimeHashes.empty())
+            {
+                set_runtime_hashes(std::move(runtimeHashes));
+            }
+            else
+            {
+                logger.info("IndexedStringA table not ready at init, "
+                            "deferring scan to first hook invocation");
+                s_deferredScanPending.store(true, std::memory_order_relaxed);
+            }
+        }
+        else
+        {
+            logger.warning("MapLookup not resolved, cannot scan IndexedStringA table");
         }
 
         load_config();
