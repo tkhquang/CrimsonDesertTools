@@ -15,17 +15,67 @@
 
 ## Installation
 
-1. Make sure you have an ASI Loader installed for Crimson Desert. If you don't have one, download `version.dll` from the [Ultimate ASI Loader releases](https://github.com/ThirteenAG/Ultimate-ASI-Loader/releases) and place it in your Crimson Desert game directory (where the game executable is located).
-2. Download the latest release from the [GitHub Releases page](https://github.com/tkhquang/CrimsonDesertTools/releases)
-3. Extract all files to your Crimson Desert game directory:
+### Step 1: Install an ASI Loader
 
-   ```text
-   <Crimson Desert installation folder>/bin64/
+You need an ASI Loader to load `.asi` mods. If you already have one (e.g. from another mod), skip to Step 2.
+
+Download the **x64** build of [Ultimate ASI Loader](https://github.com/ThirteenAG/Ultimate-ASI-Loader/releases) and place one of the following DLLs into your `bin64` folder:
+
+| DLL name       | Notes                                    |
+| -------------- | ---------------------------------------- |
+| `winmm.dll`    | **Recommended** — works for most setups  |
+| `version.dll`  | Alternative if `winmm.dll` conflicts     |
+| `dinput8.dll`  | Another alternative                      |
+
+> **Not working?** If the game launches but no `CrimsonDesertEquipHide.log` file appears in `bin64`, the ASI Loader is not loading. Try renaming the DLL to one of the other variants listed above.
+
+### Step 2: Install the mod
+
+1. Download the latest release from the [GitHub Releases page](https://github.com/tkhquang/CrimsonDesertTools/releases)
+2. Extract `CrimsonDesertEquipHide.asi` and `CrimsonDesertEquipHide.ini` into your `bin64` folder
+
+### Step 3: Launch and play
+
+Launch the game. Press `V` (default) to toggle equipment visibility.
+
+### File placement
+
+```text
+<Crimson Desert>/bin64/
+├── CrimsonDesert.exe              (Game executable)
+├── winmm.dll                      (ASI Loader)
+├── CrimsonDesertEquipHide.asi     (This mod)
+├── CrimsonDesertEquipHide.ini     (This mod's configuration)
+└── ...
+```
+
+### Using with OptiScaler
+
+If you use [OptiScaler](https://github.com/cdozdil/OptiScaler) for frame generation or upscaling, the standard ASI Loader (`version.dll`) will conflict with OptiScaler's own `dxgi.dll`. Follow these steps instead:
+
+1. **Delete** `winmm.dll` (or whichever ASI Loader DLL you placed) from `bin64` — OptiScaler will handle mod loading instead
+2. Open `OptiScaler.ini`, find the `[Plugins]` section, and set:
+
+   ```ini
+   LoadAsiPlugins = true
    ```
 
-   Example: `D:\Games\SteamLibrary\steamapps\common\Crimson Desert\bin64`
+3. Create a `plugins` folder inside `bin64`
+4. Move `CrimsonDesertEquipHide.asi` and `CrimsonDesertEquipHide.ini` into the `plugins` folder
 
-4. Launch the game and use the configured hotkey (default: `V`) to toggle equipment visibility
+```text
+<Crimson Desert>/bin64/
+├── CrimsonDesert.exe
+├── OptiScaler.ini                 (LoadAsiPlugins = true)
+├── dxgi.dll                       (OptiScaler)
+├── plugins/
+│   ├── CrimsonDesertEquipHide.asi
+│   ├── CrimsonDesertEquipHide.ini
+│   └── ...                        (Other ASI mods go here too)
+└── ...
+```
+
+> This applies to any ASI mod, not just this one. If you have other `.asi` mods (e.g. CDSprintHold), move them into the `plugins` folder as well.
 
 ## Configuration
 
@@ -133,7 +183,7 @@ See [CHANGELOG.md](CHANGELOG.md) for a detailed history of updates.
 
 This mod requires:
 
-- [Ultimate ASI Loader](https://github.com/ThirteenAG/Ultimate-ASI-Loader) by [**ThirteenAG**](https://github.com/ThirteenAG) – `version.dll` variant required
+- [Ultimate ASI Loader](https://github.com/ThirteenAG/Ultimate-ASI-Loader) by [**ThirteenAG**](https://github.com/ThirteenAG) – `winmm.dll` recommended (see [Installation](#installation) for alternatives)
 - [DetourModKit](https://github.com/tkhquang/DetourModKit) – A lightweight C++ toolkit for game modding
 
 ## Building from Source

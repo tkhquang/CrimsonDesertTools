@@ -9,6 +9,7 @@
 #include <chrono>
 #include <cstdint>
 #include <cstring>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -54,7 +55,9 @@ namespace EquipHide
     // Per-address cache of original vis bytes written before the mod overrides them.
     // Keyed by the vis-byte address (entry + 0x1C).  Populated by the direct-write
     // path on first hide; consumed on un-hide to restore the game's natural value.
-    // Only accessed from the direct-write call site (cold path, single-threaded).
+    // Guarded by s_directWriteMtx — accessed from both the hook thread (via the
+    // s_needsDirectWrite flag) and the input thread (via flush_visibility).
+    static std::mutex s_directWriteMtx;
     static std::unordered_map<uintptr_t, uint8_t> s_originalVis;
 
     static DMK::Config::KeyComboList s_showAllCombos;
@@ -63,8 +66,18 @@ namespace EquipHide
     // d8-based fallback: activates when global pointer chain AOBs fail
     static std::atomic<bool> s_fallbackMode{false};
 
+    // Signals all background threads to exit during shutdown.
+    static std::atomic<bool> s_shutdownRequested{false};
+
     // Deferred IndexedStringA scan: set when the table isn't ready at init
     static std::atomic<bool> s_deferredScanPending{false};
+
+    // Lazy re-probe: set when the deferred scan finishes with unresolved parts.
+    // A background thread periodically re-scans until all parts resolve or the
+    // game session ends.  The hook signals the re-probe by writing steady_ms()
+    // into s_lazyProbeSignal, which the thread polls cheaply.
+    static std::atomic<bool> s_lazyProbePending{false};
+    static std::atomic<int64_t> s_lazyProbeSignal{0};
 
     // Startup direct-write enforcement deadline (ms since steady_clock epoch).
     // While active, resolve_player_vis_ctrls() schedules direct writes on
@@ -324,7 +337,7 @@ namespace EquipHide
         const auto globalPtr = *reinterpret_cast<const uintptr_t*>(globalPtrAddr);
         if (globalPtr < 0x10000)
         {
-            logger.debug("IndexedStringA scan: global pointer not yet initialized ({:#x})",
+            logger.trace("IndexedStringA scan: global pointer not yet initialized ({:#x})",
                          globalPtr);
             return nameToHash;
         }
@@ -337,7 +350,7 @@ namespace EquipHide
             return nameToHash;
         }
 
-        logger.debug("IndexedStringA scan: globalPtr={:#x} tableArray={:#x}",
+        logger.trace("IndexedStringA scan: globalPtr={:#x} tableArray={:#x}",
                       globalPtr, tableArray);
 
         const auto t0 = std::chrono::steady_clock::now();
@@ -382,8 +395,44 @@ namespace EquipHide
                     {
                         nameToHash[name] = h;
                         ++probeHits;
-                        logger.debug("Outlier probe: {} found at 0x{:X} "
+                        logger.trace("Outlier probe: {} found at 0x{:X} "
                                      "(fallback was 0x{:X})", name, h, fallback);
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Wide scan for parts still unresolved after the targeted probe.
+        // Handles arbitrary hash relocations across game versions by sweeping
+        // the full table outside the main scan range.
+        auto wideUnresolved = get_unresolved_fallbacks(nameToHash);
+        if (!wideUnresolved.empty())
+        {
+            constexpr uint32_t k_wideScanMax = 0x20000;
+            for (uint32_t h = 1; h < k_wideScanMax && !wideUnresolved.empty(); ++h)
+            {
+                if (h >= k_tableScanMin && h <= k_tableScanMax)
+                    continue;
+
+                auto len = read_table_entry(tableArray, h, buf, sizeof(buf));
+                if (len == 0 || len >= k_maxStringLen)
+                    continue;
+                if (buf[0] != 'C' || buf[1] != 'D' || buf[2] != '_')
+                    continue;
+
+                for (auto it = wideUnresolved.begin();
+                     it != wideUnresolved.end(); ++it)
+                {
+                    if (len == it->first.size() &&
+                        std::memcmp(buf, it->first.c_str(), len) == 0)
+                    {
+                        nameToHash[it->first] = h;
+                        ++probeHits;
+                        logger.trace("Wide scan: {} found at 0x{:X} "
+                                     "(fallback was 0x{:X})",
+                                     it->first, h, it->second);
+                        wideUnresolved.erase(it);
                         break;
                     }
                 }
@@ -393,8 +442,8 @@ namespace EquipHide
         const auto t1 = std::chrono::steady_clock::now();
         const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
 
-        logger.info("IndexedStringA scan complete: {} CD_ entries ({} range, {} probed) in {}ms",
-                     cdEntries + probeHits, cdEntries, probeHits, ms);
+        logger.trace("IndexedStringA scan complete: {} CD_ entries ({} range, {} probed) in {}ms",
+                      cdEntries + probeHits, cdEntries, probeHits, ms);
 
         return nameToHash;
     }
@@ -500,6 +549,12 @@ namespace EquipHide
         if (!s_mapLookupAddr)
             return;
 
+        // Manual lock/unlock instead of unique_lock — MSVC SEH does not run
+        // C++ destructors on unwind under /EHsc, so an RAII lock would stay
+        // held permanently after an SEH-caught fault.
+        if (!s_directWriteMtx.try_lock())
+            return;
+
 #ifdef _MSC_VER
         __try
         {
@@ -562,6 +617,7 @@ namespace EquipHide
                 DMK::Logger::get_instance().warning("DirectWrite: SEH caught crash");
         }
 #endif
+        s_directWriteMtx.unlock();
     }
 
     static constexpr AobCandidate k_aobCandidates[] = {
@@ -595,7 +651,8 @@ namespace EquipHide
 
         for (int attempt = 0; attempt < k_maxScanAttempts; ++attempt)
         {
-            // Wait before retrying (2s, 4s, 6s, ...)
+            if (s_shutdownRequested.load(std::memory_order_relaxed))
+                return;
             if (attempt > 0)
                 std::this_thread::sleep_for(std::chrono::seconds(2 * attempt));
 
@@ -607,6 +664,9 @@ namespace EquipHide
 
             if (unresolved.empty() || attempt == k_maxScanAttempts - 1)
             {
+                const auto totalParts = std::size(get_unresolved_fallbacks({}));
+                const auto fallbackCount = unresolved.size();
+
                 set_runtime_hashes(std::move(runtimeHashes));
                 rebuild_part_lookup();
                 s_deferredScanPending.store(false, std::memory_order_relaxed);
@@ -618,10 +678,18 @@ namespace EquipHide
                                        "using fallback 0x{:X}",
                                        name, attempt + 1, fallback);
                 }
+
+                logger.info("Deferred scan complete: {}/{} runtime, {} fallback "
+                            "({} attempts)",
+                            totalParts - fallbackCount, totalParts,
+                            fallbackCount, attempt + 1);
+
+                if (fallbackCount > 0)
+                    s_lazyProbePending.store(true, std::memory_order_relaxed);
                 return;
             }
 
-            logger.debug("Deferred scan attempt {}: {} parts unresolved, retrying",
+            logger.trace("Deferred scan attempt {}: {} parts unresolved, retrying",
                           attempt + 1, unresolved.size());
         }
 
@@ -637,6 +705,17 @@ namespace EquipHide
         if (!s_mapLookupAddr)
             return;
 
+        // Wait until the game world is loaded before launching — avoids
+        // exhausting retry attempts while idling at the main menu.
+        if (s_worldSystemPtr)
+        {
+            auto ws = read_ptr(s_worldSystemPtr, 0);
+            if (!ws) return;
+            auto am = read_ptr(ws, 0x30);
+            if (!am) return;
+            if (!read_ptr(am, 0x28)) return;
+        }
+
         // Launch once — the flag prevents re-entry
         static std::atomic<bool> s_launched{false};
         if (s_launched.exchange(true, std::memory_order_relaxed))
@@ -645,14 +724,100 @@ namespace EquipHide
         std::thread(deferred_scan_thread).detach();
     }
 
+    // =========================================================================
+    // Lazy re-probe for demand-loaded IndexedStringA entries
+    //
+    // Some entries (e.g. CD_Tool_Book) are only populated by the game when
+    // related content is first accessed.  After the deferred scan finishes
+    // with unresolved parts, this thread sleeps until the hook signals that
+    // enough time has passed, then re-scans.
+    // =========================================================================
+    static constexpr int64_t k_lazyProbeIntervalMs = 60'000;
+
+    static void lazy_probe_thread() noexcept
+    {
+        auto& logger = DMK::Logger::get_instance();
+        int probeCount = 0;
+
+        logger.info("Lazy probe started for demand-loaded parts "
+                    "(interval: {}s)", k_lazyProbeIntervalMs / 1000);
+
+        while (s_lazyProbePending.load(std::memory_order_relaxed))
+        {
+            if (s_shutdownRequested.load(std::memory_order_relaxed))
+                return;
+            std::this_thread::sleep_for(std::chrono::seconds(5));
+
+            auto signal = s_lazyProbeSignal.load(std::memory_order_relaxed);
+            if (signal == 0)
+                continue;
+
+            ++probeCount;
+            logger.trace("Lazy probe #{}: scanning IndexedStringA table", probeCount);
+
+            auto runtimeHashes = scan_indexed_string_table(s_mapLookupAddr);
+            if (runtimeHashes.empty())
+                continue;
+
+            auto unresolved = get_unresolved_fallbacks(runtimeHashes);
+            if (unresolved.empty())
+            {
+                set_runtime_hashes(std::move(runtimeHashes));
+                rebuild_part_lookup();
+                s_lazyProbePending.store(false, std::memory_order_relaxed);
+                logger.info("Lazy probe resolved all remaining parts "
+                            "({} probes)", probeCount);
+                return;
+            }
+
+            logger.trace("Lazy probe #{}: {} parts still unresolved",
+                          probeCount, unresolved.size());
+
+            // Reset signal — hook will set it again after the next interval
+            s_lazyProbeSignal.store(0, std::memory_order_relaxed);
+        }
+    }
+
+    static void launch_lazy_probe() noexcept
+    {
+        if (!s_lazyProbePending.load(std::memory_order_relaxed))
+            return;
+
+        static std::atomic<bool> s_launched{false};
+        if (s_launched.exchange(true, std::memory_order_relaxed))
+            return;
+
+        std::thread(lazy_probe_thread).detach();
+    }
+
     /// Core logic — no SEH here so C++ objects (SafetyHookContext&) are fine.
     static void on_vis_check_impl(SafetyHookContext &ctx)
     {
-        if (s_needsDirectWrite.exchange(false, std::memory_order_relaxed))
+        // Load-before-exchange: avoids a locked xchg (~20-30 cycles) on the
+        // common path where the flag is false.  The benign TOCTOU between the
+        // load and exchange is safe — apply_direct_vis_write has its own mutex.
+        if (s_needsDirectWrite.load(std::memory_order_relaxed) &&
+            s_needsDirectWrite.exchange(false, std::memory_order_relaxed))
             apply_direct_vis_write();
 
         if (s_deferredScanPending.load(std::memory_order_relaxed))
             launch_deferred_scan();
+
+        // Signal the lazy re-probe thread periodically.
+        // Throttled: only check the clock every 4096 hook invocations to
+        // avoid per-call QueryPerformanceCounter overhead on the hot path.
+        if (s_lazyProbePending.load(std::memory_order_relaxed))
+        {
+            launch_lazy_probe();
+            static std::atomic<uint32_t> s_probeCounter{0};
+            if ((s_probeCounter.fetch_add(1, std::memory_order_relaxed) & 0xFFF) == 0)
+            {
+                const auto now = steady_ms();
+                auto prev = s_lazyProbeSignal.load(std::memory_order_relaxed);
+                if (prev == 0 || (now - prev) >= k_lazyProbeIntervalMs)
+                    s_lazyProbeSignal.store(now, std::memory_order_relaxed);
+            }
+        }
 
         auto r10 = ctx.r10;
         if (r10 < 0x10000)
@@ -707,11 +872,17 @@ namespace EquipHide
                             }
                             if (!alreadyCached && n < k_maxProtagonists)
                             {
-                                s_playerVisCtrls[n].store(a1, std::memory_order_relaxed);
-                                s_playerCount.store(n + 1, std::memory_order_relaxed);
+                                // Atomically claim the slot to avoid TOCTOU if
+                                // two hook invocations race on parallel threads.
+                                int expected = n;
+                                if (s_playerCount.compare_exchange_weak(
+                                        expected, n + 1, std::memory_order_relaxed))
+                                {
+                                    s_playerVisCtrls[n].store(a1, std::memory_order_relaxed);
 
-                                if (s_startupWriteEnd.load(std::memory_order_relaxed) > 0)
-                                    s_needsDirectWrite.store(true, std::memory_order_relaxed);
+                                    if (s_startupWriteEnd.load(std::memory_order_relaxed) > 0)
+                                        s_needsDirectWrite.store(true, std::memory_order_relaxed);
+                                }
                             }
                         }
                     }
@@ -919,7 +1090,6 @@ namespace EquipHide
         if (!s_fallbackMode.load(std::memory_order_relaxed))
             resolve_player_vis_ctrls();
         apply_direct_vis_write();
-        s_needsDirectWrite.store(true, std::memory_order_relaxed);
     }
 
     // =========================================================================
@@ -930,6 +1100,11 @@ namespace EquipHide
         auto &inputMgr = DMK::InputManager::get_instance();
         auto &states = category_states();
         auto &logger = DMK::Logger::get_instance();
+
+        int toggleCount = 0;
+        int showCount = 0;
+        int hideCount = 0;
+        int globalCount = 0;
 
         // --- Global Show All / Hide All ---
         if (!s_showAllCombos.empty())
@@ -946,7 +1121,7 @@ namespace EquipHide
                     logger.info("Equip hide: all categories VISIBLE");
                     flush_visibility();
                 });
-            logger.info("Registered hotkey binding 'ShowAll'");
+            ++globalCount;
         }
 
         if (!s_hideAllCombos.empty())
@@ -963,7 +1138,7 @@ namespace EquipHide
                     logger.info("Equip hide: all categories HIDDEN");
                     flush_visibility();
                 });
-            logger.info("Registered hotkey binding 'HideAll'");
+            ++globalCount;
         }
 
         // --- Per-category toggle (grouped by shared combo) ---
@@ -1017,8 +1192,7 @@ namespace EquipHide
                     flush_visibility();
                 });
 
-            logger.info("Registered hotkey binding '{}' for {} categories",
-                        bindingName, indices.size());
+            ++toggleCount;
         }
 
         // --- Per-category force show / force hide ---
@@ -1040,7 +1214,7 @@ namespace EquipHide
                         logger.info("Equip hide [{}]: VISIBLE", section);
                         flush_visibility();
                     });
-                logger.info("Registered hotkey binding 'ShowEquip_{}'", section);
+                ++showCount;
             }
 
             if (!states[i].hideHotkeyCombos.empty())
@@ -1054,9 +1228,14 @@ namespace EquipHide
                         logger.info("Equip hide [{}]: HIDDEN", section);
                         flush_visibility();
                     });
-                logger.info("Registered hotkey binding 'HideEquip_{}'", section);
+                ++hideCount;
             }
         }
+
+        const int total = globalCount + toggleCount + showCount + hideCount;
+        logger.info("Hotkeys registered: {} binding(s) "
+                    "({} toggle, {} show, {} hide, {} global)",
+                    total, toggleCount, showCount, hideCount, globalCount);
     }
 
     // =========================================================================
@@ -1100,6 +1279,8 @@ namespace EquipHide
             auto runtimeHashes = scan_indexed_string_table(s_mapLookupAddr);
             if (!runtimeHashes.empty())
             {
+                logger.info("IndexedStringA scan: {} entries resolved at init",
+                            runtimeHashes.size());
                 set_runtime_hashes(std::move(runtimeHashes));
             }
             else
@@ -1191,6 +1372,8 @@ namespace EquipHide
     void shutdown()
     {
         DMK::Logger::get_instance().info("{} shutting down...", MOD_NAME);
+        s_shutdownRequested.store(true, std::memory_order_relaxed);
+        s_lazyProbePending.store(false, std::memory_order_relaxed);
         DMK_Shutdown();
     }
 

@@ -140,7 +140,7 @@ namespace EquipHide
     //   0xAF2B  CD_Tool_Pan                   Pan
     //   0xAF2E  CD_Tool_Trumpet               Trumpet
     //   0xAF6B  CD_Tool_Pipe                  Pipe
-    // 0x12A8B  CD_Tool_Book                  Book (non-deterministic slot)
+    //          CD_Tool_Book                  Book (hash assigned on demand, no stable fallback)
     //
     // Lanterns (0xAE5A - 0xAE5C):
     //   0xAE5A  CD_Tool_Hyperspace_RemoteControl  Remote Control
@@ -325,7 +325,7 @@ namespace EquipHide
         {"CD_Tool_Pan",                 0xAF2B},
         {"CD_Tool_Trumpet",             0xAF2E},
         {"CD_Tool_Pipe",                0xAF6B},
-        {"CD_Tool_Book",                0x12A8B},
+        {"CD_Tool_Book",                0},  // demand-loaded: no stable fallback
         // Lanterns
         {"CD_Tool_Hyperspace_RemoteControl", 0xAE5A},
         {"CD_Lantern",                  0xAE5B},
@@ -387,17 +387,22 @@ namespace EquipHide
                     auto it = s_nameToHash.find(p.name);
                     if (it != s_nameToHash.end())
                     {
-                        if (it->second != p.fallbackHash)
+                        if (p.fallbackHash != 0 && it->second != p.fallbackHash)
                             logger.debug("Hash shifted: {} 0x{:X} -> 0x{:X}",
                                          p.name, p.fallbackHash, it->second);
                         ++resolved;
                     }
-                    else
+                    else if (p.fallbackHash != 0)
                     {
                         logger.warning("Part '{}' not found in runtime table, "
                                        "using fallback 0x{:X}", p.name, p.fallbackHash);
                         s_nameToHash[p.name] = p.fallbackHash;
                         ++fallback;
+                    }
+                    else
+                    {
+                        logger.debug("Part '{}' awaiting runtime resolution "
+                                     "(no fallback)", p.name);
                     }
                 }
                 logger.info("Hash resolution: {}/{} runtime, {} fallback",
@@ -407,7 +412,10 @@ namespace EquipHide
             {
                 logger.info("Using compile-time fallback hashes (pending deferred scan)");
                 for (const auto& p : k_allParts)
-                    s_nameToHash[p.name] = p.fallbackHash;
+                {
+                    if (p.fallbackHash != 0)
+                        s_nameToHash[p.name] = p.fallbackHash;
+                }
             }
             s_nameToHashBuilt = true;
         }
@@ -492,9 +500,33 @@ namespace EquipHide
             auto it = nameMap.find(token);
             if (it != nameMap.end())
             {
+                if (it->second == 0)
+                {
+                    logger.trace("  {} skipped {} (no stable hash)", category_section(cat), token);
+                    continue;
+                }
                 writeMap[it->second] = cat;
-                logger.debug("  {} += {} (0x{:04X})", category_section(cat), token, it->second);
+                logger.trace("  {} += {} (0x{:04X})", category_section(cat), token, it->second);
                 continue;
+            }
+
+            // Check if this is a known part awaiting runtime resolution
+            {
+                bool knownDeferred = false;
+                for (const auto& p : k_allParts)
+                {
+                    if (token == p.name && p.fallbackHash == 0)
+                    {
+                        knownDeferred = true;
+                        break;
+                    }
+                }
+                if (knownDeferred)
+                {
+                    logger.trace("  {} deferred {} (awaiting runtime scan)",
+                                  category_section(cat), token);
+                    continue;
+                }
             }
 
             // Try as hex ID (for advanced users / gap IDs)
@@ -504,10 +536,13 @@ namespace EquipHide
                 {
                     auto id = static_cast<uint32_t>(std::stoul(token.substr(2), nullptr, 16));
                     writeMap[id] = cat;
-                    logger.debug("  {} += 0x{:04X} (raw)", category_section(cat), id);
+                    logger.trace("  {} += 0x{:04X} (raw)", category_section(cat), id);
                     continue;
                 }
-                catch (...) {}
+                catch (...)
+                {
+                    logger.warning("  {} : malformed hex ID '{}'", category_section(cat), token);
+                }
             }
 
             logger.warning("  {} : unknown part '{}'", category_section(cat), token);
@@ -598,8 +633,9 @@ namespace EquipHide
         s_outlierCount.store(outlierCount, std::memory_order_release);
 
         auto& logger = DMK::Logger::get_instance();
-        logger.info("Part lookup built: {} entries across {} categories",
-                     writeMap.size(), CATEGORY_COUNT);
+        const char *verb = s_nameToHashBuilt ? "rebuilt" : "built";
+        logger.info("Part lookup {}: {} entries across {} categories",
+                     verb, writeMap.size(), CATEGORY_COUNT);
         if (!writeMap.empty())
         {
             logger.info("Hash range: 0x{:X} - 0x{:X} ({} outliers)",

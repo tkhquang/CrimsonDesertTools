@@ -1,3 +1,5 @@
+#ifndef EQUIPHIDE_DEV_BUILD
+
 #include "constants.hpp"
 #include "equip_hide.hpp"
 
@@ -108,3 +110,5 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
 
     return TRUE;
 }
+
+#endif // !EQUIPHIDE_DEV_BUILD
