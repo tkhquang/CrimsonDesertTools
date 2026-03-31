@@ -21,20 +21,20 @@ This mod allows you to hide equipped gear visually in Crimson Desert using custo
 [size=5]Installation[/size]
 
 [size=4]Step 1: Install an ASI Loader[/size]
-You need an ASI Loader to load [code].asi[/code] mods. If you already have one (e.g. from another mod), skip to Step 2.
+You need an ASI Loader to load [b].asi[/b] mods. If you already have one (e.g. from another mod), skip to Step 2.
 
-Download the [b]x64[/b] build of [url=https://github.com/ThirteenAG/Ultimate-ASI-Loader/releases]Ultimate ASI Loader[/url] and place one of the following DLLs into your [code]bin64[/code] folder:
+Download the [b]x64[/b] build of [url=https://github.com/ThirteenAG/Ultimate-ASI-Loader/releases]Ultimate ASI Loader[/url] and place one of the following DLLs into your [b]bin64[/b] folder:
 [list]
-[*] [code]winmm.dll[/code] — [b]Recommended[/b], works for most setups
-[*] [code]version.dll[/code] — Alternative if [code]winmm.dll[/code] conflicts
-[*] [code]dinput8.dll[/code] — Another alternative
+[*] [b]winmm.dll[/b] — [b]Recommended[/b], works for most setups
+[*] [b]version.dll[/b] — Alternative if winmm.dll conflicts
+[*] [b]dinput8.dll[/b] — Another alternative
 [/list]
 
-[b]Not working?[/b] If the game launches but no [code]CrimsonDesertEquipHide.log[/code] file appears in [code]bin64[/code], the ASI Loader is not loading. Try renaming the DLL to one of the other variants listed above.
+[b]Not working?[/b] If the game launches but no [b]CrimsonDesertEquipHide.log[/b] file appears in [b]bin64[/b], the ASI Loader is not loading. Try renaming the DLL to one of the other variants listed above.
 
 [size=4]Step 2: Install the mod[/size]
 1. Download the latest release from the files section
-2. Extract [code]CrimsonDesertEquipHide.asi[/code] and [code]CrimsonDesertEquipHide.ini[/code] into your [code]bin64[/code] folder
+2. Extract [b]CrimsonDesertEquipHide.asi[/b] and [b]CrimsonDesertEquipHide.ini[/b] into your [b]bin64[/b] folder
 
 [size=4]Step 3: Launch and play[/size]
 Launch the game. Press [b]V[/b] (default) to toggle equipment visibility.
@@ -50,12 +50,12 @@ Launch the game. Press [b]V[/b] (default) to toggle equipment visibility.
 [/code]
 
 [size=4]Using with OptiScaler[/size]
-If you use [url=https://github.com/cdozdil/OptiScaler]OptiScaler[/url] for frame generation or upscaling, the standard ASI Loader ([code]winmm.dll[/code]) will conflict with OptiScaler's own [code]dxgi.dll[/code]. Follow these steps instead:
+If you use [url=https://github.com/cdozdil/OptiScaler]OptiScaler[/url] for frame generation or upscaling, the standard ASI Loader (e.g. [b]winmm.dll[/b]) will conflict with OptiScaler's own [b]dxgi.dll[/b]. Follow these steps instead:
 
-1. [b]Delete[/b] [code]winmm.dll[/code] (or whichever ASI Loader DLL you placed) from [code]bin64[/code] — OptiScaler will handle mod loading instead
-2. Open [code]OptiScaler.ini[/code], find the [code][Plugins][/code] section, and set [code]LoadAsiPlugins = true[/code]
-3. Create a [code]plugins[/code] folder inside [code]bin64[/code]
-4. Move [code]CrimsonDesertEquipHide.asi[/code] and [code]CrimsonDesertEquipHide.ini[/code] into the [code]plugins[/code] folder
+1. [b]Delete[/b] winmm.dll (or whichever ASI Loader DLL you placed) from [b]bin64[/b] — OptiScaler will handle mod loading instead
+2. Open [b]OptiScaler.ini[/b], find the [b][Plugins][/b] section, and set [b]LoadAsiPlugins = true[/b]
+3. Create a [b]plugins[/b] folder inside [b]bin64[/b]
+4. Move [b]CrimsonDesertEquipHide.asi[/b] and [b]CrimsonDesertEquipHide.ini[/b] into the [b]plugins[/b] folder
 
 [code]
 <Crimson Desert>/bin64/
@@ -69,10 +69,10 @@ If you use [url=https://github.com/cdozdil/OptiScaler]OptiScaler[/url] for frame
 └── ...
 [/code]
 
-This applies to any ASI mod, not just this one. If you have other [code].asi[/code] mods (e.g. CDSprintHold), move them into the [code]plugins[/code] folder as well.
+This applies to any ASI mod, not just this one. If you have other [b].asi[/b] mods (e.g. CDSprintHold), move them into the [b]plugins[/b] folder as well.
 
 [size=5]Configuration[/size]
-The mod can be configured by editing the CrimsonDesertEquipHide.ini file:
+The mod can be configured by editing the [b]CrimsonDesertEquipHide.ini[/b] file:
 [code]
 [General]
 ; Log level: Trace, Debug, Info, Warning, Error
@@ -108,7 +108,7 @@ Each category supports three independent hotkey bindings:
 [*] [b]HideHotkey[/b] — always forces hidden
 [/list]
 
-Global overrides in [General]:
+Global overrides in [b][General][/b]:
 [list]
 [*] [b]ShowAllHotkey[/b] — forces ALL categories visible
 [*] [b]HideAllHotkey[/b] — forces ALL categories hidden
@@ -150,8 +150,8 @@ ToggleHotkey = V,Gamepad_LB+Gamepad_Y
 [size=5]Troubleshooting[/size]
 If you encounter issues:
 [list]
-[*] Set LogLevel = Debug in the INI file
-[*] Check the log file in your game directory (CrimsonDesertEquipHide.log)
+[*] Set [b]LogLevel = Debug[/b] in the INI file
+[*] Check the log file in your game directory ([b]CrimsonDesertEquipHide.log[/b])
 [*] For memory pattern errors, the mod needs an update for the current game version
 [/list]
 

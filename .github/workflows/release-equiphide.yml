@@ -51,11 +51,12 @@ jobs:
             # Extract title from first line (removing ## prefix)
             $title = ($content -split "`r?`n")[0] -replace "^##\s+", ""
 
-            # Get the rest as changelog content (skip first line)
-            $changelogLines = ($content -split "`r?`n" | Select-Object -Skip 1) -join "%0A"
+            # Write changelog body (skip first line) to a temp file to avoid
+            # PowerShell string interpolation issues with backticks in content.
+            $changelogBody = ($content -split "`r?`n" | Select-Object -Skip 1) -join "`n"
+            Set-Content -Path "changelog_body.txt" -Value $changelogBody -Encoding utf8 -NoNewline
 
             echo "SUGGESTED_TITLE=$title" >> $env:GITHUB_OUTPUT
-            echo "CHANGELOG=$changelogLines" >> $env:GITHUB_OUTPUT
             echo "Using changelog from NEXT_CHANGELOG.md with suggested title: $title"
           } else {
             echo "No NEXT_CHANGELOG.md file found. Please create one before running this workflow."
@@ -80,12 +81,9 @@ jobs:
       - name: Bump version and update changelog
         id: bump
         run: |
-          $changelogContent = "${{ steps.read-changelog.outputs.CHANGELOG }}" -replace '%0A', "`n"
-          Set-Content -Path "temp_changelog.txt" -Value $changelogContent
-
           $safeTitle = "${{ steps.determine-title.outputs.TITLE }}"
+          $changelogArg = Get-Content -Path "changelog_body.txt" -Raw
 
-          $changelogArg = Get-Content -Path "temp_changelog.txt" -Raw
           python CrimsonDesertEquipHide/scripts/version_updater.py bump ${{ inputs.version_part }} --title "$safeTitle" --changelog "$changelogArg"
 
           # Extract the new version from version.hpp
@@ -98,8 +96,6 @@ jobs:
           echo "NEW_VERSION=$new_version" >> $env:GITHUB_ENV
           echo "VERSION_TAG=v$new_version" >> $env:GITHUB_ENV
           echo "ARTIFACT_NAME=CrimsonDesertEquipHide_v${new_version}.zip" >> $env:GITHUB_ENV
-
-          Remove-Item -Path "temp_changelog.txt"
         shell: pwsh
 
       - name: Setup MSVC Developer Environment
@@ -191,9 +187,7 @@ jobs:
       - name: Prepare release body
         id: prepare-release
         run: |
-          "${{ steps.read-changelog.outputs.CHANGELOG }}" -replace '%0A', "`n" | Out-File -FilePath "changelog_content.txt" -Encoding utf8
-
-          $changelog = Get-Content -Path "changelog_content.txt" -Raw
+          $changelog = Get-Content -Path "changelog_body.txt" -Raw
 
           $releaseBody = @'
           # Crimson Desert - Equip Hide
