@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(CrimsonDesertEquipHide VERSION 0.2.0 LANGUAGES CXX)
+project(CrimsonDesertEquipHide VERSION 0.2.3 LANGUAGES CXX)
 
 # --- Standard and Compiler Options ---
 set(CMAKE_CXX_STANDARD 23)
@@ -50,6 +50,9 @@ else()
         "'git submodule update --init --recursive'")
 endif()
 
+# --- Dev Build Option ---
+option(EQUIPHIDE_DEV_BUILD "Build two-DLL hot-reload configuration for development" OFF)
+
 # --- Source Files ---
 set(COMMON_SOURCES
     src/dllmain.cpp
@@ -66,81 +69,178 @@ set(COMMON_INCLUDE_DIRS
     src
 )
 
-# --- ASI Target (.asi file) ---
-add_library(${PROJECT_NAME}-ASI SHARED ${ASI_SOURCES})
+# --- Game Output Directory (dev builds) ---
+set(GAME_BIN_DIR "D:/Games/SteamLibrary/steamapps/common/Crimson Desert/bin64/plugins")
 
-target_include_directories(${PROJECT_NAME}-ASI PRIVATE ${COMMON_INCLUDE_DIRS})
+if(EQUIPHIDE_DEV_BUILD)
+    # =====================================================================
+    # Dev Build: two-DLL hot-reload (loader + logic)
+    # =====================================================================
+    message(STATUS "DEV BUILD enabled — building loader + logic DLL pair")
 
-target_link_libraries(${PROJECT_NAME}-ASI PRIVATE
-    DetourModKit
-    psapi
-    user32
-    kernel32
-)
+    # --- Loader ASI (thin stub, no DetourModKit) ---
+    add_library(equip_hide_loader SHARED src/dev/loader_main.cpp)
 
-# Set output name and properties for ASI
-set_target_properties(${PROJECT_NAME}-ASI PROPERTIES
-    OUTPUT_NAME "CrimsonDesertEquipHide-temp-asi"
-    SUFFIX ".asi"
-    PREFIX ""
-)
-
-# --- Target-Scoped Release Optimizations ---
-if(MSVC)
-    # /Gy: function-level linking, /Gw: global data optimization.
-    # /O1: favor size (appropriate for an injected DLL).
-    target_compile_options(${PROJECT_NAME}-ASI PRIVATE
-        $<$<CONFIG:Release>:/O1 /Gy /Gw>
+    target_link_libraries(equip_hide_loader PRIVATE
+        kernel32
+        user32
     )
 
-    # /OPT:REF removes unreferenced functions/data; /OPT:ICF folds identical COMDATs.
-    target_link_options(${PROJECT_NAME}-ASI PRIVATE
-        $<$<CONFIG:Release>:/OPT:REF /OPT:ICF>
+    set_target_properties(equip_hide_loader PROPERTIES
+        OUTPUT_NAME "CrimsonDesertEquipHide"
+        SUFFIX ".asi"
+        PREFIX ""
+        RUNTIME_OUTPUT_DIRECTORY "${GAME_BIN_DIR}"
+        RUNTIME_OUTPUT_DIRECTORY_DEBUG "${GAME_BIN_DIR}"
+        RUNTIME_OUTPUT_DIRECTORY_RELEASE "${GAME_BIN_DIR}"
+        RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO "${GAME_BIN_DIR}"
+        LIBRARY_OUTPUT_DIRECTORY "${GAME_BIN_DIR}"
+        LIBRARY_OUTPUT_DIRECTORY_DEBUG "${GAME_BIN_DIR}"
+        LIBRARY_OUTPUT_DIRECTORY_RELEASE "${GAME_BIN_DIR}"
+        LIBRARY_OUTPUT_DIRECTORY_RELWITHDEBINFO "${GAME_BIN_DIR}"
     )
-else()
-    # -ffunction-sections/-fdata-sections enable --gc-sections for dead code elimination.
-    # -O2 is set globally via CMAKE_CXX_FLAGS_RELEASE.
-    target_compile_options(${PROJECT_NAME}-ASI PRIVATE
-        $<$<CONFIG:Release>:-ffunction-sections -fdata-sections>
+
+    if(MSVC)
+        target_compile_options(equip_hide_loader PRIVATE /W4)
+    else()
+        target_link_options(equip_hide_loader PRIVATE
+            -static-libgcc
+            -static-libstdc++
+            -static
+        )
+    endif()
+
+    # --- Logic DLL (all mod code) ---
+    add_library(equip_hide_logic SHARED
+        ${COMMON_SOURCES}
+        src/dev/logic_exports.cpp
     )
-    target_link_options(${PROJECT_NAME}-ASI PRIVATE
-        -Wl,--gc-sections
-        -Wl,--exclude-all-symbols
-        -static-libgcc
-        -static-libstdc++
-        -static
 
-        # Strip all symbols in Release to minimize binary size.
-        $<$<CONFIG:Release>:-s>
+    target_include_directories(equip_hide_logic PRIVATE ${COMMON_INCLUDE_DIRS})
+
+    target_compile_definitions(equip_hide_logic PRIVATE EQUIPHIDE_DEV_BUILD)
+
+    target_link_libraries(equip_hide_logic PRIVATE
+        DetourModKit
+        psapi
+        user32
+        kernel32
     )
-endif()
 
-# --- Link-Time Optimization ---
-include(CheckIPOSupported)
-check_ipo_supported(RESULT _ipo_supported LANGUAGES CXX OUTPUT _ipo_error)
+    # Build to staging/ so the linker never conflicts with a game-locked DLL.
+    # The loader copies from staging/ before LoadLibrary.
+    set(GAME_STAGING_DIR "${GAME_BIN_DIR}/staging")
 
-if(_ipo_supported)
+    set_target_properties(equip_hide_logic PROPERTIES
+        OUTPUT_NAME "CrimsonDesertEquipHide_Logic"
+        PREFIX ""
+        RUNTIME_OUTPUT_DIRECTORY "${GAME_STAGING_DIR}"
+        RUNTIME_OUTPUT_DIRECTORY_DEBUG "${GAME_STAGING_DIR}"
+        RUNTIME_OUTPUT_DIRECTORY_RELEASE "${GAME_STAGING_DIR}"
+        RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO "${GAME_STAGING_DIR}"
+        LIBRARY_OUTPUT_DIRECTORY "${GAME_STAGING_DIR}"
+        LIBRARY_OUTPUT_DIRECTORY_DEBUG "${GAME_STAGING_DIR}"
+        LIBRARY_OUTPUT_DIRECTORY_RELEASE "${GAME_STAGING_DIR}"
+        LIBRARY_OUTPUT_DIRECTORY_RELWITHDEBINFO "${GAME_STAGING_DIR}"
+        PDB_OUTPUT_DIRECTORY "${GAME_STAGING_DIR}"
+        PDB_OUTPUT_DIRECTORY_DEBUG "${GAME_STAGING_DIR}"
+        PDB_OUTPUT_DIRECTORY_RELEASE "${GAME_STAGING_DIR}"
+        PDB_OUTPUT_DIRECTORY_RELWITHDEBINFO "${GAME_STAGING_DIR}"
+    )
+
+    if(MSVC)
+        target_compile_options(equip_hide_logic PRIVATE /W4 /Zi)
+        target_link_options(equip_hide_logic PRIVATE /DEBUG /OPT:REF /OPT:ICF)
+    else()
+        target_link_options(equip_hide_logic PRIVATE
+            -Wl,--exclude-all-symbols
+            -static-libgcc
+            -static-libstdc++
+            -static
+        )
+    endif()
+
+else() # EQUIPHIDE_DEV_BUILD=OFF
+    # =====================================================================
+    # Production Build: single ASI (unchanged)
+    # =====================================================================
+
+    # --- ASI Target (.asi file) ---
+    add_library(${PROJECT_NAME}-ASI SHARED ${ASI_SOURCES})
+
+    target_include_directories(${PROJECT_NAME}-ASI PRIVATE ${COMMON_INCLUDE_DIRS})
+
+    target_link_libraries(${PROJECT_NAME}-ASI PRIVATE
+        DetourModKit
+        psapi
+        user32
+        kernel32
+    )
+
+    # Set output name and properties for ASI
     set_target_properties(${PROJECT_NAME}-ASI PROPERTIES
-        INTERPROCEDURAL_OPTIMIZATION_RELEASE ON
+        OUTPUT_NAME "CrimsonDesertEquipHide-temp-asi"
+        SUFFIX ".asi"
+        PREFIX ""
     )
-    message(STATUS "LTO enabled for ${PROJECT_NAME}-ASI Release builds")
-else()
-    message(STATUS "LTO not supported for ${PROJECT_NAME}-ASI: ${_ipo_error}")
-endif()
 
-# Post-build steps to rename to desired names
-add_custom_command(TARGET ${PROJECT_NAME}-ASI POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy
-    $<TARGET_FILE:${PROJECT_NAME}-ASI>
-    ${CMAKE_CURRENT_BINARY_DIR}/CrimsonDesertEquipHide.asi
-    COMMENT "Renaming ASI output to final name"
-)
+    # --- Target-Scoped Release Optimizations ---
+    if(MSVC)
+        # /Gy: function-level linking, /Gw: global data optimization.
+        # /O1: favor size (appropriate for an injected DLL).
+        target_compile_options(${PROJECT_NAME}-ASI PRIVATE
+            $<$<CONFIG:Release>:/O1 /Gy /Gw>
+        )
 
-# --- Build Summary ---
-message(STATUS "---------------------------------------------------------------------")
-message(STATUS "CrimsonDesertEquipHide (${PROJECT_VERSION}) Configuration Summary:")
-message(STATUS "  Generator:                   ${CMAKE_GENERATOR}")
-message(STATUS "  Build Type:                  ${CMAKE_BUILD_TYPE}")
-message(STATUS "  Targets:")
-message(STATUS "    - ${PROJECT_NAME}-ASI      -> CrimsonDesertEquipHide.asi (via post-build copy)")
-message(STATUS "---------------------------------------------------------------------")
+        # /OPT:REF removes unreferenced functions/data; /OPT:ICF folds identical COMDATs.
+        target_link_options(${PROJECT_NAME}-ASI PRIVATE
+            $<$<CONFIG:Release>:/OPT:REF /OPT:ICF>
+        )
+    else()
+        # -ffunction-sections/-fdata-sections enable --gc-sections for dead code elimination.
+        # -O2 is set globally via CMAKE_CXX_FLAGS_RELEASE.
+        target_compile_options(${PROJECT_NAME}-ASI PRIVATE
+            $<$<CONFIG:Release>:-ffunction-sections -fdata-sections>
+        )
+        target_link_options(${PROJECT_NAME}-ASI PRIVATE
+            -Wl,--gc-sections
+            -Wl,--exclude-all-symbols
+            -static-libgcc
+            -static-libstdc++
+            -static
+
+            # Strip all symbols in Release to minimize binary size.
+            $<$<CONFIG:Release>:-s>
+        )
+    endif()
+
+    # --- Link-Time Optimization ---
+    include(CheckIPOSupported)
+    check_ipo_supported(RESULT _ipo_supported LANGUAGES CXX OUTPUT _ipo_error)
+
+    if(_ipo_supported)
+        set_target_properties(${PROJECT_NAME}-ASI PROPERTIES
+            INTERPROCEDURAL_OPTIMIZATION_RELEASE ON
+        )
+        message(STATUS "LTO enabled for ${PROJECT_NAME}-ASI Release builds")
+    else()
+        message(STATUS "LTO not supported for ${PROJECT_NAME}-ASI: ${_ipo_error}")
+    endif()
+
+    # Post-build steps to rename to desired names
+    add_custom_command(TARGET ${PROJECT_NAME}-ASI POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy
+        $<TARGET_FILE:${PROJECT_NAME}-ASI>
+        ${CMAKE_CURRENT_BINARY_DIR}/CrimsonDesertEquipHide.asi
+        COMMENT "Renaming ASI output to final name"
+    )
+
+    # --- Build Summary ---
+    message(STATUS "---------------------------------------------------------------------")
+    message(STATUS "CrimsonDesertEquipHide (${PROJECT_VERSION}) Configuration Summary:")
+    message(STATUS "  Generator:                   ${CMAKE_GENERATOR}")
+    message(STATUS "  Build Type:                  ${CMAKE_BUILD_TYPE}")
+    message(STATUS "  Targets:")
+    message(STATUS "    - ${PROJECT_NAME}-ASI      -> CrimsonDesertEquipHide.asi (via post-build copy)")
+    message(STATUS "---------------------------------------------------------------------")
+endif() # EQUIPHIDE_DEV_BUILD
