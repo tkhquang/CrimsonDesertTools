@@ -27,7 +27,7 @@ Download the **x64** build of [Ultimate ASI Loader](https://github.com/ThirteenA
 | `version.dll`  | Alternative if `winmm.dll` conflicts     |
 | `dinput8.dll`  | Another alternative                      |
 
-> **Not working?** If the game launches but no `CrimsonDesertEquipHide.log` file appears in `bin64`, the ASI Loader is not loading. Try renaming the DLL to one of the other variants listed above.
+> **How to verify:** After completing Step 2, launch the game once. If no `CrimsonDesertEquipHide.log` file appears in `bin64`, the ASI Loader is not loading. Try renaming the DLL to one of the other variants listed above.
 
 ### Step 2: Install the mod
 
