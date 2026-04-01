@@ -1,5 +1,7 @@
-/// Logic DLL entry point for hot-reload dev builds.
-/// Exports Init() and Shutdown() for the loader stub to call.
+/**
+ * @file logic_exports.cpp
+ * @brief Logic DLL entry point for hot-reload dev builds.
+ */
 
 #include "equip_hide.hpp"
 #include "constants.hpp"
@@ -8,9 +10,6 @@
 
 #include <Windows.h>
 
-// =========================================================================
-// Exported lifecycle functions
-// =========================================================================
 extern "C" __declspec(dllexport) bool Init()
 {
     DMK::Logger::configure("EquipHide", EquipHide::LOG_FILE, "%Y-%m-%d %H:%M:%S");
@@ -40,9 +39,6 @@ extern "C" __declspec(dllexport) void Shutdown()
     EquipHide::shutdown();
 }
 
-// =========================================================================
-// DllMain — minimal, no thread spawning
-// =========================================================================
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID /*lpReserved*/)
 {
     if (ul_reason_for_call == DLL_PROCESS_ATTACH)

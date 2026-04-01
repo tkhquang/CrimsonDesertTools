@@ -1,14 +1,21 @@
-[size=6]Crimson Desert - Equip Hide[/size]
+[size=6]Gear Hider - Equipment Visibility Toggle for Armor Weapons Helmet & More[/size]
+
+[center][size=5][color=#e6a800]⚠ This mod replaces [url=https://www.nexusmods.com/crimsondesert/mods/166]Weapon Hider - Equipment Visibility Toggle[/url] ⚠[/color][/size]
+If you were using the old mod, please [b]uninstall it first[/b] (remove the old .asi and .ini files), then install this version.
+This is a complete upgrade with expanded scope. All weapon hiding features are included, plus full armor, helmet, cloak, and accessory support.[/center]
 
 [size=5]Description[/size]
-This mod allows you to hide equipped gear visually in Crimson Desert using customizable hotkeys. Toggle visibility per category — weapons, shields, bows, tools, and lanterns. Perfect for cleaner screenshots, aesthetic character builds, or simply enjoying the world without gear clutter.
+This mod allows you to hide equipped gear visually in Crimson Desert using customizable hotkeys. Toggle visibility per category for weapons, shields, bows, armor, tools, and lanterns. Perfect for cleaner screenshots, aesthetic character builds, or simply enjoying the world without gear clutter.
 
 [size=5]Key Features[/size]
 [list]
 [*] Toggle, force-show, or force-hide equipment visibility per category with hotkeys
 [*] Global show-all / hide-all hotkeys to control every category at once
-[*] Categories: One-Hand Weapons, Two-Hand Weapons, Shields, Bows, Special Weapons, Tools, Lanterns
+[*] Weapon categories: One-Hand Weapons, Two-Hand Weapons, Shields, Bows, Special Weapons, Tools, Lanterns
+[*] Armor categories: Helm, Chest, Legs, Gloves, Boots, Cloak, Shoulder, Mask, Glasses, Accessories
+[*] User Presets: 3 custom part groups to combine parts from any category into a single toggle
 [*] Per-category configuration: enable/disable, toggle/show/hide hotkeys, default hidden state, part list
+[*] ForceShow mode for compatibility with third-party replacer mods
 [*] Fully customizable settings through INI configuration
 [*] Open-source with full transparency
 [/list]
@@ -25,9 +32,9 @@ You need an ASI Loader to load [b].asi[/b] mods. If you already have one (e.g. f
 
 Download the [b]x64[/b] build of [url=https://github.com/ThirteenAG/Ultimate-ASI-Loader/releases]Ultimate ASI Loader[/url] and place one of the following DLLs into your [b]bin64[/b] folder:
 [list]
-[*] [b]winmm.dll[/b] — [b]Recommended[/b], works for most setups
-[*] [b]version.dll[/b] — Alternative if winmm.dll conflicts
-[*] [b]dinput8.dll[/b] — Another alternative
+[*] [b]winmm.dll[/b] - [b]Recommended[/b], works for most setups
+[*] [b]version.dll[/b] - Alternative if winmm.dll conflicts
+[*] [b]dinput8.dll[/b] - Another alternative
 [/list]
 
 [b]How to verify:[/b] After completing Step 2, launch the game once. If no [b]CrimsonDesertEquipHide.log[/b] file appears in [b]bin64[/b], the ASI Loader is not loading. Try renaming the DLL to one of the other variants listed above.
@@ -37,7 +44,7 @@ Download the [b]x64[/b] build of [url=https://github.com/ThirteenAG/Ultimate-ASI
 2. Extract [b]CrimsonDesertEquipHide.asi[/b] and [b]CrimsonDesertEquipHide.ini[/b] into your [b]bin64[/b] folder
 
 [size=4]Step 3: Launch and play[/size]
-Launch the game. Press [b]V[/b] (default) to toggle equipment visibility.
+Launch the game. Press [b]V[/b] (default) to toggle equipment visibility. By default, the INI is configured to hide Shields, Helms, and Masks on game load.
 
 [size=4]File placement[/size]
 [code]
@@ -52,7 +59,7 @@ Launch the game. Press [b]V[/b] (default) to toggle equipment visibility.
 [size=4]Using with OptiScaler[/size]
 If you use [url=https://github.com/cdozdil/OptiScaler]OptiScaler[/url] for frame generation or upscaling, the standard ASI Loader (e.g. [b]winmm.dll[/b]) will conflict with OptiScaler's own [b]dxgi.dll[/b]. Follow these steps instead:
 
-1. [b]Delete[/b] winmm.dll (or whichever ASI Loader DLL you placed) from [b]bin64[/b] — OptiScaler will handle mod loading instead
+1. [b]Delete[/b] winmm.dll (or whichever ASI Loader DLL you placed) from [b]bin64[/b]. OptiScaler will handle mod loading instead
 2. Open [b]OptiScaler.ini[/b], find the [b][Plugins][/b] section, and set [b]LoadAsiPlugins = true[/b]
 3. Create a [b]plugins[/b] folder inside [b]bin64[/b]
 4. Move [b]CrimsonDesertEquipHide.asi[/b] and [b]CrimsonDesertEquipHide.ini[/b] into the [b]plugins[/b] folder
@@ -85,35 +92,43 @@ ForceShow = false
 ShowAllHotkey =
 HideAllHotkey =
 
-[OneHandWeapons]
-Enabled = true
-ToggleHotkey = V
-ShowHotkey =
-HideHotkey =
-DefaultHidden = false
-Parts = CD_MainWeapon_Sword_R, CD_MainWeapon_Sword_IN_R, ...
-
 [Shields]
 Enabled = true
 ToggleHotkey = V
 ShowHotkey =
 HideHotkey =
-DefaultHidden = false
+DefaultHidden = true
 Parts = CD_MainWeapon_Shield_L, CD_MainWeapon_Shield_R, ...
+
+[Helm]
+Enabled = true
+ToggleHotkey = V
+ShowHotkey =
+HideHotkey =
+DefaultHidden = true
+Parts = CD_Helm, CD_Helm_Acc, ...
+
+[UserPreset1]
+Enabled = false
+ToggleHotkey =
+ShowHotkey =
+HideHotkey =
+DefaultHidden = false
+Parts =
 [/code]
 
 [size=5]Hotkey Types[/size]
 Each category supports three independent hotkey bindings:
 [list]
-[*] [b]ToggleHotkey[/b] — flips between hidden and visible
-[*] [b]ShowHotkey[/b] — always forces visible
-[*] [b]HideHotkey[/b] — always forces hidden
+[*] [b]ToggleHotkey[/b] - flips between hidden and visible
+[*] [b]ShowHotkey[/b] - always forces visible
+[*] [b]HideHotkey[/b] - always forces hidden
 [/list]
 
 Global overrides in [b][General][/b]:
 [list]
-[*] [b]ShowAllHotkey[/b] — forces ALL categories visible
-[*] [b]HideAllHotkey[/b] — forces ALL categories hidden
+[*] [b]ShowAllHotkey[/b] - forces ALL categories visible
+[*] [b]HideAllHotkey[/b] - forces ALL categories hidden
 [/list]
 
 [size=5]Hotkey Format[/size]
@@ -151,6 +166,9 @@ ForceShow = true
 [/code]
 
 This forces the mod to write a visible value directly, overriding whatever the replacer mod has set. Safe to leave [b]false[/b] if you are not experiencing visibility issues.
+
+[size=5]User Presets[/size]
+The INI file includes three [b]UserPreset[/b] sections (UserPreset1, UserPreset2, UserPreset3) that let you combine parts from any category into a single toggle. Set [b]Enabled = true[/b], assign a hotkey, and list any parts you want grouped together. Parts can overlap with built-in categories (both toggles will apply).
 
 [size=5]Known Limitations[/size]
 [list]

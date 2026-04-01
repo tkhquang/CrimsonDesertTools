@@ -2,14 +2,17 @@
 
 ## Overview
 
-**CrimsonDesertEquipHide** is an ASI plugin for Crimson Desert that allows players to hide equipped gear visually using customizable hotkeys. Toggle visibility of weapons, shields, bows, tools, and lanterns per category — useful for cleaner screenshots, aesthetic character builds, or simply enjoying the world without gear clutter.
+**CrimsonDesertEquipHide** is an ASI plugin for Crimson Desert that allows players to hide equipped gear visually using customizable hotkeys. Toggle visibility of weapons, shields, bows, armor, tools, and lanterns per category. Useful for cleaner screenshots, aesthetic character builds, or simply enjoying the world without gear clutter.
 
 ## Features
 
 - Toggle, force-show, or force-hide equipment visibility per category with hotkeys
 - Global show-all / hide-all hotkeys to control every category at once
-- Categories: One-Hand Weapons, Two-Hand Weapons, Shields, Bows, Special Weapons, Tools, Lanterns
+- Weapon categories: One-Hand Weapons, Two-Hand Weapons, Shields, Bows, Special Weapons, Tools, Lanterns
+- Armor categories: Helm, Chest, Legs, Gloves, Boots, Cloak, Shoulder, Mask, Glasses, Accessories
+- User Presets: 3 custom part groups to combine parts from any category into a single toggle
 - Per-category configuration: enable/disable, toggle/show/hide hotkeys, default hidden state, part list
+- ForceShow mode for compatibility with third-party replacer mods
 - SEH-protected hook callback to prevent crashes if mod is outdated
 - Fully customizable settings via INI configuration
 
@@ -23,7 +26,7 @@ Download the **x64** build of [Ultimate ASI Loader](https://github.com/ThirteenA
 
 | DLL name       | Notes                                    |
 | -------------- | ---------------------------------------- |
-| `winmm.dll`    | **Recommended** — works for most setups  |
+| `winmm.dll`    | **Recommended**, works for most setups   |
 | `version.dll`  | Alternative if `winmm.dll` conflicts     |
 | `dinput8.dll`  | Another alternative                      |
 
@@ -36,7 +39,7 @@ Download the **x64** build of [Ultimate ASI Loader](https://github.com/ThirteenA
 
 ### Step 3: Launch and play
 
-Launch the game. Press `V` (default) to toggle equipment visibility.
+Launch the game. Press `V` (default) to toggle equipment visibility. By default, the INI is configured to hide Shields, Helms, and Masks on game load.
 
 ### File placement
 
@@ -53,7 +56,7 @@ Launch the game. Press `V` (default) to toggle equipment visibility.
 
 If you use [OptiScaler](https://github.com/cdozdil/OptiScaler) for frame generation or upscaling, the standard ASI Loader (`version.dll`) will conflict with OptiScaler's own `dxgi.dll`. Follow these steps instead:
 
-1. **Delete** `winmm.dll` (or whichever ASI Loader DLL you placed) from `bin64` — OptiScaler will handle mod loading instead
+1. **Delete** `winmm.dll` (or whichever ASI Loader DLL you placed) from `bin64`. OptiScaler will handle mod loading instead
 2. Open `OptiScaler.ini`, find the `[Plugins]` section, and set:
 
    ```ini
@@ -93,21 +96,29 @@ ForceShow = false
 ShowAllHotkey =
 HideAllHotkey =
 
-[OneHandWeapons]
-Enabled = true
-ToggleHotkey = V
-ShowHotkey =
-HideHotkey =
-DefaultHidden = false
-Parts = CD_MainWeapon_Sword_R, CD_MainWeapon_Sword_IN_R, ...
-
 [Shields]
 Enabled = true
 ToggleHotkey = V
 ShowHotkey =
 HideHotkey =
-DefaultHidden = false
+DefaultHidden = true
 Parts = CD_MainWeapon_Shield_L, CD_MainWeapon_Shield_R, ...
+
+[Helm]
+Enabled = true
+ToggleHotkey = V
+ShowHotkey =
+HideHotkey =
+DefaultHidden = true
+Parts = CD_Helm, CD_Helm_Acc, ...
+
+[UserPreset1]
+Enabled = false
+ToggleHotkey =
+ShowHotkey =
+HideHotkey =
+DefaultHidden = false
+Parts =
 ```
 
 ### Hotkey Types
@@ -150,10 +161,12 @@ ToggleHotkey = V,Gamepad_LB+Gamepad_Y
 
 ## How It Works
 
-1. **AOB Pattern Scanning** – Cascading patterns scan the game's memory to locate the visibility decision function
-2. **Mid-Hook** – Intercepts the visibility check and forces `Visible=2` (Out-only) for hidden equipment categories
-3. **Input Management** – DetourModKit's input system handles keyboard, mouse, and gamepad with modifier key combos
-4. **SEH Protection** – Hook callback is wrapped in structured exception handling (MSVC) to prevent crashes
+1. **AOB Pattern Scanning** - Cascading patterns scan the game's memory to locate the visibility decision function and related game structures
+2. **Mid-Hook** - Intercepts the visibility check and forces `Visible=2` (Out-only) for hidden weapon categories
+3. **Inline Hook** - A secondary hook on the PartAddShow function prevents hidden parts from briefly flashing visible during state transitions (e.g. exiting glide)
+4. **Armor Injection** - Armor parts have no vanilla visibility entries, so the mod injects new map entries via the game's own internal functions
+5. **Input Management** - DetourModKit's input system handles keyboard, mouse, and gamepad with modifier key combos
+6. **SEH Protection** - Hook callback is wrapped in structured exception handling (MSVC) to prevent crashes
 
 ## Troubleshooting
 
@@ -171,6 +184,10 @@ Common issues:
 
 > **Still stuck?** [Open a GitHub issue](https://github.com/tkhquang/CrimsonDesertTools/issues/new?assignees=&labels=bug&template=bug_report.yaml) and include your INI config, log output, and game version.
 
+## User Presets
+
+The INI file includes three `UserPreset` sections (UserPreset1, UserPreset2, UserPreset3) that let you combine parts from any category into a single toggle. Set `Enabled = true`, assign a hotkey, and list any parts you want grouped together. Parts can overlap with built-in categories (both toggles will apply).
+
 ## Compatibility with Replacer Mods
 
 Some third-party replacer mods (e.g. "Playing as" character mods) hide weapons or shields by default. If you find that toggling equipment to visible has no effect, set `ForceShow = true` in the `[General]` section of the INI file:
@@ -184,7 +201,7 @@ This forces the mod to write a visible value directly, overriding whatever the r
 
 ## Known Limitations
 
-- Toggle may take 1-3 seconds to take effect — the game caches mesh visibility and re-evaluates periodically, not per-frame
+- Toggle may take 1-3 seconds to take effect.
 - After a major game update, AOB patterns may need updating
 - Currently only tested with the Steam version of the game
 

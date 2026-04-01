@@ -17,26 +17,29 @@
 
 namespace EquipHide
 {
-    // =========================================================================
-    // Hook target: sub_140818340 — visibility decision function
-    //
-    // Hook point: movzx eax, byte ptr [r13+1Ch]; cmp al, 3
-    //
-    // Register layout at hook point:
-    //   R10 = pointer to part hash DWORD (IndexedStringA ID)
-    //   R13 = pointer to PartInOutSocket struct (Visible byte at +0x1C)
-    //   R8B = exclusion-list flag
-    //
-    // To hide a part: set [R13+0x1C] = 2 (Out-only visibility)
-    //
-    // Cascading AOB patterns (tried in order until one matches):
-    //   P1: Direct hook-site pattern (most precise, least resilient)
-    //   P2: Wider context pattern encoding array iteration structure
-    //       (survives register reallocation, needs +0x36 offset)
-    //   P3: Short core pattern (last resort, 7 bytes)
-    //
-    // See .idea/research/update_resilience.md for full analysis.
-    // =========================================================================
+    /**
+     * @brief Hook target: sub_14081D3C0 — PartInOut transition function.
+     *
+     * Hook point: movzx eax, byte ptr [r13+1Ch]; cmp al, 3
+     *
+     * Register layout at hook point:
+     *   R10 = pointer to part hash DWORD (IndexedStringA ID)
+     *   R13 = pointer to PartInOutSocket struct (Visible byte at +0x1C)
+     *   R8B = exclusion-list flag
+     *   [RBP+0x67] = a4 (transition type byte, saved from R9B at prologue)
+     *
+     * Visibility byte values: 0=both, 1=In-only, 2=Out-only, 3=skip.
+     * To hide: set [R13+0x1C]=2 and force a4=2 when a4==1.
+     *
+     * Transition types (a4): 0=stow, 1=draw, 2=skip.
+     *
+     * Cascading AOB patterns (tried in order until one matches):
+     *   P1: Direct hook-site pattern (most precise, least resilient)
+     *   P2: Wider context pattern (survives register reallocation, +0x36 offset)
+     *   P3: Short core pattern (last resort, 7 bytes)
+     *
+     * See .idea/research/update_resilience.md for full analysis.
+     */
 
     static std::atomic<bool> s_playerOnly{true};
     static std::atomic<bool> s_forceShow{false};
@@ -44,45 +47,50 @@ namespace EquipHide
     static constexpr int k_maxProtagonists = 8;
     static std::atomic<uintptr_t> s_playerVisCtrls[k_maxProtagonists]{};
     static std::atomic<int> s_playerCount{0};
-    static std::atomic<uint32_t> s_resolveCounter{0};
+
+    /* Non-atomic: hook runs on game threads processing one entity at a time;
+       plain increment + mask avoids ~20-30 cycle LOCK XADD overhead. */
+    static uint32_t s_resolveCounter = 0;
     static constexpr uint32_t k_resolveInterval = 512;
+
+    /* Cached primary player vis_ctrl for fast single-compare.
+       For the common single-protagonist case, replaces the slot array loop. */
+    static std::atomic<uintptr_t> s_primaryPlayerVisCtrl{0};
 
     static uintptr_t s_worldSystemPtr = 0;
     static uintptr_t s_childActorVtbl = 0;
     static uintptr_t s_mapLookupAddr = 0;
 
+    static uintptr_t s_mapInsertAddr = 0;                          // sub_1408228C0
+    static uintptr_t s_indexedStringGlobalAddr = 0;                // qword_145BBAED8
+    static std::atomic<bool> s_armorInjected[k_maxProtagonists]{}; // reset on vis ctrl change
+
+    /* Inline hook trampoline for sub_14081DC20 — PartInOut direct-show.
+       This function bypasses the vis check and calls sub_1425EB1E0 directly,
+       causing hidden parts to flash during state transitions (e.g. gliding exit). */
+    using PartAddShowFn = __int64(__fastcall *)(__int64, uint8_t, uint64_t,
+                                                float, __int64, __int64,
+                                                __int64, __int64, __int64);
+    static PartAddShowFn s_originalPartAddShow = nullptr;
+
     static std::atomic<bool> s_needsDirectWrite{false};
 
-    // Per-address cache of original vis bytes written before the mod overrides them.
-    // Keyed by the vis-byte address (entry + 0x1C).  Populated by the direct-write
-    // path on first hide; consumed on un-hide to restore the game's natural value.
-    // Guarded by s_directWriteMtx — accessed from both the hook thread (via the
-    // s_needsDirectWrite flag) and the input thread (via flush_visibility).
+    /* Guarded by s_directWriteMtx — accessed from hook thread (s_needsDirectWrite)
+       and input thread (flush_visibility). */
     static std::mutex s_directWriteMtx;
     static std::unordered_map<uintptr_t, uint8_t> s_originalVis;
 
     static DMK::Config::KeyComboList s_showAllCombos;
     static DMK::Config::KeyComboList s_hideAllCombos;
 
-    // d8-based fallback: activates when global pointer chain AOBs fail
-    static std::atomic<bool> s_fallbackMode{false};
-
-    // Signals all background threads to exit during shutdown.
-    static std::atomic<bool> s_shutdownRequested{false};
-
-    // Deferred IndexedStringA scan: set when the table isn't ready at init
-    static std::atomic<bool> s_deferredScanPending{false};
-
-    // Lazy re-probe: set when the deferred scan finishes with unresolved parts.
-    // A background thread periodically re-scans until all parts resolve or the
-    // game session ends.  The hook signals the re-probe by writing steady_ms()
-    // into s_lazyProbeSignal, which the thread polls cheaply.
-    static std::atomic<bool> s_lazyProbePending{false};
+    static std::atomic<bool> s_fallbackMode{false};        // d8-based fallback when global chain AOBs fail
+    static std::atomic<bool> s_shutdownRequested{false};   // signals all background threads to exit
+    static std::atomic<bool> s_deferredScanPending{false}; // set when IndexedStringA table not ready at init
+    static std::atomic<bool> s_lazyProbePending{false};    // set when deferred scan finishes with unresolved parts
     static std::atomic<int64_t> s_lazyProbeSignal{0};
-
-    // Startup direct-write enforcement deadline (ms since steady_clock epoch).
-    // While active, resolve_player_vis_ctrls() schedules direct writes on
-    // success to proactively enforce DefaultHidden during game loading.
+    /* Startup direct-write enforcement deadline (ms since steady_clock epoch).
+       Covers the race where the game processes initial equipment visibility
+       before the hook is installed. */
     static std::atomic<int64_t> s_startupWriteEnd{0};
 
     static int64_t steady_ms() noexcept
@@ -100,14 +108,14 @@ namespace EquipHide
         return (*addr > 0x10000) ? *addr : 0;
     }
 
-    // =========================================================================
-    // AOB-based address resolution
-    //
-    // Each target address (global pointer, vtable, function) is resolved at
-    // init via cascading AOB patterns.  Two resolution modes:
-    //   Direct:      target = match_addr + offset
-    //   RipRelative: target = match_addr + instrEnd + *(int32*)(match + dispOffset)
-    // =========================================================================
+    /** @brief Unsafe pointer read — use ONLY inside SEH-protected hot paths. */
+    static uintptr_t read_ptr_unsafe(uintptr_t base, ptrdiff_t off) noexcept
+    {
+        auto addr = *reinterpret_cast<const uintptr_t *>(base + off);
+        return (addr > 0x10000) ? addr : 0;
+    }
+
+    // --- AOB-based address resolution ---
     enum class ResolveMode : uint8_t
     {
         Direct,
@@ -196,26 +204,52 @@ namespace EquipHide
         {"WS_P2_StructField",
          "80 B8 49 01 00 00 00 75 ?? 48 8B 05 ?? ?? ?? ?? 48 8B 88 D8 00 00 00",
          ResolveMode::RipRelative, 12, 16},
+
+        {"WS_P3_InnerLoad",
+         "48 8B 0D ?? ?? ?? ?? 48 8B 49 50 E8 ?? ?? ?? ?? 84 C0 0F 94 C0",
+         ResolveMode::RipRelative, 3, 7},
     };
 
     static constexpr AddrCandidate k_childActorVtblCandidates[] = {
-        {"VT_P1_DtorConst",
-         "48 8D 05 ?? ?? ?? ?? 48 89 01 E8 ?? ?? ?? ?? F6 C3 01 74 ?? BA 87 EE 08 4C",
-         ResolveMode::RipRelative, 3, 7},
+        {"VT_P1_AllocCtor",
+         "48 8B 55 08 48 89 F1 E8 ?? ?? ?? ?? 90 48 8D 05 ?? ?? ?? ?? 48 89 06 EB ??",
+         ResolveMode::RipRelative, 16, 20},
 
         {"VT_P2_CtorStore",
-         "48 89 F1 E8 ?? ?? ?? ?? 90 48 8D 05 ?? ?? ?? ?? 48 89 06 EB 03 4C",
+         "48 89 F1 E8 ?? ?? ?? ?? 90 48 8D 05 ?? ?? ?? ?? 48 89 06 EB ?? 4C",
          ResolveMode::RipRelative, 12, 16},
+
+        {"VT_P3_WiderCtorStore",
+         "45 31 ED 48 85 F6 74 ?? 48 8B 55 08 48 89 F1 E8 ?? ?? ?? ?? 90 48 8D 05",
+         ResolveMode::RipRelative, 24, 28},
     };
 
     static constexpr AddrCandidate k_mapLookupCandidates[] = {
         {"ML_P1_FullPrologue",
-         "48 83 EC 08 83 79 04 00 4C 8B C1 75 07 33 C0 48 83 C4 08 C3 48 8B 05 ?? ?? ?? ?? 48 89 1C 24 8B 1A",
+         "48 83 EC 08 83 79 04 00 4C 8B C1 75 ?? 33 C0 48 83 C4 08 C3 48 8B 05 ?? ?? ?? ?? 48 89 1C 24 8B 1A",
          ResolveMode::Direct, 0, 0},
 
         {"ML_P2_HashBody",
          "8B 48 58 48 03 D2 44 8B 5C D1 08 41 8B 08 85 C9 74 ?? 33 D2 41 8B C3 F7 F1",
          ResolveMode::Direct, -0x24, 0},
+
+        {"ML_P3_HashLoop",
+         "44 8B CA 33 D2 49 C1 E1 08 4D 03 48 10 45 8B 11 45 85 D2",
+         ResolveMode::Direct, -0x3D, 0},
+    };
+
+    static constexpr AddrCandidate k_mapInsertCandidates[] = {
+        {"MI_P1_FullPrologue",
+         "4C 89 4C 24 20 53 55 56 57 41 54 41 55 48 83 EC 28 44 8B 11 48 8B D9 4D 8B E1 41 8B F0 4C 8B EA",
+         ResolveMode::Direct, 0, 0},
+
+        {"MI_P2_InnerBody",
+         "44 8B 11 48 8B D9 4D 8B E1 41 8B F0 4C 8B EA",
+         ResolveMode::Direct, -0x11, 0},
+
+        {"MI_P3_PrologueBody",
+         "53 55 56 57 41 54 41 55 48 83 EC 28 44 8B 11 48 8B D9 4D 8B E1 41 8B F0 4C 8B EA 41 8B CA 45 85 D2",
+         ResolveMode::Direct, -5, 0},
     };
 
     static uintptr_t resolve_address(
@@ -236,28 +270,18 @@ namespace EquipHide
         return 0;
     }
 
-    // =========================================================================
-    // IndexedStringA table scan
-    //
-    // Reads the game's global IndexedStringA table to build a name->hash map
-    // at init time. This makes hash IDs resilient to table reordering across
-    // game patches.
-    //
-    // Table layout (verified via CE):
-    //   globalPtr      = *(qword*)(mapLookupFunc + 20 + rip_disp)
-    //   tableArray     = *(qword*)(globalPtr + 0x58)
-    //   entry[hash]    = tableArray + hash * 16
-    //   entry[hash]+0  = pointer to null-terminated string (or 0)
-    // =========================================================================
-    // Scan only the range where equipment parts are known to cluster.
-    // Outlier hashes (e.g. CD_Tool_FishingRod, CD_Tool_Book) are resolved
-    // via targeted probes around their fallback hashes.
+    /**
+     * @brief IndexedStringA table scan.
+     *
+     * Table layout:
+     *   globalPtr   = *(qword*)(mapLookupFunc + 20 + rip_disp)
+     *   tableArray  = *(qword*)(globalPtr + 0x58)
+     *   entry[hash] = tableArray + hash * 16
+     *   entry[hash]+0 = pointer to null-terminated string (or 0)
+     */
     static constexpr uint32_t k_tableScanMin = 0xAD00;
     static constexpr uint32_t k_tableScanMax = 0xBFFF;
 
-    // SEH-protected table entry reader.  Returns the string length (excluding
-    // null terminator) or 0 on any access fault.  Separate function so that
-    // __try/__except does not conflict with C++ objects in the caller.
     static constexpr std::size_t k_maxStringLen = 64;
 
     static std::size_t read_table_entry(uintptr_t tableArray, uint32_t hash,
@@ -292,12 +316,9 @@ namespace EquipHide
         auto &logger = DMK::Logger::get_instance();
         std::unordered_map<std::string, uint32_t> nameToHash;
 
-        // The MapLookup function contains: mov rax, [rip+disp] at offset +20
-        // (opcode 48 8B 05 xx xx xx xx). Extract the RIP-relative displacement.
         const auto ripInstr = mapLookupFunc + 20;
         const auto *instrBytes = reinterpret_cast<const uint8_t *>(ripInstr);
 
-        // Verify REX.W MOV RAX opcode: 48 8B 05
         if (instrBytes[0] != 0x48 || instrBytes[1] != 0x8B || instrBytes[2] != 0x05)
         {
             logger.warning("IndexedStringA scan: unexpected opcode at +20 "
@@ -350,9 +371,6 @@ namespace EquipHide
             ++cdEntries;
         }
 
-        // Targeted probe for known parts not found in the linear sweep.
-        // Outlier hashes can shift between game launches, so we search a
-        // small window around each fallback hash.
         const auto unresolved = get_unresolved_fallbacks(nameToHash);
         if (!unresolved.empty())
         {
@@ -383,9 +401,6 @@ namespace EquipHide
             }
         }
 
-        // Wide scan for parts still unresolved after the targeted probe.
-        // Handles arbitrary hash relocations across game versions by sweeping
-        // the full table outside the main scan range.
         auto wideUnresolved = get_unresolved_fallbacks(nameToHash);
         if (!wideUnresolved.empty())
         {
@@ -482,6 +497,14 @@ namespace EquipHide
 
             for (int i = count; i < k_maxProtagonists; ++i)
                 s_playerVisCtrls[i].store(0, std::memory_order_relaxed);
+
+            s_primaryPlayerVisCtrl.store(
+                count > 0 ? s_playerVisCtrls[0].load(std::memory_order_relaxed) : 0,
+                std::memory_order_relaxed);
+
+            for (int i = 0; i < k_maxProtagonists; ++i)
+                s_armorInjected[i].store(false, std::memory_order_relaxed);
+
             s_playerCount.store(count, std::memory_order_relaxed);
 
             {
@@ -491,18 +514,30 @@ namespace EquipHide
                         "Resolve: ws={:#x} am={:#x} user={:#x} count={}",
                         ws, am, user, count);
             }
-            // Startup enforcement: after resolve succeeds, schedule a
-            // direct write so DefaultHidden takes effect even when the
-            // passive hook path missed the initial visibility setup or
-            // the PlayerOnly filter has transitional pointer data.
+            if (count > 0)
             {
-                auto end = s_startupWriteEnd.load(std::memory_order_relaxed);
-                if (end > 0 && count > 0)
+                static uintptr_t s_prevVisCtrls[k_maxProtagonists]{};
+                static int s_prevCount = 0;
+                bool changed = (count != s_prevCount);
+                if (!changed)
                 {
-                    if (steady_ms() < end)
-                        s_needsDirectWrite.store(true, std::memory_order_relaxed);
-                    else
-                        s_startupWriteEnd.store(0, std::memory_order_relaxed);
+                    for (int j = 0; j < count; ++j)
+                    {
+                        if (s_playerVisCtrls[j].load(std::memory_order_relaxed) != s_prevVisCtrls[j])
+                        {
+                            changed = true;
+                            break;
+                        }
+                    }
+                }
+                if (changed)
+                {
+                    s_prevCount = count;
+                    for (int j = 0; j < count; ++j)
+                        s_prevVisCtrls[j] = s_playerVisCtrls[j].load(std::memory_order_relaxed);
+                    for (int j = 0; j < k_maxProtagonists; ++j)
+                        s_armorInjected[j].store(false, std::memory_order_relaxed);
+                    s_needsDirectWrite.store(true, std::memory_order_relaxed);
                 }
             }
         }
@@ -527,10 +562,8 @@ namespace EquipHide
     {
         if (!s_mapLookupAddr)
             return;
-
-        // Manual lock/unlock instead of unique_lock — MSVC SEH does not run
-        // C++ destructors on unwind under /EHsc, so an RAII lock would stay
-        // held permanently after an SEH-caught fault.
+        /* Manual lock/unlock: MSVC SEH does not run C++ destructors on unwind
+           under /EHsc, so an RAII lock would stay held after a caught fault. */
         if (!s_directWriteMtx.try_lock())
             return;
 
@@ -554,7 +587,7 @@ namespace EquipHide
                     continue;
                 auto mapBase = descNode + 0x20;
 
-                for (const auto &[hash, cat] : get_part_map())
+                for (const auto &[hash, mask] : get_part_map())
                 {
                     auto entry = lookup(mapBase, &hash);
                     if (!entry)
@@ -563,7 +596,7 @@ namespace EquipHide
                     const auto visAddr = entry + 0x1C;
                     auto *visPtr = reinterpret_cast<uint8_t *>(visAddr);
 
-                    if (is_category_hidden(cat))
+                    if (is_any_category_hidden(mask))
                     {
                         if (s_originalVis.find(visAddr) == s_originalVis.end())
                             s_originalVis[visAddr] = *visPtr;
@@ -573,7 +606,7 @@ namespace EquipHide
                     {
                         if (s_forceShow.load(std::memory_order_relaxed))
                         {
-                            *visPtr = default_show_value(cat);
+                            *visPtr = 0;
                             s_originalVis.erase(visAddr);
                         }
                         else
@@ -603,6 +636,185 @@ namespace EquipHide
         s_directWriteMtx.unlock();
     }
 
+    /**
+     * @brief Armor entry injection into the PartInOutSocket hash map.
+     *
+     * Armor parts have no PartInOutSocket entries in vanilla. To hide them,
+     * inject new entries with Visible=2 via the game's map insertion function.
+     *
+     * Entry data struct (29 bytes):
+     *   +0x00  3 x byte flags + padding = 0
+     *   +0x04  5 x dword socket bones   = 0
+     *   +0x1C  byte Visible             = 2 (Out-only)
+     */
+    using MapInsertFn = __int64 *(__fastcall *)(unsigned int *map_base,
+                                                int **part_hash_pp,
+                                                unsigned int bucket_key,
+                                                __int64 entry_data,
+                                                int extra,
+                                                uint8_t *out_existed,
+                                                __int64 *out_hash_ptr,
+                                                __int64 *out_data_ptr);
+
+    static uint32_t compute_bucket_key(uint32_t partHash) noexcept
+    {
+        __try
+        {
+            if (!s_indexedStringGlobalAddr)
+                return 0;
+            auto globalPtr = *reinterpret_cast<const uintptr_t *>(s_indexedStringGlobalAddr);
+            if (globalPtr < 0x10000)
+                return 0;
+            auto tablePtr = *reinterpret_cast<const uintptr_t *>(globalPtr + 0x58);
+            if (tablePtr < 0x10000)
+                return 0;
+            return *reinterpret_cast<const uint32_t *>(
+                tablePtr + 16ULL * partHash + 8);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return 0;
+        }
+    }
+
+    static int inject_armor_entries_for_map(uintptr_t mapBase) noexcept
+    {
+        __try
+        {
+            if (!s_mapInsertAddr || !s_mapLookupAddr)
+                return 0;
+
+            auto insert = reinterpret_cast<MapInsertFn>(s_mapInsertAddr);
+            auto lookup = reinterpret_cast<MapLookupFn>(s_mapLookupAddr);
+
+            auto &logger = DMK::Logger::get_instance();
+            int injected = 0;
+            int existing_set = 0;
+            int skipped_key = 0;
+
+            for (const auto &[hash, mask] : get_part_map())
+            {
+                if (!is_any_category_hidden(mask))
+                    continue;
+
+                auto existing = lookup(mapBase, &hash);
+                if (existing)
+                {
+                    auto *visPtr = reinterpret_cast<uint8_t *>(existing + 0x1C);
+                    if (DMK::Memory::is_readable(visPtr, 1))
+                        *visPtr = 2;
+                    logger.trace("  0x{:X} — existing, vis set to 2", hash);
+                    ++existing_set;
+                    continue;
+                }
+
+                auto bucketKey = compute_bucket_key(hash);
+                if (bucketKey == 0)
+                {
+                    logger.trace("  0x{:X} — skipped (no bucket key)", hash);
+                    ++skipped_key;
+                    continue;
+                }
+
+                alignas(8) uint8_t entryData[32] = {};
+                entryData[0x1C] = 2; // Visible = Out-only
+
+                uint32_t hashCopy = hash;
+                int *hashPtr = reinterpret_cast<int *>(&hashCopy);
+                uint8_t outExisted = 0;
+                __int64 outHashPtr = 0;
+                __int64 outDataPtr = 0;
+
+                auto *mapBasePtr = reinterpret_cast<unsigned int *>(mapBase);
+
+                insert(
+                    mapBasePtr,
+                    &hashPtr,
+                    bucketKey,
+                    reinterpret_cast<__int64>(entryData),
+                    0,
+                    &outExisted,
+                    &outHashPtr,
+                    &outDataPtr);
+
+                if (!outExisted)
+                {
+                    logger.debug("  0x{:X} — INJECTED new entry", hash);
+                    ++injected;
+                }
+            }
+
+            logger.debug("ArmorInject map: {} injected, {} existing updated, "
+                         "{} skipped (no bucket key)",
+                         injected, existing_set, skipped_key);
+            return injected;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            static std::atomic<bool> s_crashLogged{false};
+            if (!s_crashLogged.exchange(true, std::memory_order_relaxed))
+                DMK::Logger::get_instance().warning(
+                    "ArmorInject: SEH caught crash during map insertion");
+            return -1;
+        }
+    }
+
+    static void inject_armor_entries() noexcept
+    {
+        if (!s_mapInsertAddr || !s_mapLookupAddr || !s_indexedStringGlobalAddr)
+            return;
+
+        bool anyHidden = false;
+        for (std::size_t i = 0; i < CATEGORY_COUNT; ++i)
+        {
+            if (is_category_hidden(static_cast<Category>(i)))
+            {
+                anyHidden = true;
+                break;
+            }
+        }
+        if (!anyHidden)
+            return;
+
+        const auto n = s_playerCount.load(std::memory_order_relaxed);
+        if (n <= 0)
+            return;
+
+        auto &logger = DMK::Logger::get_instance();
+        int totalInjected = 0;
+
+        for (int i = 0; i < n; ++i)
+        {
+            if (s_armorInjected[i].load(std::memory_order_relaxed))
+                continue;
+
+            auto vc = s_playerVisCtrls[i].load(std::memory_order_relaxed);
+            if (!vc)
+                continue;
+
+            auto comp = read_ptr(vc, 0x48);
+            if (!comp)
+                continue;
+            auto descNode = read_ptr(comp, 0x218);
+            if (!descNode)
+                continue;
+            auto mapBase = descNode + 0x20;
+
+            int result = inject_armor_entries_for_map(mapBase);
+            if (result >= 0)
+            {
+                s_armorInjected[i].store(true, std::memory_order_relaxed);
+                totalInjected += result;
+            }
+        }
+
+        if (totalInjected > 0)
+            logger.info("ArmorInject: {} new entries injected across {} protagonists",
+                        totalInjected, n);
+        else
+            logger.debug("ArmorInject: 0 new entries (all existed or no hidden parts)");
+    }
+
     static constexpr AobCandidate k_aobCandidates[] = {
         {"P1_DirectSite",
          "41 0F B6 45 1C 3C 03 74 ?? 45 84 C0 75 ?? 84 C0",
@@ -617,15 +829,67 @@ namespace EquipHide
          0},
     };
 
-    // =========================================================================
-    // Mid-hook callback (SEH-protected)
-    //
-    // Read part hash from [R10], classify by range, and force Visible=2
-    // for hidden categories.  Wrapped in SEH to prevent game crash if the
-    // mod is outdated and register layout has changed.
-    // =========================================================================
-    /// Launch a background thread to scan the IndexedStringA table.
-    /// Retries with increasing delays until all parts resolve or limit is hit.
+    /**
+     * @brief Inline hook: PartInOut direct-show bypass (sub_14081DC20).
+     *
+     * Signature (x64 __fastcall):
+     *   __int64 sub_14081DC20(
+     *       __int64 a1,           // RCX  descriptor context
+     *       char    a2,           // DL   transition flag
+     *       uint64_t partHashPtr, // R8   pointer to DWORD part hash
+     *       float   blend,        // XMM3 animation blend
+     *       __int64 a5..a9)       // stack params
+     */
+    static constexpr AddrCandidate k_partAddShowCandidates[] = {
+        {"PAS_P1_Prologue",
+         "40 55 56 57 41 55 48 83 EC 48 48 8B 79 38",
+         ResolveMode::Direct, 0, 0},
+
+        // Post-prologue: sub rsp,48; mov rdi,[rcx+38]; mov r13,r8; mov r9d,[rcx+40]
+        {"PAS_P2_PostPrologue",
+         "48 83 EC 48 48 8B 79 38 4D 8B E8 44 8B 49 40",
+         ResolveMode::Direct, -6, 0},
+
+        // SIMD save + shift: movaps [rsp+30],xmm6; shl rax,04; movaps xmm6,xmm3; add rax,rdi
+        {"PAS_P3_SimdBody",
+         "0F 29 74 24 30 48 C1 E0 04 0F 28 F3 48 03 C7",
+         ResolveMode::Direct, -0x1B, 0},
+    };
+
+    static bool check_part_hidden(uint64_t partHashPtr)
+    {
+        if (partHashPtr < 0x10000)
+            return false;
+        auto partHash = *reinterpret_cast<const uint32_t *>(partHashPtr);
+        if (!needs_classification(partHash))
+            return false;
+        auto mask = classify_part(partHash);
+        return mask != 0 && is_any_category_hidden(mask);
+    }
+
+    static bool should_skip_part_add_show(uint64_t partHashPtr) noexcept
+    {
+        __try
+        {
+            return check_part_hidden(partHashPtr);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return false;
+        }
+    }
+
+    static __int64 __fastcall on_part_add_show(
+        __int64 a1, uint8_t a2, uint64_t partHashPtr, float blend,
+        __int64 a5, __int64 a6, __int64 a7, __int64 a8, __int64 a9)
+    {
+        if (should_skip_part_add_show(partHashPtr))
+            return 0;
+        return s_originalPartAddShow(a1, a2, partHashPtr, blend,
+                                     a5, a6, a7, a8, a9);
+    }
+
+    // --- Deferred IndexedStringA scan ---
     static constexpr int k_maxScanAttempts = 10;
 
     static void deferred_scan_thread() noexcept
@@ -653,6 +917,10 @@ namespace EquipHide
                 set_runtime_hashes(std::move(runtimeHashes));
                 rebuild_part_lookup();
                 s_deferredScanPending.store(false, std::memory_order_relaxed);
+
+                for (int j = 0; j < k_maxProtagonists; ++j)
+                    s_armorInjected[j].store(false, std::memory_order_relaxed);
+                s_needsDirectWrite.store(true, std::memory_order_relaxed);
 
                 if (!unresolved.empty())
                 {
@@ -688,8 +956,8 @@ namespace EquipHide
         if (!s_mapLookupAddr)
             return;
 
-        // Wait until the game world is loaded before launching — avoids
-        // exhausting retry attempts while idling at the main menu.
+        // Wait until the game world is loaded — avoids exhausting retry
+        // attempts while idling at the main menu.
         if (s_worldSystemPtr)
         {
             auto ws = read_ptr(s_worldSystemPtr, 0);
@@ -702,7 +970,6 @@ namespace EquipHide
                 return;
         }
 
-        // Launch once — the flag prevents re-entry
         static std::atomic<bool> s_launched{false};
         if (s_launched.exchange(true, std::memory_order_relaxed))
             return;
@@ -710,14 +977,7 @@ namespace EquipHide
         std::thread(deferred_scan_thread).detach();
     }
 
-    // =========================================================================
-    // Lazy re-probe for demand-loaded IndexedStringA entries
-    //
-    // Some entries (e.g. CD_Tool_Book) are only populated by the game when
-    // related content is first accessed.  After the deferred scan finishes
-    // with unresolved parts, this thread sleeps until the hook signals that
-    // enough time has passed, then re-scans.
-    // =========================================================================
+    // --- Lazy re-probe for demand-loaded IndexedStringA entries ---
     static constexpr int64_t k_lazyProbeIntervalMs = 60'000;
 
     static void lazy_probe_thread() noexcept
@@ -761,7 +1021,6 @@ namespace EquipHide
             logger.trace("Lazy probe #{}: {} parts still unresolved",
                          probeCount, unresolved.size());
 
-            // Reset signal — hook will set it again after the next interval
             s_lazyProbeSignal.store(0, std::memory_order_relaxed);
         }
     }
@@ -778,22 +1037,19 @@ namespace EquipHide
         std::thread(lazy_probe_thread).detach();
     }
 
-    /// Core logic — no SEH here so C++ objects (SafetyHookContext&) are fine.
+    // --- Mid-hook callback ---
     static void on_vis_check_impl(SafetyHookContext &ctx)
     {
-        // Load-before-exchange: avoids a locked xchg (~20-30 cycles) on the
-        // common path where the flag is false.  The benign TOCTOU between the
-        // load and exchange is safe — apply_direct_vis_write has its own mutex.
         if (s_needsDirectWrite.load(std::memory_order_relaxed) &&
             s_needsDirectWrite.exchange(false, std::memory_order_relaxed))
+        {
+            inject_armor_entries();
             apply_direct_vis_write();
+        }
 
         if (s_deferredScanPending.load(std::memory_order_relaxed))
             launch_deferred_scan();
 
-        // Signal the lazy re-probe thread periodically.
-        // Throttled: only check the clock every 4096 hook invocations to
-        // avoid per-call QueryPerformanceCounter overhead on the hot path.
         if (s_lazyProbePending.load(std::memory_order_relaxed))
         {
             launch_lazy_probe();
@@ -813,15 +1069,11 @@ namespace EquipHide
 
         auto partHash = *reinterpret_cast<const uint32_t *>(r10);
 
-        // Quick range check before map lookup — skip obviously out-of-range hashes.
-        // Bounds cover the contiguous block; outliers are checked separately.
-        const auto rangeMin = hash_range_min();
-        const auto rangeMax = hash_range_max();
-        if (rangeMin != 0 && (partHash < rangeMin || partHash > rangeMax) && !is_outlier_hash(partHash))
+        if (!needs_classification(partHash))
             return;
 
-        const auto cat = classify_part(partHash);
-        if (!cat)
+        const auto mask = classify_part(partHash);
+        if (mask == 0)
             return;
 
         auto r13 = ctx.r13;
@@ -836,17 +1088,17 @@ namespace EquipHide
 
             if (s_fallbackMode.load(std::memory_order_relaxed))
             {
-                // d8-based fallback: read actor from vis_ctrl chain and check d8 field
-                auto comp = read_ptr(a1, 0x48);
+                // d8-based fallback: a1->+0x48->+0x08->+0xD8.
+                // Uses read_ptr_unsafe — SEH-protected via on_vis_check.
+                auto comp = read_ptr_unsafe(a1, 0x48);
                 if (comp)
                 {
-                    auto actor = read_ptr(comp, 0x08);
+                    auto actor = read_ptr_unsafe(comp, 0x08);
                     if (actor)
                     {
-                        auto *d8Ptr = reinterpret_cast<const int32_t *>(actor + 0xD8);
-                        if (DMK::Memory::is_readable(d8Ptr, sizeof(int32_t)) && *d8Ptr >= 2)
+                        auto d8Val = *reinterpret_cast<const int32_t *>(actor + 0xD8);
+                        if (d8Val >= 2)
                         {
-                            // Player party member detected — cache a1 into slot array
                             const auto n = s_playerCount.load(std::memory_order_relaxed);
                             bool alreadyCached = false;
                             for (int i = 0; i < n; ++i)
@@ -859,28 +1111,30 @@ namespace EquipHide
                             }
                             if (!alreadyCached && n < k_maxProtagonists)
                             {
-                                // Atomically claim the slot to avoid TOCTOU if
-                                // two hook invocations race on parallel threads.
+                                // CAS to avoid TOCTOU if two hooks race on parallel threads
                                 int expected = n;
                                 if (s_playerCount.compare_exchange_weak(
                                         expected, n + 1, std::memory_order_relaxed))
                                 {
                                     s_playerVisCtrls[n].store(a1, std::memory_order_relaxed);
-
-                                    if (s_startupWriteEnd.load(std::memory_order_relaxed) > 0)
-                                        s_needsDirectWrite.store(true, std::memory_order_relaxed);
+                                    s_primaryPlayerVisCtrl.store(
+                                        s_playerVisCtrls[0].load(std::memory_order_relaxed),
+                                        std::memory_order_relaxed);
+                                    s_needsDirectWrite.store(true, std::memory_order_relaxed);
                                 }
                             }
                         }
                     }
                 }
 
-                // Filter using cached slots (same logic as global-chain path)
                 const auto n = s_playerCount.load(std::memory_order_relaxed);
                 if (n > 0)
                 {
+                    if (a1 == s_primaryPlayerVisCtrl.load(std::memory_order_relaxed))
+                        goto player_confirmed;
+
                     bool isPlayer = false;
-                    for (int i = 0; i < n; ++i)
+                    for (int i = 1; i < n; ++i)
                     {
                         if (a1 == s_playerVisCtrls[i].load(std::memory_order_relaxed))
                         {
@@ -891,35 +1145,41 @@ namespace EquipHide
                     if (!isPlayer)
                         return;
                 }
-                // n == 0: cache empty, allow all (DefaultHidden still works)
+            player_confirmed:;
             }
             else
             {
-                auto cnt = s_resolveCounter.fetch_add(1, std::memory_order_relaxed);
+                auto cnt = ++s_resolveCounter;
                 if (s_playerCount.load(std::memory_order_relaxed) == 0 ||
-                    (cnt % k_resolveInterval) == 0)
+                    (cnt & (k_resolveInterval - 1)) == 0)
                     resolve_player_vis_ctrls();
 
                 const auto n = s_playerCount.load(std::memory_order_relaxed);
                 if (n > 0)
                 {
-                    bool isPlayer = false;
-                    for (int i = 0; i < n; ++i)
-                    {
-                        if (a1 == s_playerVisCtrls[i].load(std::memory_order_relaxed))
-                        {
-                            isPlayer = true;
-                            break;
-                        }
-                    }
+                    if (a1 == s_primaryPlayerVisCtrl.load(std::memory_order_relaxed))
+                        goto global_player_confirmed;
 
-                    if (!isPlayer)
-                        return;
+                    {
+                        bool isPlayer = false;
+                        for (int i = 1; i < n; ++i)
+                        {
+                            if (a1 == s_playerVisCtrls[i].load(std::memory_order_relaxed))
+                            {
+                                isPlayer = true;
+                                break;
+                            }
+                        }
+
+                        if (!isPlayer)
+                            return;
+                    }
+                global_player_confirmed:;
                 }
             }
         }
 
-        if (is_category_hidden(*cat))
+        if (is_any_category_hidden(mask))
         {
             auto *visPtr = reinterpret_cast<uint8_t *>(r13 + 0x1C);
             *visPtr = 2;
@@ -927,13 +1187,13 @@ namespace EquipHide
         else if (s_forceShow.load(std::memory_order_relaxed))
         {
             auto *visPtr = reinterpret_cast<uint8_t *>(r13 + 0x1C);
-            *visPtr = default_show_value(*cat);
+            *visPtr = 0;
         }
     }
 
-    /// SEH wrapper — catches access violations if mod is outdated and
-    /// register layout has changed.  Separate function because MSVC SEH
-    /// cannot coexist with C++ destructors in the same frame.
+    /* SEH wrapper: separate function because MSVC SEH cannot coexist with
+       C++ destructors in the same frame. Swallows faults if the mod is
+       outdated and register layout has changed — don't crash the game. */
     static int seh_filter(unsigned int /*code*/) { return EXCEPTION_EXECUTE_HANDLER; }
 
     static void on_vis_check(SafetyHookContext &ctx)
@@ -944,27 +1204,17 @@ namespace EquipHide
         }
         __except (seh_filter(GetExceptionCode()))
         {
-            // Silently swallow — mod is likely outdated, don't crash the game
         }
     }
 
-    // =========================================================================
-    // AOB scan with unpack retry
-    //
-    // Packed/protected binaries may decompress code into dynamically
-    // allocated memory outside the main module.  Scan all readable-
-    // executable regions in the process to find the hook target
-    // regardless of where the unpacker places the code.
-    // =========================================================================
-
+    /* AOB scan — scans all executable regions, not just the main module,
+       because packed/protected binaries may decompress code elsewhere. */
     struct CompiledCandidate
     {
         const AobCandidate *source;
         DMK::Scanner::CompiledPattern compiled;
     };
 
-    /// Scan all executable committed memory regions for the AOB patterns.
-    /// Returns the resolved hook address and sets matchedSource on success.
     static uintptr_t scan_for_hook_target(
         const std::vector<CompiledCandidate> &candidates,
         const AobCandidate *&matchedSource)
@@ -999,9 +1249,7 @@ namespace EquipHide
         return 0;
     }
 
-    // =========================================================================
-    // Config
-    // =========================================================================
+    // --- Config ---
     static void load_config()
     {
         DMK::Config::register_string("General", "LogLevel", "Log Level", [](const std::string &val)
@@ -1026,11 +1274,16 @@ namespace EquipHide
             const auto cat = static_cast<Category>(i);
             const std::string section{category_section(cat)};
 
+            const bool active = (cat == Category::Shields ||
+                                 cat == Category::Helm ||
+                                 cat == Category::Mask);
+            const char *defaultToggle = active ? "V" : "";
+
             DMK::Config::register_bool(section, "Enabled", section + " Enabled", [i](bool val)
-                                       { category_states()[i].enabled.store(val, std::memory_order_relaxed); }, true);
+                                       { category_states()[i].enabled.store(val, std::memory_order_relaxed); }, active);
 
             DMK::Config::register_key_combo(section, "ToggleHotkey", section + " Toggle Hotkey", [i](const DMK::Config::KeyComboList &combos)
-                                            { category_states()[i].toggleHotkeyCombos = combos; }, "V");
+                                            { category_states()[i].toggleHotkeyCombos = combos; }, defaultToggle);
 
             DMK::Config::register_key_combo(section, "ShowHotkey", section + " Show Hotkey", [i](const DMK::Config::KeyComboList &combos)
                                             { category_states()[i].showHotkeyCombos = combos; }, "");
@@ -1039,10 +1292,10 @@ namespace EquipHide
                                             { category_states()[i].hideHotkeyCombos = combos; }, "");
 
             DMK::Config::register_bool(section, "DefaultHidden", section + " Default Hidden", [i](bool val)
-                                       { category_states()[i].hidden.store(val, std::memory_order_relaxed); }, false);
+                                       { category_states()[i].hidden.store(val, std::memory_order_relaxed); }, active);
 
             DMK::Config::register_string(section, "Parts", section + " Parts", [cat](const std::string &val)
-                                         { register_parts(cat, val); }, "");
+                                         { register_parts(cat, val); }, default_parts_string(cat));
         }
 
         DMK::Config::load(INI_FILE);
@@ -1050,11 +1303,7 @@ namespace EquipHide
         build_part_lookup();
     }
 
-    // =========================================================================
-    // Hotkey helpers
-    // =========================================================================
-
-    /// Serialise a KeyComboList into a stable string key for deduplication.
+    // --- Hotkey helpers ---
     static std::string combo_key(const DMK::Config::KeyComboList &combos)
     {
         std::string key;
@@ -1069,17 +1318,16 @@ namespace EquipHide
         return key;
     }
 
-    /// Trigger direct-write update after visibility state change.
     static void flush_visibility() noexcept
     {
         if (!s_fallbackMode.load(std::memory_order_relaxed))
             resolve_player_vis_ctrls();
+
+        inject_armor_entries();
         apply_direct_vis_write();
     }
 
-    // =========================================================================
-    // Hotkey registration — categories sharing the same key toggle together
-    // =========================================================================
+    // --- Hotkey registration ---
     static void register_hotkeys()
     {
         auto &inputMgr = DMK::InputManager::get_instance();
@@ -1091,7 +1339,6 @@ namespace EquipHide
         int hideCount = 0;
         int globalCount = 0;
 
-        // --- Global Show All / Hide All ---
         if (!s_showAllCombos.empty())
         {
             inputMgr.register_press(
@@ -1126,7 +1373,6 @@ namespace EquipHide
             ++globalCount;
         }
 
-        // --- Per-category toggle (grouped by shared combo) ---
         struct HotkeyGroup
         {
             DMK::Config::KeyComboList combos;
@@ -1180,7 +1426,6 @@ namespace EquipHide
             ++toggleCount;
         }
 
-        // --- Per-category force show / force hide ---
         for (std::size_t i = 0; i < CATEGORY_COUNT; ++i)
         {
             if (!states[i].enabled.load(std::memory_order_relaxed))
@@ -1223,14 +1468,16 @@ namespace EquipHide
                     total, toggleCount, showCount, hideCount, globalCount);
     }
 
-    // =========================================================================
-    // Public interface
-    // =========================================================================
+    // --- Public interface ---
     bool init()
     {
         auto &logger = DMK::Logger::get_instance();
 
-        logger.info("=== {} v{} ===", MOD_NAME, MOD_VERSION);
+        logger.info("{} v{}", MOD_NAME, MOD_VERSION);
+        logger.info("By {}", MOD_AUTHOR);
+        logger.info("Source: {}", MOD_SOURCE);
+        logger.info("Nexus:  {}", MOD_NEXUS);
+        logger.debug("Built on " __DATE__ " at " __TIME__);
 
         DMK::Memory::init_cache();
 
@@ -1246,6 +1493,33 @@ namespace EquipHide
             k_mapLookupCandidates, std::size(k_mapLookupCandidates),
             "MapLookup");
 
+        s_mapInsertAddr = resolve_address(
+            k_mapInsertCandidates, std::size(k_mapInsertCandidates),
+            "MapInsert");
+
+        // Resolve IndexedStringA global from MapLookup: mov rax, [rip+disp] at +20
+        // (opcode 48 8B 05 xx xx xx xx → loads qword_145BBAED8).
+        if (s_mapLookupAddr)
+        {
+            const auto ripInstr = s_mapLookupAddr + 20;
+            const auto *instrBytes = reinterpret_cast<const uint8_t *>(ripInstr);
+            if (instrBytes[0] == 0x48 && instrBytes[1] == 0x8B && instrBytes[2] == 0x05)
+            {
+                int32_t disp = 0;
+                std::memcpy(&disp, instrBytes + 3, sizeof(int32_t));
+                s_indexedStringGlobalAddr = static_cast<uintptr_t>(
+                    static_cast<int64_t>(ripInstr + 7) + disp);
+                logger.info("IndexedStringA global resolved at {:#x}",
+                            s_indexedStringGlobalAddr);
+            }
+            else
+            {
+                logger.warning("IndexedStringA global: unexpected opcode at MapLookup+20 "
+                               "({:02X} {:02X} {:02X}), armor injection disabled",
+                               instrBytes[0], instrBytes[1], instrBytes[2]);
+            }
+        }
+
         if (!s_worldSystemPtr || !s_childActorVtbl)
         {
             s_fallbackMode.store(true, std::memory_order_relaxed);
@@ -1256,9 +1530,6 @@ namespace EquipHide
             logger.info("Player identification: global pointer chain");
         }
 
-        // Attempt IndexedStringA table scan for runtime hash resolution.
-        // The game's global pointer may not be populated yet during DllMain,
-        // so we also schedule a deferred retry in the hook callback.
         if (s_mapLookupAddr)
         {
             auto runtimeHashes = scan_indexed_string_table(s_mapLookupAddr);
@@ -1282,7 +1553,6 @@ namespace EquipHide
 
         load_config();
 
-        // Pre-compile AOB patterns once
         std::vector<CompiledCandidate> compiledCandidates;
         for (const auto &candidate : k_aobCandidates)
         {
@@ -1299,9 +1569,6 @@ namespace EquipHide
             return false;
         }
 
-        // Scan all executable memory regions for the hook target.
-        // The process gate in dllmain ensures we run after the protector
-        // has finished unpacking, so a single scan pass is sufficient.
         const AobCandidate *matchedSource = nullptr;
         uintptr_t hookAddr = scan_for_hook_target(compiledCandidates, matchedSource);
 
@@ -1324,15 +1591,40 @@ namespace EquipHide
         logger.info("Hook installed via pattern '{}' at 0x{:X}",
                     matchedSource->name, hookAddr);
 
+        // Prevents hidden parts from flashing during state transitions (gliding exit).
+        {
+            auto partAddShowAddr = resolve_address(
+                k_partAddShowCandidates, std::size(k_partAddShowCandidates),
+                "PartAddShow");
+
+            if (partAddShowAddr)
+            {
+                auto result = hookMgr.create_inline_hook(
+                    "PartAddShow", partAddShowAddr,
+                    reinterpret_cast<void *>(on_part_add_show),
+                    reinterpret_cast<void **>(&s_originalPartAddShow));
+
+                if (result.has_value())
+                    logger.info("PartAddShow inline hook installed at 0x{:X}",
+                                partAddShowAddr);
+                else
+                    logger.warning("PartAddShow hook failed: {} — gliding flash fix disabled",
+                                   DetourModKit::Hook::error_to_string(result.error()));
+            }
+            else
+            {
+                logger.warning("PartAddShow AOB scan failed — gliding flash fix disabled");
+            }
+        }
+
         register_hotkeys();
 
         auto &inputMgr = DMK::InputManager::get_instance();
         inputMgr.start();
 
-        // Schedule startup direct-write enforcement if any category starts hidden.
-        // Covers the race where the game processes initial equipment visibility
-        // before the hook is installed, or the PlayerOnly filter has transitional
-        // pointer data during game loading.
+        // Schedule startup direct-write enforcement: covers the race where
+        // the game processes initial equipment visibility before the hook is
+        // installed, or the PlayerOnly filter has transitional pointer data.
         {
             bool anyDefaultHidden = false;
             for (std::size_t i = 0; i < CATEGORY_COUNT; ++i)
@@ -1354,11 +1646,66 @@ namespace EquipHide
         return true;
     }
 
+    /**
+     * @brief Undo all visibility modifications before unload.
+     * @details Injected armor entries get vis=3 (skip) so the game ignores
+     *          the malformed entries (zero socket bones). Modified weapon
+     *          entries get their original vis bytes restored.
+     */
+    static void cleanup_vis_bytes() noexcept
+    {
+        if (!s_mapLookupAddr)
+            return;
+        if (!s_directWriteMtx.try_lock())
+            return;
+
+        __try
+        {
+            auto lookup = reinterpret_cast<MapLookupFn>(s_mapLookupAddr);
+            const auto n = s_playerCount.load(std::memory_order_relaxed);
+
+            for (int i = 0; i < n; ++i)
+            {
+                auto vc = s_playerVisCtrls[i].load(std::memory_order_relaxed);
+                if (!vc)
+                    continue;
+                auto comp = read_ptr(vc, 0x48);
+                if (!comp)
+                    continue;
+                auto descNode = read_ptr(comp, 0x218);
+                if (!descNode)
+                    continue;
+                auto mapBase = descNode + 0x20;
+
+                for (const auto &[hash, mask] : get_part_map())
+                {
+                    auto entry = lookup(mapBase, &hash);
+                    if (!entry)
+                        continue;
+
+                    auto *visPtr = reinterpret_cast<uint8_t *>(entry + 0x1C);
+
+                    auto it = s_originalVis.find(reinterpret_cast<uintptr_t>(visPtr));
+                    if (it != s_originalVis.end())
+                        *visPtr = it->second; // restore original for weapon entries
+                    else
+                        *visPtr = 3; // injected entry: vis=3 (skip) — zero socket bones
+                }
+            }
+            s_originalVis.clear();
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+        }
+        s_directWriteMtx.unlock();
+    }
+
     void shutdown()
     {
         DMK::Logger::get_instance().info("{} shutting down...", MOD_NAME);
         s_shutdownRequested.store(true, std::memory_order_relaxed);
         s_lazyProbePending.store(false, std::memory_order_relaxed);
+        cleanup_vis_bytes();
         DMK_Shutdown();
     }
 
