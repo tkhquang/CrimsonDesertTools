@@ -17,17 +17,6 @@
             }
         },
         {
-            "name": "mingw-release",
-            "displayName": "MinGW Release (single ASI)",
-            "generator": "MinGW Makefiles",
-            "binaryDir": "${sourceDir}/build/release-mingw",
-            "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Release",
-                "CMAKE_C_COMPILER": "gcc",
-                "CMAKE_CXX_COMPILER": "g++"
-            }
-        },
-        {
             "name": "msvc-dev",
             "displayName": "MSVC Dev (hot-reload two-DLL)",
             "generator": "Visual Studio 17 2022",
@@ -35,18 +24,6 @@
             "binaryDir": "${sourceDir}/build/dev-msvc",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "RelWithDebInfo",
-                "EQUIPHIDE_DEV_BUILD": "ON"
-            }
-        },
-        {
-            "name": "mingw-dev",
-            "displayName": "MinGW Dev (hot-reload two-DLL)",
-            "generator": "MinGW Makefiles",
-            "binaryDir": "${sourceDir}/build/dev-mingw",
-            "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "RelWithDebInfo",
-                "CMAKE_C_COMPILER": "gcc",
-                "CMAKE_CXX_COMPILER": "g++",
                 "EQUIPHIDE_DEV_BUILD": "ON"
             }
         }
@@ -58,17 +35,9 @@
             "configuration": "Release"
         },
         {
-            "name": "mingw-release",
-            "configurePreset": "mingw-release"
-        },
-        {
             "name": "msvc-dev",
             "configurePreset": "msvc-dev",
             "configuration": "RelWithDebInfo"
-        },
-        {
-            "name": "mingw-dev",
-            "configurePreset": "mingw-dev"
         }
     ]
 }
