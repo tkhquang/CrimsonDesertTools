@@ -46,6 +46,11 @@ namespace EquipHide
         return names[idx];
     }
 
+    constexpr uint8_t default_show_value([[maybe_unused]] Category cat)
+    {
+        return 0;
+    }
+
     // =========================================================================
     // Per-category runtime state
     // =========================================================================

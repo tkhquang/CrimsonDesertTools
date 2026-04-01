@@ -87,6 +87,8 @@ The mod is configured via the `CrimsonDesertEquipHide.ini` file:
 LogLevel = Info
 ; Apply only to player characters
 PlayerOnly = true
+; Set to true if equipment stays invisible when toggling to visible
+ForceShow = false
 ; Force all categories visible / hidden at once (empty = disabled)
 ShowAllHotkey =
 HideAllHotkey =
@@ -169,6 +171,17 @@ Common issues:
 
 > **Still stuck?** [Open a GitHub issue](https://github.com/tkhquang/CrimsonDesertTools/issues/new?assignees=&labels=bug&template=bug_report.yaml) and include your INI config, log output, and game version.
 
+## Compatibility with Replacer Mods
+
+Some third-party replacer mods (e.g. "Playing as" character mods) hide weapons or shields by default. If you find that toggling equipment to visible has no effect, set `ForceShow = true` in the `[General]` section of the INI file:
+
+```ini
+[General]
+ForceShow = true
+```
+
+This forces the mod to write a visible value directly, overriding whatever the replacer mod has set. Safe to leave `false` if you are not experiencing visibility issues.
+
 ## Known Limitations
 
 - Toggle may take 1-3 seconds to take effect — the game caches mesh visibility and re-evaluates periodically, not per-frame
@@ -190,30 +203,31 @@ This mod requires:
 
 ### Prerequisites
 
-- [MinGW-w64](https://www.mingw-w64.org/) (GCC 12+) or [Visual Studio 2022](https://visualstudio.microsoft.com/) (MSVC with C++23 support)
+- [Visual Studio 2022](https://visualstudio.microsoft.com/) (MSVC with C++23 support)
 - [CMake](https://cmake.org/) (3.16 or newer)
-- [Ninja](https://ninja-build.org/) (recommended)
 - Git (to fetch submodules)
 
-### Building with MinGW (Recommended)
+### Release Build
 
 ```bash
 git submodule update --init --recursive
 cd CrimsonDesertEquipHide
-cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++
-cmake --build build --config Release --parallel
-```
-
-### Building with MSVC
-
-```bash
-git submodule update --init --recursive
-cd CrimsonDesertEquipHide
-cmake -S . -B build/msvc -G "Visual Studio 17 2022" -A x64
-cmake --build build/msvc --config Release --parallel
+cmake --preset msvc-release
+cmake --build build/release-msvc --config Release --parallel
 ```
 
 The output binary (`CrimsonDesertEquipHide.asi`) will be placed in the build directory.
+
+### Dev Build (Hot-Reload)
+
+The dev build produces a loader ASI + logic DLL pair, allowing you to rebuild and hot-reload the logic DLL without restarting the game.
+
+```bash
+cmake --preset msvc-dev
+cmake --build build/dev-msvc --config RelWithDebInfo --parallel
+```
+
+The loader (`CrimsonDesertEquipHide.asi`) and logic DLL (`CrimsonDesertEquipHide_Logic.dll`) are deployed directly to the game's plugin directory via a post-build step. Press **Numpad 0** in-game to trigger a reload after rebuilding.
 
 ## Credits
 

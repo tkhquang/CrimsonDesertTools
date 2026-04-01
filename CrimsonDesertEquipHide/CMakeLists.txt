@@ -7,19 +7,8 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Override CMake's default -O3 for MinGW Release builds with -O2 for a better
-# code-size/performance tradeoff and to avoid GCC 15 LTO ICEs at -O3.
-if(NOT MSVC)
-    set(CMAKE_CXX_FLAGS_RELEASE "-O2 -DNDEBUG" CACHE STRING "" FORCE)
-endif()
-
 # --- Compiler Flags ---
-if(MSVC)
-    add_compile_options(/W4)
-else()
-    # GCC/Clang/MinGW specific flags
-    add_compile_options(-Wall -Wextra)
-endif()
+add_compile_options(/W4)
 
 # --- Windows Definitions ---
 if(WIN32)
@@ -100,15 +89,7 @@ if(EQUIPHIDE_DEV_BUILD)
         LIBRARY_OUTPUT_DIRECTORY_RELWITHDEBINFO "${GAME_BIN_DIR}"
     )
 
-    if(MSVC)
-        target_compile_options(equip_hide_loader PRIVATE /W4)
-    else()
-        target_link_options(equip_hide_loader PRIVATE
-            -static-libgcc
-            -static-libstdc++
-            -static
-        )
-    endif()
+    target_compile_options(equip_hide_loader PRIVATE /W4)
 
     # --- Logic DLL (all mod code) ---
     add_library(equip_hide_logic SHARED
@@ -148,17 +129,8 @@ if(EQUIPHIDE_DEV_BUILD)
         PDB_OUTPUT_DIRECTORY_RELWITHDEBINFO "${GAME_STAGING_DIR}"
     )
 
-    if(MSVC)
-        target_compile_options(equip_hide_logic PRIVATE /W4 /Zi)
-        target_link_options(equip_hide_logic PRIVATE /DEBUG /OPT:REF /OPT:ICF)
-    else()
-        target_link_options(equip_hide_logic PRIVATE
-            -Wl,--exclude-all-symbols
-            -static-libgcc
-            -static-libstdc++
-            -static
-        )
-    endif()
+    target_compile_options(equip_hide_logic PRIVATE /W4 /Zi)
+    target_link_options(equip_hide_logic PRIVATE /DEBUG /OPT:REF /OPT:ICF)
 
 else() # EQUIPHIDE_DEV_BUILD=OFF
     # =====================================================================
@@ -185,34 +157,16 @@ else() # EQUIPHIDE_DEV_BUILD=OFF
     )
 
     # --- Target-Scoped Release Optimizations ---
-    if(MSVC)
-        # /Gy: function-level linking, /Gw: global data optimization.
-        # /O1: favor size (appropriate for an injected DLL).
-        target_compile_options(${PROJECT_NAME}-ASI PRIVATE
-            $<$<CONFIG:Release>:/O1 /Gy /Gw>
-        )
+    # /Gy: function-level linking, /Gw: global data optimization.
+    # /O1: favor size (appropriate for an injected DLL).
+    target_compile_options(${PROJECT_NAME}-ASI PRIVATE
+        $<$<CONFIG:Release>:/O1 /Gy /Gw>
+    )
 
-        # /OPT:REF removes unreferenced functions/data; /OPT:ICF folds identical COMDATs.
-        target_link_options(${PROJECT_NAME}-ASI PRIVATE
-            $<$<CONFIG:Release>:/OPT:REF /OPT:ICF>
-        )
-    else()
-        # -ffunction-sections/-fdata-sections enable --gc-sections for dead code elimination.
-        # -O2 is set globally via CMAKE_CXX_FLAGS_RELEASE.
-        target_compile_options(${PROJECT_NAME}-ASI PRIVATE
-            $<$<CONFIG:Release>:-ffunction-sections -fdata-sections>
-        )
-        target_link_options(${PROJECT_NAME}-ASI PRIVATE
-            -Wl,--gc-sections
-            -Wl,--exclude-all-symbols
-            -static-libgcc
-            -static-libstdc++
-            -static
-
-            # Strip all symbols in Release to minimize binary size.
-            $<$<CONFIG:Release>:-s>
-        )
-    endif()
+    # /OPT:REF removes unreferenced functions/data; /OPT:ICF folds identical COMDATs.
+    target_link_options(${PROJECT_NAME}-ASI PRIVATE
+        $<$<CONFIG:Release>:/OPT:REF /OPT:ICF>
+    )
 
     # --- Link-Time Optimization ---
     include(CheckIPOSupported)

@@ -39,6 +39,7 @@ namespace EquipHide
     // =========================================================================
 
     static std::atomic<bool> s_playerOnly{true};
+    static std::atomic<bool> s_forceShow{false};
 
     static constexpr int k_maxProtagonists = 8;
     static std::atomic<uintptr_t> s_playerVisCtrls[k_maxProtagonists]{};
@@ -48,7 +49,7 @@ namespace EquipHide
 
     static uintptr_t s_worldSystemPtr = 0;
     static uintptr_t s_childActorVtbl = 0;
-    static uintptr_t s_mapLookupAddr  = 0;
+    static uintptr_t s_mapLookupAddr = 0;
 
     static std::atomic<bool> s_needsDirectWrite{false};
 
@@ -87,7 +88,8 @@ namespace EquipHide
     static int64_t steady_ms() noexcept
     {
         return std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::steady_clock::now().time_since_epoch()).count();
+                   std::chrono::steady_clock::now().time_since_epoch())
+            .count();
     }
 
     static uintptr_t read_ptr(uintptr_t base, ptrdiff_t off) noexcept
@@ -106,7 +108,11 @@ namespace EquipHide
     //   Direct:      target = match_addr + offset
     //   RipRelative: target = match_addr + instrEnd + *(int32*)(match + dispOffset)
     // =========================================================================
-    enum class ResolveMode : uint8_t { Direct, RipRelative };
+    enum class ResolveMode : uint8_t
+    {
+        Direct,
+        RipRelative
+    };
 
     struct AddrCandidate
     {
@@ -254,7 +260,6 @@ namespace EquipHide
     // __try/__except does not conflict with C++ objects in the caller.
     static constexpr std::size_t k_maxStringLen = 64;
 
-#ifdef _MSC_VER
     static std::size_t read_table_entry(uintptr_t tableArray, uint32_t hash,
                                         char *buf, std::size_t bufSize) noexcept
     {
@@ -280,44 +285,17 @@ namespace EquipHide
             return 0;
         }
     }
-#else
-    static std::size_t read_table_entry(uintptr_t tableArray, uint32_t hash,
-                                        char *buf, std::size_t bufSize) noexcept
-    {
-        const auto entryAddr = tableArray + static_cast<uintptr_t>(hash) * 16;
-        if (!DMK::Memory::is_readable(reinterpret_cast<const void *>(entryAddr),
-                                       sizeof(uintptr_t)))
-            return 0;
-
-        const auto strPtr = *reinterpret_cast<const uintptr_t *>(entryAddr);
-        if (strPtr < 0x10000)
-            return 0;
-
-        if (!DMK::Memory::is_readable(reinterpret_cast<const void *>(strPtr), bufSize))
-            return 0;
-
-        const auto *src = reinterpret_cast<const char *>(strPtr);
-        std::size_t len = 0;
-        while (len < bufSize - 1 && src[len] != '\0')
-        {
-            buf[len] = src[len];
-            ++len;
-        }
-        buf[len] = '\0';
-        return len;
-    }
-#endif
 
     static std::unordered_map<std::string, uint32_t> scan_indexed_string_table(
         uintptr_t mapLookupFunc)
     {
-        auto& logger = DMK::Logger::get_instance();
+        auto &logger = DMK::Logger::get_instance();
         std::unordered_map<std::string, uint32_t> nameToHash;
 
         // The MapLookup function contains: mov rax, [rip+disp] at offset +20
         // (opcode 48 8B 05 xx xx xx xx). Extract the RIP-relative displacement.
         const auto ripInstr = mapLookupFunc + 20;
-        const auto* instrBytes = reinterpret_cast<const uint8_t*>(ripInstr);
+        const auto *instrBytes = reinterpret_cast<const uint8_t *>(ripInstr);
 
         // Verify REX.W MOV RAX opcode: 48 8B 05
         if (instrBytes[0] != 0x48 || instrBytes[1] != 0x8B || instrBytes[2] != 0x05)
@@ -334,7 +312,7 @@ namespace EquipHide
         const auto globalPtrAddr = static_cast<uintptr_t>(
             static_cast<int64_t>(instrEnd) + disp);
 
-        const auto globalPtr = *reinterpret_cast<const uintptr_t*>(globalPtrAddr);
+        const auto globalPtr = *reinterpret_cast<const uintptr_t *>(globalPtrAddr);
         if (globalPtr < 0x10000)
         {
             logger.trace("IndexedStringA scan: global pointer not yet initialized ({:#x})",
@@ -342,7 +320,7 @@ namespace EquipHide
             return nameToHash;
         }
 
-        const auto tableArray = *reinterpret_cast<const uintptr_t*>(globalPtr + 0x58);
+        const auto tableArray = *reinterpret_cast<const uintptr_t *>(globalPtr + 0x58);
         if (tableArray < 0x10000)
         {
             logger.warning("IndexedStringA scan: tableArray is null/invalid ({:#x})",
@@ -351,7 +329,7 @@ namespace EquipHide
         }
 
         logger.trace("IndexedStringA scan: globalPtr={:#x} tableArray={:#x}",
-                      globalPtr, tableArray);
+                     globalPtr, tableArray);
 
         const auto t0 = std::chrono::steady_clock::now();
         uint32_t cdEntries = 0;
@@ -379,10 +357,11 @@ namespace EquipHide
         if (!unresolved.empty())
         {
             constexpr uint32_t k_probeRadius = 0x100;
-            for (const auto& [name, fallback] : unresolved)
+            for (const auto &[name, fallback] : unresolved)
             {
                 const uint32_t lo = (fallback > k_probeRadius)
-                                        ? fallback - k_probeRadius : 1;
+                                        ? fallback - k_probeRadius
+                                        : 1;
                 const uint32_t hi = fallback + k_probeRadius;
 
                 for (uint32_t h = lo; h <= hi; ++h)
@@ -396,7 +375,8 @@ namespace EquipHide
                         nameToHash[name] = h;
                         ++probeHits;
                         logger.trace("Outlier probe: {} found at 0x{:X} "
-                                     "(fallback was 0x{:X})", name, h, fallback);
+                                     "(fallback was 0x{:X})",
+                                     name, h, fallback);
                         break;
                     }
                 }
@@ -443,7 +423,7 @@ namespace EquipHide
         const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
 
         logger.trace("IndexedStringA scan complete: {} CD_ entries ({} range, {} probed) in {}ms",
-                      cdEntries + probeHits, cdEntries, probeHits, ms);
+                     cdEntries + probeHits, cdEntries, probeHits, ms);
 
         return nameToHash;
     }
@@ -466,16 +446,17 @@ namespace EquipHide
         if (!s_worldSystemPtr || !s_childActorVtbl)
             return;
 
-#ifdef _MSC_VER
         __try
         {
-#endif
             auto ws = read_ptr(s_worldSystemPtr, 0);
-            if (!ws) return;
+            if (!ws)
+                return;
             auto am = read_ptr(ws, 0x30);
-            if (!am) return;
+            if (!am)
+                return;
             auto user = read_ptr(am, 0x28);
-            if (!user) return;
+            if (!user)
+                return;
 
             static constexpr ptrdiff_t k_bodyOffsets[] = {
                 0xD0, 0xD8, 0xE0, 0xE8, 0xF0, 0xF8, 0x100, 0x108};
@@ -524,7 +505,6 @@ namespace EquipHide
                         s_startupWriteEnd.store(0, std::memory_order_relaxed);
                 }
             }
-#ifdef _MSC_VER
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
@@ -532,7 +512,6 @@ namespace EquipHide
             if (!s_crashLogged.exchange(true, std::memory_order_relaxed))
                 DMK::Logger::get_instance().warning("Resolve: SEH caught crash");
         }
-#endif
     }
 
     struct AobCandidate
@@ -555,10 +534,8 @@ namespace EquipHide
         if (!s_directWriteMtx.try_lock())
             return;
 
-#ifdef _MSC_VER
         __try
         {
-#endif
             auto lookup = reinterpret_cast<MapLookupFn>(s_mapLookupAddr);
             const auto n = s_playerCount.load(std::memory_order_relaxed);
             int modified = 0;
@@ -594,11 +571,19 @@ namespace EquipHide
                     }
                     else
                     {
-                        auto it = s_originalVis.find(visAddr);
-                        if (it != s_originalVis.end())
+                        if (s_forceShow.load(std::memory_order_relaxed))
                         {
-                            *visPtr = it->second;
-                            s_originalVis.erase(it);
+                            *visPtr = default_show_value(cat);
+                            s_originalVis.erase(visAddr);
+                        }
+                        else
+                        {
+                            auto it = s_originalVis.find(visAddr);
+                            if (it != s_originalVis.end())
+                            {
+                                *visPtr = it->second;
+                                s_originalVis.erase(it);
+                            }
                         }
                     }
                     ++modified;
@@ -608,7 +593,6 @@ namespace EquipHide
             DMK::Logger::get_instance().trace(
                 "DirectWrite: {} protagonists, {} entries modified",
                 n, modified);
-#ifdef _MSC_VER
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
@@ -616,7 +600,6 @@ namespace EquipHide
             if (!s_crashLogged.exchange(true, std::memory_order_relaxed))
                 DMK::Logger::get_instance().warning("DirectWrite: SEH caught crash");
         }
-#endif
         s_directWriteMtx.unlock();
     }
 
@@ -647,7 +630,7 @@ namespace EquipHide
 
     static void deferred_scan_thread() noexcept
     {
-        auto& logger = DMK::Logger::get_instance();
+        auto &logger = DMK::Logger::get_instance();
 
         for (int attempt = 0; attempt < k_maxScanAttempts; ++attempt)
         {
@@ -673,7 +656,7 @@ namespace EquipHide
 
                 if (!unresolved.empty())
                 {
-                    for (const auto& [name, fallback] : unresolved)
+                    for (const auto &[name, fallback] : unresolved)
                         logger.warning("Part '{}' unresolved after {} scan attempts, "
                                        "using fallback 0x{:X}",
                                        name, attempt + 1, fallback);
@@ -690,11 +673,11 @@ namespace EquipHide
             }
 
             logger.trace("Deferred scan attempt {}: {} parts unresolved, retrying",
-                          attempt + 1, unresolved.size());
+                         attempt + 1, unresolved.size());
         }
 
         logger.warning("IndexedStringA deferred scan exhausted {} attempts",
-                         k_maxScanAttempts);
+                       k_maxScanAttempts);
         s_deferredScanPending.store(false, std::memory_order_relaxed);
     }
 
@@ -710,10 +693,13 @@ namespace EquipHide
         if (s_worldSystemPtr)
         {
             auto ws = read_ptr(s_worldSystemPtr, 0);
-            if (!ws) return;
+            if (!ws)
+                return;
             auto am = read_ptr(ws, 0x30);
-            if (!am) return;
-            if (!read_ptr(am, 0x28)) return;
+            if (!am)
+                return;
+            if (!read_ptr(am, 0x28))
+                return;
         }
 
         // Launch once — the flag prevents re-entry
@@ -736,11 +722,12 @@ namespace EquipHide
 
     static void lazy_probe_thread() noexcept
     {
-        auto& logger = DMK::Logger::get_instance();
+        auto &logger = DMK::Logger::get_instance();
         int probeCount = 0;
 
         logger.info("Lazy probe started for demand-loaded parts "
-                    "(interval: {}s)", k_lazyProbeIntervalMs / 1000);
+                    "(interval: {}s)",
+                    k_lazyProbeIntervalMs / 1000);
 
         while (s_lazyProbePending.load(std::memory_order_relaxed))
         {
@@ -766,12 +753,13 @@ namespace EquipHide
                 rebuild_part_lookup();
                 s_lazyProbePending.store(false, std::memory_order_relaxed);
                 logger.info("Lazy probe resolved all remaining parts "
-                            "({} probes)", probeCount);
+                            "({} probes)",
+                            probeCount);
                 return;
             }
 
             logger.trace("Lazy probe #{}: {} parts still unresolved",
-                          probeCount, unresolved.size());
+                         probeCount, unresolved.size());
 
             // Reset signal — hook will set it again after the next interval
             s_lazyProbeSignal.store(0, std::memory_order_relaxed);
@@ -829,8 +817,7 @@ namespace EquipHide
         // Bounds cover the contiguous block; outliers are checked separately.
         const auto rangeMin = hash_range_min();
         const auto rangeMax = hash_range_max();
-        if (rangeMin != 0 && (partHash < rangeMin || partHash > rangeMax)
-            && !is_outlier_hash(partHash))
+        if (rangeMin != 0 && (partHash < rangeMin || partHash > rangeMax) && !is_outlier_hash(partHash))
             return;
 
         const auto cat = classify_part(partHash);
@@ -937,12 +924,16 @@ namespace EquipHide
             auto *visPtr = reinterpret_cast<uint8_t *>(r13 + 0x1C);
             *visPtr = 2;
         }
+        else if (s_forceShow.load(std::memory_order_relaxed))
+        {
+            auto *visPtr = reinterpret_cast<uint8_t *>(r13 + 0x1C);
+            *visPtr = default_show_value(*cat);
+        }
     }
 
     /// SEH wrapper — catches access violations if mod is outdated and
     /// register layout has changed.  Separate function because MSVC SEH
     /// cannot coexist with C++ destructors in the same frame.
-#ifdef _MSC_VER
     static int seh_filter(unsigned int /*code*/) { return EXCEPTION_EXECUTE_HANDLER; }
 
     static void on_vis_check(SafetyHookContext &ctx)
@@ -956,15 +947,6 @@ namespace EquipHide
             // Silently swallow — mod is likely outdated, don't crash the game
         }
     }
-#else
-    // MinGW/GCC does not support MSVC-style SEH (__try/__except).
-    // Fall back to an unprotected call — the pointer checks in
-    // on_vis_check_impl already guard against the most common faults.
-    static void on_vis_check(SafetyHookContext &ctx)
-    {
-        on_vis_check_impl(ctx);
-    }
-#endif
 
     // =========================================================================
     // AOB scan with unpack retry
@@ -1029,6 +1011,9 @@ namespace EquipHide
 
         DMK::Config::register_bool("General", "PlayerOnly", "Player Only", [](bool val)
                                    { s_playerOnly.store(val, std::memory_order_relaxed); }, true);
+
+        DMK::Config::register_bool("General", "ForceShow", "Force Show", [](bool val)
+                                   { s_forceShow.store(val, std::memory_order_relaxed); }, false);
 
         DMK::Config::register_key_combo("General", "ShowAllHotkey", "Show All Hotkey", [](const DMK::Config::KeyComboList &combos)
                                         { s_showAllCombos = combos; }, "");
