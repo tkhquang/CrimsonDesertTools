@@ -12,10 +12,14 @@ This mod allows you to hide equipped gear visually in Crimson Desert using custo
 [*] Toggle, force-show, or force-hide equipment visibility per category with hotkeys
 [*] Global show-all / hide-all hotkeys to control every category at once
 [*] Weapon categories: One-Hand Weapons, Two-Hand Weapons, Shields, Bows, Special Weapons, Tools, Lanterns
-[*] Armor categories: Helm, Chest, Legs, Gloves, Boots, Cloak, Shoulder, Mask, Glasses, Accessories
+[*] Armor categories: Helm, Chest, Legs, Gloves, Boots, Cloak, Shoulder, Mask, Glasses
+[*] Accessory categories: Earrings, Rings, Necklace, Bags
 [*] User Presets: 3 custom part groups to combine parts from any category into a single toggle
 [*] Per-category configuration: enable/disable, toggle/show/hide hotkeys, default hidden state, part list
-[*] ForceShow mode for compatibility with third-party replacer mods
+[*] [Experimental] BaldFix: runtime hair-visibility fix when helmet/cloak is hidden — no PAZ patching needed. Hair/beard may occasionally disappear; re-toggling the helmet (show then hide) restores it
+[*] GlidingFix: prevents hidden equipment from briefly flashing visible during state transitions (e.g. exiting gliding, cutscene transitions)
+[*] ForceShow mode for compatibility with mods that alter default equipment visibility via PAZ patching (e.g. character replacers, armor replacers, transmog mods)
+[*] Hot-reload cleanup: visibility bytes restored on DLL unload
 [*] Fully customizable settings through INI configuration
 [*] Open-source with full transparency
 [/list]
@@ -86,8 +90,17 @@ The mod can be configured by editing the [b]CrimsonDesertEquipHide.ini[/b] file:
 LogLevel = Info
 ; Apply only to player characters
 PlayerOnly = true
-; Set to true if equipment stays invisible when toggling to visible
+; Set to true if you use mods that alter the default visibility of equipment
+; via PAZ patching (e.g. character replacers like 'Playing Kliff as Damiane',
+; armor replacers, transmog mods). ForceShow overrides their changes so
+; toggling equipment back to visible still works.
+; Safe to leave false if you are not using such mods.
 ForceShow = false
+; [Experimental] Prevents baldness when hiding helmets/cloaks
+; Hair/beard may occasionally disappear; re-toggling the helmet (show then hide) restores it
+BaldFix = true
+; Prevents hidden equipment from briefly flashing during state transitions
+GlidingFix = true
 ; Force all categories visible / hidden at once (empty = disabled)
 ShowAllHotkey =
 HideAllHotkey =
@@ -158,17 +171,35 @@ ToggleHotkey = V,Gamepad_LB+Gamepad_Y
 [b]XInput only:[/b] Xbox controllers work natively. For PS4/PS5/Switch controllers, use an XInput translation layer (e.g. DS4Windows, DualSenseX, BetterJoy) or Steam Input to present your controller as XInput. See [url=https://github.com/tkhquang/DetourModKit?tab=readme-ov-file#gamepad-compatibility]Gamepad Compatibility[/url] for details.
 
 [size=5]Compatibility with Replacer Mods[/size]
-Some third-party replacer mods (e.g. "Playing as" character mods) hide weapons or shields by default. If you find that toggling equipment to visible has no effect, set [b]ForceShow = true[/b] in the [b][General][/b] section of the INI file:
+Set [b]ForceShow = true[/b] if you use mods that alter the default visibility of equipment via PAZ patching (e.g. character replacers like "Playing Kliff as Damiane", armor replacers, transmog mods). ForceShow overrides their changes so toggling equipment back to visible still works:
 
 [code]
 [General]
 ForceShow = true
 [/code]
 
-This forces the mod to write a visible value directly, overriding whatever the replacer mod has set. Safe to leave [b]false[/b] if you are not experiencing visibility issues.
+Safe to leave [b]false[/b] if you are not using such mods.
 
 [size=5]User Presets[/size]
-The INI file includes three [b]UserPreset[/b] sections (UserPreset1, UserPreset2, UserPreset3) that let you combine parts from any category into a single toggle. Set [b]Enabled = true[/b], assign a hotkey, and list any parts you want grouped together. Parts can overlap with built-in categories (both toggles will apply).
+The INI file includes three [b]UserPreset[/b] sections (UserPreset1, UserPreset2, UserPreset3) that let you create custom part groups with independent visibility control.
+
+When a preset is [b]enabled[/b] and contains parts, it takes [b]full control[/b] of those parts:
+[list]
+[*] Only the preset's own hotkey controls its parts
+[*] Built-in category toggles (e.g. [b]V[/b] for Shields/Helm/Mask) will [b]NOT[/b] affect parts owned by an active preset
+[*] Parts can appear in both a built-in category and a preset — the preset wins when enabled
+[*] Set [b]DefaultHidden = true[/b] on a preset if you want its parts hidden on startup
+[/list]
+
+[code]
+[UserPreset1]
+Enabled = true
+ToggleHotkey = F5
+DefaultHidden = true
+Parts = CD_Helm, CD_Cloak, CD_Shoulder
+[/code]
+
+In this example, pressing [b]V[/b] would still toggle Shields and Masks, but Helm would only respond to [b]F5[/b] because UserPreset1 owns it.
 
 [size=5]Known Limitations[/size]
 [list]

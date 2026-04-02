@@ -11,6 +11,7 @@
 
 static HANDLE g_shutdownEvent = nullptr;
 static HANDLE g_instanceMutex = nullptr;
+static HANDLE g_lifecycleThread = nullptr;
 
 static DWORD WINAPI lifecycle_thread(LPVOID /*param*/)
 {
@@ -68,7 +69,8 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
         if (!g_shutdownEvent)
             return FALSE;
 
-        if (!CreateThread(nullptr, 0, lifecycle_thread, nullptr, 0, nullptr))
+        g_lifecycleThread = CreateThread(nullptr, 0, lifecycle_thread, nullptr, 0, nullptr);
+        if (!g_lifecycleThread)
         {
             CloseHandle(g_shutdownEvent);
             g_shutdownEvent = nullptr;
@@ -80,11 +82,16 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
         if (g_shutdownEvent)
         {
             SetEvent(g_shutdownEvent);
-            if (lpReserved == nullptr)
-                Sleep(200);
+            if (lpReserved == nullptr && g_lifecycleThread)
+                WaitForSingleObject(g_lifecycleThread, 5000);
 
             CloseHandle(g_shutdownEvent);
             g_shutdownEvent = nullptr;
+        }
+        if (g_lifecycleThread)
+        {
+            CloseHandle(g_lifecycleThread);
+            g_lifecycleThread = nullptr;
         }
         if (g_instanceMutex)
         {

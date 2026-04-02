@@ -9,10 +9,14 @@
 - Toggle, force-show, or force-hide equipment visibility per category with hotkeys
 - Global show-all / hide-all hotkeys to control every category at once
 - Weapon categories: One-Hand Weapons, Two-Hand Weapons, Shields, Bows, Special Weapons, Tools, Lanterns
-- Armor categories: Helm, Chest, Legs, Gloves, Boots, Cloak, Shoulder, Mask, Glasses, Accessories
-- User Presets: 3 custom part groups to combine parts from any category into a single toggle
+- Armor categories: Helm, Chest, Legs, Gloves, Boots, Cloak, Shoulder, Mask, Glasses
+- Accessory categories: Earrings, Rings, Necklace, Bags
+- User Presets: 3 custom part groups with independent visibility control (overrides built-in categories)
 - Per-category configuration: enable/disable, toggle/show/hide hotkeys, default hidden state, part list
-- ForceShow mode for compatibility with third-party replacer mods
+- [Experimental] BaldFix: runtime hair-visibility fix when helmet/cloak is hidden — no PAZ patching needed. Hair/beard may occasionally disappear; re-toggling the helmet (show then hide) restores it
+- GlidingFix: prevents hidden equipment from briefly flashing visible during state transitions (e.g. exiting gliding, cutscene transitions)
+- ForceShow mode for compatibility with mods that alter default equipment visibility via PAZ patching (e.g. character replacers, armor replacers, transmog mods)
+- Hot-reload cleanup: visibility bytes restored on DLL unload
 - SEH-protected hook callback to prevent crashes if mod is outdated
 - Fully customizable settings via INI configuration
 
@@ -90,8 +94,17 @@ The mod is configured via the `CrimsonDesertEquipHide.ini` file:
 LogLevel = Info
 ; Apply only to player characters
 PlayerOnly = true
-; Set to true if equipment stays invisible when toggling to visible
+; Set to true if you use mods that alter the default visibility of equipment
+; via PAZ patching (e.g. character replacers like 'Playing Kliff as Damiane',
+; armor replacers, transmog mods). ForceShow overrides their changes so
+; toggling equipment back to visible still works.
+; Safe to leave false if you are not using such mods.
 ForceShow = false
+; [Experimental] Prevents baldness when hiding helmets/cloaks
+; Hair/beard may occasionally disappear; re-toggling the helmet (show then hide) restores it
+BaldFix = true
+; Prevents hidden equipment from briefly flashing during state transitions
+GlidingFix = true
 ; Force all categories visible / hidden at once (empty = disabled)
 ShowAllHotkey =
 HideAllHotkey =
@@ -163,10 +176,11 @@ ToggleHotkey = V,Gamepad_LB+Gamepad_Y
 
 1. **AOB Pattern Scanning** - Cascading patterns scan the game's memory to locate the visibility decision function and related game structures
 2. **Mid-Hook** - Intercepts the visibility check and forces `Visible=2` (Out-only) for hidden weapon categories
-3. **Inline Hook** - A secondary hook on the PartAddShow function prevents hidden parts from briefly flashing visible during state transitions (e.g. exiting glide)
+3. **Inline Hook** - When GlidingFix is enabled, a secondary hook on the PartAddShow function prevents hidden parts from briefly flashing visible during state transitions (e.g. exiting glide)
 4. **Armor Injection** - Armor parts have no vanilla visibility entries, so the mod injects new map entries via the game's own internal functions
-5. **Input Management** - DetourModKit's input system handles keyboard, mouse, and gamepad with modifier key combos
-6. **SEH Protection** - Hook callback is wrapped in structured exception handling (MSVC) to prevent crashes
+5. **[Experimental] BaldFix Hook** - Hooks the postfix rule evaluator to suppress hair-hiding rules when Helm or Cloak is hidden, keeping hair visible at runtime without PAZ patching. Hair/beard may occasionally disappear; re-toggling the helmet (show then hide) restores it
+6. **Input Management** - DetourModKit's input system handles keyboard, mouse, and gamepad with modifier key combos
+7. **SEH Protection** - Hook callback is wrapped in structured exception handling (MSVC) to prevent crashes
 
 ## Troubleshooting
 
@@ -186,18 +200,35 @@ Common issues:
 
 ## User Presets
 
-The INI file includes three `UserPreset` sections (UserPreset1, UserPreset2, UserPreset3) that let you combine parts from any category into a single toggle. Set `Enabled = true`, assign a hotkey, and list any parts you want grouped together. Parts can overlap with built-in categories (both toggles will apply).
+The INI file includes three `UserPreset` sections (UserPreset1, UserPreset2, UserPreset3) that let you create custom part groups with independent visibility control.
+
+When a preset is **enabled** and contains parts, it takes **full control** of those parts:
+
+- Only the preset's own hotkey controls its parts
+- Built-in category toggles (e.g., `V` for Shields/Helm/Mask) will **not** affect parts owned by an active preset
+- Parts can appear in both a built-in category and a preset -- the preset wins when enabled
+- Set `DefaultHidden = true` on a preset if you want its parts hidden on startup
+
+```ini
+[UserPreset1]
+Enabled = true
+ToggleHotkey = F5
+DefaultHidden = true
+Parts = CD_Helm, CD_Cloak, CD_Shoulder
+```
+
+In this example, pressing `V` would still toggle Shields and Masks, but Helm would only respond to `F5` because UserPreset1 owns it.
 
 ## Compatibility with Replacer Mods
 
-Some third-party replacer mods (e.g. "Playing as" character mods) hide weapons or shields by default. If you find that toggling equipment to visible has no effect, set `ForceShow = true` in the `[General]` section of the INI file:
+Set `ForceShow = true` if you use mods that alter the default visibility of equipment via PAZ patching (e.g. character replacers like "Playing Kliff as Damiane", armor replacers, transmog mods). ForceShow overrides their changes so toggling equipment back to visible still works:
 
 ```ini
 [General]
 ForceShow = true
 ```
 
-This forces the mod to write a visible value directly, overriding whatever the replacer mod has set. Safe to leave `false` if you are not experiencing visibility issues.
+Safe to leave `false` if you are not using such mods.
 
 ## Known Limitations
 

@@ -154,22 +154,7 @@ namespace EquipHide
     //   (CD_Upperbody, CD_Lowerbody, CD_Hand, CD_Foot, CD_Cloak,
     //    CD_Shoulder, CD_Mask and their variants — runtime hash only)
     //
-    // NOT classified (system / accessories / mount / excluded):
-    //   0xAD91  CD_Horse_Hair                 Horse Hair
-    //   0xADBE  CD_Bag                        Bag
-    //   0xADBF  CD_Bag_Rocket                 Bag Rocket
-    //   0xADC0  CD_Bag_For_Dock               Bag For Dock
-    //   0xADC1  CD_Bag_Belt_For_Dock          Bag Belt For Dock
-    //   0xADC3  CD_Bag_Small                  Bag Small
-    //   0xADC4  CD_Bag_Acc                    Bag Accessory
-    //   0xADC5  CD_Bag_Belt                   Bag Belt
-    //   0xADC6  CD_Bag_Lantern                Bag Lantern
-    //   0xADC7  CD_Bag_Rack                   Bag Rack
-    //   0xADC8  CD_Ring_R                     Accessory (ring R)
-    //   0xADC9  CD_Ring_L                     Accessory (ring L)
-    //   0xADCB  CD_Earring_L                  Accessory (earring L)
-    //   0xADCC  CD_Earring_R                  Accessory (earring R)
-    //   0xADCD  CD_Necklace                   Accessory (necklace)
+    // NOT classified (system / mount / excluded):
     //   0xADDF  CD_Abyss_Wing                 Abyss Wing
     //   0xADE0  CD_Abyss_Wing_01              Abyss Wing 1
     //   0xADE1  CD_Abyss_Wing_02              Abyss Wing 2
@@ -379,24 +364,27 @@ namespace EquipHide
         {"CD_Mask_Acc_01",              0xADBB, Category::Mask},
         // Glasses (armor)
         {"CD_Glasses",                  0xADCA, Category::Glasses},
-        // Accessories (earrings, rings, necklace, bags, belt, misc)
-        {"CD_Earring_L",                0xADCB, Category::Accessories},
-        {"CD_Earring_R",                0xADCC, Category::Accessories},
-        {"CD_Ring_R",                   0xADC8, Category::Accessories},
-        {"CD_Ring_L",                   0xADC9, Category::Accessories},
-        {"CD_Necklace",                 0xADCD, Category::Accessories},
-        {"CD_Belt",                     0xADBC, Category::Accessories},
-        {"CD_Acc",                      0xADBD, Category::Accessories},
-        {"CD_Bag",                      0xADBE, Category::Accessories},
-        {"CD_Bag_Rocket",               0xADBF, Category::Accessories},
-        {"CD_Bag_For_Dock",             0xADC0, Category::Accessories},
-        {"CD_Bag_Belt_For_Dock",        0xADC1, Category::Accessories},
-        {"CD_Additional_For_Dock",      0xADC2, Category::Accessories},
-        {"CD_Bag_Small",                0xADC3, Category::Accessories},
-        {"CD_Bag_Acc",                  0xADC4, Category::Accessories},
-        {"CD_Bag_Belt",                 0xADC5, Category::Accessories},
-        {"CD_Bag_Lantern",              0xADC6, Category::Accessories},
-        {"CD_Bag_Rack",                 0xADC7, Category::Accessories},
+        // Earrings
+        {"CD_Earring_L",                0xADCB, Category::Earrings},
+        {"CD_Earring_R",                0xADCC, Category::Earrings},
+        // Rings
+        {"CD_Ring_R",                   0xADC8, Category::Rings},
+        {"CD_Ring_L",                   0xADC9, Category::Rings},
+        // Necklace
+        {"CD_Necklace",                 0xADCD, Category::Necklace},
+        // Bags (belt, pouches, racks, misc accessories)
+        {"CD_Belt",                     0xADBC, Category::Bags},
+        {"CD_Acc",                      0xADBD, Category::Bags},
+        {"CD_Bag",                      0xADBE, Category::Bags},
+        {"CD_Bag_Rocket",               0xADBF, Category::Bags},
+        {"CD_Bag_For_Dock",             0xADC0, Category::Bags},
+        {"CD_Bag_Belt_For_Dock",        0xADC1, Category::Bags},
+        {"CD_Additional_For_Dock",      0xADC2, Category::Bags},
+        {"CD_Bag_Small",                0xADC3, Category::Bags},
+        {"CD_Bag_Acc",                  0xADC4, Category::Bags},
+        {"CD_Bag_Belt",                 0xADC5, Category::Bags},
+        {"CD_Bag_Lantern",              0xADC6, Category::Bags},
+        {"CD_Bag_Rack",                 0xADC7, Category::Bags},
     };
     // clang-format on
 
@@ -743,8 +731,7 @@ namespace EquipHide
                               s_outliers[i].load(std::memory_order_relaxed));
         }
 
-        s_activeMap.store(1 - s_activeMap.load(std::memory_order_relaxed),
-                          std::memory_order_release);
+        s_activeMap.fetch_xor(1, std::memory_order_release);
     }
 
     void rebuild_part_lookup()
@@ -801,6 +788,29 @@ namespace EquipHide
 
     bool is_any_category_hidden(CategoryMask mask)
     {
+        // User presets take priority over built-in categories.
+        // If a part belongs to any enabled preset, the preset's hidden
+        // state is used directly and built-in categories are ignored.
+        bool hasActivePreset = false;
+        for (std::size_t i = 0; i < CATEGORY_COUNT; ++i)
+        {
+            if (!(mask & (CategoryMask{1} << i)))
+                continue;
+            const auto cat = static_cast<Category>(i);
+            if (!is_user_preset(cat))
+                continue;
+            const auto &st = s_states[i];
+            if (!st.enabled.load(std::memory_order_relaxed))
+                continue;
+            hasActivePreset = true;
+            if (st.hidden.load(std::memory_order_relaxed))
+                return true;
+        }
+
+        if (hasActivePreset)
+            return false;
+
+        // No active preset — check built-in categories.
         for (std::size_t i = 0; i < CATEGORY_COUNT && mask != 0; ++i)
         {
             if ((mask & (CategoryMask{1} << i)) &&

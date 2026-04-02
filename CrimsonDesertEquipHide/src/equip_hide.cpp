@@ -43,14 +43,14 @@ namespace EquipHide
 
     static std::atomic<bool> s_playerOnly{true};
     static std::atomic<bool> s_forceShow{false};
+    static std::atomic<bool> s_baldFix{true};
+    static std::atomic<bool> s_glidingFix{true};
 
     static constexpr int k_maxProtagonists = 8;
     static std::atomic<uintptr_t> s_playerVisCtrls[k_maxProtagonists]{};
     static std::atomic<int> s_playerCount{0};
 
-    /* Non-atomic: hook runs on game threads processing one entity at a time;
-       plain increment + mask avoids ~20-30 cycle LOCK XADD overhead. */
-    static uint32_t s_resolveCounter = 0;
+    static std::atomic<uint32_t> s_resolveCounter{0};
     static constexpr uint32_t k_resolveInterval = 512;
 
     /* Cached primary player vis_ctrl for fast single-compare.
@@ -73,6 +73,13 @@ namespace EquipHide
                                                 __int64, __int64, __int64);
     static PartAddShowFn s_originalPartAddShow = nullptr;
 
+    /* Inline hook trampoline for sub_1423FDEB0 — Postfix rule evaluator.
+       Evaluates whether a conditional part prefab postfix rule matches the
+       currently equipped items. When Helm/Cloak is hidden by our mod, we
+       suppress hair-hiding rules to prevent baldness. */
+    using PostfixEvalFn = __int64(__fastcall *)(__int64, __int64);
+    static PostfixEvalFn s_originalPostfixEval = nullptr;
+
     static std::atomic<bool> s_needsDirectWrite{false};
 
     /* Guarded by s_directWriteMtx — accessed from hook thread (s_needsDirectWrite)
@@ -88,10 +95,13 @@ namespace EquipHide
     static std::atomic<bool> s_deferredScanPending{false}; // set when IndexedStringA table not ready at init
     static std::atomic<bool> s_lazyProbePending{false};    // set when deferred scan finishes with unresolved parts
     static std::atomic<int64_t> s_lazyProbeSignal{0};
-    /* Startup direct-write enforcement deadline (ms since steady_clock epoch).
-       Covers the race where the game processes initial equipment visibility
-       before the hook is installed. */
-    static std::atomic<int64_t> s_startupWriteEnd{0};
+
+    static std::mutex s_bgThreadMtx;
+    static std::thread s_deferredScanThread;
+    static std::thread s_lazyProbeThread;
+
+    static uintptr_t s_prevVisCtrls[k_maxProtagonists]{};
+    static int s_prevCount = 0;
 
     static int64_t steady_ms() noexcept
     {
@@ -516,8 +526,7 @@ namespace EquipHide
             }
             if (count > 0)
             {
-                static uintptr_t s_prevVisCtrls[k_maxProtagonists]{};
-                static int s_prevCount = 0;
+                s_directWriteMtx.lock();
                 bool changed = (count != s_prevCount);
                 if (!changed)
                 {
@@ -538,7 +547,10 @@ namespace EquipHide
                     for (int j = 0; j < k_maxProtagonists; ++j)
                         s_armorInjected[j].store(false, std::memory_order_relaxed);
                     s_needsDirectWrite.store(true, std::memory_order_relaxed);
+                    DMK::Logger::get_instance().debug(
+                        "Player set changed — scheduling injection + direct write");
                 }
+                s_directWriteMtx.unlock();
             }
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
@@ -571,7 +583,8 @@ namespace EquipHide
         {
             auto lookup = reinterpret_cast<MapLookupFn>(s_mapLookupAddr);
             const auto n = s_playerCount.load(std::memory_order_relaxed);
-            int modified = 0;
+            int hiddenCount = 0;
+            int restoredCount = 0;
 
             for (int i = 0; i < n; ++i)
             {
@@ -601,31 +614,29 @@ namespace EquipHide
                         if (s_originalVis.find(visAddr) == s_originalVis.end())
                             s_originalVis[visAddr] = *visPtr;
                         *visPtr = 2;
+                        ++hiddenCount;
                     }
                     else
                     {
-                        if (s_forceShow.load(std::memory_order_relaxed))
+                        auto it = s_originalVis.find(visAddr);
+                        if (it != s_originalVis.end())
+                        {
+                            *visPtr = (it->second == 2) ? 0 : it->second;
+                            s_originalVis.erase(it);
+                            ++restoredCount;
+                        }
+                        else if (s_forceShow.load(std::memory_order_relaxed))
                         {
                             *visPtr = 0;
-                            s_originalVis.erase(visAddr);
-                        }
-                        else
-                        {
-                            auto it = s_originalVis.find(visAddr);
-                            if (it != s_originalVis.end())
-                            {
-                                *visPtr = it->second;
-                                s_originalVis.erase(it);
-                            }
+                            ++restoredCount;
                         }
                     }
-                    ++modified;
                 }
             }
 
             DMK::Logger::get_instance().trace(
-                "DirectWrite: {} protagonists, {} entries modified",
-                n, modified);
+                "DirectWrite: {} protagonists, {} hidden, {} restored",
+                n, hiddenCount, restoredCount);
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
@@ -679,10 +690,17 @@ namespace EquipHide
 
     static int inject_armor_entries_for_map(uintptr_t mapBase) noexcept
     {
+        if (!s_directWriteMtx.try_lock())
+            return 0;
+
+        int result = 0;
         __try
         {
             if (!s_mapInsertAddr || !s_mapLookupAddr)
+            {
+                s_directWriteMtx.unlock();
                 return 0;
+            }
 
             auto insert = reinterpret_cast<MapInsertFn>(s_mapInsertAddr);
             auto lookup = reinterpret_cast<MapLookupFn>(s_mapLookupAddr);
@@ -700,10 +718,6 @@ namespace EquipHide
                 auto existing = lookup(mapBase, &hash);
                 if (existing)
                 {
-                    auto *visPtr = reinterpret_cast<uint8_t *>(existing + 0x1C);
-                    if (DMK::Memory::is_readable(visPtr, 1))
-                        *visPtr = 2;
-                    logger.trace("  0x{:X} — existing, vis set to 2", hash);
                     ++existing_set;
                     continue;
                 }
@@ -747,7 +761,7 @@ namespace EquipHide
             logger.debug("ArmorInject map: {} injected, {} existing updated, "
                          "{} skipped (no bucket key)",
                          injected, existing_set, skipped_key);
-            return injected;
+            result = injected;
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
@@ -755,8 +769,10 @@ namespace EquipHide
             if (!s_crashLogged.exchange(true, std::memory_order_relaxed))
                 DMK::Logger::get_instance().warning(
                     "ArmorInject: SEH caught crash during map insertion");
-            return -1;
+            result = -1;
         }
+        s_directWriteMtx.unlock();
+        return result;
     }
 
     static void inject_armor_entries() noexcept
@@ -774,7 +790,13 @@ namespace EquipHide
             }
         }
         if (!anyHidden)
+        {
+            /* Reset injection flags so the next hide toggle will re-update
+               existing entries (setting their vis bytes back to 2). */
+            for (int i = 0; i < k_maxProtagonists; ++i)
+                s_armorInjected[i].store(false, std::memory_order_relaxed);
             return;
+        }
 
         const auto n = s_playerCount.load(std::memory_order_relaxed);
         if (n <= 0)
@@ -856,6 +878,95 @@ namespace EquipHide
          ResolveMode::Direct, -0x1B, 0},
     };
 
+    /**
+     * @brief AOB candidates for sub_1423FDEB0 — Postfix rule evaluator.
+     *
+     * Virtual function at vtable[4] of objects with vtable 0x144CC8248.
+     * Evaluates whether a postfix rule matches currently equipped items.
+     * Returns 1 = rule matches (hide hair), 0 = no match (keep hair).
+     *
+     * Prologue: mov [rsp+8],rbx; mov [rsp+10],rbp; mov [rsp+18],rsi;
+     *           push rdi; push r14; push r15
+     */
+    static constexpr AddrCandidate k_postfixEvalCandidates[] = {
+        {"PFE_P1_PrologueAndBody",
+         "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 41 56 41 57 "
+         "48 83 EC 50 4C 8B FA 48 8B 5A 58 8B 42 60 48 8D 3C C3",
+         ResolveMode::Direct, 0, 0},
+
+        {"PFE_P2_UniqueBody",
+         "48 83 EC 50 4C 8B FA 48 8B 5A 58 8B 42 60 48 8D 3C C3 48 3B",
+         ResolveMode::Direct, -0x14, 0},
+
+        {"PFE_P3_LoopInit",
+         "45 33 F6 44 89 74 24 28 C7 44 24 2C 08 00 00 00 49 8B 5F 58 41 8B 47 60",
+         ResolveMode::Direct, -0x6F, 0},
+    };
+
+    /**
+     * @brief Hair-hiding suffix check for the BaldFix hook.
+     *
+     * ruleObj + 0x18 is a string handle (char**). Double-deref to get char*.
+     * Hair-hiding suffixes: _a, _c, _d, _f, _i, _q, _v
+     */
+    static bool is_hair_hiding_rule(__int64 ruleObj)
+    {
+        auto handleAddr = *reinterpret_cast<uintptr_t *>(ruleObj + 0x18);
+        if (handleAddr < 0x10000)
+            return false;
+        auto suffixAddr = *reinterpret_cast<uintptr_t *>(handleAddr);
+        if (suffixAddr < 0x10000)
+            return false;
+        const auto *suffix = reinterpret_cast<const char *>(suffixAddr);
+
+        if (suffix[0] != '_' || suffix[2] != '\0')
+            return false;
+
+        switch (suffix[1])
+        {
+        case 'a':
+        case 'c':
+        case 'd':
+        case 'f':
+        case 'i':
+        case 'q':
+        case 'v':
+            return true;
+        default:
+            return false;
+        }
+    }
+
+    static bool should_suppress_hair_hiding(__int64 ruleObj) noexcept
+    {
+        __try
+        {
+            if (!is_hair_hiding_rule(ruleObj))
+                return false;
+            return is_category_hidden(Category::Helm) ||
+                   is_category_hidden(Category::Cloak);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return false;
+        }
+    }
+
+    static __int64 __fastcall on_postfix_eval(__int64 ruleObj, __int64 context)
+    {
+        if (s_baldFix.load(std::memory_order_relaxed) &&
+            should_suppress_hair_hiding(ruleObj))
+        {
+            static std::atomic<bool> s_loggedBaldFix{false};
+            if (!s_loggedBaldFix.exchange(true, std::memory_order_relaxed))
+                DMK::Logger::get_instance().debug(
+                    "BaldFix: suppressed hair-hiding rule (suffix at ruleObj 0x{:X})",
+                    ruleObj);
+            return 0;
+        }
+        return s_originalPostfixEval(ruleObj, context);
+    }
+
     static bool check_part_hidden(uint64_t partHashPtr)
     {
         if (partHashPtr < 0x10000)
@@ -883,7 +994,8 @@ namespace EquipHide
         __int64 a1, uint8_t a2, uint64_t partHashPtr, float blend,
         __int64 a5, __int64 a6, __int64 a7, __int64 a8, __int64 a9)
     {
-        if (should_skip_part_add_show(partHashPtr))
+        if (s_glidingFix.load(std::memory_order_relaxed) &&
+            should_skip_part_add_show(partHashPtr))
             return 0;
         return s_originalPartAddShow(a1, a2, partHashPtr, blend,
                                      a5, a6, a7, a8, a9);
@@ -921,6 +1033,8 @@ namespace EquipHide
                 for (int j = 0; j < k_maxProtagonists; ++j)
                     s_armorInjected[j].store(false, std::memory_order_relaxed);
                 s_needsDirectWrite.store(true, std::memory_order_relaxed);
+                logger.debug("Deferred scan: scheduling re-injection with {} resolved hashes",
+                             totalParts - fallbackCount);
 
                 if (!unresolved.empty())
                 {
@@ -974,7 +1088,10 @@ namespace EquipHide
         if (s_launched.exchange(true, std::memory_order_relaxed))
             return;
 
-        std::thread(deferred_scan_thread).detach();
+        {
+            std::lock_guard<std::mutex> lk(s_bgThreadMtx);
+            s_deferredScanThread = std::thread(deferred_scan_thread);
+        }
     }
 
     // --- Lazy re-probe for demand-loaded IndexedStringA entries ---
@@ -1034,7 +1151,10 @@ namespace EquipHide
         if (s_launched.exchange(true, std::memory_order_relaxed))
             return;
 
-        std::thread(lazy_probe_thread).detach();
+        {
+            std::lock_guard<std::mutex> lk(s_bgThreadMtx);
+            s_lazyProbeThread = std::thread(lazy_probe_thread);
+        }
     }
 
     // --- Mid-hook callback ---
@@ -1111,7 +1231,6 @@ namespace EquipHide
                             }
                             if (!alreadyCached && n < k_maxProtagonists)
                             {
-                                // CAS to avoid TOCTOU if two hooks race on parallel threads
                                 int expected = n;
                                 if (s_playerCount.compare_exchange_weak(
                                         expected, n + 1, std::memory_order_relaxed))
@@ -1121,6 +1240,9 @@ namespace EquipHide
                                         s_playerVisCtrls[0].load(std::memory_order_relaxed),
                                         std::memory_order_relaxed);
                                     s_needsDirectWrite.store(true, std::memory_order_relaxed);
+                                    DMK::Logger::get_instance().debug(
+                                        "Fallback: new player vis ctrl cached at slot {} (0x{:X})",
+                                        n, a1);
                                 }
                             }
                         }
@@ -1149,7 +1271,7 @@ namespace EquipHide
             }
             else
             {
-                auto cnt = ++s_resolveCounter;
+                auto cnt = s_resolveCounter.fetch_add(1, std::memory_order_relaxed);
                 if (s_playerCount.load(std::memory_order_relaxed) == 0 ||
                     (cnt & (k_resolveInterval - 1)) == 0)
                     resolve_player_vis_ctrls();
@@ -1262,6 +1384,12 @@ namespace EquipHide
 
         DMK::Config::register_bool("General", "ForceShow", "Force Show", [](bool val)
                                    { s_forceShow.store(val, std::memory_order_relaxed); }, false);
+
+        DMK::Config::register_bool("General", "BaldFix", "Bald Fix", [](bool val)
+                                   { s_baldFix.store(val, std::memory_order_relaxed); }, true);
+
+        DMK::Config::register_bool("General", "GlidingFix", "Gliding Fix", [](bool val)
+                                   { s_glidingFix.store(val, std::memory_order_relaxed); }, true);
 
         DMK::Config::register_key_combo("General", "ShowAllHotkey", "Show All Hotkey", [](const DMK::Config::KeyComboList &combos)
                                         { s_showAllCombos = combos; }, "");
@@ -1592,6 +1720,7 @@ namespace EquipHide
                     matchedSource->name, hookAddr);
 
         // Prevents hidden parts from flashing during state transitions (gliding exit).
+        if (s_glidingFix.load(std::memory_order_relaxed))
         {
             auto partAddShowAddr = resolve_address(
                 k_partAddShowCandidates, std::size(k_partAddShowCandidates),
@@ -1617,6 +1746,38 @@ namespace EquipHide
             }
         }
 
+        // Prevents baldness when hiding helmets/cloaks by suppressing
+        // the game's postfix rules that hide hair based on equipped gear.
+        if (s_baldFix.load(std::memory_order_relaxed))
+        {
+            auto postfixEvalAddr = resolve_address(
+                k_postfixEvalCandidates, std::size(k_postfixEvalCandidates),
+                "PostfixEval");
+
+            if (postfixEvalAddr)
+            {
+                auto result = hookMgr.create_inline_hook(
+                    "PostfixEval", postfixEvalAddr,
+                    reinterpret_cast<void *>(on_postfix_eval),
+                    reinterpret_cast<void **>(&s_originalPostfixEval));
+
+                if (result.has_value())
+                    logger.info("PostfixEval inline hook installed at 0x{:X} — bald fix active",
+                                postfixEvalAddr);
+                else
+                    logger.warning("PostfixEval hook failed: {} — bald fix disabled",
+                                   DetourModKit::Hook::error_to_string(result.error()));
+            }
+            else
+            {
+                logger.warning("PostfixEval AOB scan failed — bald fix disabled");
+            }
+        }
+        else
+        {
+            logger.info("BaldFix disabled in config — hair-hiding rules will apply normally");
+        }
+
         register_hotkeys();
 
         auto &inputMgr = DMK::InputManager::get_instance();
@@ -1625,23 +1786,6 @@ namespace EquipHide
         // Schedule startup direct-write enforcement: covers the race where
         // the game processes initial equipment visibility before the hook is
         // installed, or the PlayerOnly filter has transitional pointer data.
-        {
-            bool anyDefaultHidden = false;
-            for (std::size_t i = 0; i < CATEGORY_COUNT; ++i)
-            {
-                if (category_states()[i].hidden.load(std::memory_order_relaxed))
-                {
-                    anyDefaultHidden = true;
-                    break;
-                }
-            }
-            if (anyDefaultHidden)
-            {
-                s_startupWriteEnd.store(steady_ms() + 60000, std::memory_order_relaxed);
-                logger.debug("Startup direct-write enforcement scheduled (60s)");
-            }
-        }
-
         logger.info("Equip hide system initialized");
         return true;
     }
@@ -1656,13 +1800,15 @@ namespace EquipHide
     {
         if (!s_mapLookupAddr)
             return;
-        if (!s_directWriteMtx.try_lock())
-            return;
+        s_directWriteMtx.lock();
 
         __try
         {
             auto lookup = reinterpret_cast<MapLookupFn>(s_mapLookupAddr);
             const auto n = s_playerCount.load(std::memory_order_relaxed);
+
+            int restoredCount = 0;
+            int skipCount = 0;
 
             for (int i = 0; i < n; ++i)
             {
@@ -1687,12 +1833,21 @@ namespace EquipHide
 
                     auto it = s_originalVis.find(reinterpret_cast<uintptr_t>(visPtr));
                     if (it != s_originalVis.end())
-                        *visPtr = it->second; // restore original for weapon entries
+                    {
+                        *visPtr = it->second;
+                        ++restoredCount;
+                    }
                     else
-                        *visPtr = 3; // injected entry: vis=3 (skip) — zero socket bones
+                    {
+                        *visPtr = 3;
+                        ++skipCount;
+                    }
                 }
             }
             s_originalVis.clear();
+            DMK::Logger::get_instance().debug(
+                "Cleanup: {} vis bytes restored, {} set to skip",
+                restoredCount, skipCount);
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
@@ -1705,6 +1860,15 @@ namespace EquipHide
         DMK::Logger::get_instance().info("{} shutting down...", MOD_NAME);
         s_shutdownRequested.store(true, std::memory_order_relaxed);
         s_lazyProbePending.store(false, std::memory_order_relaxed);
+
+        {
+            std::lock_guard<std::mutex> lk(s_bgThreadMtx);
+            if (s_deferredScanThread.joinable())
+                s_deferredScanThread.join();
+            if (s_lazyProbeThread.joinable())
+                s_lazyProbeThread.join();
+        }
+
         cleanup_vis_bytes();
         DMK_Shutdown();
     }

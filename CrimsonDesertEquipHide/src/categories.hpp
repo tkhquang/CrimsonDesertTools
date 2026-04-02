@@ -36,7 +36,10 @@ namespace EquipHide
         Shoulder,
         Mask,
         Glasses,
-        Accessories,
+        Earrings,
+        Rings,
+        Necklace,
+        Bags,
         UserPreset1,
         UserPreset2,
         UserPreset3,
@@ -52,7 +55,8 @@ namespace EquipHide
             "OneHandWeapons", "TwoHandWeapons", "Shields", "Bows",
             "SpecialWeapons", "Tools", "Lanterns",
             "Helm", "Chest", "Legs", "Gloves", "Boots",
-            "Cloak", "Shoulder", "Mask", "Glasses", "Accessories",
+            "Cloak", "Shoulder", "Mask", "Glasses",
+            "Earrings", "Rings", "Necklace", "Bags",
             "UserPreset1", "UserPreset2", "UserPreset3"};
         static_assert(std::size(names) == CATEGORY_COUNT,
                       "names[] must match Category enum");
@@ -100,7 +104,10 @@ namespace EquipHide
         case Category::Shoulder:
         case Category::Mask:
         case Category::Glasses:
-        case Category::Accessories:
+        case Category::Earrings:
+        case Category::Rings:
+        case Category::Necklace:
+        case Category::Bags:
         case Category::UserPreset1:
         case Category::UserPreset2:
         case Category::UserPreset3:
