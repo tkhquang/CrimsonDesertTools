@@ -6,6 +6,17 @@ REQUIREMENTS:
 - Ultimate ASI Loader (x64) from:
   https://github.com/ThirteenAG/Ultimate-ASI-Loader/releases
 
+FEATURES:
+- Toggle, force-show, or force-hide equipment visibility per category
+- Weapon categories: One-Hand Weapons, Two-Hand Weapons, Shields,
+  Bows, Special Weapons, Tools, Lanterns
+- Armor categories: Helm, Chest, Legs, Gloves, Boots, Cloak,
+  Shoulder, Mask, Glasses, Accessories
+- 3 User Presets: custom part groups combining parts from any category
+- Global show-all / hide-all hotkeys
+- ForceShow mode for compatibility with third-party replacer mods
+- Fully customizable settings through INI configuration
+
 INSTALLATION:
 
   Step 1: Install an ASI Loader
@@ -30,6 +41,8 @@ INSTALLATION:
   Step 3: Launch and play
   -----------------------
   Launch the game. Press V (default) to toggle equipment visibility.
+  By default, the INI is configured to hide Shields, Helms, and Masks
+  on game load.
 
   File placement:
 
@@ -47,7 +60,7 @@ USING WITH OPTISCALER:
   Follow these steps instead:
 
   1. Delete winmm.dll (or whichever ASI Loader DLL you placed) from
-     bin64 — OptiScaler will handle mod loading instead
+     bin64 -- OptiScaler will handle mod loading instead
   2. Open OptiScaler.ini, find the [Plugins] section, and set
      LoadAsiPlugins = true
   3. Create a plugins folder inside bin64
@@ -66,6 +79,11 @@ USING WITH OPTISCALER:
 
   This applies to any ASI mod. If you have other .asi mods (e.g.
   CDSprintHold), move them into the plugins folder as well.
+
+REPLACER MOD COMPATIBILITY:
+  If equipment stays invisible when toggling to visible (common with
+  third-party "Playing as" character mods), set ForceShow = true in
+  the [General] section of the INI file.
 
 CONFIGURATION:
 Edit CrimsonDesertEquipHide.ini to customize hotkeys, categories,

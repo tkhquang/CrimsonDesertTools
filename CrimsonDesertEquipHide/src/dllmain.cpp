@@ -11,9 +11,8 @@
 
 static HANDLE g_shutdownEvent = nullptr;
 static HANDLE g_instanceMutex = nullptr;
+static HANDLE g_lifecycleThread = nullptr;
 
-/// Mod lifecycle thread — runs init, waits for shutdown signal, then tears down
-/// outside the loader lock (joining threads from DllMain would deadlock).
 static DWORD WINAPI lifecycle_thread(LPVOID /*param*/)
 {
     {
@@ -54,10 +53,7 @@ static DWORD WINAPI lifecycle_thread(LPVOID /*param*/)
 
     logger.info("Equip hide initialization complete.");
 
-    // Block until DLL_PROCESS_DETACH signals us
     WaitForSingleObject(g_shutdownEvent, INFINITE);
-
-    // Shutdown runs here, outside the loader lock
     EquipHide::shutdown();
     return 0;
 }
@@ -73,8 +69,8 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
         if (!g_shutdownEvent)
             return FALSE;
 
-        // CreateThread is safe from DllMain (unlike std::thread on some CRTs)
-        if (!CreateThread(nullptr, 0, lifecycle_thread, nullptr, 0, nullptr))
+        g_lifecycleThread = CreateThread(nullptr, 0, lifecycle_thread, nullptr, 0, nullptr);
+        if (!g_lifecycleThread)
         {
             CloseHandle(g_shutdownEvent);
             g_shutdownEvent = nullptr;
@@ -86,16 +82,16 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
         if (g_shutdownEvent)
         {
             SetEvent(g_shutdownEvent);
-
-            // On FreeLibrary (lpReserved == nullptr): give the lifecycle thread
-            // time to shut down.  On process exit (lpReserved != nullptr) the OS
-            // has already terminated all threads, so the event is never consumed
-            // and we skip the wait.
-            if (lpReserved == nullptr)
-                Sleep(200);
+            if (lpReserved == nullptr && g_lifecycleThread)
+                WaitForSingleObject(g_lifecycleThread, 5000);
 
             CloseHandle(g_shutdownEvent);
             g_shutdownEvent = nullptr;
+        }
+        if (g_lifecycleThread)
+        {
+            CloseHandle(g_lifecycleThread);
+            g_lifecycleThread = nullptr;
         }
         if (g_instanceMutex)
         {

@@ -1,6 +1,10 @@
-/// Hot-reload loader stub for CrimsonDesertEquipHide development builds.
-/// Loads equip_hide_logic.dll, polls Numpad 0 to unload/reload it in-place.
-/// No DetourModKit dependency — logging via OutputDebugStringA only.
+/**
+ * @file loader_main.cpp
+ * @brief Hot-reload loader stub for development builds.
+ *
+ * Loads equip_hide_logic.dll, polls Numpad 0 to unload/reload it in-place.
+ * No DetourModKit dependency — logging via OutputDebugStringA only.
+ */
 
 #include <Windows.h>
 
@@ -9,9 +13,6 @@
 #include <cstring>
 #include <string>
 
-// =========================================================================
-// Constants
-// =========================================================================
 static constexpr const char *k_logicDllName   = "CrimsonDesertEquipHide_Logic.dll";
 static constexpr const char *k_stagingSubdir  = "staging";
 static constexpr const char *k_logPrefix      = "[EquipHideLoader] ";
@@ -20,9 +21,6 @@ static constexpr int         k_postShutdownMs = 100;
 static constexpr int         k_preLoadDelayMs = 200;
 static constexpr int         k_vkReload       = VK_NUMPAD0;
 
-// =========================================================================
-// State
-// =========================================================================
 static std::atomic<bool> s_running{false};
 static std::atomic<bool> s_reloading{false};
 static HANDLE            s_thread = nullptr;
@@ -34,9 +32,6 @@ using ShutdownFn = void(__cdecl *)();
 static InitFn     s_fnInit     = nullptr;
 static ShutdownFn s_fnShutdown = nullptr;
 
-// =========================================================================
-// Helpers
-// =========================================================================
 static void log_msg(const char *msg)
 {
     char buf[512];
@@ -59,8 +54,6 @@ static std::string get_loader_dir(HMODULE hSelf)
     return std::string(path);
 }
 
-/// Move a single file from staging to the loader directory.
-/// Silently skips if the source does not exist.
 static void move_staged_file(const std::string &stagingDir,
                              const std::string &loaderDir,
                              const char *filename)
@@ -75,8 +68,6 @@ static void move_staged_file(const std::string &stagingDir,
     DeleteFileA(src.c_str());
 }
 
-/// Copy the logic DLL (and companion PDB) from the staging directory.
-/// Returns true if the DLL was found and copied successfully.
 static bool copy_from_staging(const std::string &loaderDir)
 {
     std::string stagingDir = loaderDir + k_stagingSubdir + "\\";
@@ -92,16 +83,13 @@ static bool copy_from_staging(const std::string &loaderDir)
     }
     DeleteFileA(stagingDll.c_str());
 
-    // Move companion PDB so staging/ stays clean
     move_staged_file(stagingDir, loaderDir, "CrimsonDesertEquipHide_Logic.pdb");
 
     log_msg("Copied logic DLL from staging");
     return true;
 }
 
-// =========================================================================
-// Logic DLL lifecycle
-// =========================================================================
+// --- Logic DLL lifecycle ---
 static bool load_logic(const std::string &dllPath)
 {
     s_logicDll = LoadLibraryA(dllPath.c_str());
@@ -148,7 +136,6 @@ static void unload_logic()
     if (s_fnShutdown)
         s_fnShutdown();
 
-    // Allow in-flight callbacks to drain
     Sleep(k_postShutdownMs);
 
     FreeLibrary(s_logicDll);
@@ -159,9 +146,7 @@ static void unload_logic()
     log_msg("Logic DLL unloaded");
 }
 
-// =========================================================================
-// Loader thread
-// =========================================================================
+// --- Loader thread ---
 static DWORD WINAPI loader_thread(LPVOID param)
 {
     HMODULE hSelf = static_cast<HMODULE>(param);
@@ -181,7 +166,6 @@ static DWORD WINAPI loader_thread(LPVOID param)
 
         bool isKeyDown = (GetAsyncKeyState(k_vkReload) & 0x8000) != 0;
 
-        // Trigger on key release (debounce)
         if (wasKeyDown && !isKeyDown)
         {
             if (!s_reloading.exchange(true, std::memory_order_acq_rel))
@@ -190,7 +174,6 @@ static DWORD WINAPI loader_thread(LPVOID param)
 
                 unload_logic();
 
-                // Wait for file lock release
                 Sleep(k_preLoadDelayMs);
 
                 copy_from_staging(loaderDir);
@@ -210,9 +193,6 @@ static DWORD WINAPI loader_thread(LPVOID param)
     return 0;
 }
 
-// =========================================================================
-// DllMain
-// =========================================================================
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved)
 {
     switch (ul_reason_for_call)
