@@ -14,12 +14,8 @@ This mod allows you to hide equipped gear visually in Crimson Desert using custo
 [*] Weapon categories: One-Hand Weapons, Two-Hand Weapons, Shields, Bows, Special Weapons, Tools, Lanterns
 [*] Armor categories: Helm, Chest, Legs, Gloves, Boots, Cloak, Shoulder, Mask, Glasses
 [*] Accessory categories: Earrings, Rings, Necklace, Bags
-[*] User Presets: 3 custom part groups to combine parts from any category into a single toggle
+[*] User Presets: 10 custom part groups to combine parts from any category into a single toggle
 [*] Per-category configuration: enable/disable, toggle/show/hide hotkeys, default hidden state, part list
-[*] [Experimental] BaldFix: runtime hair-visibility fix when helmet/cloak is hidden — no PAZ patching needed. Hair/beard may occasionally disappear; re-toggling the helmet (show then hide) restores it
-[*] GlidingFix: prevents hidden equipment from briefly flashing visible during state transitions (e.g. exiting gliding, cutscene transitions)
-[*] ForceShow mode for compatibility with mods that alter default equipment visibility via PAZ patching (e.g. character replacers, armor replacers, transmog mods)
-[*] Hot-reload cleanup: visibility bytes restored on DLL unload
 [*] Fully customizable settings through INI configuration
 [*] Open-source with full transparency
 [/list]
@@ -187,7 +183,7 @@ When a preset is [b]enabled[/b] and contains parts, it takes [b]full control[/b]
 [list]
 [*] Only the preset's own hotkey controls its parts
 [*] Built-in category toggles (e.g. [b]V[/b] for Shields/Helm/Mask) will [b]NOT[/b] affect parts owned by an active preset
-[*] Parts can appear in both a built-in category and a preset — the preset wins when enabled
+[*] Parts can appear in both a built-in category and a preset -the preset wins when enabled
 [*] Set [b]DefaultHidden = true[/b] on a preset if you want its parts hidden on startup
 [/list]
 
@@ -201,10 +197,13 @@ Parts = CD_Helm, CD_Cloak, CD_Shoulder
 
 In this example, pressing [b]V[/b] would still toggle Shields and Masks, but Helm would only respond to [b]F5[/b] because UserPreset1 owns it.
 
-[size=5]Known Limitations[/size]
+[size=5]Known Issues[/size]
 [list]
+[*] [b]Flight cloak parts cause visual artifacts and squished hair[/b] -CD_Cloak_Flight and its variants can cause strange visual artifacts and compressed/squished hair when toggling cloak visibility. These parts have been removed from the default Cloak category. You can re-add them in the INI at your own risk (see the comment in the [Cloak] section).
+[*] [b]Chest/Legs flickering when toggled independently[/b] -Hiding chest while legs are visible, then toggling legs, can cause pants to flicker on/off. Workaround: toggle both chest and legs together using the same hotkey, or set your desired default states via DefaultHidden and avoid toggling them separately at runtime.
+[*] [b]Dagger permanently visible after hiding one-hand weapons[/b] -Daggers may remain visible and clip with swords occupying the same visual slot. Will be addressed in a future update.
 [*] Toggle may take 1-3 seconds to take effect
-[*] After a major game update, AOB patterns may need updating
+[*] After a major game update, the mod may stop working until a new version is released
 [*] Currently only tested with the Steam version of the game
 [/list]
 

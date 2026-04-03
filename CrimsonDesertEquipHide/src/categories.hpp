@@ -43,6 +43,13 @@ namespace EquipHide
         UserPreset1,
         UserPreset2,
         UserPreset3,
+        UserPreset4,
+        UserPreset5,
+        UserPreset6,
+        UserPreset7,
+        UserPreset8,
+        UserPreset9,
+        UserPreset10,
         COUNT
     };
 
@@ -57,7 +64,10 @@ namespace EquipHide
             "Helm", "Chest", "Legs", "Gloves", "Boots",
             "Cloak", "Shoulder", "Mask", "Glasses",
             "Earrings", "Rings", "Necklace", "Bags",
-            "UserPreset1", "UserPreset2", "UserPreset3"};
+            "UserPreset1", "UserPreset2", "UserPreset3",
+            "UserPreset4", "UserPreset5", "UserPreset6",
+            "UserPreset7", "UserPreset8", "UserPreset9",
+            "UserPreset10"};
         static_assert(std::size(names) == CATEGORY_COUNT,
                       "names[] must match Category enum");
         const auto idx = static_cast<std::size_t>(cat);
@@ -74,15 +84,7 @@ namespace EquipHide
     /** @brief Returns true if the category is a user-defined preset. */
     constexpr bool is_user_preset(Category cat)
     {
-        switch (cat)
-        {
-        case Category::UserPreset1:
-        case Category::UserPreset2:
-        case Category::UserPreset3:
-            return true;
-        default:
-            return false;
-        }
+        return cat >= Category::UserPreset1 && cat <= Category::UserPreset10;
     }
 
     /**
@@ -108,12 +110,9 @@ namespace EquipHide
         case Category::Rings:
         case Category::Necklace:
         case Category::Bags:
-        case Category::UserPreset1:
-        case Category::UserPreset2:
-        case Category::UserPreset3:
             return true;
         default:
-            return false;
+            return is_user_preset(cat);
         }
     }
 

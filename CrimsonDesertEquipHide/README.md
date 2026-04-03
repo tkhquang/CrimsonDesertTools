@@ -11,7 +11,7 @@
 - Weapon categories: One-Hand Weapons, Two-Hand Weapons, Shields, Bows, Special Weapons, Tools, Lanterns
 - Armor categories: Helm, Chest, Legs, Gloves, Boots, Cloak, Shoulder, Mask, Glasses
 - Accessory categories: Earrings, Rings, Necklace, Bags
-- User Presets: 3 custom part groups with independent visibility control (overrides built-in categories)
+- User Presets: 10 custom part groups with independent visibility control (overrides built-in categories)
 - Per-category configuration: enable/disable, toggle/show/hide hotkeys, default hidden state, part list
 - [Experimental] BaldFix: runtime hair-visibility fix when helmet/cloak is hidden — no PAZ patching needed. Hair/beard may occasionally disappear; re-toggling the helmet (show then hide) restores it
 - GlidingFix: prevents hidden equipment from briefly flashing visible during state transitions (e.g. exiting gliding, cutscene transitions)
@@ -230,11 +230,14 @@ ForceShow = true
 
 Safe to leave `false` if you are not using such mods.
 
-## Known Limitations
+## Known Issues
 
+- **Flight cloak parts cause visual artifacts and squished hair** — `CD_Cloak_Flight` and its variants can cause strange visual artifacts and compressed/squished hair when toggling cloak visibility. These parts have been removed from the default Cloak category. You can re-add them in the INI at your own risk (see the comment in the `[Cloak]` section).
+- **Chest/Legs flickering when toggled independently** — Hiding chest while legs are visible, then toggling legs, can cause pants to flicker on/off. This appears to be a limitation of how the game handles layered armor visibility. Workaround: toggle both chest and legs together using the same hotkey, or set your desired default states via `DefaultHidden` and avoid toggling them separately at runtime.
+- **Dagger permanently visible after hiding one-hand weapons** — Daggers may remain visible and clip with swords occupying the same visual slot. This is a known issue and will be addressed in a future update.
 - Toggle may take 1-3 seconds to take effect.
-- After a major game update, AOB patterns may need updating
-- Currently only tested with the Steam version of the game
+- After a major game update, the mod may stop working until a new version is released.
+- Currently only tested with the Steam version of the game.
 
 ## Changelog
 
