@@ -400,11 +400,13 @@ namespace EquipHide
 
                     if (std::memcmp(buf, name.c_str(), len) == 0)
                     {
+                        const bool isNew = (nameToHash.find(name) == nameToHash.end());
                         nameToHash[name] = h;
                         ++probeHits;
-                        logger.trace("Outlier probe: {} found at 0x{:X} "
-                                     "(fallback was 0x{:X})",
-                                     name, h, fallback);
+                        if (isNew)
+                            logger.trace("Outlier probe: {} found at 0x{:X} "
+                                         "(fallback was 0x{:X})",
+                                         name, h, fallback);
                         break;
                     }
                 }
@@ -432,11 +434,13 @@ namespace EquipHide
                     if (len == it->first.size() &&
                         std::memcmp(buf, it->first.c_str(), len) == 0)
                     {
+                        const bool isNew = (nameToHash.find(it->first) == nameToHash.end());
                         nameToHash[it->first] = h;
                         ++probeHits;
-                        logger.trace("Wide scan: {} found at 0x{:X} "
-                                     "(fallback was 0x{:X})",
-                                     it->first, h, it->second);
+                        if (isNew)
+                            logger.trace("Wide scan: {} found at 0x{:X} "
+                                         "(fallback was 0x{:X})",
+                                         it->first, h, it->second);
                         wideUnresolved.erase(it);
                         break;
                     }
