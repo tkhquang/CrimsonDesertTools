@@ -272,7 +272,7 @@ namespace EquipHide
 
         if (result)
         {
-            logger.info("{} resolved via '{}' at {:#x}", label, matchedName, result);
+            logger.info("{} resolved via '{}' at 0x{:X}", label, matchedName, result);
             return result;
         }
 
@@ -346,7 +346,7 @@ namespace EquipHide
         const auto globalPtr = *reinterpret_cast<const uintptr_t *>(globalPtrAddr);
         if (globalPtr < 0x10000)
         {
-            logger.trace("IndexedStringA scan: global pointer not yet initialized ({:#x})",
+            logger.trace("IndexedStringA scan: global pointer not yet initialized (0x{:X})",
                          globalPtr);
             return nameToHash;
         }
@@ -354,12 +354,12 @@ namespace EquipHide
         const auto tableArray = *reinterpret_cast<const uintptr_t *>(globalPtr + 0x58);
         if (tableArray < 0x10000)
         {
-            logger.warning("IndexedStringA scan: tableArray is null/invalid ({:#x})",
+            logger.warning("IndexedStringA scan: tableArray is null/invalid (0x{:X})",
                            tableArray);
             return nameToHash;
         }
 
-        logger.trace("IndexedStringA scan: globalPtr={:#x} tableArray={:#x}",
+        logger.trace("IndexedStringA scan: globalPtr=0x{:X} tableArray=0x{:X}",
                      globalPtr, tableArray);
 
         const auto t0 = std::chrono::steady_clock::now();
@@ -400,11 +400,13 @@ namespace EquipHide
 
                     if (std::memcmp(buf, name.c_str(), len) == 0)
                     {
+                        const bool isNew = (nameToHash.find(name) == nameToHash.end());
                         nameToHash[name] = h;
                         ++probeHits;
-                        logger.trace("Outlier probe: {} found at 0x{:X} "
-                                     "(fallback was 0x{:X})",
-                                     name, h, fallback);
+                        if (isNew)
+                            logger.trace("Outlier probe: {} found at 0x{:X} "
+                                         "(fallback was 0x{:X})",
+                                         name, h, fallback);
                         break;
                     }
                 }
@@ -432,11 +434,13 @@ namespace EquipHide
                     if (len == it->first.size() &&
                         std::memcmp(buf, it->first.c_str(), len) == 0)
                     {
+                        const bool isNew = (nameToHash.find(it->first) == nameToHash.end());
                         nameToHash[it->first] = h;
                         ++probeHits;
-                        logger.trace("Wide scan: {} found at 0x{:X} "
-                                     "(fallback was 0x{:X})",
-                                     it->first, h, it->second);
+                        if (isNew)
+                            logger.trace("Wide scan: {} found at 0x{:X} "
+                                         "(fallback was 0x{:X})",
+                                         it->first, h, it->second);
                         wideUnresolved.erase(it);
                         break;
                     }
@@ -453,17 +457,18 @@ namespace EquipHide
         return nameToHash;
     }
 
+    /** @brief Traverse body -> vis_ctrl pointer chain. Caller MUST be SEH-protected. */
     static uintptr_t body_to_vis_ctrl(uintptr_t body) noexcept
     {
         if (!body)
             return 0;
-        auto inner = read_ptr(body, 0x68);
+        auto inner = read_ptr_unsafe(body, 0x68);
         if (!inner)
             return 0;
-        auto sub = read_ptr(inner, 0x40);
+        auto sub = read_ptr_unsafe(inner, 0x40);
         if (!sub)
             return 0;
-        return read_ptr(sub, 0xE8);
+        return read_ptr_unsafe(sub, 0xE8);
     }
 
     static void resolve_player_vis_ctrls() noexcept
@@ -473,13 +478,14 @@ namespace EquipHide
 
         __try
         {
-            auto ws = read_ptr(s_worldSystemPtr, 0);
+            /* read_ptr_unsafe: outer __try makes is_readable() redundant. */
+            auto ws = read_ptr_unsafe(s_worldSystemPtr, 0);
             if (!ws)
                 return;
-            auto am = read_ptr(ws, 0x30);
+            auto am = read_ptr_unsafe(ws, 0x30);
             if (!am)
                 return;
-            auto user = read_ptr(am, 0x28);
+            auto user = read_ptr_unsafe(am, 0x28);
             if (!user)
                 return;
 
@@ -492,17 +498,22 @@ namespace EquipHide
                 if (count >= k_maxProtagonists)
                     break;
 
-                auto candidate = read_ptr(user, off);
-                if (!candidate)
-                    continue;
+                /* Per-slot SEH so one bad body pointer does not abort the loop. */
+                __try
+                {
+                    auto candidate = read_ptr_unsafe(user, off);
+                    if (!candidate)
+                        continue;
 
-                auto vt = read_ptr(candidate, 0);
-                if (vt != s_childActorVtbl)
-                    continue;
+                    auto vt = read_ptr_unsafe(candidate, 0);
+                    if (vt != s_childActorVtbl)
+                        continue;
 
-                auto vc = body_to_vis_ctrl(candidate);
-                if (vc)
-                    s_playerVisCtrls[count++] = vc;
+                    auto vc = body_to_vis_ctrl(candidate);
+                    if (vc)
+                        s_playerVisCtrls[count++] = vc;
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER) { }
             }
 
             for (int i = count; i < k_maxProtagonists; ++i)
@@ -521,36 +532,40 @@ namespace EquipHide
                 static std::atomic<bool> s_logged{false};
                 if (!s_logged.exchange(true, std::memory_order_relaxed))
                     DMK::Logger::get_instance().debug(
-                        "Resolve: ws={:#x} am={:#x} user={:#x} count={}",
+                        "Resolve: ws=0x{:X} am=0x{:X} user=0x{:X} count={}",
                         ws, am, user, count);
             }
             if (count > 0)
             {
-                s_directWriteMtx.lock();
-                bool changed = (count != s_prevCount);
-                if (!changed)
+                /* Non-blocking: skip if the input thread holds the mutex;
+                   the next resolve cycle will catch any change. */
+                if (s_directWriteMtx.try_lock())
                 {
-                    for (int j = 0; j < count; ++j)
+                    bool changed = (count != s_prevCount);
+                    if (!changed)
                     {
-                        if (s_playerVisCtrls[j].load(std::memory_order_relaxed) != s_prevVisCtrls[j])
+                        for (int j = 0; j < count; ++j)
                         {
-                            changed = true;
-                            break;
+                            if (s_playerVisCtrls[j].load(std::memory_order_relaxed) != s_prevVisCtrls[j])
+                            {
+                                changed = true;
+                                break;
+                            }
                         }
                     }
+                    if (changed)
+                    {
+                        s_prevCount = count;
+                        for (int j = 0; j < count; ++j)
+                            s_prevVisCtrls[j] = s_playerVisCtrls[j].load(std::memory_order_relaxed);
+                        for (int j = 0; j < k_maxProtagonists; ++j)
+                            s_armorInjected[j].store(false, std::memory_order_relaxed);
+                        s_needsDirectWrite.store(true, std::memory_order_relaxed);
+                        DMK::Logger::get_instance().debug(
+                            "Player set changed — scheduling injection + direct write");
+                    }
+                    s_directWriteMtx.unlock();
                 }
-                if (changed)
-                {
-                    s_prevCount = count;
-                    for (int j = 0; j < count; ++j)
-                        s_prevVisCtrls[j] = s_playerVisCtrls[j].load(std::memory_order_relaxed);
-                    for (int j = 0; j < k_maxProtagonists; ++j)
-                        s_armorInjected[j].store(false, std::memory_order_relaxed);
-                    s_needsDirectWrite.store(true, std::memory_order_relaxed);
-                    DMK::Logger::get_instance().debug(
-                        "Player set changed — scheduling injection + direct write");
-                }
-                s_directWriteMtx.unlock();
             }
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
@@ -581,6 +596,7 @@ namespace EquipHide
 
         __try
         {
+            auto &logger = DMK::Logger::get_instance();
             auto lookup = reinterpret_cast<MapLookupFn>(s_mapLookupAddr);
             const auto n = s_playerCount.load(std::memory_order_relaxed);
             int hiddenCount = 0;
@@ -592,10 +608,10 @@ namespace EquipHide
                 if (!vc)
                     continue;
 
-                auto comp = read_ptr(vc, 0x48);
+                auto comp = read_ptr_unsafe(vc, 0x48);
                 if (!comp)
                     continue;
-                auto descNode = read_ptr(comp, 0x218);
+                auto descNode = read_ptr_unsafe(comp, 0x218);
                 if (!descNode)
                     continue;
                 auto mapBase = descNode + 0x20;
@@ -615,13 +631,18 @@ namespace EquipHide
                             s_originalVis[visAddr] = *visPtr;
                         *visPtr = 2;
                         ++hiddenCount;
+                        logger.trace("  [{}] 0x{:04X} hidden (vis=2)",
+                                     i, hash);
                     }
                     else
                     {
                         auto it = s_originalVis.find(visAddr);
                         if (it != s_originalVis.end())
                         {
-                            *visPtr = (it->second == 2) ? 0 : it->second;
+                            const auto restored = (it->second == 2) ? 0 : it->second;
+                            *visPtr = static_cast<uint8_t>(restored);
+                            logger.trace("  [{}] 0x{:04X} restored (vis={})",
+                                         i, hash, restored);
                             s_originalVis.erase(it);
                             ++restoredCount;
                         }
@@ -629,14 +650,15 @@ namespace EquipHide
                         {
                             *visPtr = 0;
                             ++restoredCount;
+                            logger.trace("  [{}] 0x{:04X} force-shown (vis=0)",
+                                         i, hash);
                         }
                     }
                 }
             }
 
-            DMK::Logger::get_instance().trace(
-                "DirectWrite: {} protagonists, {} hidden, {} restored",
-                n, hiddenCount, restoredCount);
+            logger.trace("DirectWrite: {} protagonists, {} hidden, {} restored",
+                        n, hiddenCount, restoredCount);
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
@@ -814,20 +836,25 @@ namespace EquipHide
             if (!vc)
                 continue;
 
-            auto comp = read_ptr(vc, 0x48);
-            if (!comp)
-                continue;
-            auto descNode = read_ptr(comp, 0x218);
-            if (!descNode)
-                continue;
-            auto mapBase = descNode + 0x20;
-
-            int result = inject_armor_entries_for_map(mapBase);
-            if (result >= 0)
+            /* Per-player SEH so one bad pointer does not skip the rest. */
+            __try
             {
-                s_armorInjected[i].store(true, std::memory_order_relaxed);
-                totalInjected += result;
+                auto comp = read_ptr_unsafe(vc, 0x48);
+                if (!comp)
+                    continue;
+                auto descNode = read_ptr_unsafe(comp, 0x218);
+                if (!descNode)
+                    continue;
+                auto mapBase = descNode + 0x20;
+
+                int result = inject_armor_entries_for_map(mapBase);
+                if (result >= 0)
+                {
+                    s_armorInjected[i].store(true, std::memory_order_relaxed);
+                    totalInjected += result;
+                }
             }
+            __except (EXCEPTION_EXECUTE_HANDLER) { }
         }
 
         if (totalInjected > 0)
@@ -1429,6 +1456,38 @@ namespace EquipHide
         DMK::Config::load(INI_FILE);
         DMK::Config::log_all();
         build_part_lookup();
+
+        {
+            auto &logger = DMK::Logger::get_instance();
+            if (logger.get_log_level() <= DMK::LogLevel::Trace)
+            {
+                const auto &states = category_states();
+                const auto &partMap = get_part_map();
+
+                for (std::size_t i = 0; i < CATEGORY_COUNT; ++i)
+                {
+                    const auto cat = static_cast<Category>(i);
+                    const auto bit = category_bit(cat);
+                    int count = 0;
+                    for (const auto &[hash, mask] : partMap)
+                    {
+                        if (mask & bit)
+                            ++count;
+                    }
+
+                    const bool enabled = states[i].enabled.load(std::memory_order_relaxed);
+                    const bool hidden = states[i].hidden.load(std::memory_order_relaxed);
+
+                    if (!enabled)
+                        logger.trace("Category {}: disabled ({} parts registered)",
+                                     category_section(cat), count);
+                    else
+                        logger.trace("Category {}: enabled, default={} ({} parts)",
+                                     category_section(cat),
+                                     hidden ? "hidden" : "visible", count);
+                }
+            }
+        }
     }
 
     // --- Hotkey helpers ---
@@ -1637,7 +1696,7 @@ namespace EquipHide
                 std::memcpy(&disp, instrBytes + 3, sizeof(int32_t));
                 s_indexedStringGlobalAddr = static_cast<uintptr_t>(
                     static_cast<int64_t>(ripInstr + 7) + disp);
-                logger.info("IndexedStringA global resolved at {:#x}",
+                logger.info("IndexedStringA global resolved at 0x{:X}",
                             s_indexedStringGlobalAddr);
             }
             else
@@ -1792,62 +1851,26 @@ namespace EquipHide
 
     /**
      * @brief Undo all visibility modifications before unload.
-     * @details Injected armor entries get vis=3 (skip) so the game ignores
-     *          the malformed entries (zero socket bones). Modified weapon
-     *          entries get their original vis bytes restored.
+     * @details Restores only entries tracked in s_originalVis. Unmodified
+     *          entries (including injected zero-bone armor entries) are left as-is.
      */
     static void cleanup_vis_bytes() noexcept
     {
-        if (!s_mapLookupAddr)
-            return;
         s_directWriteMtx.lock();
 
         __try
         {
-            auto lookup = reinterpret_cast<MapLookupFn>(s_mapLookupAddr);
-            const auto n = s_playerCount.load(std::memory_order_relaxed);
-
             int restoredCount = 0;
-            int skipCount = 0;
-
-            for (int i = 0; i < n; ++i)
+            for (const auto &[visAddr, origVis] : s_originalVis)
             {
-                auto vc = s_playerVisCtrls[i].load(std::memory_order_relaxed);
-                if (!vc)
-                    continue;
-                auto comp = read_ptr(vc, 0x48);
-                if (!comp)
-                    continue;
-                auto descNode = read_ptr(comp, 0x218);
-                if (!descNode)
-                    continue;
-                auto mapBase = descNode + 0x20;
-
-                for (const auto &[hash, mask] : get_part_map())
-                {
-                    auto entry = lookup(mapBase, &hash);
-                    if (!entry)
-                        continue;
-
-                    auto *visPtr = reinterpret_cast<uint8_t *>(entry + 0x1C);
-
-                    auto it = s_originalVis.find(reinterpret_cast<uintptr_t>(visPtr));
-                    if (it != s_originalVis.end())
-                    {
-                        *visPtr = it->second;
-                        ++restoredCount;
-                    }
-                    else
-                    {
-                        *visPtr = 3;
-                        ++skipCount;
-                    }
-                }
+                auto *visPtr = reinterpret_cast<uint8_t *>(visAddr);
+                *visPtr = origVis;
+                ++restoredCount;
             }
             s_originalVis.clear();
+
             DMK::Logger::get_instance().debug(
-                "Cleanup: {} vis bytes restored, {} set to skip",
-                restoredCount, skipCount);
+                "Cleanup: {} vis bytes restored", restoredCount);
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {

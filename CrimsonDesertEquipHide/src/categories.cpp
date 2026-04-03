@@ -539,6 +539,19 @@ namespace EquipHide
         s_categoryParts[static_cast<std::size_t>(cat)] = partsStr;
 
         auto& logger = DMK::Logger::get_instance();
+        auto& writeMap = s_partMaps[1 - s_activeMap.load(std::memory_order_relaxed)];
+
+        // Clear previous entries for this category so that a second callback
+        // (e.g. INI override after default registration) fully replaces them.
+        const auto bit = category_bit(cat);
+        for (auto it = writeMap.begin(); it != writeMap.end(); )
+        {
+            it->second &= ~bit;
+            if (it->second == 0)
+                it = writeMap.erase(it);
+            else
+                ++it;
+        }
 
         if (partsStr.find_first_not_of(" ,") == std::string::npos)
         {
@@ -548,7 +561,6 @@ namespace EquipHide
         }
 
         const auto& nameMap = name_to_hash_map();
-        auto& writeMap = s_partMaps[1 - s_activeMap.load(std::memory_order_relaxed)];
 
         std::size_t pos = 0;
         while (pos < partsStr.size())
