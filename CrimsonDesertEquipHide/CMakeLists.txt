@@ -45,6 +45,16 @@ option(EQUIPHIDE_DEV_BUILD "Build two-DLL hot-reload configuration for developme
 # --- Source Files ---
 set(COMMON_SOURCES
     src/dllmain.cpp
+    src/shared_state.cpp
+    src/aob_resolver.cpp
+    src/indexed_string_table.cpp
+    src/player_detection.cpp
+    src/visibility_write.cpp
+    src/armor_injection.cpp
+    src/bald_fix.cpp
+    src/gliding_fix.cpp
+    src/background_threads.cpp
+    src/input_handler.cpp
     src/categories.cpp
     src/equip_hide.cpp
 )

@@ -590,38 +590,51 @@ namespace EquipHide
                st.hidden.load(std::memory_order_relaxed);
     }
 
-    bool is_any_category_hidden(CategoryMask mask)
+    // Single atomic load replaces per-category iteration in the hot path.
+    static std::atomic<CategoryMask> s_hiddenMask{0};
+    static std::atomic<CategoryMask> s_presetHiddenMask{0};
+    static std::atomic<CategoryMask> s_activePresetMask{0};
+
+    void update_hidden_mask()
     {
-        // User presets take priority over built-in categories.
-        // If a part belongs to any enabled preset, the preset's hidden
-        // state is used directly and built-in categories are ignored.
-        bool hasActivePreset = false;
+        CategoryMask hidden = 0;
+        CategoryMask presetHidden = 0;
+        CategoryMask activePreset = 0;
+
         for (std::size_t i = 0; i < CATEGORY_COUNT; ++i)
         {
-            if (!(mask & (CategoryMask{1} << i)))
-                continue;
-            const auto cat = static_cast<Category>(i);
-            if (!is_user_preset(cat))
-                continue;
             const auto &st = s_states[i];
-            if (!st.enabled.load(std::memory_order_relaxed))
-                continue;
-            hasActivePreset = true;
-            if (st.hidden.load(std::memory_order_relaxed))
-                return true;
+            const bool enabled = st.enabled.load(std::memory_order_relaxed);
+            const bool isHidden = st.hidden.load(std::memory_order_relaxed);
+            const auto bit = CategoryMask{1} << i;
+
+            if (is_user_preset(static_cast<Category>(i)))
+            {
+                if (enabled)
+                {
+                    activePreset |= bit;
+                    if (isHidden)
+                        presetHidden |= bit;
+                }
+            }
+            else
+            {
+                if (enabled && isHidden)
+                    hidden |= bit;
+            }
         }
 
-        if (hasActivePreset)
-            return false;
+        s_activePresetMask.store(activePreset, std::memory_order_relaxed);
+        s_presetHiddenMask.store(presetHidden, std::memory_order_relaxed);
+        s_hiddenMask.store(hidden, std::memory_order_relaxed);
+    }
 
-        // No active preset — check built-in categories.
-        for (std::size_t i = 0; i < CATEGORY_COUNT && mask != 0; ++i)
-        {
-            if ((mask & (CategoryMask{1} << i)) &&
-                is_category_hidden(static_cast<Category>(i)))
-                return true;
-        }
-        return false;
+    bool is_any_category_hidden(CategoryMask mask)
+    {
+        const auto presetOverlap = mask & s_activePresetMask.load(std::memory_order_relaxed);
+        if (presetOverlap != 0)
+            return (presetOverlap & s_presetHiddenMask.load(std::memory_order_relaxed)) != 0;
+        return (mask & s_hiddenMask.load(std::memory_order_relaxed)) != 0;
     }
 
     const std::unordered_map<uint32_t, CategoryMask>& get_part_map()
