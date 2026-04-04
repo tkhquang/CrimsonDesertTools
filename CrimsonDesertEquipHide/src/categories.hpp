@@ -207,6 +207,9 @@ namespace EquipHide
     /** @brief Returns true if ANY category in the given bitmask is currently hidden. */
     bool is_any_category_hidden(CategoryMask mask);
 
+    /** @brief Recompute cached hidden-state masks from category_states(). Call after any mutation. */
+    void update_hidden_mask();
+
     /**
      * @brief Returns the registered part-hash to category-mask map by reference.
      * @details Double-buffered: readers see the active map while rebuild_part_lookup()

@@ -1,0 +1,230 @@
+#include "player_detection.hpp"
+#include "shared_state.hpp"
+
+#include <DetourModKit.hpp>
+
+#include <Windows.h>
+
+namespace EquipHide
+{
+    static std::atomic<uint32_t> s_resolveCounter{0};
+    static constexpr uint32_t k_resolveInterval = 512;
+
+    static uintptr_t s_prevVisCtrls[k_maxProtagonists]{};
+    static int s_prevCount = 0;
+
+    /** @brief Traverse body -> vis_ctrl pointer chain. Caller MUST be SEH-protected. */
+    static uintptr_t body_to_vis_ctrl(uintptr_t body) noexcept
+    {
+        if (!body)
+            return 0;
+        auto inner = read_ptr_unsafe(body, 0x68);
+        if (!inner)
+            return 0;
+        auto sub = read_ptr_unsafe(inner, 0x40);
+        if (!sub)
+            return 0;
+        return read_ptr_unsafe(sub, 0xE8);
+    }
+
+    void resolve_player_vis_ctrls() noexcept
+    {
+        auto &addrs = resolved_addrs();
+        if (!addrs.worldSystem || !addrs.childActorVtbl)
+            return;
+
+        auto &ps = player_state();
+
+        __try
+        {
+            /* read_ptr_unsafe: outer __try makes is_readable() redundant. */
+            auto ws = read_ptr_unsafe(addrs.worldSystem, 0);
+            if (!ws)
+                return;
+            auto am = read_ptr_unsafe(ws, 0x30);
+            if (!am)
+                return;
+            auto user = read_ptr_unsafe(am, 0x28);
+            if (!user)
+                return;
+
+            static constexpr ptrdiff_t k_bodyOffsets[] = {
+                0xD0, 0xD8, 0xE0, 0xE8, 0xF0, 0xF8, 0x100, 0x108};
+
+            int count = 0;
+            for (auto off : k_bodyOffsets)
+            {
+                if (count >= k_maxProtagonists)
+                    break;
+
+                /* Per-slot SEH so one bad body pointer does not abort the loop. */
+                __try
+                {
+                    auto candidate = read_ptr_unsafe(user, off);
+                    if (!candidate)
+                        continue;
+
+                    auto vt = read_ptr_unsafe(candidate, 0);
+                    if (vt != addrs.childActorVtbl)
+                        continue;
+
+                    auto vc = body_to_vis_ctrl(candidate);
+                    if (vc)
+                        ps.visCtrls[count++] = vc;
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                }
+            }
+
+            for (int i = count; i < k_maxProtagonists; ++i)
+                ps.visCtrls[i].store(0, std::memory_order_relaxed);
+
+            ps.primaryVisCtrl.store(
+                count > 0 ? ps.visCtrls[0].load(std::memory_order_relaxed) : 0,
+                std::memory_order_relaxed);
+
+            for (int i = 0; i < k_maxProtagonists; ++i)
+                ps.armorInjected[i].store(false, std::memory_order_relaxed);
+
+            ps.count.store(count, std::memory_order_relaxed);
+
+            {
+                static std::atomic<bool> s_logged{false};
+                if (!s_logged.exchange(true, std::memory_order_relaxed))
+                    DMK::Logger::get_instance().debug(
+                        "Resolve: ws=0x{:X} am=0x{:X} user=0x{:X} count={}",
+                        ws, am, user, count);
+            }
+            if (count > 0)
+            {
+                /* Non-blocking: skip if the input thread holds the mutex;
+                   the next resolve cycle will catch any change. */
+                auto &mtx = vis_write_mutex();
+                if (mtx.try_lock())
+                {
+                    bool changed = (count != s_prevCount);
+                    if (!changed)
+                    {
+                        for (int j = 0; j < count; ++j)
+                        {
+                            if (ps.visCtrls[j].load(std::memory_order_relaxed) != s_prevVisCtrls[j])
+                            {
+                                changed = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (changed)
+                    {
+                        s_prevCount = count;
+                        for (int j = 0; j < count; ++j)
+                            s_prevVisCtrls[j] = ps.visCtrls[j].load(std::memory_order_relaxed);
+                        for (int j = 0; j < k_maxProtagonists; ++j)
+                            ps.armorInjected[j].store(false, std::memory_order_relaxed);
+                        needs_direct_write().store(true, std::memory_order_relaxed);
+                        DMK::Logger::get_instance().debug(
+                            "Player set changed — scheduling injection + direct write");
+                    }
+                    mtx.unlock();
+                }
+            }
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            static std::atomic<bool> s_crashLogged{false};
+            if (!s_crashLogged.exchange(true, std::memory_order_relaxed))
+                DMK::Logger::get_instance().warning("Resolve: SEH caught crash");
+        }
+    }
+
+    bool is_player_vis_ctrl(uintptr_t a1) noexcept
+    {
+        auto &ps = player_state();
+        if (a1 == ps.primaryVisCtrl.load(std::memory_order_relaxed))
+            return true;
+
+        const auto n = ps.count.load(std::memory_order_relaxed);
+        for (int i = 1; i < n; ++i)
+        {
+            if (ps.visCtrls[i].load(std::memory_order_relaxed) == a1)
+                return true;
+        }
+        return false;
+    }
+
+    bool check_player_filter(uintptr_t a1) noexcept
+    {
+        if (!flag_player_only().load(std::memory_order_relaxed))
+            return true;
+
+        if (a1 < 0x10000)
+            return false;
+
+        auto &ps = player_state();
+
+        if (flag_fallback_mode().load(std::memory_order_relaxed))
+        {
+            /* Actor type byte: *(*(actor+0x88)+1). Value 1 = local player,
+               3-6 = party members. Same mechanism the headgear visibility system uses. */
+            auto comp = read_ptr_unsafe(a1, 0x48);
+            if (comp)
+            {
+                auto actor = read_ptr_unsafe(comp, 0x08);
+                if (actor)
+                {
+                    auto typePtr = read_ptr_unsafe(actor, 0x88);
+                    if (typePtr)
+                    {
+                        auto typeByte = *reinterpret_cast<const uint8_t *>(typePtr + 1);
+                        bool isProtagonist = (typeByte == 1) ||
+                                             (typeByte >= 3 && typeByte <= 6);
+                        if (isProtagonist)
+                        {
+                            const auto n = ps.count.load(std::memory_order_relaxed);
+                            bool alreadyCached = false;
+                            for (int i = 0; i < n; ++i)
+                            {
+                                if (ps.visCtrls[i].load(std::memory_order_relaxed) == a1)
+                                {
+                                    alreadyCached = true;
+                                    break;
+                                }
+                            }
+                            if (!alreadyCached && n < k_maxProtagonists)
+                            {
+                                int expected = n;
+                                if (ps.count.compare_exchange_weak(
+                                        expected, n + 1, std::memory_order_relaxed))
+                                {
+                                    ps.visCtrls[n].store(a1, std::memory_order_relaxed);
+                                    ps.primaryVisCtrl.store(
+                                        ps.visCtrls[0].load(std::memory_order_relaxed),
+                                        std::memory_order_relaxed);
+                                    needs_direct_write().store(true, std::memory_order_relaxed);
+                                    DMK::Logger::get_instance().debug(
+                                        "Fallback: cached protagonist vis ctrl at slot {} "
+                                        "(0x{:X}, type={})",
+                                        n, a1, typeByte);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            return ps.count.load(std::memory_order_relaxed) <= 0 ||
+                   is_player_vis_ctrl(a1);
+        }
+
+        // Global pointer chain mode.
+        auto cnt = s_resolveCounter.fetch_add(1, std::memory_order_relaxed);
+        if (ps.count.load(std::memory_order_relaxed) == 0 ||
+            (cnt & (k_resolveInterval - 1)) == 0)
+            resolve_player_vis_ctrls();
+
+        return ps.count.load(std::memory_order_relaxed) <= 0 ||
+               is_player_vis_ctrl(a1);
+    }
+
+} // namespace EquipHide
