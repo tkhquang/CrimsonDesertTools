@@ -141,11 +141,14 @@ namespace EquipHide
      */
     void set_runtime_hashes(std::unordered_map<std::string, uint32_t> &&nameToHash);
 
+    /** @brief Total number of known part definitions. */
+    std::size_t total_part_count() noexcept;
+
     /**
-     * @brief Returns fallback hashes for known parts not present in the given map.
-     * @details Used by the table scanner to do targeted probes for outlier hashes.
+     * @brief Returns names of known parts not present in the given map.
+     * @details Used by the table scanner to track resolution progress.
      */
-    std::vector<std::pair<std::string, uint32_t>> get_unresolved_fallbacks(
+    std::vector<std::string> get_unresolved_parts(
         const std::unordered_map<std::string, uint32_t> &resolved);
 
     /**

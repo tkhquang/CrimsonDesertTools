@@ -15,376 +15,198 @@ namespace EquipHide
         return s_states;
     }
 
-    /**
-     * @brief Part hash reference and compile-time fallbacks (v1.01.00).
-     *
-     * Part hashes are IndexedStringA IDs resolved at runtime by scanning the
-     * game's string table (see equip_hide.cpp init). The values below serve as
-     * a fallback if the runtime scan fails.
-     *
-     * See .idea/research/equip_hide_v2.md for full mapping.
-     */
-
-    /*
-    // OneHandWeapons (0xAE03 - 0xAE1A, 0xB085 - 0xB086):
-    //   0xAE03  CD_MainWeapon_Sword_R         Sword (Right, drawn)
-    //   0xAE04  CD_MainWeapon_Sword_IN_R      Sword (Right, sheathed)
-    //   0xAE05  CD_MainWeapon_Sword_L         Sword (Left, drawn)
-    //   0xAE06  CD_MainWeapon_Sword_IN_L      Sword (Left, sheathed)
-    //   0xAE07  CD_MainWeapon_Dagger_R        Dagger (Right, drawn)
-    //   0xAE08  CD_MainWeapon_Dagger_IN_R     Dagger (Right, sheathed)
-    //   0xAE09  CD_MainWeapon_Dagger_L        Dagger (Left, drawn)
-    //   0xAE0A  CD_MainWeapon_Dagger_IN_L     Dagger (Left, sheathed)
-    //   0xAE0B  CD_MainWeapon_Axe_R           Axe (Right)
-    //   0xAE0C  CD_MainWeapon_Axe_L           Axe (Left)
-    //   0xAE0D  CD_MainWeapon_Mace_R          Mace (Right)
-    //   0xAE0E  CD_MainWeapon_Mace_L          Mace (Left)
-    //   0xAE0F  CD_MainWeapon_Hammer_R        Hammer (Right)
-    //   0xAE10  CD_MainWeapon_Flail_R         Flail (Right)
-    //   0xAE11  CD_MainWeapon_Wand_R          Wand (Right)
-    //   0xAE12  CD_MainWeapon_Bola            Bola
-    //   0xAE13  CD_MainWeapon_Fist_R          Fist (Right)
-    //   0xAE14  CD_MainWeapon_Fist_L          Fist (Left)
-    //   0xAE15  CD_MainWeapon_HandCannon      Hand Cannon
-    //   0xAE16  CD_MainWeapon_Fist_Hand       Fist (Hand)
-    //   0xAE17  CD_MainWeapon_Fist_Foot       Fist (Foot)
-    //   0xAE18  CD_MainWeapon_Lance           Lance
-    //   0xAE19  CD_MainWeapon_Gauntlet        Gauntlet (Right)
-    //   0xAE1A  CD_MainWeapon_Gauntlet_L      Gauntlet (Left)
-    //   0xB085  CD_MainWeapon_Sword_R_Aux     Sword Aux (Right, drawn)
-    //   0xB086  CD_MainWeapon_Sword_IN_R_Aux  Sword Aux (Right, sheathed)
-    //
-    // TwoHandWeapons (0xAE1B - 0xAE29, 0xAE41, 0xAF2A):
-    //   0xAE1B  CD_TwoHandWeapon_Sword        Greatsword
-    //   0xAE1C  CD_TwoHandWeapon_Axe          2H Axe
-    //   0xAE1D  CD_TwoHandWeapon_Axe_Aux      2H Axe (Auxiliary)
-    //   0xAE1E  CD_TwoHandWeapon_Mace         2H Mace
-    //   0xAE1F  CD_TwoHandWeapon_WarHammer    War Hammer
-    //   0xAE20  CD_TwoHandWeapon_Hammer       2H Hammer
-    //   0xAE21  CD_TwoHandWeapon_Cannon       Cannon
-    //   0xAE22  CD_TwoHandWeapon_CannonBall   Cannon Ball
-    //   0xAE23  CD_TwoHandWeapon_Thrower      Thrower
-    //   0xAE24  CD_TwoHandWeapon_Spear        Spear
-    //   0xAE25  CD_TwoHandWeapon_Alebard      Halberd
-    //   0xAE26  CD_MainWeapon_Pike            Pike
-    //   0xAE27  CD_TwoHandWeapon_Rod          Rod
-    //   0xAE28  CD_TwoHandWeapon_Flail        2H Flail
-    //   0xAE29  CD_TwoHandWeapon_BlowPipe     Blow Pipe
-    //   0xAE41  CD_TwoHandWeapon_Scythe       Scythe
-    //   0xAF2A  CD_TwoHandWeapon_Flag         Flag
-    //
-    // Shields (0xAE2A - 0xAE2C):
-    //   0xAE2A  CD_MainWeapon_Shield_L        Shield (Left)
-    //   0xAE2B  CD_MainWeapon_Shield_R        Shield (Right)
-    //   0xAE2C  CD_MainWeapon_TowerShield_L   Tower Shield (Left)
-    //
-    //   NOTE: Only 3 shield slot hashes exist in the IndexedStringA table.
-    //   All shields (including unique/legendary like "Shield of Conviction")
-    //   must use one of these slots. If a shield doesn't get hidden, it may
-    //   render via an alternate VFX/overlay code path (see equip_hide.cpp).
-    //
-    // Bows (0xAE2D - 0xAE34, 0xAF28):
-    //   0xAE2D  CD_MainWeapon_Bow             Bow
-    //   0xAE2E  CD_MainWeapon_Quiver          Quiver
-    //   0xAE2F  CD_MainWeapon_Quiver_Arw      Quiver Arrow (base)
-    //   0xAE30  CD_MainWeapon_Quiver_Arw_01   Quiver Arrow 1
-    //   0xAE31  CD_MainWeapon_Quiver_Arw_02   Quiver Arrow 2
-    //   0xAE32  CD_MainWeapon_Quiver_Arw_03   Quiver Arrow 3
-    //   0xAE33  CD_MainWeapon_Arw             Arrow
-    //   0xAE34  CD_MainWeapon_Arwline         Arrow Line
-    //   0xAF28  CD_MainWeapon_Arw_IN          Arrow (Sheathed)
-    //
-    // SpecialWeapons (0xAE35 - 0xAE3F):
-    //   0xAE35  CD_MainWeapon_ArwHead         Arrow Head
-    //   0xAE36  CD_MainWeapon_CrossBow        Crossbow
-    //   0xAE37  CD_MainWeapon_Pistol_R        Pistol (Right)
-    //   0xAE38  CD_MainWeapon_Pistol_L        Pistol (Left)
-    //   0xAE39  CD_MainWeapon_Musket          Musket
-    //   0xAE3A  CD_MainWeapon_Trap            Trap
-    //   0xAE3B  CD_MainWeapon_Bomb            Bomb
-    //   0xAE3C  CD_MainWeapon_Fan             Fan
-    //   0xAE3D  CD_MainWeapon_ThrownSpear_R   Thrown Spear (Right)
-    //   0xAE3E  CD_MainWeapon_ThrownSpear_L   Thrown Spear (Left)
-    //   0xAE3F  CD_MainWeapon_Whip_R          Whip (Right)
-    //
-    // Tools (0x0F6D, 0xAE42 - 0xAE59, 0xAF2B, 0xAF2E, 0xAF6B, 0x12A8B):
-    //   0x0F6D  CD_Tool_FishingRod            Fishing Rod
-    //   0xAE42  CD_Tool                       Tool (generic)
-    //   0xAE43  CD_Tool_01                    Tool variant
-    //   0xAE44  CD_Tool_02                    Tool variant
-    //   0xAE45  CD_Tool_Axe                   Tool Axe
-    //   0xAE46  CD_Tool_Hammer                Tool Hammer
-    //   0xAE47  CD_Tool_Saw                   Tool Saw
-    //   0xAE48  CD_Tool_Hoe                   Tool Hoe
-    //   0xAE49  CD_Tool_Broom                 Tool Broom
-    //   0xAE4A  CD_Tool_FarmScythe            Farm Scythe
-    //   0xAE4B  CD_Tool_Hayfork               Hayfork
-    //   0xAE4C  CD_Tool_Pickaxe               Pickaxe
-    //   0xAE4D  CD_Tool_Rake                  Tool Rake
-    //   0xAE4E  CD_Tool_Shovel                Tool Shovel
-    //   0xAE4F  CD_Tool_Crutch                Tool Crutch
-    //   0xAE50  CD_Tool_FishingRod_Sub        Fishing Rod (Sub)
-    //   0xAE51  CD_Tool_Shooter               Shooter
-    //   0xAE52  CD_Tool_Flute                 Flute
-    //   0xAE53  CD_Tool_FireCan               Fire Can
-    //   0xAE54  CD_Tool_Cigarette             Cigarette
-    //   0xAE55  CD_Tool_Sprayer               Sprayer
-    //   0xAE56  CD_Tool_HandDrum              Hand Drum
-    //   0xAE57  CD_Tool_DrumStick_R           Drum Stick (Right)
-    //   0xAE58  CD_Tool_DrumStick_L           Drum Stick (Left)
-    //   0xAE59  CD_Tool_Torch                 Torch
-    //   0xAF2B  CD_Tool_Pan                   Pan
-    //   0xAF2E  CD_Tool_Trumpet               Trumpet
-    //   0xAF6B  CD_Tool_Pipe                  Pipe
-    //          CD_Tool_Book                  Book (hash assigned on demand, no stable fallback)
-    //
-    // Lanterns (0xAE5A - 0xAE5C):
-    //   0xAE5A  CD_Tool_Hyperspace_RemoteControl  Remote Control
-    //   0xAE5B  CD_Lantern                        Lantern
-    //   0xAE5C  CD_Lantern_Ring                   Lantern Ring
-    //
-    // Armor (now classified — see Helm..Glasses categories above)
-    //   0xAD97  CD_Helm                       Helm
-    //   0xAD98  CD_Helm_Acc                   Helm Accessory
-    //   0xAD99  CD_Helm_Acc_01                Helm Accessory 1
-    //   0xAD9A  CD_Helm_Acc_02                Helm Accessory 2
-    //   0xAD9B  CD_Helm_Small                 Helm (Small)
-    //   0xAD9C  CD_Helm_Visione_Belt          Helm Visione Belt
-    //   0xADCA  CD_Glasses                    Glasses
-    //   (CD_Upperbody, CD_Lowerbody, CD_Hand, CD_Foot, CD_Cloak,
-    //    CD_Shoulder, CD_Mask and their variants — runtime hash only)
-    //
-    // NOT classified (system / mount / excluded):
-    //   0xADDF  CD_Abyss_Wing                 Abyss Wing
-    //   0xADE0  CD_Abyss_Wing_01              Abyss Wing 1
-    //   0xADE1  CD_Abyss_Wing_02              Abyss Wing 2
-    //   0xADE2  CD_Abyss_Wing_03              Abyss Wing 3
-    //   0xADE3  CD_Abyss_Glider               Abyss Glider
-    //   0xADE4  CD_Abyss_Glider_01            Abyss Glider 1
-    //   0xADE5  CD_Abyss_Glider_02            Abyss Glider 2
-    //   0xADE6  CD_Abyss_WingSuit             Abyss WingSuit
-    //   0xADE7  CD_Abyss_WingSuit_01          Abyss WingSuit 1
-    //   0xADE8  CD_Abyss_WingSuit_02          Abyss WingSuit 2
-    //   0xADED  CD_Wrist_BindingRope          Binding Rope
-    //   0xADEE  CD_HyperspacePlug             Hyperspace Plug
-    //   0xADEF  CD_AbyssGauntlet              Abyss Gauntlet
-    //   0xADF0  CD_AbyssController            Abyss Controller
-    //   0xADF1  CD_Abyss_Gauntlet             Abyss Gauntlet (variant)
-    //   0xADF2  CD_Abyss_Gauntlet_01          Abyss Gauntlet 1
-    //   0xADF3  CD_Abyss_Gauntlet_02          Abyss Gauntlet 2
-    //   0xADF4  CD_Helm_Flight                Flight Helmet
-    //   0xADF5  CD_Saddle                     Saddle
-    //   0xADF6  CD_Saddle_Hook                Saddle Hook
-    //   0xADF7  CD_Saddle_Belt                Saddle Belt
-    //   0xADF8  CD_Armor_Halterbind           Armor Halterbind
-    //   0xADF9  CD_Halterbind                 Halterbind
-    //   0xADFB  CD_HorseShoe                  Horse Shoe
-    //   0xADFC  CD_HorseHel                   Horse Helmet
-    //   0xADFD  CD_HorseArmor                 Horse Armor
-    //   0xADFE  CD_HorseArmor_01              Horse Armor 1
-    //   0xADFF  CD_HorsePack                  Horse Pack
-    //   0xAE00  CD_HorsePack_01               Horse Pack 1
-    //   0xAE01  CD_Parachute                  Parachute
-    //   0xAE02  CD_WagonWheel                 Wagon Wheel
-    //   0xAE40  CD_PartHider                  System (never hide)
-    //   0xAE5D  CD_Wagon_Lantern_R            Wagon Lantern R (excluded)
-    //   0xAE5E  CD_Wagon_Lantern_L            Wagon Lantern L (excluded)
-    //   0xAE5F  CD_Wagon_Lantern_Ring         Wagon Lantern Ring (excluded)
-    //   0xAE60  CD_LandSpider_Shell           Land Spider Shell
-    //   0xAE61  CD_LandSpider_Shell_01        Land Spider Shell 1
-    //   0xAF2C  CD_MainWeapon_Parachute       Parachute (weapon slot)
-    */
+    /* Part names and categories. Hashes resolved at runtime via
+       IndexedStringA table scan. See .idea/research/ for full mapping. */
 
     // --- Name -> hash table ---
     struct NamedPart
     {
         const char* name;
-        uint32_t    fallbackHash;
         Category    cat;
     };
 
     // clang-format off
     static constexpr NamedPart k_allParts[] = {
         // 1H Weapons
-        {"CD_MainWeapon_Sword_R",       0xAE03, Category::OneHandWeapons},
-        {"CD_MainWeapon_Sword_IN_R",    0xAE04, Category::OneHandWeapons},
-        {"CD_MainWeapon_Sword_L",       0xAE05, Category::OneHandWeapons},
-        {"CD_MainWeapon_Sword_IN_L",    0xAE06, Category::OneHandWeapons},
-        {"CD_MainWeapon_Dagger_R",      0xAE07, Category::OneHandWeapons},
-        {"CD_MainWeapon_Dagger_IN_R",   0xAE08, Category::OneHandWeapons},
-        {"CD_MainWeapon_Dagger_L",      0xAE09, Category::OneHandWeapons},
-        {"CD_MainWeapon_Dagger_IN_L",   0xAE0A, Category::OneHandWeapons},
-        {"CD_MainWeapon_Axe_R",         0xAE0B, Category::OneHandWeapons},
-        {"CD_MainWeapon_Axe_L",         0xAE0C, Category::OneHandWeapons},
-        {"CD_MainWeapon_Mace_R",        0xAE0D, Category::OneHandWeapons},
-        {"CD_MainWeapon_Mace_L",        0xAE0E, Category::OneHandWeapons},
-        {"CD_MainWeapon_Hammer_R",      0xAE0F, Category::OneHandWeapons},
-        {"CD_MainWeapon_Flail_R",       0xAE10, Category::OneHandWeapons},
-        {"CD_MainWeapon_Wand_R",        0xAE11, Category::OneHandWeapons},
-        {"CD_MainWeapon_Bola",          0xAE12, Category::OneHandWeapons},
-        {"CD_MainWeapon_Fist_R",        0xAE13, Category::OneHandWeapons},
-        {"CD_MainWeapon_Fist_L",        0xAE14, Category::OneHandWeapons},
-        {"CD_MainWeapon_HandCannon",    0xAE15, Category::OneHandWeapons},
-        {"CD_MainWeapon_Fist_Hand",     0xAE16, Category::OneHandWeapons},
-        {"CD_MainWeapon_Fist_Foot",     0xAE17, Category::OneHandWeapons},
-        {"CD_MainWeapon_Lance",         0xAE18, Category::OneHandWeapons},
-        {"CD_MainWeapon_Gauntlet",      0xAE19, Category::OneHandWeapons},
-        {"CD_MainWeapon_Gauntlet_L",    0xAE1A, Category::OneHandWeapons},
-        {"CD_MainWeapon_Sword_R_Aux",   0xB085, Category::OneHandWeapons},
-        {"CD_MainWeapon_Sword_IN_R_Aux",0xB086, Category::OneHandWeapons},
+        {"CD_MainWeapon_Sword_R",        Category::OneHandWeapons},
+        {"CD_MainWeapon_Sword_IN_R",     Category::OneHandWeapons},
+        {"CD_MainWeapon_Sword_L",        Category::OneHandWeapons},
+        {"CD_MainWeapon_Sword_IN_L",     Category::OneHandWeapons},
+        {"CD_MainWeapon_Dagger_R",       Category::OneHandWeapons},
+        {"CD_MainWeapon_Dagger_IN_R",    Category::OneHandWeapons},
+        {"CD_MainWeapon_Dagger_L",       Category::OneHandWeapons},
+        {"CD_MainWeapon_Dagger_IN_L",    Category::OneHandWeapons},
+        {"CD_MainWeapon_Axe_R",          Category::OneHandWeapons},
+        {"CD_MainWeapon_Axe_L",          Category::OneHandWeapons},
+        {"CD_MainWeapon_Mace_R",         Category::OneHandWeapons},
+        {"CD_MainWeapon_Mace_L",         Category::OneHandWeapons},
+        {"CD_MainWeapon_Hammer_R",       Category::OneHandWeapons},
+        {"CD_MainWeapon_Flail_R",        Category::OneHandWeapons},
+        {"CD_MainWeapon_Wand_R",         Category::OneHandWeapons},
+        {"CD_MainWeapon_Bola",           Category::OneHandWeapons},
+        {"CD_MainWeapon_Fist_R",         Category::OneHandWeapons},
+        {"CD_MainWeapon_Fist_L",         Category::OneHandWeapons},
+        {"CD_MainWeapon_HandCannon",     Category::OneHandWeapons},
+        {"CD_MainWeapon_Fist_Hand",      Category::OneHandWeapons},
+        {"CD_MainWeapon_Fist_Foot",      Category::OneHandWeapons},
+        {"CD_MainWeapon_Lance",          Category::OneHandWeapons},
+        {"CD_MainWeapon_Gauntlet",       Category::OneHandWeapons},
+        {"CD_MainWeapon_Gauntlet_L",     Category::OneHandWeapons},
+        {"CD_MainWeapon_Sword_R_Aux",    Category::OneHandWeapons},
+        {"CD_MainWeapon_Sword_IN_R_Aux", Category::OneHandWeapons},
         // 2H Weapons
-        {"CD_TwoHandWeapon_Sword",      0xAE1B, Category::TwoHandWeapons},
-        {"CD_TwoHandWeapon_Axe",        0xAE1C, Category::TwoHandWeapons},
-        {"CD_TwoHandWeapon_Axe_Aux",    0xAE1D, Category::TwoHandWeapons},
-        {"CD_TwoHandWeapon_Mace",       0xAE1E, Category::TwoHandWeapons},
-        {"CD_TwoHandWeapon_WarHammer",  0xAE1F, Category::TwoHandWeapons},
-        {"CD_TwoHandWeapon_Hammer",     0xAE20, Category::TwoHandWeapons},
-        {"CD_TwoHandWeapon_Cannon",     0xAE21, Category::TwoHandWeapons},
-        {"CD_TwoHandWeapon_CannonBall", 0xAE22, Category::TwoHandWeapons},
-        {"CD_TwoHandWeapon_Thrower",    0xAE23, Category::TwoHandWeapons},
-        {"CD_TwoHandWeapon_Spear",      0xAE24, Category::TwoHandWeapons},
-        {"CD_TwoHandWeapon_Alebard",    0xAE25, Category::TwoHandWeapons},
-        {"CD_MainWeapon_Pike",          0xAE26, Category::TwoHandWeapons},
-        {"CD_TwoHandWeapon_Rod",        0xAE27, Category::TwoHandWeapons},
-        {"CD_TwoHandWeapon_Flail",      0xAE28, Category::TwoHandWeapons},
-        {"CD_TwoHandWeapon_BlowPipe",   0xAE29, Category::TwoHandWeapons},
-        {"CD_TwoHandWeapon_Scythe",     0xAE41, Category::TwoHandWeapons},
-        {"CD_TwoHandWeapon_Flag",       0xAF2A, Category::TwoHandWeapons},
+        {"CD_TwoHandWeapon_Sword",       Category::TwoHandWeapons},
+        {"CD_TwoHandWeapon_Axe",         Category::TwoHandWeapons},
+        {"CD_TwoHandWeapon_Axe_Aux",     Category::TwoHandWeapons},
+        {"CD_TwoHandWeapon_Mace",        Category::TwoHandWeapons},
+        {"CD_TwoHandWeapon_WarHammer",   Category::TwoHandWeapons},
+        {"CD_TwoHandWeapon_Hammer",      Category::TwoHandWeapons},
+        {"CD_TwoHandWeapon_Cannon",      Category::TwoHandWeapons},
+        {"CD_TwoHandWeapon_CannonBall",  Category::TwoHandWeapons},
+        {"CD_TwoHandWeapon_Thrower",     Category::TwoHandWeapons},
+        {"CD_TwoHandWeapon_Spear",       Category::TwoHandWeapons},
+        {"CD_TwoHandWeapon_Alebard",     Category::TwoHandWeapons},
+        {"CD_MainWeapon_Pike",           Category::TwoHandWeapons},
+        {"CD_TwoHandWeapon_Rod",         Category::TwoHandWeapons},
+        {"CD_TwoHandWeapon_Flail",       Category::TwoHandWeapons},
+        {"CD_TwoHandWeapon_BlowPipe",    Category::TwoHandWeapons},
+        {"CD_TwoHandWeapon_Scythe",      Category::TwoHandWeapons},
+        {"CD_TwoHandWeapon_Flag",        Category::TwoHandWeapons},
         // Shields
-        {"CD_MainWeapon_Shield_L",      0xAE2A, Category::Shields},
-        {"CD_MainWeapon_Shield_R",      0xAE2B, Category::Shields},
-        {"CD_MainWeapon_TowerShield_L", 0xAE2C, Category::Shields},
+        {"CD_MainWeapon_Shield_L",       Category::Shields},
+        {"CD_MainWeapon_Shield_R",       Category::Shields},
+        {"CD_MainWeapon_TowerShield_L",  Category::Shields},
         // Bows / Arrows
-        {"CD_MainWeapon_Bow",           0xAE2D, Category::Bows},
-        {"CD_MainWeapon_Quiver",        0xAE2E, Category::Bows},
-        {"CD_MainWeapon_Quiver_Arw",    0xAE2F, Category::Bows},
-        {"CD_MainWeapon_Quiver_Arw_01", 0xAE30, Category::Bows},
-        {"CD_MainWeapon_Quiver_Arw_02", 0xAE31, Category::Bows},
-        {"CD_MainWeapon_Quiver_Arw_03", 0xAE32, Category::Bows},
-        {"CD_MainWeapon_Arw",           0xAE33, Category::Bows},
-        {"CD_MainWeapon_Arwline",       0xAE34, Category::Bows},
-        {"CD_MainWeapon_Arw_IN",        0xAF28, Category::Bows},
+        {"CD_MainWeapon_Bow",            Category::Bows},
+        {"CD_MainWeapon_Quiver",         Category::Bows},
+        {"CD_MainWeapon_Quiver_Arw",     Category::Bows},
+        {"CD_MainWeapon_Quiver_Arw_01",  Category::Bows},
+        {"CD_MainWeapon_Quiver_Arw_02",  Category::Bows},
+        {"CD_MainWeapon_Quiver_Arw_03",  Category::Bows},
+        {"CD_MainWeapon_Arw",            Category::Bows},
+        {"CD_MainWeapon_Arwline",        Category::Bows},
+        {"CD_MainWeapon_Arw_IN",         Category::Bows},
         // Special / Ranged
-        {"CD_MainWeapon_ArwHead",       0xAE35, Category::SpecialWeapons},
-        {"CD_MainWeapon_CrossBow",      0xAE36, Category::SpecialWeapons},
-        {"CD_MainWeapon_Pistol_R",      0xAE37, Category::SpecialWeapons},
-        {"CD_MainWeapon_Pistol_L",      0xAE38, Category::SpecialWeapons},
-        {"CD_MainWeapon_Musket",        0xAE39, Category::SpecialWeapons},
-        {"CD_MainWeapon_Trap",          0xAE3A, Category::SpecialWeapons},
-        {"CD_MainWeapon_Bomb",          0xAE3B, Category::SpecialWeapons},
-        {"CD_MainWeapon_Fan",           0xAE3C, Category::SpecialWeapons},
-        {"CD_MainWeapon_ThrownSpear_R", 0xAE3D, Category::SpecialWeapons},
-        {"CD_MainWeapon_ThrownSpear_L", 0xAE3E, Category::SpecialWeapons},
-        {"CD_MainWeapon_Whip_R",        0xAE3F, Category::SpecialWeapons},
-        {"CD_MainWeapon_Parachute",     0xAF2C, Category::SpecialWeapons},
+        {"CD_MainWeapon_ArwHead",        Category::SpecialWeapons},
+        {"CD_MainWeapon_CrossBow",       Category::SpecialWeapons},
+        {"CD_MainWeapon_Pistol_R",       Category::SpecialWeapons},
+        {"CD_MainWeapon_Pistol_L",       Category::SpecialWeapons},
+        {"CD_MainWeapon_Musket",         Category::SpecialWeapons},
+        {"CD_MainWeapon_Trap",           Category::SpecialWeapons},
+        {"CD_MainWeapon_Bomb",           Category::SpecialWeapons},
+        {"CD_MainWeapon_Fan",            Category::SpecialWeapons},
+        {"CD_MainWeapon_ThrownSpear_R",  Category::SpecialWeapons},
+        {"CD_MainWeapon_ThrownSpear_L",  Category::SpecialWeapons},
+        {"CD_MainWeapon_Whip_R",         Category::SpecialWeapons},
+        {"CD_MainWeapon_Parachute",      Category::SpecialWeapons},
         // Tools
-        {"CD_Tool_FishingRod",          0x0F6D, Category::Tools},
-        {"CD_Tool",                     0xAE42, Category::Tools},
-        {"CD_Tool_01",                  0xAE43, Category::Tools},
-        {"CD_Tool_02",                  0xAE44, Category::Tools},
-        {"CD_Tool_Axe",                 0xAE45, Category::Tools},
-        {"CD_Tool_Hammer",              0xAE46, Category::Tools},
-        {"CD_Tool_Saw",                 0xAE47, Category::Tools},
-        {"CD_Tool_Hoe",                 0xAE48, Category::Tools},
-        {"CD_Tool_Broom",              0xAE49, Category::Tools},
-        {"CD_Tool_FarmScythe",          0xAE4A, Category::Tools},
-        {"CD_Tool_Hayfork",             0xAE4B, Category::Tools},
-        {"CD_Tool_Pickaxe",             0xAE4C, Category::Tools},
-        {"CD_Tool_Rake",                0xAE4D, Category::Tools},
-        {"CD_Tool_Shovel",              0xAE4E, Category::Tools},
-        {"CD_Tool_Crutch",              0xAE4F, Category::Tools},
-        {"CD_Tool_FishingRod_Sub",      0xAE50, Category::Tools},
-        {"CD_Tool_Shooter",             0xAE51, Category::Tools},
-        {"CD_Tool_Flute",               0xAE52, Category::Tools},
-        {"CD_Tool_FireCan",             0xAE53, Category::Tools},
-        {"CD_Tool_Cigarette",           0xAE54, Category::Tools},
-        {"CD_Tool_Sprayer",             0xAE55, Category::Tools},
-        {"CD_Tool_HandDrum",            0xAE56, Category::Tools},
-        {"CD_Tool_DrumStick_R",         0xAE57, Category::Tools},
-        {"CD_Tool_DrumStick_L",         0xAE58, Category::Tools},
-        {"CD_Tool_Torch",               0xAE59, Category::Tools},
-        {"CD_Tool_Pan",                 0xAF2B, Category::Tools},
-        {"CD_Tool_Trumpet",             0xAF2E, Category::Tools},
-        {"CD_Tool_Pipe",                0xAF6B, Category::Tools},
-        {"CD_Tool_Book",                0,      Category::Tools},
+        {"CD_Tool_FishingRod",           Category::Tools},
+        {"CD_Tool",                      Category::Tools},
+        {"CD_Tool_01",                   Category::Tools},
+        {"CD_Tool_02",                   Category::Tools},
+        {"CD_Tool_Axe",                  Category::Tools},
+        {"CD_Tool_Hammer",               Category::Tools},
+        {"CD_Tool_Saw",                  Category::Tools},
+        {"CD_Tool_Hoe",                  Category::Tools},
+        {"CD_Tool_Broom",                Category::Tools},
+        {"CD_Tool_FarmScythe",           Category::Tools},
+        {"CD_Tool_Hayfork",              Category::Tools},
+        {"CD_Tool_Pickaxe",              Category::Tools},
+        {"CD_Tool_Rake",                 Category::Tools},
+        {"CD_Tool_Shovel",               Category::Tools},
+        {"CD_Tool_Crutch",              Category::Tools},
+        {"CD_Tool_FishingRod_Sub",       Category::Tools},
+        {"CD_Tool_Shooter",              Category::Tools},
+        {"CD_Tool_Flute",                Category::Tools},
+        {"CD_Tool_FireCan",              Category::Tools},
+        {"CD_Tool_Cigarette",            Category::Tools},
+        {"CD_Tool_Sprayer",              Category::Tools},
+        {"CD_Tool_HandDrum",             Category::Tools},
+        {"CD_Tool_DrumStick_R",          Category::Tools},
+        {"CD_Tool_DrumStick_L",          Category::Tools},
+        {"CD_Tool_Torch",                Category::Tools},
+        {"CD_Tool_Pan",                  Category::Tools},
+        {"CD_Tool_Trumpet",              Category::Tools},
+        {"CD_Tool_Pipe",                 Category::Tools},
+        {"CD_Tool_Book",                 Category::Tools},
         // Lanterns
-        {"CD_Tool_Hyperspace_RemoteControl", 0xAE5A, Category::Lanterns},
-        {"CD_Lantern",                  0xAE5B, Category::Lanterns},
-        {"CD_Lantern_Ring",             0xAE5C, Category::Lanterns},
+        {"CD_Tool_Hyperspace_RemoteControl", Category::Lanterns},
+        {"CD_Lantern",                   Category::Lanterns},
+        {"CD_Lantern_Ring",              Category::Lanterns},
         // Helm (armor)
-        {"CD_Helm",                     0xAD97, Category::Helm},
-        {"CD_Helm_Acc",                 0xAD98, Category::Helm},
-        {"CD_Helm_Acc_01",              0xAD99, Category::Helm},
-        {"CD_Helm_Acc_02",              0xAD9A, Category::Helm},
-        {"CD_Helm_Small",               0xAD9B, Category::Helm},
-        {"CD_Helm_Visione_Belt",        0xAD9C, Category::Helm},
-        {"CD_Helm_Flight",              0xADF4, Category::Helm},
-        // Chest (armor) — includes vest and jacket sub-types
-        {"CD_Upperbody",                0xAD9D, Category::Chest},
-        {"CD_Upperbody_Acc",            0xAD9E, Category::Chest},
-        {"CD_Upperbody_Acc_01",         0xAD9F, Category::Chest},
-        {"CD_Upperbody_Acc_02",         0xADA0, Category::Chest},
-        {"CD_Vest",                     0xADA5, Category::Chest},
-        {"CD_Vest_Acc",                 0xADA6, Category::Chest},
-        {"CD_Vest_Acc_01",              0xADA7, Category::Chest},
-        {"CD_Jacket",                   0xADA8, Category::Chest},
-        {"CD_Jacket_Acc",               0xADA9, Category::Chest},
-        {"CD_Jacket_Acc_01",            0xADAA, Category::Chest},
+        {"CD_Helm",                      Category::Helm},
+        {"CD_Helm_Acc",                  Category::Helm},
+        {"CD_Helm_Acc_01",              Category::Helm},
+        {"CD_Helm_Acc_02",              Category::Helm},
+        {"CD_Helm_Small",                Category::Helm},
+        {"CD_Helm_Visione_Belt",         Category::Helm},
+        {"CD_Helm_Flight",               Category::Helm},
+        // Chest (armor)
+        {"CD_Upperbody",                 Category::Chest},
+        {"CD_Upperbody_Acc",             Category::Chest},
+        {"CD_Upperbody_Acc_01",          Category::Chest},
+        {"CD_Upperbody_Acc_02",          Category::Chest},
+        {"CD_Vest",                      Category::Chest},
+        {"CD_Vest_Acc",                  Category::Chest},
+        {"CD_Vest_Acc_01",               Category::Chest},
+        {"CD_Jacket",                    Category::Chest},
+        {"CD_Jacket_Acc",                Category::Chest},
+        {"CD_Jacket_Acc_01",             Category::Chest},
         // Legs (armor)
-        {"CD_Lowerbody",                0xADAB, Category::Legs},
-        {"CD_Lowerbody_Acc",            0xADAC, Category::Legs},
-        {"CD_Underwear",                0xAD96, Category::Legs},
+        {"CD_Lowerbody",                 Category::Legs},
+        {"CD_Lowerbody_Acc",             Category::Legs},
+        {"CD_Underwear",                 Category::Legs},
         // Gloves (armor)
-        {"CD_Hand",                     0xADB2, Category::Gloves},
-        {"CD_Hand_Acc",                 0xADB3, Category::Gloves},
-        {"CD_Hand_Acc_01",              0xADB4, Category::Gloves},
-        {"CD_Hand_Acc_02",              0xADB5, Category::Gloves},
+        {"CD_Hand",                      Category::Gloves},
+        {"CD_Hand_Acc",                  Category::Gloves},
+        {"CD_Hand_Acc_01",               Category::Gloves},
+        {"CD_Hand_Acc_02",               Category::Gloves},
         // Boots (armor)
-        {"CD_Foot",                     0xADB6, Category::Boots},
-        {"CD_Foot_Acc",                 0xADB7, Category::Boots},
-        {"CD_Foot_Acc_01",              0xADB8, Category::Boots},
-        // Cloak (armor) — includes flight cloak variants
-        {"CD_Cloak",                    0xADAD, Category::Cloak},
-        {"CD_Cloak_Acc",                0xADAE, Category::Cloak},
-        {"CD_Cloak_Acc_01",             0xADAF, Category::Cloak},
-        {"CD_Cloak_Acc_02",             0xADB0, Category::Cloak},
-        {"CD_Cloak_Shoulder",           0xADB1, Category::Cloak},
-        {"CD_Cloak_Flight",             0xADDB, Category::Cloak},
-        {"CD_Cloak_Flight_01",          0xADDC, Category::Cloak},
-        {"CD_Cloak_Flight_02",          0xADDD, Category::Cloak},
-        {"CD_Cloak_Flight_03",          0xADDE, Category::Cloak},
+        {"CD_Foot",                      Category::Boots},
+        {"CD_Foot_Acc",                  Category::Boots},
+        {"CD_Foot_Acc_01",               Category::Boots},
+        // Cloak (armor)
+        {"CD_Cloak",                     Category::Cloak},
+        {"CD_Cloak_Acc",                 Category::Cloak},
+        {"CD_Cloak_Acc_01",              Category::Cloak},
+        {"CD_Cloak_Acc_02",              Category::Cloak},
+        {"CD_Cloak_Shoulder",            Category::Cloak},
+        {"CD_Cloak_Flight",              Category::Cloak},
+        {"CD_Cloak_Flight_01",           Category::Cloak},
+        {"CD_Cloak_Flight_02",           Category::Cloak},
+        {"CD_Cloak_Flight_03",           Category::Cloak},
         // Shoulder (armor)
-        {"CD_Shoulder",                 0xADA1, Category::Shoulder},
-        {"CD_Shoulder_Under",           0xADA2, Category::Shoulder},
-        {"CD_Shoulder_Acc",             0xADA3, Category::Shoulder},
-        {"CD_Shoulder_Acc_01",          0xADA4, Category::Shoulder},
+        {"CD_Shoulder",                  Category::Shoulder},
+        {"CD_Shoulder_Under",            Category::Shoulder},
+        {"CD_Shoulder_Acc",              Category::Shoulder},
+        {"CD_Shoulder_Acc_01",           Category::Shoulder},
         // Mask (armor)
-        {"CD_Mask",                     0xADB9, Category::Mask},
-        {"CD_Mask_Acc",                 0xADBA, Category::Mask},
-        {"CD_Mask_Acc_01",              0xADBB, Category::Mask},
+        {"CD_Mask",                      Category::Mask},
+        {"CD_Mask_Acc",                  Category::Mask},
+        {"CD_Mask_Acc_01",               Category::Mask},
         // Glasses (armor)
-        {"CD_Glasses",                  0xADCA, Category::Glasses},
+        {"CD_Glasses",                   Category::Glasses},
         // Earrings
-        {"CD_Earring_L",                0xADCB, Category::Earrings},
-        {"CD_Earring_R",                0xADCC, Category::Earrings},
+        {"CD_Earring_L",                 Category::Earrings},
+        {"CD_Earring_R",                 Category::Earrings},
         // Rings
-        {"CD_Ring_R",                   0xADC8, Category::Rings},
-        {"CD_Ring_L",                   0xADC9, Category::Rings},
+        {"CD_Ring_R",                    Category::Rings},
+        {"CD_Ring_L",                    Category::Rings},
         // Necklace
-        {"CD_Necklace",                 0xADCD, Category::Necklace},
-        // Bags (belt, pouches, racks, misc accessories)
-        {"CD_Belt",                     0xADBC, Category::Bags},
-        {"CD_Acc",                      0xADBD, Category::Bags},
-        {"CD_Bag",                      0xADBE, Category::Bags},
-        {"CD_Bag_Rocket",               0xADBF, Category::Bags},
-        {"CD_Bag_For_Dock",             0xADC0, Category::Bags},
-        {"CD_Bag_Belt_For_Dock",        0xADC1, Category::Bags},
-        {"CD_Additional_For_Dock",      0xADC2, Category::Bags},
-        {"CD_Bag_Small",                0xADC3, Category::Bags},
-        {"CD_Bag_Acc",                  0xADC4, Category::Bags},
-        {"CD_Bag_Belt",                 0xADC5, Category::Bags},
-        {"CD_Bag_Lantern",              0xADC6, Category::Bags},
-        {"CD_Bag_Rack",                 0xADC7, Category::Bags},
+        {"CD_Necklace",                  Category::Necklace},
+        // Bags
+        {"CD_Belt",                      Category::Bags},
+        {"CD_Acc",                       Category::Bags},
+        {"CD_Bag",                       Category::Bags},
+        {"CD_Bag_Rocket",                Category::Bags},
+        {"CD_Bag_For_Dock",              Category::Bags},
+        {"CD_Bag_Belt_For_Dock",         Category::Bags},
+        {"CD_Additional_For_Dock",       Category::Bags},
+        {"CD_Bag_Small",                 Category::Bags},
+        {"CD_Bag_Acc",                   Category::Bags},
+        {"CD_Bag_Belt",                  Category::Bags},
+        {"CD_Bag_Lantern",               Category::Bags},
+        {"CD_Bag_Rack",                  Category::Bags},
     };
     // clang-format on
 
@@ -402,14 +224,19 @@ namespace EquipHide
         s_hasRuntimeHashes = true;
     }
 
-    std::vector<std::pair<std::string, uint32_t>> get_unresolved_fallbacks(
+    std::size_t total_part_count() noexcept
+    {
+        return std::size(k_allParts);
+    }
+
+    std::vector<std::string> get_unresolved_parts(
         const std::unordered_map<std::string, uint32_t>& resolved)
     {
-        std::vector<std::pair<std::string, uint32_t>> result;
+        std::vector<std::string> result;
         for (const auto& p : k_allParts)
         {
             if (!resolved.count(p.name))
-                result.emplace_back(p.name, p.fallbackHash);
+                result.emplace_back(p.name);
         }
         return result;
     }
@@ -433,41 +260,18 @@ namespace EquipHide
                 s_nameToHash = s_runtimeHashes;
 
                 int resolved = 0;
-                int fallback = 0;
                 for (const auto& p : k_allParts)
                 {
-                    auto it = s_nameToHash.find(p.name);
-                    if (it != s_nameToHash.end())
-                    {
-                        if (p.fallbackHash != 0 && it->second != p.fallbackHash)
-                            logger.debug("Hash shifted: {} 0x{:X} -> 0x{:X}",
-                                         p.name, p.fallbackHash, it->second);
+                    if (s_nameToHash.count(p.name))
                         ++resolved;
-                    }
-                    else if (p.fallbackHash != 0)
-                    {
-                        logger.warning("Part '{}' not found in runtime table, "
-                                       "using fallback 0x{:X}", p.name, p.fallbackHash);
-                        s_nameToHash[p.name] = p.fallbackHash;
-                        ++fallback;
-                    }
-                    else
-                    {
-                        logger.debug("Part '{}' awaiting runtime resolution "
-                                     "(no fallback)", p.name);
-                    }
                 }
-                logger.info("Hash resolution: {}/{} runtime, {} fallback",
-                            resolved, std::size(k_allParts), fallback);
+                logger.info("Hash resolution: {}/{} runtime",
+                            resolved, std::size(k_allParts));
             }
             else
             {
-                logger.info("Using compile-time fallback hashes (pending deferred scan)");
-                for (const auto& p : k_allParts)
-                {
-                    if (p.fallbackHash != 0)
-                        s_nameToHash[p.name] = p.fallbackHash;
-                }
+                logger.info("No runtime hashes available, part map empty "
+                            "(pending deferred scan)");
             }
             s_nameToHashBuilt = true;
         }
@@ -517,8 +321,8 @@ namespace EquipHide
      * @details Bounds check + single array read (~3 cycles) replaces
      *          unordered_map lookup (~20 cycles). Value: 0 = unclassified.
      */
-    static constexpr uint32_t k_flatBase  = 0xAD00;
-    static constexpr uint32_t k_flatEnd   = 0xBFFF;
+    static constexpr uint32_t k_flatBase  = 0xAC00;
+    static constexpr uint32_t k_flatEnd   = 0xCFFF;
     static constexpr uint32_t k_flatSize  = k_flatEnd - k_flatBase + 1;
 
     static std::array<CategoryMask, k_flatSize> s_flatTables[2]{};
@@ -562,6 +366,11 @@ namespace EquipHide
 
         const auto& nameMap = name_to_hash_map();
 
+        // No runtime hashes yet — store names for deferred resolution only.
+        // rebuild_part_lookup() will re-resolve after the scan completes.
+        if (nameMap.empty())
+            return;
+
         std::size_t pos = 0;
         while (pos < partsStr.size())
         {
@@ -598,24 +407,6 @@ namespace EquipHide
                 continue;
             }
 
-            {
-                bool knownDeferred = false;
-                for (const auto& p : k_allParts)
-                {
-                    if (token == p.name && p.fallbackHash == 0)
-                    {
-                        knownDeferred = true;
-                        break;
-                    }
-                }
-                if (knownDeferred)
-                {
-                    logger.trace("  {} deferred {} (awaiting runtime scan)",
-                                  category_section(cat), token);
-                    continue;
-                }
-            }
-
             if (token.size() > 2 && token[0] == '0' && (token[1] == 'x' || token[1] == 'X'))
             {
                 try
@@ -631,7 +422,8 @@ namespace EquipHide
                 }
             }
 
-            logger.warning("  {} : unknown part '{}'", category_section(cat), token);
+            logger.debug("  {} : unknown part '{}' (pending runtime scan?)",
+                         category_section(cat), token);
         }
     }
 
