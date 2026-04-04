@@ -110,14 +110,6 @@ namespace EquipHide
             .count();
     }
 
-    static uintptr_t read_ptr(uintptr_t base, ptrdiff_t off) noexcept
-    {
-        const auto *addr = reinterpret_cast<const uintptr_t *>(base + off);
-        if (!DMK::Memory::is_readable(addr, sizeof(uintptr_t)))
-            return 0;
-        return (*addr > 0x10000) ? *addr : 0;
-    }
-
     /** @brief Unsafe pointer read — use ONLY inside SEH-protected hot paths. */
     static uintptr_t read_ptr_unsafe(uintptr_t base, ptrdiff_t off) noexcept
     {
@@ -289,8 +281,8 @@ namespace EquipHide
      *   entry[hash] = tableArray + hash * 16
      *   entry[hash]+0 = pointer to null-terminated string (or 0)
      */
-    static constexpr uint32_t k_tableScanMin = 0xAD00;
-    static constexpr uint32_t k_tableScanMax = 0xBFFF;
+    static constexpr uint32_t k_tableScanMin = 0xAC00;
+    static constexpr uint32_t k_tableScanMax = 0xCFFF;
 
     static constexpr std::size_t k_maxStringLen = 64;
 
@@ -359,8 +351,9 @@ namespace EquipHide
             return nameToHash;
         }
 
-        logger.trace("IndexedStringA scan: globalPtr=0x{:X} tableArray=0x{:X}",
-                     globalPtr, tableArray);
+        logger.trace("IndexedStringA scan: globalPtr=0x{:X} tableArray=0x{:X} "
+                     "range=0x{:X}-0x{:X}",
+                     globalPtr, tableArray, k_tableScanMin, k_tableScanMax);
 
         const auto t0 = std::chrono::steady_clock::now();
         uint32_t cdEntries = 0;
@@ -381,43 +374,11 @@ namespace EquipHide
             ++cdEntries;
         }
 
-        const auto unresolved = get_unresolved_fallbacks(nameToHash);
-        if (!unresolved.empty())
-        {
-            constexpr uint32_t k_probeRadius = 0x100;
-            for (const auto &[name, fallback] : unresolved)
-            {
-                const uint32_t lo = (fallback > k_probeRadius)
-                                        ? fallback - k_probeRadius
-                                        : 1;
-                const uint32_t hi = fallback + k_probeRadius;
-
-                for (uint32_t h = lo; h <= hi; ++h)
-                {
-                    auto len = read_table_entry(tableArray, h, buf, sizeof(buf));
-                    if (len != name.size())
-                        continue;
-
-                    if (std::memcmp(buf, name.c_str(), len) == 0)
-                    {
-                        const bool isNew = (nameToHash.find(name) == nameToHash.end());
-                        nameToHash[name] = h;
-                        ++probeHits;
-                        if (isNew)
-                            logger.trace("Outlier probe: {} found at 0x{:X} "
-                                         "(fallback was 0x{:X})",
-                                         name, h, fallback);
-                        break;
-                    }
-                }
-            }
-        }
-
-        auto wideUnresolved = get_unresolved_fallbacks(nameToHash);
-        if (!wideUnresolved.empty())
+        auto unresolvedNames = get_unresolved_parts(nameToHash);
+        if (!unresolvedNames.empty())
         {
             constexpr uint32_t k_wideScanMax = 0x20000;
-            for (uint32_t h = 1; h < k_wideScanMax && !wideUnresolved.empty(); ++h)
+            for (uint32_t h = 1; h < k_wideScanMax && !unresolvedNames.empty(); ++h)
             {
                 if (h >= k_tableScanMin && h <= k_tableScanMax)
                     continue;
@@ -428,20 +389,16 @@ namespace EquipHide
                 if (buf[0] != 'C' || buf[1] != 'D' || buf[2] != '_')
                     continue;
 
-                for (auto it = wideUnresolved.begin();
-                     it != wideUnresolved.end(); ++it)
+                for (auto it = unresolvedNames.begin();
+                     it != unresolvedNames.end(); ++it)
                 {
-                    if (len == it->first.size() &&
-                        std::memcmp(buf, it->first.c_str(), len) == 0)
+                    if (len == it->size() &&
+                        std::memcmp(buf, it->c_str(), len) == 0)
                     {
-                        const bool isNew = (nameToHash.find(it->first) == nameToHash.end());
-                        nameToHash[it->first] = h;
+                        nameToHash[*it] = h;
                         ++probeHits;
-                        if (isNew)
-                            logger.trace("Wide scan: {} found at 0x{:X} "
-                                         "(fallback was 0x{:X})",
-                                         it->first, h, it->second);
-                        wideUnresolved.erase(it);
+                        logger.trace("Wide scan: {} found at 0x{:X}", *it, h);
+                        unresolvedNames.erase(it);
                         break;
                     }
                 }
@@ -513,7 +470,9 @@ namespace EquipHide
                     if (vc)
                         s_playerVisCtrls[count++] = vc;
                 }
-                __except (EXCEPTION_EXECUTE_HANDLER) { }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                }
             }
 
             for (int i = count; i < k_maxProtagonists; ++i)
@@ -658,7 +617,7 @@ namespace EquipHide
             }
 
             logger.trace("DirectWrite: {} protagonists, {} hidden, {} restored",
-                        n, hiddenCount, restoredCount);
+                         n, hiddenCount, restoredCount);
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
@@ -854,7 +813,9 @@ namespace EquipHide
                     totalInjected += result;
                 }
             }
-            __except (EXCEPTION_EXECUTE_HANDLER) { }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+            }
         }
 
         if (totalInjected > 0)
@@ -1028,66 +989,80 @@ namespace EquipHide
                                      a5, a6, a7, a8, a9);
     }
 
+    static void cleanup_vis_bytes() noexcept;
+
     // --- Deferred IndexedStringA scan ---
     static constexpr int k_maxScanAttempts = 10;
+    static constexpr int k_scanRetryMs = 2000;
+    static constexpr int k_scanIdleRetryMs = 10000;
+    static constexpr int k_scanInitialDelayMs = 8000;
 
     static void deferred_scan_thread() noexcept
     {
         auto &logger = DMK::Logger::get_instance();
 
-        for (int attempt = 0; attempt < k_maxScanAttempts; ++attempt)
+        int realAttempts = 0;
+        bool tableReady = false;
+        for (;;)
         {
             if (s_shutdownRequested.load(std::memory_order_relaxed))
                 return;
-            if (attempt > 0)
-                std::this_thread::sleep_for(std::chrono::seconds(2 * attempt));
+
+            int sleepMs;
+            if (realAttempts == 0 && !tableReady)
+                sleepMs = k_scanInitialDelayMs;
+            else if (!tableReady)
+                sleepMs = k_scanIdleRetryMs;
+            else
+                sleepMs = k_scanRetryMs;
+            std::this_thread::sleep_for(std::chrono::milliseconds(sleepMs));
 
             auto runtimeHashes = scan_indexed_string_table(s_mapLookupAddr);
             if (runtimeHashes.empty())
                 continue;
 
-            auto unresolved = get_unresolved_fallbacks(runtimeHashes);
+            const auto totalParts = total_part_count();
+            auto unresolved = get_unresolved_parts(runtimeHashes);
+            const auto resolvedCount = totalParts - unresolved.size();
 
-            if (unresolved.empty() || attempt == k_maxScanAttempts - 1)
+            // Table not meaningfully populated yet — keep waiting without
+            // burning attempt budget.
+            if (resolvedCount < 10)
+                continue;
+
+            tableReady = true;
+
+            ++realAttempts;
+
+            // Accept results when >=90% resolved or attempt budget spent.
+            constexpr auto k_minResolvePct = 90;
+            const bool enough = (resolvedCount * 100 / totalParts) >= k_minResolvePct;
+
+            if (enough || realAttempts >= k_maxScanAttempts)
             {
-                const auto totalParts = std::size(get_unresolved_fallbacks({}));
-                const auto fallbackCount = unresolved.size();
-
                 set_runtime_hashes(std::move(runtimeHashes));
                 rebuild_part_lookup();
                 s_deferredScanPending.store(false, std::memory_order_relaxed);
 
+                // Restore any vis bytes set during a prior scan phase so the
+                // rebuilt part map can re-apply with correct hashes.
+                cleanup_vis_bytes();
+
                 for (int j = 0; j < k_maxProtagonists; ++j)
                     s_armorInjected[j].store(false, std::memory_order_relaxed);
                 s_needsDirectWrite.store(true, std::memory_order_relaxed);
-                logger.debug("Deferred scan: scheduling re-injection with {} resolved hashes",
-                             totalParts - fallbackCount);
+
+                logger.info("Deferred scan complete: {}/{} resolved ({} attempts)",
+                            resolvedCount, totalParts, realAttempts);
 
                 if (!unresolved.empty())
-                {
-                    for (const auto &[name, fallback] : unresolved)
-                        logger.warning("Part '{}' unresolved after {} scan attempts, "
-                                       "using fallback 0x{:X}",
-                                       name, attempt + 1, fallback);
-                }
-
-                logger.info("Deferred scan complete: {}/{} runtime, {} fallback "
-                            "({} attempts)",
-                            totalParts - fallbackCount, totalParts,
-                            fallbackCount, attempt + 1);
-
-                if (fallbackCount > 0)
                     s_lazyProbePending.store(true, std::memory_order_relaxed);
                 return;
             }
 
-            logger.trace("Deferred scan attempt {}: {} parts unresolved, retrying",
-                         attempt + 1, unresolved.size());
+            logger.trace("Deferred scan attempt {}: {}/{} resolved, retrying",
+                         realAttempts, resolvedCount, totalParts);
         }
-
-        logger.warning("IndexedStringA deferred scan exhausted {} attempts",
-                       k_maxScanAttempts);
-        s_deferredScanPending.store(false, std::memory_order_relaxed);
     }
 
     static void launch_deferred_scan() noexcept
@@ -1096,20 +1071,6 @@ namespace EquipHide
             return;
         if (!s_mapLookupAddr)
             return;
-
-        // Wait until the game world is loaded — avoids exhausting retry
-        // attempts while idling at the main menu.
-        if (s_worldSystemPtr)
-        {
-            auto ws = read_ptr(s_worldSystemPtr, 0);
-            if (!ws)
-                return;
-            auto am = read_ptr(ws, 0x30);
-            if (!am)
-                return;
-            if (!read_ptr(am, 0x28))
-                return;
-        }
 
         static std::atomic<bool> s_launched{false};
         if (s_launched.exchange(true, std::memory_order_relaxed))
@@ -1150,12 +1111,16 @@ namespace EquipHide
             if (runtimeHashes.empty())
                 continue;
 
-            auto unresolved = get_unresolved_fallbacks(runtimeHashes);
+            auto unresolved = get_unresolved_parts(runtimeHashes);
             if (unresolved.empty())
             {
                 set_runtime_hashes(std::move(runtimeHashes));
                 rebuild_part_lookup();
+                cleanup_vis_bytes();
                 s_lazyProbePending.store(false, std::memory_order_relaxed);
+                for (int j = 0; j < k_maxProtagonists; ++j)
+                    s_armorInjected[j].store(false, std::memory_order_relaxed);
+                s_needsDirectWrite.store(true, std::memory_order_relaxed);
                 logger.info("Lazy probe resolved all remaining parts "
                             "({} probes)",
                             probeCount);
@@ -1182,6 +1147,95 @@ namespace EquipHide
             std::lock_guard<std::mutex> lk(s_bgThreadMtx);
             s_lazyProbeThread = std::thread(lazy_probe_thread);
         }
+    }
+
+    // --- Player-only filter ---
+
+    /** @brief Returns true if the current actor is a known protagonist. */
+    static bool is_player_vis_ctrl(uintptr_t a1) noexcept
+    {
+        if (a1 == s_primaryPlayerVisCtrl.load(std::memory_order_relaxed))
+            return true;
+
+        const auto n = s_playerCount.load(std::memory_order_relaxed);
+        for (int i = 1; i < n; ++i)
+        {
+            if (s_playerVisCtrls[i].load(std::memory_order_relaxed) == a1)
+                return true;
+        }
+        return false;
+    }
+
+    /**
+     * @brief Check player-only filter. Returns false (reject) if the actor
+     *        is not a known protagonist when PlayerOnly mode is active.
+     *
+     * Side effects: triggers resolve cycle (global chain) or caches new
+     * vis ctrls (fallback mode).
+     */
+    static bool check_player_filter(uintptr_t a1) noexcept
+    {
+        if (!s_playerOnly.load(std::memory_order_relaxed))
+            return true;
+
+        if (a1 < 0x10000)
+            return false;
+
+        if (s_fallbackMode.load(std::memory_order_relaxed))
+        {
+            // d8-based fallback: a1->+0x48->+0x08->+0xD8.
+            // Uses read_ptr_unsafe — SEH-protected via on_vis_check.
+            auto comp = read_ptr_unsafe(a1, 0x48);
+            if (comp)
+            {
+                auto actor = read_ptr_unsafe(comp, 0x08);
+                if (actor)
+                {
+                    auto d8Val = *reinterpret_cast<const int32_t *>(actor + 0xD8);
+                    if (d8Val >= 2)
+                    {
+                        const auto n = s_playerCount.load(std::memory_order_relaxed);
+                        bool alreadyCached = false;
+                        for (int i = 0; i < n; ++i)
+                        {
+                            if (s_playerVisCtrls[i].load(std::memory_order_relaxed) == a1)
+                            {
+                                alreadyCached = true;
+                                break;
+                            }
+                        }
+                        if (!alreadyCached && n < k_maxProtagonists)
+                        {
+                            int expected = n;
+                            if (s_playerCount.compare_exchange_weak(
+                                    expected, n + 1, std::memory_order_relaxed))
+                            {
+                                s_playerVisCtrls[n].store(a1, std::memory_order_relaxed);
+                                s_primaryPlayerVisCtrl.store(
+                                    s_playerVisCtrls[0].load(std::memory_order_relaxed),
+                                    std::memory_order_relaxed);
+                                s_needsDirectWrite.store(true, std::memory_order_relaxed);
+                                DMK::Logger::get_instance().debug(
+                                    "Fallback: new player vis ctrl cached at slot {} (0x{:X})",
+                                    n, a1);
+                            }
+                        }
+                    }
+                }
+            }
+
+            return s_playerCount.load(std::memory_order_relaxed) <= 0 ||
+                   is_player_vis_ctrl(a1);
+        }
+
+        // Global pointer chain mode.
+        auto cnt = s_resolveCounter.fetch_add(1, std::memory_order_relaxed);
+        if (s_playerCount.load(std::memory_order_relaxed) == 0 ||
+            (cnt & (k_resolveInterval - 1)) == 0)
+            resolve_player_vis_ctrls();
+
+        return s_playerCount.load(std::memory_order_relaxed) <= 0 ||
+               is_player_vis_ctrl(a1);
     }
 
     // --- Mid-hook callback ---
@@ -1227,106 +1281,9 @@ namespace EquipHide
         if (r13 < 0x10000)
             return;
 
-        if (s_playerOnly.load(std::memory_order_relaxed))
-        {
-            auto a1 = *reinterpret_cast<uintptr_t *>(ctx.rbp + 0x4F);
-            if (a1 < 0x10000)
-                return;
-
-            if (s_fallbackMode.load(std::memory_order_relaxed))
-            {
-                // d8-based fallback: a1->+0x48->+0x08->+0xD8.
-                // Uses read_ptr_unsafe — SEH-protected via on_vis_check.
-                auto comp = read_ptr_unsafe(a1, 0x48);
-                if (comp)
-                {
-                    auto actor = read_ptr_unsafe(comp, 0x08);
-                    if (actor)
-                    {
-                        auto d8Val = *reinterpret_cast<const int32_t *>(actor + 0xD8);
-                        if (d8Val >= 2)
-                        {
-                            const auto n = s_playerCount.load(std::memory_order_relaxed);
-                            bool alreadyCached = false;
-                            for (int i = 0; i < n; ++i)
-                            {
-                                if (s_playerVisCtrls[i].load(std::memory_order_relaxed) == a1)
-                                {
-                                    alreadyCached = true;
-                                    break;
-                                }
-                            }
-                            if (!alreadyCached && n < k_maxProtagonists)
-                            {
-                                int expected = n;
-                                if (s_playerCount.compare_exchange_weak(
-                                        expected, n + 1, std::memory_order_relaxed))
-                                {
-                                    s_playerVisCtrls[n].store(a1, std::memory_order_relaxed);
-                                    s_primaryPlayerVisCtrl.store(
-                                        s_playerVisCtrls[0].load(std::memory_order_relaxed),
-                                        std::memory_order_relaxed);
-                                    s_needsDirectWrite.store(true, std::memory_order_relaxed);
-                                    DMK::Logger::get_instance().debug(
-                                        "Fallback: new player vis ctrl cached at slot {} (0x{:X})",
-                                        n, a1);
-                                }
-                            }
-                        }
-                    }
-                }
-
-                const auto n = s_playerCount.load(std::memory_order_relaxed);
-                if (n > 0)
-                {
-                    if (a1 == s_primaryPlayerVisCtrl.load(std::memory_order_relaxed))
-                        goto player_confirmed;
-
-                    bool isPlayer = false;
-                    for (int i = 1; i < n; ++i)
-                    {
-                        if (a1 == s_playerVisCtrls[i].load(std::memory_order_relaxed))
-                        {
-                            isPlayer = true;
-                            break;
-                        }
-                    }
-                    if (!isPlayer)
-                        return;
-                }
-            player_confirmed:;
-            }
-            else
-            {
-                auto cnt = s_resolveCounter.fetch_add(1, std::memory_order_relaxed);
-                if (s_playerCount.load(std::memory_order_relaxed) == 0 ||
-                    (cnt & (k_resolveInterval - 1)) == 0)
-                    resolve_player_vis_ctrls();
-
-                const auto n = s_playerCount.load(std::memory_order_relaxed);
-                if (n > 0)
-                {
-                    if (a1 == s_primaryPlayerVisCtrl.load(std::memory_order_relaxed))
-                        goto global_player_confirmed;
-
-                    {
-                        bool isPlayer = false;
-                        for (int i = 1; i < n; ++i)
-                        {
-                            if (a1 == s_playerVisCtrls[i].load(std::memory_order_relaxed))
-                            {
-                                isPlayer = true;
-                                break;
-                            }
-                        }
-
-                        if (!isPlayer)
-                            return;
-                    }
-                global_player_confirmed:;
-                }
-            }
-        }
+        auto a1 = *reinterpret_cast<uintptr_t *>(ctx.rbp + 0x4F);
+        if (!check_player_filter(a1))
+            return;
 
         if (is_any_category_hidden(mask))
         {
@@ -1509,6 +1466,10 @@ namespace EquipHide
     {
         if (!s_fallbackMode.load(std::memory_order_relaxed))
             resolve_player_vis_ctrls();
+
+        // Reset injection flags so newly-toggled categories get entries created.
+        for (int i = 0; i < k_maxProtagonists; ++i)
+            s_armorInjected[i].store(false, std::memory_order_relaxed);
 
         inject_armor_entries();
         apply_direct_vis_write();
@@ -1729,8 +1690,9 @@ namespace EquipHide
             else
             {
                 logger.info("IndexedStringA table not ready at init, "
-                            "deferring scan to first hook invocation");
+                            "starting deferred scan thread");
                 s_deferredScanPending.store(true, std::memory_order_relaxed);
+                launch_deferred_scan();
             }
         }
         else
@@ -1842,10 +1804,11 @@ namespace EquipHide
         auto &inputMgr = DMK::InputManager::get_instance();
         inputMgr.start();
 
-        // Schedule startup direct-write enforcement: covers the race where
-        // the game processes initial equipment visibility before the hook is
-        // installed, or the PlayerOnly filter has transitional pointer data.
-        logger.info("Equip hide system initialized");
+        if (s_deferredScanPending.load(std::memory_order_relaxed))
+            logger.info("Hooks installed, part hashes pending (deferred scan active)");
+        else
+            logger.info("Equip hide fully initialized ({} parts resolved)",
+                        total_part_count());
         return true;
     }
 
