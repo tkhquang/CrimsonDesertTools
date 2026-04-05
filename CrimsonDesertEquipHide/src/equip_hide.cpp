@@ -351,6 +351,7 @@ namespace EquipHide
         // the game's postfix rules that hide hair based on equipped gear.
         if (flag_bald_fix().load(std::memory_order_relaxed))
         {
+            set_baldfix_main_thread_id(GetCurrentThreadId());
             auto postfixEvalAddr = resolve_address(
                 k_postfixEvalCandidates, std::size(k_postfixEvalCandidates),
                 "PostfixEval");
@@ -366,7 +367,7 @@ namespace EquipHide
                 if (result.has_value())
                 {
                     set_postfix_eval_trampoline(trampoline);
-                    logger.info("PostfixEval inline hook installed at 0x{:X} — bald fix active",
+                    logger.info("PostfixEval inline hook installed at 0x{:X}",
                                 postfixEvalAddr);
                 }
                 else
@@ -377,6 +378,39 @@ namespace EquipHide
             {
                 logger.warning("PostfixEval AOB scan failed — bald fix disabled");
             }
+
+            // Per-actor context wrapper: sets a TLS player flag around the
+            // PostfixEval dispatch so we only suppress hair-hiding for the
+            // player, not NPCs sharing the same evaluation context.
+            auto ctxCreateAddr = resolve_address(
+                k_postfixCtxCreateCandidates,
+                std::size(k_postfixCtxCreateCandidates),
+                "PostfixCtxCreate");
+
+            if (ctxCreateAddr)
+            {
+                PostfixCtxCreateFn trampoline = nullptr;
+                auto result = hookMgr.create_inline_hook(
+                    "PostfixCtxCreate", ctxCreateAddr,
+                    reinterpret_cast<void *>(on_postfix_ctx_create),
+                    reinterpret_cast<void **>(&trampoline));
+
+                if (result.has_value())
+                {
+                    set_postfix_ctx_create_trampoline(trampoline);
+                    logger.info("PostfixCtxCreate inline hook installed at 0x{:X}",
+                                ctxCreateAddr);
+                }
+                else
+                    logger.warning("PostfixCtxCreate hook failed: {} — NPC hair discrimination unavailable",
+                                   DetourModKit::Hook::error_to_string(result.error()));
+            }
+            else
+            {
+                logger.warning("PostfixCtxCreate AOB scan failed — NPC hair discrimination unavailable");
+            }
+
+            logger.info("Bald fix active");
         }
         else
         {
