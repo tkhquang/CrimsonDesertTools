@@ -86,7 +86,7 @@ PlayerOnly = true
 ; toggling equipment back to visible still works.
 ; Safe to leave false if you are not using such mods.
 ForceShow = false
-; [Experimental] Prevents baldness when hiding helmets/cloaks
+; Prevents baldness when hiding helmets/cloaks/masks
 ; Hair/beard may occasionally disappear; re-toggling the helmet (show then hide) restores it
 BaldFix = true
 ; Prevents hidden equipment from briefly flashing during state transitions

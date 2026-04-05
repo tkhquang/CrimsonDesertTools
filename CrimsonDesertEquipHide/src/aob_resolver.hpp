@@ -179,4 +179,5 @@ namespace EquipHide
          ResolveMode::Direct, -0x6F, 0},
     };
 
+
 } // namespace EquipHide

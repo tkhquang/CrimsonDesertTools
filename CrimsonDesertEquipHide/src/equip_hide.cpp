@@ -347,8 +347,10 @@ namespace EquipHide
             }
         }
 
-        // Prevents baldness when hiding helmets/cloaks by suppressing
-        // the game's postfix rules that hide hair based on equipped gear.
+        // Prevents baldness when hiding helmets/cloaks.  The hook temporarily
+        // sets bit 19 in item+0x70 bitmasks per-call so PostfixEval sees
+        // inactive priority and hair-hiding rules don't match.  Player
+        // context is cached on first populated call; NPC contexts never match.
         if (flag_bald_fix().load(std::memory_order_relaxed))
         {
             auto postfixEvalAddr = resolve_address(
