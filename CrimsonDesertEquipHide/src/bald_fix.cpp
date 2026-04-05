@@ -76,7 +76,13 @@ namespace EquipHide
            When disabled, suppress for all contexts (player + NPC). */
         if (flag_player_only().load(std::memory_order_relaxed) &&
             !is_player_context(context))
+        {
+            static std::atomic<bool> s_loggedSkip{false};
+            if (!s_loggedSkip.exchange(true, std::memory_order_relaxed))
+                DMK::Logger::get_instance().trace(
+                    "BaldFix: skipped NPC context 0x{:X}", context);
             return false;
+        }
 
         return true;
     }
