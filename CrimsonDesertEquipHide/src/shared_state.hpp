@@ -20,6 +20,7 @@ namespace EquipHide
         uintptr_t mapLookup = 0;
         uintptr_t mapInsert = 0;
         uintptr_t indexedStringGlobal = 0;
+        uintptr_t helmVisGate = 0;
     };
 
     ResolvedAddresses &resolved_addrs();
@@ -51,6 +52,7 @@ namespace EquipHide
     std::atomic<bool> &flag_gliding_fix();
     std::atomic<bool> &flag_fallback_mode();
     std::atomic<bool> &flag_independent_toggle();
+    std::atomic<bool> &flag_defer_headgear();
 
     // --- Background thread control ---
     std::atomic<bool> &shutdown_requested();
@@ -74,6 +76,21 @@ namespace EquipHide
         return (addr > 0x10000) ? addr : 0;
     }
 
+    /**
+     * @brief Returns true if the game's built-in headgear visibility is active
+     *        AND the mod is configured to defer to it.
+     * @details Flag check first (relaxed atomic, same cache line as other flags)
+     *          to skip the gate byte read entirely when disabled.
+     */
+    inline bool official_helm_active() noexcept
+    {
+        if (!flag_defer_headgear().load(std::memory_order_relaxed))
+            return false;
+        auto addr = resolved_addrs().helmVisGate;
+        return addr != 0 &&
+               *reinterpret_cast<const volatile uint8_t *>(addr) != 0;
+    }
+
     /** @brief Returns true if the part at the given hash pointer is hidden by any category. */
     inline bool check_part_hidden(uint64_t partHashPtr)
     {
@@ -83,6 +100,10 @@ namespace EquipHide
         if (!needs_classification(partHash))
             return false;
         auto mask = classify_part(partHash);
+        if (mask == 0)
+            return false;
+        if (official_helm_active())
+            mask &= ~k_officialManagedMask;
         return mask != 0 && is_any_category_hidden(mask);
     }
 

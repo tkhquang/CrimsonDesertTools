@@ -14,6 +14,7 @@ namespace EquipHide
     static std::atomic<bool> s_glidingFix{true};
     static std::atomic<bool> s_fallbackMode{false};
     static std::atomic<bool> s_independentToggle{false};
+    static std::atomic<bool> s_deferHeadgear{true};
 
     static std::atomic<bool> s_shutdownRequested{false};
     static std::atomic<bool> s_deferredScanPending{false};
@@ -32,6 +33,7 @@ namespace EquipHide
     std::atomic<bool> &flag_gliding_fix() { return s_glidingFix; }
     std::atomic<bool> &flag_fallback_mode() { return s_fallbackMode; }
     std::atomic<bool> &flag_independent_toggle() { return s_independentToggle; }
+    std::atomic<bool> &flag_defer_headgear() { return s_deferHeadgear; }
 
     std::atomic<bool> &shutdown_requested() { return s_shutdownRequested; }
     std::atomic<bool> &deferred_scan_pending() { return s_deferredScanPending; }

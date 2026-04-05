@@ -104,6 +104,26 @@ namespace EquipHide
     };
 
     /**
+     * @brief Gate byte for the game's built-in headgear visibility system.
+     *
+     * EnumOptionShowPlayerCharacterHelmType: 0=ShowAlways, 1-3=active modes.
+     * When non-zero, the game's decision function (sub_140771990) manages
+     * Helm/Glass/Mask vis bytes on equip change, combat, and cutscene events.
+     *
+     * Pattern targets the movzx that loads the gate byte, followed by a TLS
+     * slot access — distinctive enough to be unique in the binary.
+     */
+    inline constexpr AddrCandidate k_helmVisGateCandidates[] = {
+        {"HVG_P1_MovzxTls",
+         "0F B6 1D ?? ?? ?? ?? BA ?? 00 00 00 65 48 8B 04 25 58 00 00 00",
+         ResolveMode::RipRelative, 3, 7},
+
+        {"HVG_P2_StoreMovzxTls",
+         "C6 45 ?? 01 0F B6 1D ?? ?? ?? ?? BA ?? 00 00 00",
+         ResolveMode::RipRelative, 7, 11},
+    };
+
+    /**
      * @brief Hook target: sub_14081D3C0 — PartInOut transition function.
      *
      * Hook point: movzx eax, byte ptr [r13+1Ch]; cmp al, 3

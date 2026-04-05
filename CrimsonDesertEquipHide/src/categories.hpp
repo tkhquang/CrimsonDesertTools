@@ -188,6 +188,12 @@ namespace EquipHide
         return CategoryMask{1} << static_cast<uint8_t>(cat);
     }
 
+    /** @brief Bitmask of categories managed by the game's built-in headgear visibility system. */
+    inline constexpr CategoryMask k_officialManagedMask =
+        category_bit(Category::Helm) |
+        category_bit(Category::Mask) |
+        category_bit(Category::Glasses);
+
     /**
      * @brief Classify a part hash into a bitmask of all categories it belongs to.
      * @return 0 if the hash is not tracked.

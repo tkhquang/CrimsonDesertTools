@@ -69,10 +69,14 @@ namespace EquipHide
             int injected = 0;
             int existing_set = 0;
             int skipped_key = 0;
+            const bool officialActive = official_helm_active();
 
-            for (const auto &[hash, mask] : get_part_map())
+            for (const auto &[hash, rawMask] : get_part_map())
             {
-                if (!is_any_category_hidden(mask))
+                auto effectiveMask = rawMask;
+                if (officialActive)
+                    effectiveMask &= ~k_officialManagedMask;
+                if (!is_any_category_hidden(effectiveMask))
                     continue;
 
                 auto existing = lookup(mapBase, &hash);
