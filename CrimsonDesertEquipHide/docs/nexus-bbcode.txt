@@ -10,6 +10,7 @@ This mod allows you to hide equipped gear visually in Crimson Desert using custo
 [*]Global show-all / hide-all hotkeys to control every category at once[/*]
 [*][b]User Presets[/b]: 10 custom part groups with independent toggle hotkeys[/*]
 [*]Fully configurable via INI with per-category settings[/*]
+[*][b]IndependentToggle[/b] mode: categories sharing a hotkey flip their own state individually, preserving mixed visible/hidden configurations[/*]
 [*]Open-source with full transparency[/*]
 [/list]
 
@@ -90,6 +91,9 @@ ForceShow = false
 BaldFix = true
 ; Prevents hidden equipment from briefly flashing during state transitions
 GlidingFix = true
+; When categories sharing the same ToggleHotkey have different DefaultHidden
+; values, set to true so each category flips its own state independently.
+IndependentToggle = false
 ; Force all categories visible / hidden at once (empty = disabled)
 ShowAllHotkey =
 HideAllHotkey =
