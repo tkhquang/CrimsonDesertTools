@@ -6,7 +6,8 @@ namespace EquipHide
 {
     /**
      * @brief Postfix rule evaluator hook callback.
-     * @details Suppresses hair-hiding rules when Helm/Cloak is hidden to prevent baldness.
+     * @details Suppresses hair-hiding rules when Helm/Cloak is hidden to
+     *          prevent baldness.  Respects the PlayerOnly flag.
      */
     using PostfixEvalFn = __int64(__fastcall *)(__int64, __int64);
 
