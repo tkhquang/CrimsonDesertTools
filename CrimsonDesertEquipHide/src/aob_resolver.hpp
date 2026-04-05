@@ -179,25 +179,5 @@ namespace EquipHide
          ResolveMode::Direct, -0x6F, 0},
     };
 
-    /**
-     * @brief AOB candidates for sub_1425F0580 — per-actor ConditionalPartPrefab
-     *        context creator / evaluator.
-     *
-     * Called once per actor during postfix rule evaluation.  Stores the actor
-     * descriptor at a1+8 (from *a2) and dispatches condition evaluation,
-     * which eventually calls PostfixEval.  Hooked to set a thread-local
-     * player flag so PostfixEval can discriminate player from NPC.
-     */
-    inline constexpr AddrCandidate k_postfixCtxCreateCandidates[] = {
-        {"PCC_P1_Prologue",
-         "48 89 5C 24 10 48 89 6C 24 18 48 89 74 24 20 48 89 4C 24 08 "
-         "57 41 54 41 55 41 56 41 57 48 83 EC 40 4D 8B F9 45 0F B6 E8",
-         ResolveMode::Direct, 0, 0},
-
-        {"PCC_P2_InnerPrologue",
-         "48 89 4C 24 08 57 41 54 41 55 41 56 41 57 48 83 EC 40 4D 8B F9 "
-         "45 0F B6 E8",
-         ResolveMode::Direct, -0x0F, 0},
-    };
 
 } // namespace EquipHide

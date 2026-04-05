@@ -185,7 +185,7 @@ ToggleHotkey = V,Gamepad_LB+Gamepad_Y
 2. **Mid-Hook** - Intercepts the visibility check and forces `Visible=2` (Out-only) for hidden weapon categories
 3. **Inline Hook** - When GlidingFix is enabled, a secondary hook on the PartAddShow function prevents hidden parts from briefly flashing visible during state transitions (e.g. exiting glide)
 4. **Armor Injection** - Armor parts have no vanilla visibility entries, so the mod injects new map entries via the game's own internal functions
-5. **[Experimental] BaldFix Hook** - Hooks the postfix rule evaluator to suppress hair-hiding rules when Helm or Cloak is hidden, keeping hair visible at runtime without PAZ patching. Hair/beard may occasionally disappear; re-toggling the helmet (show then hide) restores it
+5. **[Experimental] BaldFix Hook** - Hooks the postfix rule evaluator and temporarily sets a priority bitmask override on equipped items per-call, making hair-hiding rules see them as inactive so hair stays visible. Only applies to the player context; NPCs are unaffected. Hair/beard may occasionally disappear; re-toggling the helmet (show then hide) restores it
 6. **Input Management** - DetourModKit's input system handles keyboard, mouse, and gamepad with modifier key combos
 7. **SEH Protection** - Hook callback is wrapped in structured exception handling (MSVC) to prevent crashes
 
