@@ -232,12 +232,15 @@ Safe to leave `false` if you are not using such mods.
 
 ## Known Issues
 
-- **Flight cloak parts cause visual artifacts and squished hair** — `CD_Cloak_Flight` and its variants can cause strange visual artifacts and compressed/squished hair when toggling cloak visibility. These parts have been removed from the default Cloak category. You can re-add them in the INI at your own risk (see the comment in the `[Cloak]` section).
-- **Chest/Legs flickering when toggled independently** — Hiding chest while legs are visible, then toggling legs, can cause pants to flicker on/off. This appears to be a limitation of how the game handles layered armor visibility. Workaround: toggle both chest and legs together using the same hotkey, or set your desired default states via `DefaultHidden` and avoid toggling them separately at runtime.
-- **Dagger permanently visible after hiding one-hand weapons** — Daggers may remain visible and clip with swords occupying the same visual slot. This is a known issue and will be addressed in a future update.
-- Toggle may take 1-3 seconds to take effect.
-- After a major game update, the mod may stop working until a new version is released.
-- Currently only tested with the Steam version of the game.
+| Issue | Details | Workaround |
+| ------- | --------- | ------------ |
+| **Stuttering or FPS drops** | Some users report performance issues in crowded areas. *Not reproducible on my end.* | Try a different ASI Loader DLL (e.g. `version.dll` instead of `winmm.dll`) |
+| **Flight cloak visual artifacts** | `CD_Cloak_Flight` variants cause artifacts and squished hair. Removed from defaults. | Re-add in INI at your own risk (see `[Cloak]` comment) |
+| **Chest/Legs flickering** | Toggling chest and legs independently can cause pants to flicker | Bind both to the same hotkey, or use `DefaultHidden` instead of runtime toggling |
+| **Dagger stays visible** | Daggers may remain visible and clip after hiding one-hand weapons | *Will be addressed in a future update* |
+| **Toggle delay** | Visibility changes can take 1-3 seconds | -- |
+| **Game updates** | Major updates may break the mod until a new version is released | -- |
+| **Steam only** | Only tested with the Steam version | -- |
 
 ## Changelog
 
