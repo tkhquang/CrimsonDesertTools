@@ -41,6 +41,9 @@ namespace EquipHide
         DMK::Config::register_bool("General", "GlidingFix", "Gliding Fix", [](bool val)
                                    { flag_gliding_fix().store(val, std::memory_order_relaxed); }, true);
 
+        DMK::Config::register_bool("General", "IndependentToggle", "Independent Toggle", [](bool val)
+                                   { flag_independent_toggle().store(val, std::memory_order_relaxed); }, false);
+
         DMK::Config::register_key_combo("General", "ShowAllHotkey", "Show All Hotkey", [](const DMK::Config::KeyComboList &combos)
                                         { set_show_all_combos(combos); }, "");
 

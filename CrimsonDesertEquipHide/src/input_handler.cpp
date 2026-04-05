@@ -136,9 +136,20 @@ namespace EquipHide
                 [indices, &logger]()
                 {
                     auto &st = category_states();
-                    const bool newHidden = !st[indices[0]].hidden.load(std::memory_order_relaxed);
-                    for (auto idx : indices)
-                        st[idx].hidden.store(newHidden, std::memory_order_relaxed);
+
+                    if (flag_independent_toggle().load(std::memory_order_relaxed))
+                    {
+                        for (auto idx : indices)
+                            st[idx].hidden.store(
+                                !st[idx].hidden.load(std::memory_order_relaxed),
+                                std::memory_order_relaxed);
+                    }
+                    else
+                    {
+                        const bool newHidden = !st[indices[0]].hidden.load(std::memory_order_relaxed);
+                        for (auto idx : indices)
+                            st[idx].hidden.store(newHidden, std::memory_order_relaxed);
+                    }
 
                     std::string catNames;
                     for (auto idx : indices)
@@ -146,8 +157,11 @@ namespace EquipHide
                         if (!catNames.empty())
                             catNames += ", ";
                         catNames += category_section(static_cast<Category>(idx));
+                        catNames += st[idx].hidden.load(std::memory_order_relaxed)
+                                        ? "(H)"
+                                        : "(V)";
                     }
-                    logger.info("Equip hide toggled [{}]: {}", catNames, newHidden ? "HIDDEN" : "VISIBLE");
+                    logger.info("Equip hide toggled [{}]", catNames);
                     flush_visibility();
                 });
 

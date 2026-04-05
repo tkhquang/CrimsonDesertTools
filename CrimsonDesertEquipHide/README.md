@@ -13,6 +13,7 @@
 - Accessory categories: Earrings, Rings, Necklace, Bags
 - User Presets: 10 custom part groups with independent visibility control (overrides built-in categories)
 - Per-category configuration: enable/disable, toggle/show/hide hotkeys, default hidden state, part list
+- IndependentToggle mode: categories sharing a hotkey flip their own state individually, preserving mixed visible/hidden configurations
 - [Experimental] BaldFix: runtime hair-visibility fix when helmet/cloak is hidden — no PAZ patching needed. Hair/beard may occasionally disappear; re-toggling the helmet (show then hide) restores it
 - GlidingFix: prevents hidden equipment from briefly flashing visible during state transitions (e.g. exiting gliding, cutscene transitions)
 - ForceShow mode for compatibility with mods that alter default equipment visibility via PAZ patching (e.g. character replacers, armor replacers, transmog mods)
@@ -105,6 +106,12 @@ ForceShow = false
 BaldFix = true
 ; Prevents hidden equipment from briefly flashing during state transitions
 GlidingFix = true
+; When multiple categories share the same ToggleHotkey, this controls
+; whether they toggle as a synchronized group (false, default) or each
+; category flips its own state independently (true).
+; Use true when categories on the same key have different DefaultHidden
+; values and you want to preserve mixed visible/hidden states.
+IndependentToggle = false
 ; Force all categories visible / hidden at once (empty = disabled)
 ShowAllHotkey =
 HideAllHotkey =
