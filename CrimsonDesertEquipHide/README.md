@@ -14,6 +14,7 @@
 - User Presets: 10 custom part groups with independent visibility control (overrides built-in categories)
 - Per-category configuration: enable/disable, toggle/show/hide hotkeys, default hidden state, part list
 - IndependentToggle mode: categories sharing a hotkey flip their own state individually, preserving mixed visible/hidden configurations
+- Automatic coexistence with the game's built-in headgear visibility setting (v1.02.00+) — when the in-game setting is anything other than "Show Always", the mod yields Helm, Mask, and Glasses to the official system and only manages the remaining categories. No configuration needed
 - [Experimental] BaldFix: runtime hair-visibility fix when helmet/cloak is hidden — no PAZ patching needed. Hair/beard may occasionally disappear; re-toggling the helmet (show then hide) restores it
 - GlidingFix: prevents hidden equipment from briefly flashing visible during state transitions (e.g. exiting gliding, cutscene transitions)
 - ForceShow mode for compatibility with mods that alter default equipment visibility via PAZ patching (e.g. character replacers, armor replacers, transmog mods)
@@ -112,6 +113,9 @@ GlidingFix = true
 ; Use true when categories on the same key have different DefaultHidden
 ; values and you want to preserve mixed visible/hidden states.
 IndependentToggle = false
+; Yield Helm/Mask/Glasses to the game's built-in headgear visibility
+; setting when active. Set false to always let the mod control headgear.
+DeferHeadgear = true
 ; Force all categories visible / hidden at once (empty = disabled)
 ShowAllHotkey =
 HideAllHotkey =
@@ -185,9 +189,10 @@ ToggleHotkey = V,Gamepad_LB+Gamepad_Y
 2. **Mid-Hook** - Intercepts the visibility check and forces `Visible=2` (Out-only) for hidden weapon categories
 3. **Inline Hook** - When GlidingFix is enabled, a secondary hook on the PartAddShow function prevents hidden parts from briefly flashing visible during state transitions (e.g. exiting glide)
 4. **Armor Injection** - Armor parts have no vanilla visibility entries, so the mod injects new map entries via the game's own internal functions
-5. **[Experimental] BaldFix Hook** - Hooks the postfix rule evaluator to suppress hair-hiding rules when Helm or Cloak is hidden, keeping hair visible at runtime without PAZ patching. Hair/beard may occasionally disappear; re-toggling the helmet (show then hide) restores it
-6. **Input Management** - DetourModKit's input system handles keyboard, mouse, and gamepad with modifier key combos
-7. **SEH Protection** - Hook callback is wrapped in structured exception handling (MSVC) to prevent crashes
+5. **Official Headgear Coexistence** - Detects the game's built-in headgear visibility gate byte at startup. When the official system is active, the mod automatically yields Helm, Mask, and Glasses categories to avoid write conflicts on the shared visibility byte
+6. **[Experimental] BaldFix Hook** - Hooks the postfix rule evaluator to suppress hair-hiding rules when Helm or Cloak is hidden, keeping hair visible at runtime without PAZ patching. Defers to the game's own hair handling when headgear is officially managed. Hair/beard may occasionally disappear; re-toggling the helmet (show then hide) restores it
+7. **Input Management** - DetourModKit's input system handles keyboard, mouse, and gamepad with modifier key combos
+8. **SEH Protection** - Hook callback is wrapped in structured exception handling (MSVC) to prevent crashes
 
 ## Troubleshooting
 
@@ -236,6 +241,34 @@ ForceShow = true
 ```
 
 Safe to leave `false` if you are not using such mods.
+
+## Coexistence with Official Headgear Visibility
+
+Since v1.02.00, Crimson Desert includes a built-in headgear visibility setting (`Options > Game > Show Character Helm`) with modes like "Show Always", "Show on Battle", "Hide on Cutscenes", and "Hide Always". This setting controls Helm, Mask, and Glasses visibility.
+
+When `DeferHeadgear = true` (default), the mod **automatically detects** this setting at runtime:
+
+- **Show Always** (default): The mod manages all categories normally, including Helm, Mask, and Glasses
+- **Any other mode**: The mod yields Helm, Mask, and Glasses to the game's official system and only manages the remaining 17 categories (weapons, shields, cloak, chest, etc.)
+
+The log file will report which mode is active at startup:
+
+```log
+Official headgear visibility: ShowAlways — mod manages all categories
+```
+
+or:
+
+```log
+Official headgear visibility active (mode=3), yielding Helm/Glass/Mask to game
+```
+
+To **always** let the mod control headgear regardless of the game setting, set:
+
+```ini
+[General]
+DeferHeadgear = false
+```
 
 ## Known Issues
 

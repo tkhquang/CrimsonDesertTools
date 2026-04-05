@@ -11,6 +11,7 @@ This mod allows you to hide equipped gear visually in Crimson Desert using custo
 [*][b]User Presets[/b]: 10 custom part groups with independent toggle hotkeys[/*]
 [*]Fully configurable via INI with per-category settings[/*]
 [*][b]IndependentToggle[/b] mode: categories sharing a hotkey flip their own state individually, preserving mixed visible/hidden configurations[/*]
+[*][b]Official headgear coexistence[/b]: auto-detects the game's built-in headgear visibility setting (v1.02.00+) and yields Helm/Mask/Glasses when the official system is active[/*]
 [*]Open-source with full transparency[/*]
 [/list]
 
@@ -94,6 +95,9 @@ GlidingFix = true
 ; When categories sharing the same ToggleHotkey have different DefaultHidden
 ; values, set to true so each category flips its own state independently.
 IndependentToggle = false
+; Yield Helm/Mask/Glasses to the game's built-in headgear visibility setting
+; when active. Set false to always let the mod control headgear.
+DeferHeadgear = true
 ; Force all categories visible / hidden at once (empty = disabled)
 ShowAllHotkey =
 HideAllHotkey =
@@ -172,6 +176,17 @@ ForceShow = true
 [/code]
 
 Safe to leave [b]false[/b] if you are not using such mods.
+
+[size=5]Coexistence with Official Headgear Visibility[/size]
+Since v1.02.00, Crimson Desert includes a built-in headgear visibility setting ([b]Options > Game > Show Character Helm[/b]) with modes like "Show Always", "Show on Battle", "Hide on Cutscenes", and "Hide Always". This setting controls Helm, Mask, and Glasses visibility.
+
+When [b]DeferHeadgear = true[/b] (default), the mod [b]automatically detects[/b] this setting at runtime:
+[list]
+[*] [b]Show Always[/b] (default): The mod manages all categories normally, including Helm, Mask, and Glasses
+[*] [b]Any other mode[/b]: The mod yields Helm, Mask, and Glasses to the game's official system and only manages the remaining 17 categories (weapons, shields, cloak, chest, etc.)
+[/list]
+
+To always let the mod control headgear regardless of the game setting, set [b]DeferHeadgear = false[/b] in [b][General][/b].
 
 [size=5]User Presets[/size]
 The INI file includes three [b]UserPreset[/b] sections (UserPreset1, UserPreset2, UserPreset3) that let you create custom part groups with independent visibility control.

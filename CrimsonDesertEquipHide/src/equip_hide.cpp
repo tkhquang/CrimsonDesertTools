@@ -44,6 +44,9 @@ namespace EquipHide
         DMK::Config::register_bool("General", "IndependentToggle", "Independent Toggle", [](bool val)
                                    { flag_independent_toggle().store(val, std::memory_order_relaxed); }, false);
 
+        DMK::Config::register_bool("General", "DeferHeadgear", "Defer Headgear", [](bool val)
+                                   { flag_defer_headgear().store(val, std::memory_order_relaxed); }, true);
+
         DMK::Config::register_key_combo("General", "ShowAllHotkey", "Show All Hotkey", [](const DMK::Config::KeyComboList &combos)
                                         { set_show_all_combos(combos); }, "");
 
@@ -153,7 +156,12 @@ namespace EquipHide
         if (!needs_classification(partHash))
             return;
 
-        const auto mask = classify_part(partHash);
+        auto mask = classify_part(partHash);
+        if (mask == 0)
+            return;
+
+        if (official_helm_active())
+            mask &= ~k_officialManagedMask;
         if (mask == 0)
             return;
 
@@ -243,6 +251,9 @@ namespace EquipHide
             }
         }
 
+        /* Gate byte resolution is deferred until after load_config() reads the
+           DeferHeadgear flag. See the block after load_config() below. */
+
         if (!addrs.worldSystem || !addrs.childActorVtbl)
         {
             flag_fallback_mode().store(true, std::memory_order_relaxed);
@@ -276,6 +287,34 @@ namespace EquipHide
         }
 
         load_config();
+
+        if (flag_defer_headgear().load(std::memory_order_relaxed))
+        {
+            addrs.helmVisGate = resolve_address(
+                k_helmVisGateCandidates, std::size(k_helmVisGateCandidates),
+                "HelmVisGate");
+
+            if (addrs.helmVisGate)
+            {
+                auto gateValue = *reinterpret_cast<const uint8_t *>(addrs.helmVisGate);
+                if (gateValue != 0)
+                    logger.info("Official headgear visibility active (mode={}), "
+                                "yielding Helm/Glass/Mask to game",
+                                gateValue);
+                else
+                    logger.info("Official headgear visibility: ShowAlways "
+                                "— mod manages all categories");
+            }
+            else
+            {
+                logger.info("HelmVisGate not resolved — mod manages all categories");
+            }
+        }
+        else
+        {
+            logger.info("DeferHeadgear disabled — mod manages all categories");
+        }
+
         original_vis_map().reserve(get_part_map().size());
 
         std::vector<CompiledCandidate> compiledCandidates;

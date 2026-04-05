@@ -42,7 +42,9 @@ namespace EquipHide
                     continue;
                 auto mapBase = descNode + 0x20;
 
-                for (const auto &[hash, mask] : get_part_map())
+                const bool officialActive = official_helm_active();
+
+                for (const auto &[hash, rawMask] : get_part_map())
                 {
                     auto entry = lookup(mapBase, &hash);
                     if (!entry)
@@ -51,7 +53,24 @@ namespace EquipHide
                     const auto visAddr = entry + 0x1C;
                     auto *visPtr = reinterpret_cast<uint8_t *>(visAddr);
 
-                    if (is_any_category_hidden(mask))
+                    auto effectiveMask = rawMask;
+                    if (officialActive)
+                        effectiveMask &= ~k_officialManagedMask;
+
+                    if (effectiveMask == 0)
+                    {
+                        auto it = origVis.find(visAddr);
+                        if (it != origVis.end())
+                        {
+                            const auto restored = (it->second == 2) ? 0 : it->second;
+                            *visPtr = static_cast<uint8_t>(restored);
+                            origVis.erase(it);
+                            ++restoredCount;
+                        }
+                        continue;
+                    }
+
+                    if (is_any_category_hidden(effectiveMask))
                     {
                         if (origVis.find(visAddr) == origVis.end())
                             origVis[visAddr] = *visPtr;

@@ -54,6 +54,11 @@ namespace EquipHide
         {
             if (!is_hair_hiding_rule(ruleObj))
                 return false;
+            /* When the game's headgear visibility system is active, it handles
+               its own hair rules for Helm. Only suppress for Cloak (which the
+               official system does not manage). */
+            if (official_helm_active())
+                return is_category_hidden(Category::Cloak);
             return is_category_hidden(Category::Helm) ||
                    is_category_hidden(Category::Cloak);
         }
