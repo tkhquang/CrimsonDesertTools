@@ -1,5 +1,5 @@
 # IDE / editor
-.idea/*
+.idea
 .vscode/*
 
 # Build artifacts
@@ -18,3 +18,6 @@ Desktop.ini
 # Python
 __pycache__/
 *.pyc
+
+# Personal files
+.claude

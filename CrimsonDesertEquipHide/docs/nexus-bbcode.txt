@@ -1,23 +1,16 @@
-[size=6]Gear Hider - Equipment Visibility Toggle for Armor Weapons Helmet & More[/size]
-
-[center][size=5][color=#e6a800]⚠ This mod replaces [url=https://www.nexusmods.com/crimsondesert/mods/166]Weapon Hider - Equipment Visibility Toggle[/url] ⚠[/color][/size]
-If you were using the old mod, please [b]uninstall it first[/b] (remove the old .asi and .ini files), then install this version.
-This is a complete upgrade with expanded scope. All weapon hiding features are included, plus full armor, helmet, cloak, and accessory support.[/center]
+[size=6]Gear Hider - Equipment Visibility Toggle for Armor Weapon Helmet and More[/size]
 
 [size=5]Description[/size]
 This mod allows you to hide equipped gear visually in Crimson Desert using customizable hotkeys. Toggle visibility per category for weapons, shields, bows, armor, tools, and lanterns. Perfect for cleaner screenshots, aesthetic character builds, or simply enjoying the world without gear clutter.
 
 [size=5]Key Features[/size]
 [list]
-[*] Toggle, force-show, or force-hide equipment visibility per category with hotkeys
-[*] Global show-all / hide-all hotkeys to control every category at once
-[*] Weapon categories: One-Hand Weapons, Two-Hand Weapons, Shields, Bows, Special Weapons, Tools, Lanterns
-[*] Armor categories: Helm, Chest, Legs, Gloves, Boots, Cloak, Shoulder, Mask, Glasses
-[*] Accessory categories: Earrings, Rings, Necklace, Bags
-[*] User Presets: 10 custom part groups to combine parts from any category into a single toggle
-[*] Per-category configuration: enable/disable, toggle/show/hide hotkeys, default hidden state, part list
-[*] Fully customizable settings through INI configuration
-[*] Open-source with full transparency
+[*]Toggle, show, or hide equipped gear per category with customizable hotkeys[/*]
+[*][b]20 built-in categories[/b] covering weapons, shields, bows, armor pieces, accessories, tools, and lanterns[/*]
+[*]Global show-all / hide-all hotkeys to control every category at once[/*]
+[*][b]User Presets[/b]: 10 custom part groups with independent toggle hotkeys[/*]
+[*]Fully configurable via INI with per-category settings[/*]
+[*]Open-source with full transparency[/*]
 [/list]
 
 [size=5]Requirements[/size]
@@ -198,13 +191,15 @@ Parts = CD_Helm, CD_Cloak, CD_Shoulder
 In this example, pressing [b]V[/b] would still toggle Shields and Masks, but Helm would only respond to [b]F5[/b] because UserPreset1 owns it.
 
 [size=5]Known Issues[/size]
+
 [list]
-[*] [b]Flight cloak parts cause visual artifacts and squished hair[/b] -CD_Cloak_Flight and its variants can cause strange visual artifacts and compressed/squished hair when toggling cloak visibility. These parts have been removed from the default Cloak category. You can re-add them in the INI at your own risk (see the comment in the [Cloak] section).
-[*] [b]Chest/Legs flickering when toggled independently[/b] -Hiding chest while legs are visible, then toggling legs, can cause pants to flicker on/off. Workaround: toggle both chest and legs together using the same hotkey, or set your desired default states via DefaultHidden and avoid toggling them separately at runtime.
-[*] [b]Dagger permanently visible after hiding one-hand weapons[/b] -Daggers may remain visible and clip with swords occupying the same visual slot. Will be addressed in a future update.
-[*] Toggle may take 1-3 seconds to take effect
-[*] After a major game update, the mod may stop working until a new version is released
-[*] Currently only tested with the Steam version of the game
+[*] [b]Stuttering or FPS drops[/b] - Some users report performance issues in crowded areas. [i]Not reproducible on my end.[/i] [i]Workaround:[/i] try a different ASI Loader DLL (e.g. [b]version.dll[/b] instead of [b]winmm.dll[/b]).
+[*] [b]Flight cloak visual artifacts[/b] - [b]CD_Cloak_Flight[/b] variants cause artifacts and squished hair. Removed from defaults; re-add in INI at your own risk (see [b][Cloak][/b] comment).
+[*] [b]Chest/Legs flickering[/b] - Toggling chest and legs independently can cause pants to flicker. [i]Workaround:[/i] bind both to the same hotkey, or use [b]DefaultHidden[/b] instead of runtime toggling.
+[*] [b]Dagger stays visible[/b] - Daggers may remain visible and clip after hiding one-hand weapons. [i]Will be addressed in a future update.[/i]
+[*] Toggle may take 1-3 seconds to take effect.
+[*] Major game updates may break the mod until a new version is released.
+[*] Only tested with the Steam version.
 [/list]
 
 [size=5]Troubleshooting[/size]
@@ -214,8 +209,6 @@ If you encounter issues:
 [*] Check the log file in your game directory ([b]CrimsonDesertEquipHide.log[/b])
 [*] For memory pattern errors, the mod needs an update for the current game version
 [/list]
-
-[b]After a game update:[/b] The AOB pattern scanning system automatically adapts to minor game changes, but major updates may require mod updates if core game functions have been modified.
 
 [size=5]Credits & Source Code[/size]
 Built with [url=https://github.com/tkhquang/DetourModKit]DetourModKit[/url] for core functionality.
