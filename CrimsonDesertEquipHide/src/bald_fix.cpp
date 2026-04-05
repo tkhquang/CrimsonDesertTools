@@ -58,9 +58,24 @@ namespace EquipHide
         }
     }
 
-    /* Temporarily set bit 19 on active items for one PostfixEval call,
-       then restore.  Only called for hair-hiding rules on the player
-       context, so other rules and NPC contexts are unaffected. */
+    /* Build a bitmask of hidden head-covering categories for per-item
+       filtering.  Only items belonging to a hidden category get the
+       priority override — items for shown categories keep their original
+       bitmask so PostfixEval still hides hair/beard under them. */
+    static CategoryMask hidden_headgear_mask() noexcept
+    {
+        CategoryMask mask = 0;
+        if (is_category_hidden(Category::Helm))  mask |= category_bit(Category::Helm);
+        if (is_category_hidden(Category::Cloak)) mask |= category_bit(Category::Cloak);
+        if (is_category_hidden(Category::Mask))  mask |= category_bit(Category::Mask);
+        return mask;
+    }
+
+    /* Temporarily set bit 19 on items whose category is hidden, call
+       the original PostfixEval, then restore.  Only items belonging to
+       a hidden headgear category are overridden — e.g. hiding Mask only
+       overrides Mask items (beard stays visible) while Helm items keep
+       their bitmask (hair hidden under helmet as normal). */
     static __int64 eval_with_priority_override(
         __int64 ruleObj, __int64 context) noexcept
     {
@@ -69,6 +84,8 @@ namespace EquipHide
 
         if (itemsPtr < 0x10000 || itemCount == 0 || itemCount > k_maxItems)
             return s_originalPostfixEval(ruleObj, context);
+
+        auto hiddenMask = hidden_headgear_mask();
 
         uintptr_t patchedItems[k_maxItems];
         uint32_t  originalValues[k_maxItems];
@@ -82,6 +99,15 @@ namespace EquipHide
             if (item < 0x10000)
                 continue;
             if (*reinterpret_cast<uint8_t *>(item + 0x88) == 0)
+                continue;
+
+            /* Only override items whose part hash belongs to a hidden
+               head-covering category. */
+            auto partHash = *reinterpret_cast<uint32_t *>(item + 0x48);
+            if (!needs_classification(partHash))
+                continue;
+            auto partCat = classify_part(partHash);
+            if ((partCat & hiddenMask) == 0)
                 continue;
 
             auto *bm = reinterpret_cast<uint32_t *>(item + 0x70);
@@ -127,12 +153,14 @@ namespace EquipHide
                 }
 
                 /* Only override for the player context + hair-hiding rules
-                   + helm/cloak hidden.  NPC contexts have different addresses
-                   and are never matched. */
+                   + any head-covering gear hidden.  Per-item category
+                   filtering ensures only items for hidden categories are
+                   overridden.  NPC contexts have different addresses. */
                 if (ctx == s_cachedContext.load(std::memory_order_relaxed) &&
                     is_hair_hiding_rule(ruleObj) &&
                     (is_category_hidden(Category::Helm) ||
-                     is_category_hidden(Category::Cloak)))
+                     is_category_hidden(Category::Cloak) ||
+                     is_category_hidden(Category::Mask)))
                 {
                     static std::atomic<bool> s_logged{false};
                     if (!s_logged.exchange(true, std::memory_order_relaxed))
