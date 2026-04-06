@@ -24,7 +24,6 @@ namespace EquipHide
             auto lookup = reinterpret_cast<MapLookupFn>(addrs.mapLookup);
             auto &ps = player_state();
             auto &origVis = original_vis_map();
-            const bool cascadeOn = flag_cascade_fix().load(std::memory_order_relaxed);
             const auto n = ps.count.load(std::memory_order_relaxed);
             int hiddenCount = 0;
             int restoredCount = 0;
@@ -56,10 +55,7 @@ namespace EquipHide
                     {
                         if (origVis.find(visAddr) == origVis.end())
                             origVis[visAddr] = *visPtr;
-                        // Don't overwrite vis=3 lock -- cascade workaround
-                        // already holds this part in the skipped state.
-                        if (!(cascadeOn && *visPtr == 3))
-                            *visPtr = 2;
+                        *visPtr = 2;
                         ++hiddenCount;
                         logger.trace("  [{}] 0x{:04X} hidden (vis=2)",
                                      i, hash);

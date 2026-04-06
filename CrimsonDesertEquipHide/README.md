@@ -243,7 +243,7 @@ Safe to leave `false` if you are not using such mods.
 | ------- | --------- | ------------ |
 | **Stuttering or FPS drops** | Some users report performance issues in crowded areas. *Not reproducible on my end.* | Try a different ASI Loader DLL (e.g. `version.dll` instead of `winmm.dll`) |
 | **Flight cloak visual artifacts** | `CD_Cloak_Flight` variants cause artifacts and squished hair. Removed from defaults. | Re-add in INI at your own risk (see `[Cloak]` comment) |
-| **Chest/Legs flickering** | Hiding chest armor can cause pants to flicker | Enable `CascadeFix = true` in INI (experimental). Hiding legs while chest is visible may not stick. |
+| **Chest/Legs flickering** | Hiding chest armor can cause pants to flicker | Enable `CascadeFix = true` in INI (experimental). Some armor (e.g. Bandit Cloth) may show invisible torso or missing upper body parts when hiding chest with legs visible. Reloading a save may briefly show armor during loading. |
 | **Dagger stays visible** | Daggers may remain visible and clip after hiding one-hand weapons | *Will be addressed in a future update* |
 | **Toggle delay** | Visibility changes can take 1-3 seconds | -- |
 | **Game updates** | Major updates may break the mod until a new version is released | -- |

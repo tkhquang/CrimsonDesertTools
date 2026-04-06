@@ -52,6 +52,7 @@ set(COMMON_SOURCES
     src/visibility_write.cpp
     src/armor_injection.cpp
     src/bald_fix.cpp
+    src/cascade_suppress.cpp
     src/gliding_fix.cpp
     src/background_threads.cpp
     src/input_handler.cpp

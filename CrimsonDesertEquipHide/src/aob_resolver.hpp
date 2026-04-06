@@ -49,21 +49,21 @@ namespace EquipHide
 
     inline constexpr AddrCandidate k_worldSystemCandidates[] = {
         {"WS_P1_SmallFunc",
-         "48 83 EC 28 48 8B 0D ?? ?? ?? ?? 48 8B 49 50 E8 ?? ?? ?? ?? 84 C0 0F 94 C0 48 83 C4 28 C3",
+         "48 83 EC 28 48 8B 0D ?? ?? ?? ?? 48 8B 49 ?? E8 ?? ?? ?? ?? 84 C0 0F 94 C0 48 83 C4 28 C3",
          ResolveMode::RipRelative, 7, 11},
 
         {"WS_P2_StructField",
-         "80 B8 49 01 00 00 00 75 ?? 48 8B 05 ?? ?? ?? ?? 48 8B 88 D8 00 00 00",
+         "80 B8 ?? ?? ?? ?? 00 75 ?? 48 8B 05 ?? ?? ?? ?? 48 8B 88 ?? ?? ?? ??",
          ResolveMode::RipRelative, 12, 16},
 
         {"WS_P3_InnerLoad",
-         "48 8B 0D ?? ?? ?? ?? 48 8B 49 50 E8 ?? ?? ?? ?? 84 C0 0F 94 C0",
+         "48 8B 0D ?? ?? ?? ?? 48 8B 49 ?? E8 ?? ?? ?? ?? 84 C0 0F 94 C0",
          ResolveMode::RipRelative, 3, 7},
     };
 
     inline constexpr AddrCandidate k_childActorVtblCandidates[] = {
         {"VT_P1_AllocCtor",
-         "48 8B 55 08 48 89 F1 E8 ?? ?? ?? ?? 90 48 8D 05 ?? ?? ?? ?? 48 89 06 EB ??",
+         "48 8B 55 ?? 48 89 F1 E8 ?? ?? ?? ?? 90 48 8D 05 ?? ?? ?? ?? 48 89 06 EB ??",
          ResolveMode::RipRelative, 16, 20},
 
         {"VT_P2_CtorStore",
@@ -71,7 +71,7 @@ namespace EquipHide
          ResolveMode::RipRelative, 12, 16},
 
         {"VT_P3_WiderCtorStore",
-         "45 31 ED 48 85 F6 74 ?? 48 8B 55 08 48 89 F1 E8 ?? ?? ?? ?? 90 48 8D 05",
+         "45 31 ED 48 85 F6 74 ?? 48 8B 55 ?? 48 89 F1 E8 ?? ?? ?? ?? 90 48 8D 05",
          ResolveMode::RipRelative, 24, 28},
     };
 
@@ -81,11 +81,11 @@ namespace EquipHide
          ResolveMode::Direct, 0, 0},
 
         {"ML_P2_HashBody",
-         "8B 48 58 48 03 D2 44 8B 5C D1 08 41 8B 08 85 C9 74 ?? 33 D2 41 8B C3 F7 F1",
+         "8B 48 ?? 48 03 D2 44 8B 5C D1 ?? 41 8B 08 85 C9 74 ?? 33 D2 41 8B C3 F7 F1",
          ResolveMode::Direct, -0x24, 0},
 
         {"ML_P3_HashLoop",
-         "44 8B CA 33 D2 49 C1 E1 08 4D 03 48 10 45 8B 11 45 85 D2",
+         "44 8B CA 33 D2 49 C1 E1 08 4D 03 48 ?? 45 8B 11 45 85 D2",
          ResolveMode::Direct, -0x3D, 0},
     };
 
@@ -122,12 +122,12 @@ namespace EquipHide
          0},
 
         {"P2_WiderContext",
-         "45 32 C0 48 8B 4D ?? 48 8B 41 38 8B 49 40 48 C1 E1 04 48 03 C8 48 3B C1 74 ?? 41 8B 12",
+         "45 32 C0 48 8B 4D ?? 48 8B 41 ?? 8B 49 ?? 48 C1 E1 04 48 03 C8 48 3B C1 74 ?? 41 8B 12",
          0x36},
 
-        {"P3_ShortCore",
-         "41 0F B6 45 1C 3C 03",
-         0},
+        {"P3_PrecedingGate",
+         "41 B0 01 41 0F B6 45 1C 3C 03 74 ?? 45 84 C0",
+         3},
     };
 
     /**
@@ -143,17 +143,17 @@ namespace EquipHide
      */
     inline constexpr AddrCandidate k_partAddShowCandidates[] = {
         {"PAS_P1_Prologue",
-         "40 55 56 57 41 55 48 83 EC 48 48 8B 79 38",
+         "40 55 56 57 41 55 48 83 EC ?? 48 8B 79 ??",
          ResolveMode::Direct, 0, 0},
 
-        // Post-prologue: sub rsp,48; mov rdi,[rcx+38]; mov r13,r8; mov r9d,[rcx+40]
+        // Post-prologue: sub rsp,??; mov rdi,[rcx+??]; mov r13,r8; mov r9d,[rcx+??]
         {"PAS_P2_PostPrologue",
-         "48 83 EC 48 48 8B 79 38 4D 8B E8 44 8B 49 40",
+         "48 83 EC ?? 48 8B 79 ?? 4D 8B E8 44 8B 49 ??",
          ResolveMode::Direct, -6, 0},
 
-        // SIMD save + shift: movaps [rsp+30],xmm6; shl rax,04; movaps xmm6,xmm3; add rax,rdi
+        // SIMD save + shift: movaps [rsp+??],xmm6; shl rax,04; movaps xmm6,xmm3; add rax,rdi
         {"PAS_P3_SimdBody",
-         "0F 29 74 24 30 48 C1 E0 04 0F 28 F3 48 03 C7",
+         "0F 29 74 24 ?? 48 C1 E0 04 0F 28 F3 48 03 C7",
          ResolveMode::Direct, -0x1B, 0},
     };
 
@@ -167,17 +167,71 @@ namespace EquipHide
     inline constexpr AddrCandidate k_postfixEvalCandidates[] = {
         {"PFE_P1_PrologueAndBody",
          "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 41 56 41 57 "
-         "48 83 EC 50 4C 8B FA 48 8B 5A 58 8B 42 60 48 8D 3C C3",
+         "48 83 EC ?? 4C 8B FA 48 8B 5A ?? 8B 42 ?? 48 8D 3C C3",
          ResolveMode::Direct, 0, 0},
 
         {"PFE_P2_UniqueBody",
-         "48 83 EC 50 4C 8B FA 48 8B 5A 58 8B 42 60 48 8D 3C C3 48 3B",
+         "48 83 EC ?? 4C 8B FA 48 8B 5A ?? 8B 42 ?? 48 8D 3C C3 48 3B",
          ResolveMode::Direct, -0x14, 0},
 
         {"PFE_P3_LoopInit",
-         "45 33 F6 44 89 74 24 28 C7 44 24 2C 08 00 00 00 49 8B 5F 58 41 8B 47 60",
+         "45 33 F6 44 89 74 24 ?? C7 44 24 ?? ?? 00 00 00 49 8B 5F ?? 41 8B 47 ??",
          ResolveMode::Direct, -0x6F, 0},
     };
 
+
+    /**
+     * @brief Inline hook: VisualEquipChange (sub_14076D520).
+     *
+     * Bottleneck for all visual equipment changes (equip and unequip).
+     * Called from the network handler for TrocTrAddVisualEquipItemAck.
+     *
+     * Signature (x64 __fastcall):
+     *   __int64 sub_14076D520(
+     *       __int64 bodyComp,    // RCX  ClientFrameEventActorComponent*
+     *       int16_t slotId,      // DX   equipment slot
+     *       int16_t itemId,      // R8W  new item (0xFFFF = removing)
+     *       __int64 itemData)    // R9   item data pointer
+     */
+    inline constexpr AddrCandidate k_visualEquipChangeCandidates[] = {
+        {"VEC_P1_FullPrologue",
+         "48 89 5C 24 10 48 89 74 24 20 66 44 89 44 24 18 "
+         "55 57 41 54 41 56 41 57 48 8D AC 24 ?? ?? ?? ?? "
+         "B8 ?? ?? ?? ??",
+         ResolveMode::Direct, 0, 0},
+
+        {"VEC_P2_PushFrame",
+         "55 57 41 54 41 56 41 57 "
+         "48 8D AC 24 E0 EA FF FF B8 20 16 00 00",
+         ResolveMode::Direct, -0x10, 0},
+
+        // Post-alloca register shuffle: sub rsp,rax; mov rsi,r9; movzx ebx,r8w; movzx edi,dx; mov r14,rcx
+        {"VEC_P3_PostAlloca",
+         "48 2B E0 49 8B F1 41 0F B7 D8 0F B7 FA 4C 8B F1",
+         ResolveMode::Direct, -0x2A, 0},
+    };
+
+    /**
+     * @brief Inline hook: VisualEquipSwap (sub_14075BBF0).
+     *
+     * Handles direct item-to-item swaps (bypasses VisualEquipChange).
+     * Both paths converge on sub_14075C420 (EquipChangeDispatch).
+     */
+    inline constexpr AddrCandidate k_visualEquipSwapCandidates[] = {
+        {"VES_P1_FullPrologue",
+         "48 89 5C 24 10 55 56 57 41 54 41 55 41 56 41 57 "
+         "48 8D AC 24 30 ED FF FF B8 D0 13 00 00",
+         ResolveMode::Direct, 0, 0},
+
+        {"VES_P2_PushFrame",
+         "55 56 57 41 54 41 55 41 56 41 57 "
+         "48 8D AC 24 30 ED FF FF B8 D0 13 00 00",
+         ResolveMode::Direct, -5, 0},
+
+        // Post-alloca register shuffle: sub rsp,rax; mov r15,r8; mov r12,rdx; mov rsi,rcx; mov r14,[rcx+??]
+        {"VES_P3_PostAlloca",
+         "48 2B E0 4D 8B F8 4C 8B E2 48 8B F1 4C 8B 71 ??",
+         ResolveMode::Direct, -0x22, 0},
+    };
 
 } // namespace EquipHide

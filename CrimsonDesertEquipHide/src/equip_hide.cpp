@@ -3,6 +3,7 @@
 #include "armor_injection.hpp"
 #include "background_threads.hpp"
 #include "bald_fix.hpp"
+#include "cascade_suppress.hpp"
 #include "categories.hpp"
 #include "constants.hpp"
 #include "gliding_fix.hpp"
@@ -22,9 +23,18 @@
 
 namespace EquipHide
 {
-    // Indexed by truncated part hash; vis=3 lock prevents PartInOut re-running
-    // the transition dispatch after the first vis=2 frame (cascade workaround).
+    // Indexed by truncated part hash; R8B gate-skip lock prevents PartInOut
+    // from re-running the transition dispatch after the first vis=2 frame.
     static uint8_t s_hideLocked[0x10000]{};
+
+    // Brief guard window after any hotkey toggle.  Prevents cascade from
+    // other armor slots (shield/helm) from briefly hiding legs.
+    static std::atomic<int> s_flushGuard{0};
+
+    static constexpr CategoryMask k_cascadeBodyMask =
+        category_bit(Category::Legs) |
+        category_bit(Category::Gloves) |
+        category_bit(Category::Boots);
 
     // --- Config ---
     static void load_config()
@@ -132,8 +142,33 @@ namespace EquipHide
         if (needs_direct_write().load(std::memory_order_relaxed) &&
             needs_direct_write().exchange(false, std::memory_order_relaxed))
         {
+            // Clear stale locks on vis ctrl change (save load, zone
+            // transition) so chest gets a fresh first-frame transition.
+            if (flag_cascade_fix().load(std::memory_order_relaxed))
+                std::memset(s_hideLocked, 0, sizeof(s_hideLocked));
+
             inject_armor_entries();
             apply_direct_vis_write();
+        }
+
+        // Equipment change re-sync with debounce (CascadeFix only).
+        if (flag_cascade_fix().load(std::memory_order_relaxed))
+        {
+            static int64_t s_equipPending = 0;
+            if (consume_equip_change())
+                s_equipPending = steady_ms();
+
+            if (s_equipPending > 0)
+            {
+                static uint32_t s_debTick = 0;
+                if ((++s_debTick & 0x3F) == 0 &&
+                    (steady_ms() - s_equipPending) > 500)
+                {
+                    for (int i = 0; i < 0x10000; ++i)
+                        if (s_hideLocked[i] == 1) s_hideLocked[i] = 2;
+                    s_equipPending = 0;
+                }
+            }
         }
 
         if (deferred_scan_pending().load(std::memory_order_relaxed))
@@ -171,15 +206,45 @@ namespace EquipHide
 
         const bool cascadeOn = flag_cascade_fix().load(std::memory_order_relaxed);
         const auto hashIdx = static_cast<uint16_t>(partHash);
+        const bool isChest = (mask & category_bit(Category::Chest)) != 0;
 
-        // Apply vis=3 lock BEFORE player filter so stale MapNodes from
-        // previous vis_ctrl owners can't slip through and un-hide parts.
-        if (cascadeOn &&
+        // Protect legs from cascade during the brief window after a
+        // hotkey toggle (e.g. shield show/hide triggers a re-evaluation
+        // that would otherwise flash the pants).
+        if (cascadeOn)
+        {
+            auto guard = s_flushGuard.load(std::memory_order_relaxed);
+            if (guard > 0 &&
+                s_flushGuard.compare_exchange_strong(
+                    guard, guard - 1, std::memory_order_relaxed))
+            {
+                if ((mask & k_cascadeBodyMask) != 0 &&
+                    !is_any_category_hidden(mask) &&
+                    is_category_hidden(Category::Chest))
+                {
+                    ctx.r8 = 1;
+                    return;
+                }
+            }
+        }
+
+        // Chest lock state machine (BEFORE player filter):
+        //   0 = unlocked -- first frame, let gate pass
+        //   1 = locked   -- R8B=1, skip gate
+        //   2 = re-equip -- force vis=0 (In, recreate scene nodes)
+        if (cascadeOn && isChest &&
             s_hideLocked[hashIdx] &&
             is_any_category_hidden(mask))
         {
             auto *visPtr = reinterpret_cast<uint8_t *>(r13 + 0x1C);
-            *visPtr = 3;
+            if (s_hideLocked[hashIdx] == 2)
+            {
+                *visPtr = 0;
+                s_hideLocked[hashIdx] = 0;
+                return;
+            }
+            *visPtr = 2;
+            ctx.r8 = 1;
             return;
         }
 
@@ -190,26 +255,19 @@ namespace EquipHide
         if (is_any_category_hidden(mask))
         {
             auto *visPtr = reinterpret_cast<uint8_t *>(r13 + 0x1C);
-            if (cascadeOn && s_hideLocked[hashIdx])
+            *visPtr = 2;
+            if (cascadeOn && isChest)
             {
-                *visPtr = 3; // lock: PartInOut skips all processing
-            }
-            else
-            {
-                *visPtr = 2; // first frame: transition Out
-                if (cascadeOn)
+                if (s_hideLocked[hashIdx])
+                    ctx.r8 = 1; // gate skip on locked frames
+                else
                     s_hideLocked[hashIdx] = 1;
             }
         }
         else
         {
-            if (cascadeOn)
-            {
+            if (cascadeOn && isChest)
                 s_hideLocked[hashIdx] = 0;
-                auto *visPtr = reinterpret_cast<uint8_t *>(r13 + 0x1C);
-                if (*visPtr == 3)
-                    *visPtr = 0; // restore from lock
-            }
 
             if (flag_force_show().load(std::memory_order_relaxed))
             {
@@ -427,6 +485,58 @@ namespace EquipHide
             logger.info("BaldFix disabled in config — hair-hiding rules will apply normally");
         }
 
+        // Equipment change detection for CascadeFix re-sync.
+        // Clears the R8B gate-skip locks when chest armor is changed
+        // so the new gear gets a fresh Out transition.
+        if (flag_cascade_fix().load(std::memory_order_relaxed))
+        {
+            auto vecAddr = resolve_address(
+                k_visualEquipChangeCandidates,
+                std::size(k_visualEquipChangeCandidates),
+                "VisualEquipChange");
+
+            if (vecAddr)
+            {
+                VisualEquipChangeFn trampoline = nullptr;
+                auto result = hookMgr.create_inline_hook(
+                    "VisualEquipChange", vecAddr,
+                    reinterpret_cast<void *>(on_visual_equip_change),
+                    reinterpret_cast<void **>(&trampoline));
+
+                if (result.has_value())
+                {
+                    set_visual_equip_change_trampoline(trampoline);
+                    logger.info("VisualEquipChange hook installed at 0x{:X}", vecAddr);
+                }
+                else
+                    logger.warning("VisualEquipChange hook failed: {}",
+                                   DetourModKit::Hook::error_to_string(result.error()));
+            }
+
+            auto vesAddr = resolve_address(
+                k_visualEquipSwapCandidates,
+                std::size(k_visualEquipSwapCandidates),
+                "VisualEquipSwap");
+
+            if (vesAddr)
+            {
+                VisualEquipSwapFn trampoline = nullptr;
+                auto result = hookMgr.create_inline_hook(
+                    "VisualEquipSwap", vesAddr,
+                    reinterpret_cast<void *>(on_visual_equip_swap),
+                    reinterpret_cast<void **>(&trampoline));
+
+                if (result.has_value())
+                {
+                    set_visual_equip_swap_trampoline(trampoline);
+                    logger.info("VisualEquipSwap hook installed at 0x{:X}", vesAddr);
+                }
+                else
+                    logger.warning("VisualEquipSwap hook failed: {}",
+                                   DetourModKit::Hook::error_to_string(result.error()));
+            }
+        }
+
         register_hotkeys();
 
         auto &inputMgr = DMK::InputManager::get_instance();
@@ -440,6 +550,11 @@ namespace EquipHide
         return true;
     }
 
+    void arm_flush_guard() noexcept
+    {
+        if (flag_cascade_fix().load(std::memory_order_relaxed))
+            s_flushGuard.store(500, std::memory_order_relaxed);
+    }
 
     void shutdown()
     {
