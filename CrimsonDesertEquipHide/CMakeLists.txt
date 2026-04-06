@@ -139,6 +139,46 @@ if(EQUIPHIDE_DEV_BUILD)
         PDB_OUTPUT_DIRECTORY_RELWITHDEBINFO "${GAME_STAGING_DIR}"
     )
 
+    # Generate deploy script at configure time (no source file needed).
+    # Tries to copy DLL+PDB directly to plugins/ (game not running).
+    # On success, cleans the staging copies so the hot-reload loader
+    # does not pick up a stale build.  If the DLL is locked (game
+    # running), both files stay in staging/ for hot-reload instead.
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/deploy_logic.cmake" [=[
+execute_process(
+    COMMAND "${CMAKE_COMMAND}" -E copy "${SRC_DLL}" "${DST_DLL}"
+    RESULT_VARIABLE rc
+)
+if(rc EQUAL 0)
+    message(STATUS "Direct deploy OK — cleaning staging")
+    file(REMOVE "${STAGING_DLL}")
+    # PDB: best-effort copy alongside the DLL
+    if(EXISTS "${SRC_PDB}")
+        execute_process(
+            COMMAND "${CMAKE_COMMAND}" -E copy "${SRC_PDB}" "${DST_PDB}"
+            RESULT_VARIABLE pdb_rc
+        )
+        if(pdb_rc EQUAL 0)
+            file(REMOVE "${STAGING_PDB}")
+        endif()
+    endif()
+else()
+    message(STATUS "Direct deploy skipped (file locked) — using staging")
+endif()
+]=])
+
+    add_custom_command(TARGET equip_hide_logic POST_BUILD
+        COMMAND ${CMAKE_COMMAND}
+            -DSRC_DLL=$<TARGET_FILE:equip_hide_logic>
+            -DDST_DLL=${GAME_BIN_DIR}/CrimsonDesertEquipHide_Logic.dll
+            -DSTAGING_DLL=${GAME_STAGING_DIR}/CrimsonDesertEquipHide_Logic.dll
+            -DSRC_PDB=$<TARGET_PDB_FILE:equip_hide_logic>
+            -DDST_PDB=${GAME_BIN_DIR}/CrimsonDesertEquipHide_Logic.pdb
+            -DSTAGING_PDB=${GAME_STAGING_DIR}/CrimsonDesertEquipHide_Logic.pdb
+            -P "${CMAKE_CURRENT_BINARY_DIR}/deploy_logic.cmake"
+        COMMENT "Deploying Logic DLL+PDB (falls back to staging if locked)"
+    )
+
     target_compile_options(equip_hide_logic PRIVATE /W4 /Zi)
     target_link_options(equip_hide_logic PRIVATE /DEBUG /OPT:REF /OPT:ICF)
 

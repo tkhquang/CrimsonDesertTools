@@ -14,7 +14,7 @@
 - User Presets: 10 custom part groups with independent visibility control (overrides built-in categories)
 - Per-category configuration: enable/disable, toggle/show/hide hotkeys, default hidden state, part list
 - IndependentToggle mode: categories sharing a hotkey flip their own state individually, preserving mixed visible/hidden configurations
-- BaldFix: runtime hair-visibility fix when helmet/cloak/mask is hidden — no PAZ patching needed. Hair/beard may occasionally disappear; re-toggling the headgear (show then hide) restores it
+- BaldFix: runtime hair-visibility fix when helmet/cloak/mask is hidden - no PAZ patching needed. Hair/beard may occasionally disappear; re-toggling the headgear (show then hide) restores it
 - GlidingFix: prevents hidden equipment from briefly flashing visible during state transitions (e.g. exiting gliding, cutscene transitions)
 - ForceShow mode for compatibility with mods that alter default equipment visibility via PAZ patching (e.g. character replacers, armor replacers, transmog mods)
 - Hot-reload cleanup: visibility bytes restored on DLL unload
@@ -243,7 +243,7 @@ Safe to leave `false` if you are not using such mods.
 | ------- | --------- | ------------ |
 | **Stuttering or FPS drops** | Some users report performance issues in crowded areas. *Not reproducible on my end.* | Try a different ASI Loader DLL (e.g. `version.dll` instead of `winmm.dll`) |
 | **Flight cloak visual artifacts** | `CD_Cloak_Flight` variants cause artifacts and squished hair. Removed from defaults. | Re-add in INI at your own risk (see `[Cloak]` comment) |
-| **Chest/Legs flickering** | Toggling chest and legs independently can cause pants to flicker | Bind both to the same hotkey, or use `DefaultHidden` instead of runtime toggling |
+| **Chest/Legs flickering** | Hiding chest armor can cause pants to flicker | Enable `CascadeFix = true` in INI (experimental). Hiding legs while chest is visible may not stick. |
 | **Dagger stays visible** | Daggers may remain visible and clip after hiding one-hand weapons | *Will be addressed in a future update* |
 | **Toggle delay** | Visibility changes can take 1-3 seconds | -- |
 | **Game updates** | Major updates may break the mod until a new version is released | -- |
