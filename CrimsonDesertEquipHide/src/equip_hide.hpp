@@ -8,4 +8,7 @@ namespace EquipHide
     /** @brief Tear down hooks and restore any patched bytes. */
     void shutdown();
 
+    /** @brief Arm the post-toggle cascade guard for body parts. */
+    void arm_flush_guard() noexcept;
+
 } // namespace EquipHide
