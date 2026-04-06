@@ -132,7 +132,6 @@ namespace EquipHide
         if (needs_direct_write().load(std::memory_order_relaxed) &&
             needs_direct_write().exchange(false, std::memory_order_relaxed))
         {
-            std::memset(s_hideLocked, 0, sizeof(s_hideLocked));
             inject_armor_entries();
             apply_direct_vis_write();
         }
@@ -176,8 +175,8 @@ namespace EquipHide
         // Apply vis=3 lock BEFORE player filter so stale MapNodes from
         // previous vis_ctrl owners can't slip through and un-hide parts.
         if (cascadeOn &&
-            is_any_category_hidden(mask) &&
-            hashIdx < 0x10000 && s_hideLocked[hashIdx])
+            s_hideLocked[hashIdx] &&
+            is_any_category_hidden(mask))
         {
             auto *visPtr = reinterpret_cast<uint8_t *>(r13 + 0x1C);
             *visPtr = 3;
@@ -441,10 +440,6 @@ namespace EquipHide
         return true;
     }
 
-    void clear_cascade_locks() noexcept
-    {
-        std::memset(s_hideLocked, 0, sizeof(s_hideLocked));
-    }
 
     void shutdown()
     {

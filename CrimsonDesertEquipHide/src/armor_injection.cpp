@@ -1,4 +1,5 @@
 #include "armor_injection.hpp"
+#include "categories.hpp"
 #include "shared_state.hpp"
 
 #include <DetourModKit.hpp>
@@ -70,10 +71,26 @@ namespace EquipHide
             int existing_set = 0;
             int skipped_key = 0;
 
+            const bool cascadeOn =
+                flag_cascade_fix().load(std::memory_order_relaxed);
+
+            // Legs, gloves, boots share a ConditionalPartPrefab cascade
+            // with chest -- hiding chest deletes their map entries.
+            // Injecting vis=0 for visible body parts keeps them alive.
+            constexpr CategoryMask k_cascadeBodyMask =
+                category_bit(Category::Legs) |
+                category_bit(Category::Gloves) |
+                category_bit(Category::Boots);
+
             for (const auto &[hash, mask] : get_part_map())
             {
-                if (!is_any_category_hidden(mask))
-                    continue;
+                const bool hidden = is_any_category_hidden(mask);
+
+                if (!hidden)
+                {
+                    if (!cascadeOn || (mask & k_cascadeBodyMask) == 0)
+                        continue;
+                }
 
                 auto existing = lookup(mapBase, &hash);
                 if (existing)
@@ -91,7 +108,7 @@ namespace EquipHide
                 }
 
                 alignas(8) uint8_t entryData[32] = {};
-                entryData[0x1C] = 2; // Visible = Out-only
+                entryData[0x1C] = hidden ? 2 : 0;
 
                 uint32_t hashCopy = hash;
                 int *hashPtr = reinterpret_cast<int *>(&hashCopy);

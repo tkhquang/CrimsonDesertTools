@@ -1,7 +1,6 @@
 #include "input_handler.hpp"
 #include "armor_injection.hpp"
 #include "categories.hpp"
-#include "equip_hide.hpp"
 #include "player_detection.hpp"
 #include "shared_state.hpp"
 #include "visibility_write.hpp"
@@ -43,7 +42,6 @@ namespace EquipHide
 
     void flush_visibility() noexcept
     {
-        clear_cascade_locks();
         update_hidden_mask();
 
         if (!flag_fallback_mode().load(std::memory_order_relaxed))
