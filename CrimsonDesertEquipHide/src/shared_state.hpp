@@ -51,6 +51,7 @@ namespace EquipHide
     std::atomic<bool> &flag_gliding_fix();
     std::atomic<bool> &flag_fallback_mode();
     std::atomic<bool> &flag_independent_toggle();
+    std::atomic<bool> &flag_cascade_fix();
 
     // --- Background thread control ---
     std::atomic<bool> &shutdown_requested();

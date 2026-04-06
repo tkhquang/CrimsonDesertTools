@@ -16,11 +16,16 @@
 
 #include <Windows.h>
 
+#include <cstring>
 #include <string>
 #include <vector>
 
 namespace EquipHide
 {
+    // Indexed by truncated part hash; vis=3 lock prevents PartInOut re-running
+    // the transition dispatch after the first vis=2 frame (cascade workaround).
+    static uint8_t s_hideLocked[0x10000]{};
+
     // --- Config ---
     static void load_config()
     {
@@ -43,6 +48,9 @@ namespace EquipHide
 
         DMK::Config::register_bool("General", "IndependentToggle", "Independent Toggle", [](bool val)
                                    { flag_independent_toggle().store(val, std::memory_order_relaxed); }, false);
+
+        DMK::Config::register_bool("General", "CascadeFix", "Cascade Fix", [](bool val)
+                                   { flag_cascade_fix().store(val, std::memory_order_relaxed); }, false);
 
         DMK::Config::register_key_combo("General", "ShowAllHotkey", "Show All Hotkey", [](const DMK::Config::KeyComboList &combos)
                                         { set_show_all_combos(combos); }, "");
@@ -124,6 +132,7 @@ namespace EquipHide
         if (needs_direct_write().load(std::memory_order_relaxed) &&
             needs_direct_write().exchange(false, std::memory_order_relaxed))
         {
+            std::memset(s_hideLocked, 0, sizeof(s_hideLocked));
             inject_armor_entries();
             apply_direct_vis_write();
         }
@@ -161,6 +170,20 @@ namespace EquipHide
         if (r13 < 0x10000)
             return;
 
+        const bool cascadeOn = flag_cascade_fix().load(std::memory_order_relaxed);
+        const auto hashIdx = static_cast<uint16_t>(partHash);
+
+        // Apply vis=3 lock BEFORE player filter so stale MapNodes from
+        // previous vis_ctrl owners can't slip through and un-hide parts.
+        if (cascadeOn &&
+            is_any_category_hidden(mask) &&
+            hashIdx < 0x10000 && s_hideLocked[hashIdx])
+        {
+            auto *visPtr = reinterpret_cast<uint8_t *>(r13 + 0x1C);
+            *visPtr = 3;
+            return;
+        }
+
         auto a1 = *reinterpret_cast<uintptr_t *>(ctx.rbp + 0x4F);
         if (!check_player_filter(a1))
             return;
@@ -168,12 +191,32 @@ namespace EquipHide
         if (is_any_category_hidden(mask))
         {
             auto *visPtr = reinterpret_cast<uint8_t *>(r13 + 0x1C);
-            *visPtr = 2;
+            if (cascadeOn && s_hideLocked[hashIdx])
+            {
+                *visPtr = 3; // lock: PartInOut skips all processing
+            }
+            else
+            {
+                *visPtr = 2; // first frame: transition Out
+                if (cascadeOn)
+                    s_hideLocked[hashIdx] = 1;
+            }
         }
-        else if (flag_force_show().load(std::memory_order_relaxed))
+        else
         {
-            auto *visPtr = reinterpret_cast<uint8_t *>(r13 + 0x1C);
-            *visPtr = 0;
+            if (cascadeOn)
+            {
+                s_hideLocked[hashIdx] = 0;
+                auto *visPtr = reinterpret_cast<uint8_t *>(r13 + 0x1C);
+                if (*visPtr == 3)
+                    *visPtr = 0; // restore from lock
+            }
+
+            if (flag_force_show().load(std::memory_order_relaxed))
+            {
+                auto *visPtr = reinterpret_cast<uint8_t *>(r13 + 0x1C);
+                *visPtr = 0;
+            }
         }
     }
 
@@ -396,6 +439,11 @@ namespace EquipHide
             logger.info("Equip hide fully initialized ({} parts resolved)",
                         total_part_count());
         return true;
+    }
+
+    void clear_cascade_locks() noexcept
+    {
+        std::memset(s_hideLocked, 0, sizeof(s_hideLocked));
     }
 
     void shutdown()

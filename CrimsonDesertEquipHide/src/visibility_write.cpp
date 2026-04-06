@@ -55,7 +55,11 @@ namespace EquipHide
                     {
                         if (origVis.find(visAddr) == origVis.end())
                             origVis[visAddr] = *visPtr;
-                        *visPtr = 2;
+                        // Don't overwrite vis=3 lock — cascade workaround
+                        // already holds this part in the skipped state.
+                        if (!(flag_cascade_fix().load(std::memory_order_relaxed) &&
+                              *visPtr == 3))
+                            *visPtr = 2;
                         ++hiddenCount;
                         logger.trace("  [{}] 0x{:04X} hidden (vis=2)",
                                      i, hash);

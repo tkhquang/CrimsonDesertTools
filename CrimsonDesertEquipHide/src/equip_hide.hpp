@@ -8,4 +8,7 @@ namespace EquipHide
     /** @brief Tear down hooks and restore any patched bytes. */
     void shutdown();
 
+    /** @brief Reset the vis=3 lock table used by CascadeFix. */
+    void clear_cascade_locks() noexcept;
+
 } // namespace EquipHide
