@@ -2,6 +2,16 @@
 
 All notable changes to the CrimsonDesertEquipHide mod will be documented in this file.
 
+## [0.5.1] - Upgrade to DetourModKit v3.0.0
+
+### Internal
+
+- Upgraded DetourModKit dependency from v2.2.0 to v3.0.0 (std::expected API, typed hook errors, AVX2 scanner, deterministic shutdown)
+- Bumped CMake minimum to 3.25; added SYSTEM subdirectory to suppress dependency header warnings
+- Fixed [[nodiscard]] violation on memory cache initialization
+- Fixed linker warning (LNK4075) from INCREMENTAL/ICF conflict in dev builds
+- Reduced amour flashing issues when CascadeFix is on
+
 ## [0.5.0] - BaldFix Rework & CascadeFix
 
 - Added `CascadeFix` option (disabled by default, experimental): reduces pants flickering when hiding chest armor, allowing bare-chested gameplay without visual glitches. Some armor (e.g. Bandit Cloth) may show invisible torso or missing upper body parts when hiding chest with legs visible. Reloading a save may briefly show armor during loading.
@@ -157,6 +167,7 @@ All notable changes to the CrimsonDesertEquipHide mod will be documented in this
 - Customizable part lists per category via INI configuration
 - Configurable init delay and log level
 
+[0.5.1]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/v0.5.1
 [0.5.0]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/v0.5.0
 [0.4.0]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/v0.4.0
 [0.3.1]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/v0.3.1
