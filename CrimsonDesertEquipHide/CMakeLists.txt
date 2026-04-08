@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.16)
+cmake_minimum_required(VERSION 3.25)
 
 project(CrimsonDesertEquipHide VERSION 0.2.3 LANGUAGES CXX)
 
@@ -24,7 +24,7 @@ endif()
 # --- DetourModKit Dependency ---
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/external/DetourModKit/CMakeLists.txt")
     message(STATUS "Configuring DetourModKit from: external/DetourModKit")
-    add_subdirectory(external/DetourModKit)
+    add_subdirectory(external/DetourModKit SYSTEM)
 
     # Use the exact target name from DetourModKit
     if(TARGET DetourModKit)
@@ -86,18 +86,32 @@ if(EQUIPHIDE_DEV_BUILD)
         user32
     )
 
+    # Build loader to build dir; post-build tries to copy to game folder.
+    # If the ASI is locked (game running), the copy silently fails.
     set_target_properties(equip_hide_loader PROPERTIES
         OUTPUT_NAME "CrimsonDesertEquipHide"
         SUFFIX ".asi"
         PREFIX ""
-        RUNTIME_OUTPUT_DIRECTORY "${GAME_BIN_DIR}"
-        RUNTIME_OUTPUT_DIRECTORY_DEBUG "${GAME_BIN_DIR}"
-        RUNTIME_OUTPUT_DIRECTORY_RELEASE "${GAME_BIN_DIR}"
-        RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO "${GAME_BIN_DIR}"
-        LIBRARY_OUTPUT_DIRECTORY "${GAME_BIN_DIR}"
-        LIBRARY_OUTPUT_DIRECTORY_DEBUG "${GAME_BIN_DIR}"
-        LIBRARY_OUTPUT_DIRECTORY_RELEASE "${GAME_BIN_DIR}"
-        LIBRARY_OUTPUT_DIRECTORY_RELWITHDEBINFO "${GAME_BIN_DIR}"
+    )
+
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/deploy_loader.cmake" [=[
+execute_process(
+    COMMAND "${CMAKE_COMMAND}" -E copy "${SRC_ASI}" "${DST_ASI}"
+    RESULT_VARIABLE rc
+)
+if(rc EQUAL 0)
+    message(STATUS "Loader ASI deployed to plugins/")
+else()
+    message(STATUS "Loader ASI deploy skipped (file locked)")
+endif()
+]=])
+
+    add_custom_command(TARGET equip_hide_loader POST_BUILD
+        COMMAND ${CMAKE_COMMAND}
+            -DSRC_ASI=$<TARGET_FILE:equip_hide_loader>
+            -DDST_ASI=${GAME_BIN_DIR}/CrimsonDesertEquipHide.asi
+            -P "${CMAKE_CURRENT_BINARY_DIR}/deploy_loader.cmake"
+        COMMENT "Deploying Loader ASI (skips if locked)"
     )
 
     target_compile_options(equip_hide_loader PRIVATE /W4)
@@ -181,7 +195,7 @@ endif()
     )
 
     target_compile_options(equip_hide_logic PRIVATE /W4 /Zi)
-    target_link_options(equip_hide_logic PRIVATE /DEBUG /OPT:REF /OPT:ICF)
+    target_link_options(equip_hide_logic PRIVATE /DEBUG /INCREMENTAL:NO /OPT:REF /OPT:ICF)
 
 else() # EQUIPHIDE_DEV_BUILD=OFF
     # =====================================================================
