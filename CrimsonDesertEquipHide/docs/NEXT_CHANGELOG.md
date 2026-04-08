@@ -6,3 +6,4 @@
 - Bumped CMake minimum to 3.25; added SYSTEM subdirectory to suppress dependency header warnings
 - Fixed [[nodiscard]] violation on memory cache initialization
 - Fixed linker warning (LNK4075) from INCREMENTAL/ICF conflict in dev builds
+- Reduced amour flashing issues when CascadeFix is on
