@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.16)
+cmake_minimum_required(VERSION 3.25)
 
 project(CrimsonDesertEquipHide VERSION 0.2.3 LANGUAGES CXX)
 
@@ -24,7 +24,7 @@ endif()
 # --- DetourModKit Dependency ---
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/external/DetourModKit/CMakeLists.txt")
     message(STATUS "Configuring DetourModKit from: external/DetourModKit")
-    add_subdirectory(external/DetourModKit)
+    add_subdirectory(external/DetourModKit SYSTEM)
 
     # Use the exact target name from DetourModKit
     if(TARGET DetourModKit)
@@ -181,7 +181,7 @@ endif()
     )
 
     target_compile_options(equip_hide_logic PRIVATE /W4 /Zi)
-    target_link_options(equip_hide_logic PRIVATE /DEBUG /OPT:REF /OPT:ICF)
+    target_link_options(equip_hide_logic PRIVATE /DEBUG /INCREMENTAL:NO /OPT:REF /OPT:ICF)
 
 else() # EQUIPHIDE_DEV_BUILD=OFF
     # =====================================================================

@@ -304,7 +304,8 @@ namespace EquipHide
         logger.info("Nexus:  {}", MOD_NEXUS);
         logger.debug("Built on " __DATE__ " at " __TIME__);
 
-        DMK::Memory::init_cache();
+        if (!DMK::Memory::init_cache())
+            logger.warning("Memory cache init failed — pointer reads may be slower");
 
         auto &addrs = resolved_addrs();
 
