@@ -31,7 +31,9 @@ static DWORD WINAPI lifecycle_thread(LPVOID /*param*/)
     asyncCfg.overflow_policy = DMK::OverflowPolicy::SyncFallback;
     logger.enable_async_mode(asyncCfg);
 
-    logger.info("DLL loaded, runtime dir: {}", DMK::Filesystem::get_runtime_directory());
+    std::wstring runtimeDirW = DMK::Filesystem::get_runtime_directory();
+    std::string runtimeDir(runtimeDirW.begin(), runtimeDirW.end());
+    logger.info("DLL loaded, runtime dir: {}", runtimeDir);
 
     wchar_t mutexName[64];
     wsprintfW(mutexName, L"%s%lu", EquipHide::INSTANCE_MUTEX_PREFIX, GetCurrentProcessId());
