@@ -1,4 +1,5 @@
 #include "item_name_table.hpp"
+#include "transmog_map.hpp"
 
 #include <DetourModKit.hpp>
 
@@ -9,6 +10,7 @@
 #include <cctype>
 #include <chrono>
 #include <cstring>
+#include <fstream>
 #include <mutex>
 #include <unordered_map>
 
@@ -862,6 +864,49 @@ namespace Transmog
                   });
 
         return m_sortedCache;
+    }
+
+    void ItemNameTable::dump_catalog_tsv() const
+    {
+        auto &logger = DMK::Logger::get_instance();
+
+        std::wstring rtDir = DMK::Filesystem::get_runtime_directory();
+        if (rtDir.empty())
+        {
+            logger.warning("[nametable] dump_catalog_tsv: runtime dir unavailable");
+            return;
+        }
+        if (rtDir.back() != L'\\' && rtDir.back() != L'/')
+            rtDir.push_back(L'\\');
+
+        std::wstring path = rtDir + L"CrimsonDesertLiveTransmog_items.tsv";
+
+        std::ofstream out(path, std::ios::out | std::ios::trunc);
+        if (!out.is_open())
+        {
+            logger.warning("[nametable] dump_catalog_tsv: failed to open output file");
+            return;
+        }
+
+        const auto &entries = sorted_entries();
+
+        out << "ItemID\tSlot\tVariant\tPlayerSafe\tName\n";
+        for (const auto &e : entries)
+        {
+            const char *slotStr = "Other";
+            if (e.category != TransmogSlot::Count)
+                slotStr = slot_name(e.category);
+
+            out << "0x" << std::hex << std::uppercase << e.id << std::dec
+                << '\t' << slotStr
+                << '\t' << (e.hasVariantMeta ? "yes" : "no")
+                << '\t' << (e.isPlayerCompatible ? "yes" : "no")
+                << '\t' << e.name
+                << '\n';
+        }
+
+        logger.info("[nametable] dumped {} entries to CrimsonDesertLiveTransmog_items.tsv",
+                    entries.size());
     }
 
 } // namespace Transmog
