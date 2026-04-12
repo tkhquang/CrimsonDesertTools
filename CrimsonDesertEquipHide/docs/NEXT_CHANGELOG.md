@@ -1,5 +1,5 @@
-## [Title for next release]
+## Game v1.03.01 Support
 
-- New feature
-- Bug fix
-- Improvement
+- Added support for Crimson Desert v1.03.01 (the mod still works on v1.02.00)
+- Fixed equipment not hiding after the game update
+- Improved diagnostic logging for easier troubleshooting

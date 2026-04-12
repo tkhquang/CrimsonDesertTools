@@ -19,10 +19,16 @@
 
 #include <cstring>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace EquipHide
 {
+    // v1.03.01 changed register allocation: PartInOut struct pointer moved
+    // from R13 to RAX (loaded from [RBP+5Fh]).  Set by init() based on
+    // which AOB pattern matched (V103_ prefix → true).
+    static bool s_partInOutFromRax{false};
+
     // Indexed by truncated part hash; R8B gate-skip lock prevents PartInOut
     // from re-running the transition dispatch after the first vis=2 frame.
     static uint8_t s_hideLocked[0x10000]{};
@@ -200,8 +206,10 @@ namespace EquipHide
         if (mask == 0)
             return;
 
-        auto r13 = ctx.r13;
-        if (r13 < 0x10000)
+        // v1.03.01: PartInOut struct is in RAX (loaded from [rbp+5F] before hook).
+        // v1.02.00: PartInOut struct is in R13 directly.
+        auto partInOut = s_partInOutFromRax ? ctx.rax : ctx.r13;
+        if (partInOut < 0x10000)
             return;
 
         const bool cascadeOn = flag_cascade_fix().load(std::memory_order_relaxed);
@@ -236,7 +244,7 @@ namespace EquipHide
             s_hideLocked[hashIdx] &&
             is_any_category_hidden(mask))
         {
-            auto *visPtr = reinterpret_cast<uint8_t *>(r13 + 0x1C);
+            auto *visPtr = reinterpret_cast<uint8_t *>(partInOut + 0x1C);
             if (s_hideLocked[hashIdx] == 2)
             {
                 *visPtr = 0;
@@ -254,7 +262,7 @@ namespace EquipHide
 
         if (is_any_category_hidden(mask))
         {
-            auto *visPtr = reinterpret_cast<uint8_t *>(r13 + 0x1C);
+            auto *visPtr = reinterpret_cast<uint8_t *>(partInOut + 0x1C);
             *visPtr = 2;
             if (cascadeOn && isChest)
             {
@@ -271,7 +279,7 @@ namespace EquipHide
 
             if (flag_force_show().load(std::memory_order_relaxed))
             {
-                auto *visPtr = reinterpret_cast<uint8_t *>(r13 + 0x1C);
+                auto *visPtr = reinterpret_cast<uint8_t *>(partInOut + 0x1C);
                 *visPtr = 0;
             }
         }
@@ -402,6 +410,15 @@ namespace EquipHide
         {
             logger.error("No AOB pattern matched. The mod may be outdated for this game version.");
             return false;
+        }
+
+        // v1.03.01 moved PartInOut struct pointer from R13 to RAX
+        // and shifted struct offsets (+0x48 → +0x58). body_to_vis_ctrl
+        // chain is still correct; comp offset fix handles the rest.
+        if (matchedSource && std::string_view(matchedSource->name).starts_with("V103_"))
+        {
+            s_partInOutFromRax = true;
+            logger.info("v1.03.01 layout detected (partInOut via RAX, comp at +0x58)");
         }
 
         auto &hookMgr = DMK::HookManager::get_instance();

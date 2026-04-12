@@ -20,11 +20,24 @@ namespace EquipHide
             return 0;
         auto inner = read_ptr_unsafe(body, 0x68);
         if (!inner)
+        {
+            DMK::Logger::get_instance().trace(
+                "body_to_vis_ctrl: body=0x{:X} inner=NULL (+0x68)", body);
             return 0;
+        }
         auto sub = read_ptr_unsafe(inner, 0x40);
         if (!sub)
+        {
+            DMK::Logger::get_instance().trace(
+                "body_to_vis_ctrl: body=0x{:X} inner=0x{:X} sub=NULL (+0x40)",
+                body, inner);
             return 0;
-        return read_ptr_unsafe(sub, 0xE8);
+        }
+        auto vc = read_ptr_unsafe(sub, 0xE8);
+        DMK::Logger::get_instance().trace(
+            "body_to_vis_ctrl: body=0x{:X} inner=0x{:X} sub=0x{:X} vc=0x{:X}",
+            body, inner, sub, vc);
+        return vc;
     }
 
     void resolve_player_vis_ctrls() noexcept
@@ -166,8 +179,11 @@ namespace EquipHide
         if (flag_fallback_mode().load(std::memory_order_relaxed))
         {
             /* Actor type byte: *(*(actor+0x88)+1). Value 1 = local player,
-               3-6 = party members. Same mechanism the headgear visibility system uses. */
-            auto comp = read_ptr_unsafe(a1, 0x48);
+               3-6 = party members. Same mechanism the headgear visibility system uses.
+               v1.03.01 shifted comp from +0x48 to +0x58. */
+            auto comp = read_ptr_unsafe(a1, 0x58);
+            if (!comp)
+                comp = read_ptr_unsafe(a1, 0x48);
             if (comp)
             {
                 auto actor = read_ptr_unsafe(comp, 0x08);
@@ -177,6 +193,14 @@ namespace EquipHide
                     if (typePtr)
                     {
                         auto typeByte = *reinterpret_cast<const uint8_t *>(typePtr + 1);
+                        {
+                            static std::atomic<int> s_fbLog{0};
+                            if (s_fbLog.fetch_add(1, std::memory_order_relaxed) < 5)
+                                DMK::Logger::get_instance().trace(
+                                    "Fallback chain: a1=0x{:X} comp=0x{:X} "
+                                    "actor=0x{:X} typePtr=0x{:X} type={}",
+                                    a1, comp, actor, typePtr, typeByte);
+                        }
                         bool isProtagonist = (typeByte == 1) ||
                                              (typeByte >= 3 && typeByte <= 6);
                         if (isProtagonist)

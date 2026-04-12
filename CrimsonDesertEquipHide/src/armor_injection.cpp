@@ -37,12 +37,24 @@ namespace EquipHide
                 return 0;
             auto tablePtr = *reinterpret_cast<const uintptr_t *>(globalPtr + 0x58);
             if (tablePtr < 0x10000)
+            {
+                static std::atomic<bool> s_logOnce{false};
+                if (!s_logOnce.exchange(true, std::memory_order_relaxed))
+                    DMK::Logger::get_instance().warning(
+                        "compute_bucket_key: tablePtr=NULL "
+                        "(globalAddr=0x{:X} globalPtr=0x{:X} +0x58)",
+                        globalAddr, globalPtr);
                 return 0;
+            }
             return *reinterpret_cast<const uint32_t *>(
                 tablePtr + 16ULL * partHash + 8);
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
+            static std::atomic<bool> s_logOnce{false};
+            if (!s_logOnce.exchange(true, std::memory_order_relaxed))
+                DMK::Logger::get_instance().warning(
+                    "compute_bucket_key: SEH fault for hash 0x{:04X}", partHash);
             return 0;
         }
     }
@@ -197,13 +209,27 @@ namespace EquipHide
             /* Per-player SEH so one bad pointer does not skip the rest. */
             __try
             {
-                auto comp = read_ptr_unsafe(vc, 0x48);
+                // v1.03.01 shifted comp from +0x48 to +0x58.
+                auto comp = read_ptr_unsafe(vc, 0x58);
                 if (!comp)
+                    comp = read_ptr_unsafe(vc, 0x48);
+                if (!comp)
+                {
+                    logger.trace("ArmorInject [{}]: vc=0x{:X} comp=NULL "
+                                 "(+0x58 and +0x48 both null)", i, vc);
                     continue;
+                }
                 auto descNode = read_ptr_unsafe(comp, 0x218);
                 if (!descNode)
+                {
+                    logger.trace("ArmorInject [{}]: vc=0x{:X} comp=0x{:X} "
+                                 "descNode=NULL (+0x218)", i, vc, comp);
                     continue;
+                }
                 auto mapBase = descNode + 0x20;
+                logger.trace("ArmorInject [{}]: vc=0x{:X} comp=0x{:X} "
+                             "descNode=0x{:X} mapBase=0x{:X}",
+                             i, vc, comp, descNode, mapBase);
 
                 int result = inject_armor_entries_for_map(mapBase);
                 if (result >= 0)
