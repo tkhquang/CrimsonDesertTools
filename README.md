@@ -8,6 +8,10 @@ A collection of mods for Crimson Desert that enhance gameplay and add new featur
 
 A mod that allows players to hide equipped gear visually in Crimson Desert.
 
+### [CrimsonDesertLiveTransmog](CrimsonDesertLiveTransmog/)
+
+Runtime armor transmog - change the visual appearance of equipped armor in real time without affecting stats. Includes a ReShade overlay GUI with item browser, preset system, and per-slot control.
+
 ## Installation
 
 Each mod has its own installation instructions. See the respective mod's README for details.
