@@ -1,0 +1,204 @@
+[center][size=6][b]Live Transmog[/b][/size]
+[size=4]Runtime Armor Appearance Swap for Crimson Desert[/size][/center]
+
+[b][color=#ff6600]This mod is in BETA[/color][/b] -edge cases may exist. Use at your own risk. Please report any issues you find!
+[b][color=#ff6600]Currently only works with Kliff[/color][/b] -other playable characters are not supported yet.
+
+[line]
+
+[size=5]What It Does[/size]
+
+Change the visual appearance of your equipped armor [b]in real time[/b] without affecting stats. Browse the full item catalog through an in-game GUI, pick the armor you want to see, and apply -no game restart, no file editing required. Build and save presets to quickly swap between your favorite looks.
+
+[size=5]Key Features[/size]
+
+[list]
+[*][b]In-game item browser[/b] -searchable dropdown with all armor pieces, auto-categorized by slot (Helm, Chest, Cloak, Gloves, Boots)
+[*][b]ReShade overlay GUI[/b] -full point-and-click control via the ReShade overlay ([b]Home[/b] key). No hotkeys required
+[*][b]Preset system[/b] -save, load, rename, and cycle through multiple transmog presets per character
+[*][b]Safety filters[/b] -items that crash or won't render are filtered out by default (variant metadata, non-player gear, wrong-slot items)
+[*][b]Per-slot control[/b] -enable/disable transmog independently for each equipment slot
+[*][b]Optional hotkeys[/b] -all disabled by default; bind any action via INI if you prefer keyboard shortcuts
+[*][url=https://github.com/tkhquang/CrimsonDesertTools]Open-source[/url] with full transparency
+[/list]
+
+[line]
+
+[size=5]Requirements[/size]
+
+[list]
+[*]Crimson Desert (Steam version)
+[*][url=https://reshade.me/]ReShade[/url] -[b][color=#ff6600]required for the in-game GUI[/color][/b]
+[/list]
+
+The item browser, preset management, and per-slot controls are all part of a [b]ReShade addon overlay[/b]. Without ReShade installed, [b]there is no GUI[/b] -you would need to configure presets by editing [b]CrimsonDesertLiveTransmog_presets.json[/b] manually and using hotkeys to apply/clear. See the [i]Without ReShade[/i] section below for details.
+
+[line]
+
+[size=5]Installation[/size]
+
+[size=4]Step 1 -Install ReShade[/size]
+Download and install [url=https://reshade.me/]ReShade[/url] for Crimson Desert. The transmog overlay registers as a ReShade addon tab. Press [b]Home[/b] in-game to open the ReShade menu, then find the [b]Transmog[/b] tab.
+
+[size=4]Step 2 -Install an ASI Loader[/size]
+You need an ASI Loader to load [b].asi[/b] mods. If you already have one (e.g. from another mod), skip to Step 3.
+
+Download the [b]x64[/b] build of [url=https://github.com/ThirteenAG/Ultimate-ASI-Loader/releases]Ultimate ASI Loader[/url] and place one of the following DLLs into your [b]bin64[/b] folder:
+[list]
+[*][b]winmm.dll[/b] -[color=#4CAF50][b]Recommended[/b][/color], works for most setups
+[*][b]version.dll[/b] -alternative if winmm.dll conflicts
+[*][b]dinput8.dll[/b] -another alternative
+[/list]
+
+[b]How to verify:[/b] After completing Step 3, launch the game once. If no [b]CrimsonDesertLiveTransmog.log[/b] file appears in [b]bin64[/b], the ASI Loader is not loading. Try renaming the DLL to one of the other variants listed above.
+
+[size=4]Step 3 -Install the mod[/size]
+[list=1]
+[*]Download the latest release from the Files tab
+[*]Extract [b]CrimsonDesertLiveTransmog.asi[/b] and [b]CrimsonDesertLiveTransmog.ini[/b] into your [b]bin64[/b] folder
+[/list]
+
+[size=4]Step 4 -Launch and play[/size]
+Launch the game. Press [b]Home[/b] to open ReShade, find the [b]Transmog[/b] tab, and start browsing armor.
+
+[size=4]File placement[/size]
+[code]
+<Crimson Desert>/bin64/
+├── CrimsonDesert.exe                          (Game executable)
+├── winmm.dll                                  (ASI Loader)
+├── CrimsonDesertLiveTransmog.asi              (This mod)
+├── CrimsonDesertLiveTransmog.ini              (Configuration)
+├── CrimsonDesertLiveTransmog_presets.json     (Auto-generated preset file)
+└── ...
+[/code]
+
+[size=4]Using with OptiScaler[/size]
+If you use [url=https://github.com/cdozdil/OptiScaler]OptiScaler[/url] for frame generation or upscaling, you need to make sure that ReShade, OptiScaler, and an ASI Loader can coexist. There are multiple valid setups depending on which DLL names each tool uses.
+
+I cannot provide a definitive guide here because the correct setup depends on your specific combination of tools and versions. You may need to experiment with DLL names and load order. One example that has worked:
+
+[code]
+<Crimson Desert>/bin64/
+├── CrimsonDesert.exe
+├── winmm.dll                                  (OptiScaler, renamed)
+├── dxgi.dll                                   (ReShade)
+├── OptiScaler.ini                             (LoadAsiPlugins = true)
+├── plugins/
+│   ├── CrimsonDesertLiveTransmog.asi
+│   ├── CrimsonDesertLiveTransmog.ini
+│   └── ...
+└── ...
+[/code]
+
+If you run into issues, check the OptiScaler and ReShade documentation for their respective DLL naming and compatibility options.
+
+[line]
+
+[size=5]How to Use[/size]
+
+[color=#ff6600][b]The in-game GUI is only available through ReShade.[/b][/color]
+If you do not have ReShade installed, see the [i]Without ReShade[/i] section below.
+
+[size=4]With ReShade (recommended)[/size]
+[list=1]
+[*]Open ReShade overlay ([b]Home[/b] key) and find the [b]Transmog[/b] tab
+[*]In [b]Slot Details[/b], click the picker button next to a slot (e.g. Helm) to browse available armor
+[*]Use the search box to filter by name -items are auto-categorized to the correct slot
+[*]Select an item -changes stay [b]pending[/b] until you click [b]Apply All[/b]
+[*]Click [b]Apply All[/b] to commit all slot changes at once
+[*]Use [b]Append[/b] in the Presets section to save your current look
+[*]Use [b]Prev[/b] / [b]Next[/b] to cycle through saved presets
+[/list]
+
+[size=4]Without ReShade (manual JSON editing)[/size]
+If you cannot or do not want to install ReShade, the mod still functions -but [b]you lose the GUI entirely[/b].
+
+[list=1]
+[*]Launch the game once so the mod generates a default [b]CrimsonDesertLiveTransmog_presets.json[/b]
+[*]Close the game and open the JSON file in a text editor
+[*]Each preset contains slot entries with [b]itemId[/b] (numeric) and [b]itemName[/b] (human-readable fallback). Set [b]active: true[/b] and fill in the [b]itemId[/b] for each slot you want to transmog
+[*]Set hotkeys in the INI (e.g. [b]ApplyHotkey = F5[/b], [b]ClearHotkey = F6[/b], [b]CaptureHotkey = F7[/b]) to apply/clear/capture in-game
+[*]Launch the game -the mod loads presets on startup and applies them automatically
+[/list]
+
+[color=#4CAF50][b]Tip: Use Capture to get item IDs.[/b][/color]
+Equip the armor you want in-game, then press your [b]Capture[/b] hotkey. This snapshots your currently equipped gear into the active preset's slot mappings. Check [b]CrimsonDesertLiveTransmog_presets.json[/b] after -the captured item IDs will be filled in for each slot. You can then copy these IDs to build other presets manually.
+
+[color=#ff6600][b]Note:[/b][/color] This version does not ship an item ID reference list. A sample [b]CrimsonDesertLiveTransmog_presets.json[/b] with pre-filled armor sets is available in the [b]Miscellaneous[/b] section of the [b]Files[/b] tab -download it as a starting point or reference for valid item IDs.
+
+[line]
+
+[size=5]Configuration[/size]
+
+Edit [b]CrimsonDesertLiveTransmog.ini[/b] for global settings and optional hotkey bindings. All hotkeys are [b]disabled by default[/b] -the ReShade overlay is the primary interface.
+
+[code]
+[General]
+LogLevel = Info
+Enabled = true
+; All hotkeys disabled by default -set via INI if needed
+ToggleHotkey =
+ApplyHotkey =
+ClearHotkey =
+CaptureHotkey =
+
+[Presets]
+AppendHotkey =
+ReplaceHotkey =
+RemoveHotkey =
+NextHotkey =
+PrevHotkey =
+[/code]
+
+[size=4]Hotkey Format[/size]
+[list]
+[*]Named keys: [b]T[/b], [b]F3[/b], [b]Numpad1[/b], [b]Mouse4[/b], [b]Gamepad_A[/b], etc.
+[*]Modifiers: [b]Ctrl[/b], [b]Shift[/b], [b]Alt[/b] (or LCtrl, RCtrl, etc.)
+[*]Multiple combos: [b]T,Gamepad_LB+Gamepad_Y[/b] (T alone OR hold LB + press Y)
+[*]Empty value = disabled
+[/list]
+
+See the full list at the [url=https://github.com/tkhquang/DetourModKit?tab=readme-ov-file#supported-input-names]Supported Input Names[/url] reference.
+
+[line]
+
+[size=5]Known Limitations[/size]
+
+[list]
+[*][b]Item catalog may be incomplete[/b] -the armor list is filtered to exclude known-broken items. Some wearable items may be missing. If you find one, please report it in the Bugs or Posts tab.
+[*][b]Some listed items cannot be worn[/b] -items from other body types (e.g. Oongka gear on Kliff) appear in the catalog but fail to render. These are NOT caught by the "Hide variants" filter and may look valid in the picker but produce an empty slot.
+[*][b]Damaged armor variants don't render[/b] -the game's internal variant-metadata system blocks damaged gear. The "Hide variants" filter catches these by default. You can disable it to see them in the picker, but they still won't show in-game.
+[*][color=#ff0000][b]Wrong-slot or non-equipment items will crash[/b][/color] -selecting a chest piece for the helm slot, or picking non-armor items (dog armor, recipes, seeds, etc.) will crash the game. The safety filters prevent this by default -[b]do not disable them unless you know what you're doing[/b].
+[*][b]Dyeing is not supported yet[/b] -transmog items use their default colors.
+[*][b]Special effect armor may have visual quirks[/b] -armor with particle effects (e.g. Marni Laser Helm) may not render particles correctly. Hair may clip through some helmets.
+[*]Major game updates may break the mod until a new version is released.
+[*]Only tested with the Steam version.
+[*][b]ReShade overlay GUI is AI-generated[/b] -the overlay UI was auto-generated with AI assistance, so it may not be 100% reliable. If you run into GUI glitches or odd behavior, please report them.
+[/list]
+
+[line]
+
+[size=5]Troubleshooting[/size]
+
+If you encounter issues:
+[list]
+[*]Set [b]LogLevel = Debug[/b] in the INI file
+[*]Check the log file in your game directory ([b]CrimsonDesertLiveTransmog.log[/b])
+[*]For memory pattern errors, the mod needs an update for the current game version
+[/list]
+
+[line]
+
+[size=5]Credits & Source Code[/size]
+
+Built with [url=https://github.com/tkhquang/DetourModKit]DetourModKit[/url] for core functionality.
+
+[list]
+[*][url=https://github.com/ThirteenAG]ThirteenAG[/url] -Ultimate ASI Loader
+[*][url=https://github.com/cursey]cursey[/url] -SafetyHook
+[*]Brodie Thiesfield -SimpleIni
+[*][url=https://reshade.me/]crosire[/url] -ReShade
+[*]Pearl Abyss -Crimson Desert
+[/list]
+
+All Crimson Desert mods and tools can be found in this [url=https://github.com/tkhquang/CrimsonDesertTools]GitHub repository[/url]. Feel free to contribute or suggest improvements!
