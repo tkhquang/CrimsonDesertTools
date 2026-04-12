@@ -1,3 +1,6 @@
 [submodule "CrimsonDesertEquipHide/external/DetourModKit"]
 	path = CrimsonDesertEquipHide/external/DetourModKit
 	url = https://github.com/tkhquang/DetourModKit.git
+[submodule "CrimsonDesertLiveTransmog/external/DetourModKit"]
+	path = CrimsonDesertLiveTransmog/external/DetourModKit
+	url = https://github.com/tkhquang/DetourModKit.git

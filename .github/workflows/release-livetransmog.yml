@@ -1,0 +1,303 @@
+name: CrimsonDesertLiveTransmog - Build and Release
+
+permissions:
+  contents: write
+  actions: read
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_part:
+        description: "Version part to bump"
+        required: true
+        default: "patch"
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+      version_title:
+        description: "Version title (e.g., 'Feature Update')"
+        required: false
+        type: string
+      prerelease:
+        description: "Is this a pre-release?"
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: "recursive"
+          token: ${{ secrets.RELEASE_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+
+      - name: Read changelog from file
+        id: read-changelog
+        run: |
+          if (Test-Path "CrimsonDesertLiveTransmog\docs\NEXT_CHANGELOG.md") {
+            $content = Get-Content "CrimsonDesertLiveTransmog\docs\NEXT_CHANGELOG.md" -Raw
+
+            # Extract title from first line (removing ## prefix)
+            $title = ($content -split "`r?`n")[0] -replace "^##\s+", ""
+
+            # Write changelog body (skip first line) to a temp file to avoid
+            # PowerShell string interpolation issues with backticks in content.
+            $changelogBody = ($content -split "`r?`n" | Select-Object -Skip 1) -join "`n"
+            Set-Content -Path "changelog_body.txt" -Value $changelogBody -Encoding utf8 -NoNewline
+
+            echo "SUGGESTED_TITLE=$title" >> $env:GITHUB_OUTPUT
+            echo "Using changelog from NEXT_CHANGELOG.md with suggested title: $title"
+          } else {
+            echo "No NEXT_CHANGELOG.md file found. Please create one before running this workflow."
+            exit 1
+          }
+        shell: pwsh
+
+      - name: Determine version title
+        id: determine-title
+        run: |
+          $titleToUse = "${{ inputs.version_title }}"
+          if ([string]::IsNullOrEmpty($titleToUse)) {
+            $titleToUse = "${{ steps.read-changelog.outputs.SUGGESTED_TITLE }}"
+            echo "Using title from changelog: $titleToUse"
+          } else {
+            echo "Using provided title: $titleToUse"
+          }
+          $trimmedTitle = $titleToUse.Trim()
+          echo "TITLE=$trimmedTitle" >> $env:GITHUB_OUTPUT
+        shell: pwsh
+
+      - name: Bump version and update changelog
+        id: bump
+        run: |
+          $safeTitle = "${{ steps.determine-title.outputs.TITLE }}"
+          $changelogArg = Get-Content -Path "changelog_body.txt" -Raw
+
+          python CrimsonDesertLiveTransmog/scripts/version_updater.py bump ${{ inputs.version_part }} --title "$safeTitle" --changelog "$changelogArg"
+
+          # Extract the new version from version.hpp
+          $version_h = Get-Content CrimsonDesertLiveTransmog\src\version.hpp -Raw
+          $major = [regex]::Match($version_h, '#define\s+VERSION_MAJOR\s+(\d+)').Groups[1].Value
+          $minor = [regex]::Match($version_h, '#define\s+VERSION_MINOR\s+(\d+)').Groups[1].Value
+          $patch = [regex]::Match($version_h, '#define\s+VERSION_PATCH\s+(\d+)').Groups[1].Value
+          $new_version = "$major.$minor.$patch"
+
+          echo "NEW_VERSION=$new_version" >> $env:GITHUB_ENV
+          echo "VERSION_TAG=live-transmog/v$new_version" >> $env:GITHUB_ENV
+          echo "ARTIFACT_NAME=CrimsonDesertLiveTransmog_v${new_version}.zip" >> $env:GITHUB_ENV
+        shell: pwsh
+
+      - name: Setup MSVC Developer Environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Verify Tools
+        run: |
+          echo "--- Verifying cl (MSVC) ---"
+          cl 2>&1 | head -1
+          echo "--- Verifying cmake ---"
+          cmake --version
+        shell: bash
+
+      - name: Configure (MSVC Release)
+        run: |
+          cd CrimsonDesertLiveTransmog
+          cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+        shell: bash
+
+      - name: Build (MSVC Release)
+        run: cmake --build CrimsonDesertLiveTransmog/build --config Release --parallel
+        shell: bash
+
+      - name: Verify build output
+        run: |
+          $asiFile = "CrimsonDesertLiveTransmog\build\CrimsonDesertLiveTransmog.asi"
+          if (-not (Test-Path $asiFile)) {
+            Write-Error "ASI file not found at: $asiFile"
+            exit 1
+          }
+          Write-Output "Built: $asiFile"
+        shell: pwsh
+
+      - name: Create ZIP archive
+        run: |
+          $buildDir = "CrimsonDesertLiveTransmog\build"
+          $templateDir = "$buildDir\template"
+          $packageDir = "package"
+
+          New-Item -ItemType Directory -Path $packageDir -Force
+
+          # Copy template files if they exist
+          if (Test-Path $templateDir) {
+            Copy-Item -Path "$templateDir\*" -Destination $packageDir -Recurse
+          }
+
+          # Copy the built ASI file (post-build copy puts it at build root)
+          Copy-Item -Path "$buildDir\CrimsonDesertLiveTransmog.asi" -Destination $packageDir\
+
+          Compress-Archive -Path "$packageDir\*" -DestinationPath "${{ env.ARTIFACT_NAME }}" -Force
+          Write-Output "Created package: ${{ env.ARTIFACT_NAME }}"
+        shell: pwsh
+
+      # Only commit changes if this is NOT a pre-release
+      - name: Commit version changes
+        if: ${{ !inputs.prerelease }}
+        run: |
+          git config --local user.email "khacquang.trinh@gmail.com"
+          git config --local user.name "Quang Trinh"
+          git add CrimsonDesertLiveTransmog/src/version.hpp CrimsonDesertLiveTransmog/CHANGELOG.md
+          git status
+          git commit -m "chore(live-transmog): bump version to ${{ env.NEW_VERSION }}"
+          git tag -a "${{ env.VERSION_TAG }}" -m "Release ${{ env.VERSION_TAG }}"
+
+          BRANCH_NAME=${GITHUB_HEAD_REF:-${GITHUB_REF#refs/heads/}}
+          echo "Current branch: $BRANCH_NAME"
+
+          if [ "$BRANCH_NAME" = "main" ]; then
+            git push origin main
+          else
+            git push origin $BRANCH_NAME
+          fi
+
+          git push origin "${{ env.VERSION_TAG }}"
+        shell: bash
+
+      # For pre-releases, just create the tag without committing changes
+      - name: Create tag for pre-release
+        if: ${{ inputs.prerelease }}
+        run: |
+          git config --local user.email "khacquang.trinh@gmail.com"
+          git config --local user.name "Quang Trinh"
+          git tag -a "${{ env.VERSION_TAG }}" -m "Pre-release ${{ env.VERSION_TAG }}"
+          git push origin "${{ env.VERSION_TAG }}"
+        shell: bash
+
+      - name: Prepare release body
+        id: prepare-release
+        run: |
+          $changelog = Get-Content -Path "changelog_body.txt" -Raw
+
+          $releaseBody = @'
+          # Crimson Desert - Live Transmog
+
+          ## Release {0} - {1}
+
+          Runtime visual armor swap (transmog) for Crimson Desert. Changes the appearance of equipped armor without affecting stats.
+
+          ## Changelog
+          {2}
+
+          ### Installation
+
+          1. Extract all files to your Crimson Desert `bin64/plugins/` directory
+          2. Edit the INI file to configure your transmog swaps
+          3. Launch the game and press T (default) to toggle transmog
+
+          ### Note
+          This package includes everything you need:
+          - **CrimsonDesertLiveTransmog.asi** - The mod itself (built with [DetourModKit](https://github.com/tkhquang/DetourModKit))
+          - **CrimsonDesertLiveTransmog.ini** - Configuration file
+          - **Documentation and license information**
+
+          ASI Loader (e.g. [Ultimate ASI Loader](https://github.com/ThirteenAG/Ultimate-ASI-Loader)) must be installed separately.
+
+          ### Configuration
+
+          Edit the `CrimsonDesertLiveTransmog.ini` file to set up transmog swaps per armor slot.
+
+          See the [README](https://github.com/{3}/blob/main/CrimsonDesertLiveTransmog/README.md) for detailed instructions.
+
+          ### Technical Details
+
+          This mod is built on **DetourModKit**, a lightweight C++ toolkit for game modding that provides:
+          - Safe function hooking via [SafetyHook](https://github.com/cursey/safetyhook)
+          - AOB (Array of Bytes) pattern scanning
+          - Configuration management
+          - Thread-safe logging
+          '@
+
+          $releaseBody = $releaseBody -f "v$env:NEW_VERSION", "${{ steps.determine-title.outputs.TITLE }}", $changelog, "${{ github.repository }}"
+
+          if ('${{ inputs.prerelease }}' -eq 'true') {
+            $preReleaseNotice = @'
+          ## Pre-Release Version
+
+          This is a pre-release build for testing purposes. It may contain bugs or incomplete features.
+
+          '@
+            $releaseBody = $preReleaseNotice + $releaseBody
+          }
+
+          Set-Content -Path "release_body.txt" -Value $releaseBody -Encoding UTF8
+          echo "RELEASE_BODY_PATH=release_body.txt" >> $env:GITHUB_OUTPUT
+        shell: pwsh
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.ARTIFACT_NAME }}
+          name: CrimsonDesertLiveTransmog v${{ env.NEW_VERSION }}
+          tag_name: ${{ env.VERSION_TAG }}
+          body_path: ${{ steps.prepare-release.outputs.RELEASE_BODY_PATH }}
+          draft: false
+          prerelease: ${{ inputs.prerelease }}
+          token: ${{ secrets.RELEASE_TOKEN }}
+
+      # Only archive the changelog if this is NOT a pre-release
+      - name: Archive NEXT_CHANGELOG.md
+        if: ${{ !inputs.prerelease && success() }}
+        run: |
+          $branchName = $env:GITHUB_HEAD_REF
+          if ([string]::IsNullOrEmpty($branchName)) {
+            if ($env:GITHUB_REF -match "refs/heads/(.+)") {
+              $branchName = $matches[1]
+            }
+          }
+          Write-Output "Current branch for archiving: $branchName"
+
+          git pull origin $branchName
+
+          $archiveDir = "CrimsonDesertLiveTransmog\docs\archive"
+          $nextChangelogPath = "CrimsonDesertLiveTransmog\docs\NEXT_CHANGELOG.md"
+
+          if (-not (Test-Path $nextChangelogPath)) {
+            echo "$nextChangelogPath not found, cannot archive."
+            exit 1
+          }
+
+          if (-not (Test-Path $archiveDir)) {
+            New-Item -Path $archiveDir -ItemType Directory
+          }
+
+          $archiveFileName = "CHANGELOG_v${{ env.NEW_VERSION }}.md"
+          Move-Item $nextChangelogPath "$archiveDir\$archiveFileName"
+          echo "Archived changelog to $archiveDir\$archiveFileName"
+
+          $template = @'
+          ## [Title for next release]
+
+          - New feature
+          - Bug fix
+          - Improvement
+          '@
+          Set-Content -Path $nextChangelogPath -Value $template
+
+          git config --local user.email "khacquang.trinh@gmail.com"
+          git config --local user.name "Quang Trinh"
+          git add "$nextChangelogPath" "$archiveDir\$archiveFileName"
+          git status
+          git commit -m "chore(live-transmog): archive changelog for v${{ env.NEW_VERSION }}"
+          git push origin $branchName
+        shell: pwsh

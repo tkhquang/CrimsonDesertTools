@@ -7,6 +7,10 @@ CrimsonDesertEquipHide/build/*
 CrimsonDesertEquipHide/build_*/*
 !CrimsonDesertEquipHide/build/template
 
+CrimsonDesertLiveTransmog/build/*
+CrimsonDesertLiveTransmog/build_*/*
+!CrimsonDesertLiveTransmog/build/template
+
 # Keep marker files
 !/**/.gitkeep
 
