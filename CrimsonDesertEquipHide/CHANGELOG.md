@@ -73,13 +73,13 @@ All notable changes to the CrimsonDesertEquipHide mod will be documented in this
 
 ### Added
 
-- Armor hiding — 9 new categories: Helm, Chest, Legs, Gloves, Boots, Cloak, Shoulder, Mask, Glasses
-- Accessory hiding — 4 new categories: Earrings, Rings, Necklace, Bags (belt/bag parts)
-- User Presets — 3 custom part groups (UserPreset1–3) with independent visibility control; presets take priority over built-in categories when enabled
-- [Experimental] BaldFix — runtime hair-visibility fix when helmet or cloak is hidden; hooks the postfix rule evaluator to suppress hair-hiding rules (`_a`, `_c`, `_d`, `_f`, `_i`, `_q`, `_v`) without PAZ patching; enabled by default via `BaldFix = true` in `[General]`. Hair/beard may occasionally disappear; re-toggling the helmet (show then hide) restores it
-- Gliding flash fix — inline hook on PartAddShow prevents shield/equipment from briefly flashing visible when exiting glide; controllable via `GlidingFix = true/false` in `[General]`
-- Hot-reload cleanup — visibility bytes are restored to original values on DLL unload
-- ForceShow fix — vis byte restore now works correctly even with `ForceShow = false`
+- Armor hiding ï¿½ 9 new categories: Helm, Chest, Legs, Gloves, Boots, Cloak, Shoulder, Mask, Glasses
+- Accessory hiding ï¿½ 4 new categories: Earrings, Rings, Necklace, Bags (belt/bag parts)
+- User Presets ï¿½ 3 custom part groups (UserPreset1ï¿½3) with independent visibility control; presets take priority over built-in categories when enabled
+- [Experimental] BaldFix ï¿½ runtime hair-visibility fix when helmet or cloak is hidden; hooks the postfix rule evaluator to suppress hair-hiding rules (`_a`, `_c`, `_d`, `_f`, `_i`, `_q`, `_v`) without PAZ patching; enabled by default via `BaldFix = true` in `[General]`. Hair/beard may occasionally disappear; re-toggling the helmet (show then hide) restores it
+- Gliding flash fix ï¿½ inline hook on PartAddShow prevents shield/equipment from briefly flashing visible when exiting glide; controllable via `GlidingFix = true/false` in `[General]`
+- Hot-reload cleanup ï¿½ visibility bytes are restored to original values on DLL unload
+- ForceShow fix ï¿½ vis byte restore now works correctly even with `ForceShow = false`
 
 ### Improved
 
@@ -96,10 +96,10 @@ All notable changes to the CrimsonDesertEquipHide mod will be documented in this
 
 ### Fixed
 
-- Fix potential permanent mutex deadlock in `apply_direct_vis_write` on SEH unwind — switched to manual `try_lock`/`unlock`
-- Fix TOCTOU race on player slot caching in d8 fallback path — use `compare_exchange_weak`
+- Fix potential permanent mutex deadlock in `apply_direct_vis_write` on SEH unwind ï¿½ switched to manual `try_lock`/`unlock`
+- Fix TOCTOU race on player slot caching in d8 fallback path ï¿½ use `compare_exchange_weak`
 - Fix hotkey toggle causing `apply_direct_vis_write` to run on every subsequent hook call indefinitely
-- Fix silent `catch(...)` swallowing malformed hex IDs in INI parsing — now logs a warning
+- Fix silent `catch(...)` swallowing malformed hex IDs in INI parsing ï¿½ now logs a warning
 
 ### Improved
 
@@ -115,26 +115,26 @@ All notable changes to the CrimsonDesertEquipHide mod will be documented in this
 
 ### Added
 
-- Runtime IndexedStringA table scan at init — part name-to-hash resolution is now automatic, eliminating the need to manually update hardcoded hash IDs after each game patch
-- Targeted outlier probe for parts with non-deterministic hash slots (e.g. CD_Tool_Book), searching a ±0x100 window around fallback hashes
-- Dynamic range filter with automatic outlier detection — contiguous hash block bounds and outlier set are computed from resolved hashes at startup
-- Background thread for deferred table scan with retry logic — avoids blocking the game thread during loading
+- Runtime IndexedStringA table scan at init ï¿½ part name-to-hash resolution is now automatic, eliminating the need to manually update hardcoded hash IDs after each game patch
+- Targeted outlier probe for parts with non-deterministic hash slots (e.g. CD_Tool_Book), searching a ï¿½0x100 window around fallback hashes
+- Dynamic range filter with automatic outlier detection ï¿½ contiguous hash block bounds and outlier set are computed from resolved hashes at startup
+- Background thread for deferred table scan with retry logic ï¿½ avoids blocking the game thread during loading
 
 ### Improved
 
-- Replaced per-entry is_readable (VirtualQuery) calls with SEH exception handling in the table scanner — scan time reduced from 300-900ms to <1ms
-- Thread-safe double-buffered part lookup map — eliminates data race between background scan thread and hook callback
+- Replaced per-entry is_readable (VirtualQuery) calls with SEH exception handling in the table scanner ï¿½ scan time reduced from 300-900ms to <1ms
+- Thread-safe double-buffered part lookup map ï¿½ eliminates data race between background scan thread and hook callback
 
 ### Fixed
 
-- Fix equipment hide not working on game v1.01.00 — the patch inserted ~60 new entries into the IndexedStringA table, shifting all 98 equipment part hash IDs
-- Fix DefaultHidden intermittently not applying on cold boot — added 60-second startup direct-write enforcement that proactively writes visibility bytes after init, covering the race where the game processes initial equipment visibility before the hook is installed or the PlayerOnly filter has transitional pointer data
+- Fix equipment hide not working on game v1.01.00 ï¿½ the patch inserted ~60 new entries into the IndexedStringA table, shifting all 98 equipment part hash IDs
+- Fix DefaultHidden intermittently not applying on cold boot ï¿½ added 60-second startup direct-write enforcement that proactively writes visibility bytes after init, covering the race where the game processes initial equipment visibility before the hook is installed or the PlayerOnly filter has transitional pointer data
 - Direct-write visibility updates now work in d8-based fallback mode, improving hotkey responsiveness when the global pointer chain is unavailable
-- Fix toggling a category to visible forcing all its parts to always-show (vis=0) — the direct-write path now caches each part's original vis byte before overriding and restores it on un-hide, preserving the game's per-part-type render routing (vis=0 for shields rendered through the PartInOut path, vis=3 for weapons rendered by the animation system). This fixes daggers/knives becoming permanently visible after any hide/show toggle cycle
+- Fix toggling a category to visible forcing all its parts to always-show (vis=0) ï¿½ the direct-write path now caches each part's original vis byte before overriding and restores it on un-hide, preserving the game's per-part-type render routing (vis=0 for shields rendered through the PartInOut path, vis=3 for weapons rendered by the animation system). This fixes daggers/knives becoming permanently visible after any hide/show toggle cycle
 
 ## [0.2.1] - Fixed equipment hash IDs for game v1.01.00
 
-- Fix equipment hide not working on game v1.01.00 — the patch inserted ~60 new entries (bags, accessories) into the IndexedStringA table, shifting all 98 equipment part hash IDs upward and causing most categories (1H weapons, shields, bows, special weapons, lanterns) to fail silently while tools and 2H weapons appeared to work by coincidence
+- Fix equipment hide not working on game v1.01.00 ï¿½ the patch inserted ~60 new entries (bags, accessories) into the IndexedStringA table, shifting all 98 equipment part hash IDs upward and causing most categories (1H weapons, shields, bows, special weapons, lanterns) to fail silently while tools and 2H weapons appeared to work by coincidence
 - Update range filter bounds from
 
 ## [0.2.0] - Player-Only Mode, Show/Hide Hotkeys, and Reliable Hook Init
@@ -173,14 +173,14 @@ All notable changes to the CrimsonDesertEquipHide mod will be documented in this
 - Customizable part lists per category via INI configuration
 - Configurable init delay and log level
 
-[0.5.2]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/v0.5.2
-[0.5.1]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/v0.5.1
-[0.5.0]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/v0.5.0
-[0.4.0]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/v0.4.0
-[0.3.1]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/v0.3.1
-[0.3.0]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/v0.3.0
-[0.2.3]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/v0.2.3
-[0.2.2]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/v0.2.2
-[0.2.1]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/v0.2.1
-[0.2.0]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/v0.2.0
-[0.1.0]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/v0.1.0
+[0.5.2]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/equip-hide/v0.5.2
+[0.5.1]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/equip-hide/v0.5.1
+[0.5.0]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/equip-hide/v0.5.0
+[0.4.0]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/equip-hide/v0.4.0
+[0.3.1]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/equip-hide/v0.3.1
+[0.3.0]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/equip-hide/v0.3.0
+[0.2.3]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/equip-hide/v0.2.3
+[0.2.2]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/equip-hide/v0.2.2
+[0.2.1]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/equip-hide/v0.2.1
+[0.2.0]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/equip-hide/v0.2.0
+[0.1.0]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/equip-hide/v0.1.0

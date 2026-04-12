@@ -94,7 +94,7 @@ jobs:
           $new_version = "$major.$minor.$patch"
 
           echo "NEW_VERSION=$new_version" >> $env:GITHUB_ENV
-          echo "VERSION_TAG=v$new_version" >> $env:GITHUB_ENV
+          echo "VERSION_TAG=equip-hide/v$new_version" >> $env:GITHUB_ENV
           echo "ARTIFACT_NAME=CrimsonDesertEquipHide_v${new_version}.zip" >> $env:GITHUB_ENV
         shell: pwsh
 
@@ -159,7 +159,7 @@ jobs:
           git config --local user.name "Quang Trinh"
           git add CrimsonDesertEquipHide/src/version.hpp CrimsonDesertEquipHide/CHANGELOG.md CrimsonDesertEquipHide/build/template/CrimsonDesertEquipHide_Readme.txt
           git status
-          git commit -m "Bump version to ${{ env.NEW_VERSION }}"
+          git commit -m "chore(equip-hide): bump version to ${{ env.NEW_VERSION }}"
           git tag -a "${{ env.VERSION_TAG }}" -m "Release ${{ env.VERSION_TAG }}"
 
           BRANCH_NAME=${GITHUB_HEAD_REF:-${GITHUB_REF#refs/heads/}}
@@ -226,7 +226,7 @@ jobs:
           - Thread-safe logging
           '@
 
-          $releaseBody = $releaseBody -f $env:VERSION_TAG, "${{ steps.determine-title.outputs.TITLE }}", $changelog, "${{ github.repository }}"
+          $releaseBody = $releaseBody -f "v$env:NEW_VERSION", "${{ steps.determine-title.outputs.TITLE }}", $changelog, "${{ github.repository }}"
 
           if ('${{ inputs.prerelease }}' -eq 'true') {
             $preReleaseNotice = @'
@@ -246,7 +246,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: ${{ env.ARTIFACT_NAME }}
-          name: CrimsonDesertEquipHide ${{ env.VERSION_TAG }}
+          name: CrimsonDesertEquipHide v${{ env.NEW_VERSION }}
           tag_name: ${{ env.VERSION_TAG }}
           body_path: ${{ steps.prepare-release.outputs.RELEASE_BODY_PATH }}
           draft: false
@@ -279,7 +279,7 @@ jobs:
             New-Item -Path $archiveDir -ItemType Directory
           }
 
-          $archiveFileName = "CHANGELOG_${{ env.VERSION_TAG }}.md"
+          $archiveFileName = "CHANGELOG_v${{ env.NEW_VERSION }}.md"
           Move-Item $nextChangelogPath "$archiveDir\$archiveFileName"
           echo "Archived changelog to $archiveDir\$archiveFileName"
 
@@ -296,6 +296,6 @@ jobs:
           git config --local user.name "Quang Trinh"
           git add "$nextChangelogPath" "$archiveDir\$archiveFileName"
           git status
-          git commit -m "Chore: Archive changelog for ${{ env.VERSION_TAG }} and prepare for next release"
+          git commit -m "chore(equip-hide): archive changelog for v${{ env.NEW_VERSION }}"
           git push origin $branchName
         shell: pwsh

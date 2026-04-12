@@ -189,7 +189,7 @@ All notable changes to the CrimsonDesertEquipHide mod will be documented in this
                 break
 
         if not version_in_links:
-            version_links.append((version, f"https://github.com/tkhquang/CrimsonDesertTools/releases/tag/v{version}"))
+            version_links.append((version, f"https://github.com/tkhquang/CrimsonDesertTools/releases/tag/equip-hide/v{version}"))
 
         version_links.sort(key=lambda x: [int(n) for n in x[0].split('.')], reverse=True)
 
