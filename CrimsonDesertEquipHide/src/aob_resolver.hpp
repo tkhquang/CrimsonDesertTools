@@ -104,27 +104,55 @@ namespace EquipHide
     };
 
     /**
-     * @brief Hook target: sub_14081D3C0 — PartInOut transition function.
+     * @brief Hook target: PartInOut transition function.
      *
-     * Hook point: movzx eax, byte ptr [r13+1Ch]; cmp al, 3
+     * Hook point: movzx eax, byte ptr [<vis_reg>+1Ch]; cmp al, 3
      *
-     * Register layout at hook point:
+     * Register layout at hook point (v1.03.01):
+     *   R10 = pointer to part hash DWORD (IndexedStringA ID)
+     *   RAX = pointer to PartInOutSocket struct (loaded from [RBP+5Fh])
+     *   R8B = exclusion-list flag
+     *   [RBP+0x67] = a4 (transition type byte, saved from R9B at prologue)
+     *   [RBP+0x4F] = a1 context pointer
+     *
+     * Register layout at hook point (v1.02.00 — legacy):
      *   R10 = pointer to part hash DWORD (IndexedStringA ID)
      *   R13 = pointer to PartInOutSocket struct (Visible byte at +0x1C)
      *   R8B = exclusion-list flag
      *   [RBP+0x67] = a4 (transition type byte, saved from R9B at prologue)
+     *   [RBP+0x4F] = a1 context pointer
      *
      * Cascading AOB patterns (tried in order until one matches).
+     * Pattern names prefixed with "V103_" use the v1.03.01 register layout
+     * where the PartInOut struct pointer is in RAX (not R13).
      */
     inline constexpr AobCandidate k_hookSiteCandidates[] = {
+        // v1.03.01: mov rax,[rbp+5F]; movzx eax,[rax+1C]; cmp al,3; ...
+        {"V103_P1_DirectSite",
+         "48 8B 45 5F 0F B6 40 1C 3C 03 74 ?? 45 84 C0 75 ?? 84 C0",
+         4},
+
+        // v1.03.01: xor r8b,r8b; mov rax,[r13+??]; mov ecx,[r13+??]; shl rcx,4; ...
+        {"V103_P2_WiderContext",
+         "45 32 C0 49 8B 45 ?? 41 8B 4D ?? 48 C1 E1 04 48 03 C8 48 3B C1 74 ?? 41 8B 12",
+         0x30},
+
+        // v1.03.01: mov r8b,1; mov rax,[rbp+5F]; movzx eax,[rax+1C]; cmp al,3; ...
+        {"V103_P3_PrecedingGate",
+         "41 B0 01 48 8B 45 5F 0F B6 40 1C 3C 03 74 ?? 45 84 C0",
+         7},
+
+        // v1.02.00 (legacy): movzx eax,[r13+1C]; cmp al,3; ...
         {"P1_DirectSite",
          "41 0F B6 45 1C 3C 03 74 ?? 45 84 C0 75 ?? 84 C0",
          0},
 
+        // v1.02.00 (legacy): xor r8b,r8b; mov rcx,[rbp+??]; ...
         {"P2_WiderContext",
          "45 32 C0 48 8B 4D ?? 48 8B 41 ?? 8B 49 ?? 48 C1 E1 04 48 03 C8 48 3B C1 74 ?? 41 8B 12",
          0x36},
 
+        // v1.02.00 (legacy): mov r8b,1; movzx eax,[r13+1C]; cmp al,3; ...
         {"P3_PrecedingGate",
          "41 B0 01 41 0F B6 45 1C 3C 03 74 ?? 45 84 C0",
          3},
