@@ -2,6 +2,12 @@
 
 All notable changes to the CrimsonDesertEquipHide mod will be documented in this file.
 
+## [0.5.2] - Game v1.03.01 Support
+
+- Added support for Crimson Desert v1.03.01 (the mod still works on v1.02.00)
+- Fixed equipment not hiding after the game update
+- Improved diagnostic logging for easier troubleshooting
+
 ## [0.5.1] - Upgrade to DetourModKit v3.0.0
 
 ### Internal
@@ -167,6 +173,7 @@ All notable changes to the CrimsonDesertEquipHide mod will be documented in this
 - Customizable part lists per category via INI configuration
 - Configurable init delay and log level
 
+[0.5.2]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/v0.5.2
 [0.5.1]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/v0.5.1
 [0.5.0]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/v0.5.0
 [0.4.0]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/v0.4.0
