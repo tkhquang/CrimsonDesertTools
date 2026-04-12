@@ -1,0 +1,839 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Live Transmog - Preset Builder</title>
+<style>
+:root {
+  --bg: #1e1e24;
+  --panel: #2a2a33;
+  --input: #1a1a22;
+  --border: #3a3a44;
+  --accent: #5294e2;
+  --accent-hover: #6aa4f2;
+  --yellow: #d4a020;
+  --yellow-hover: #e4b030;
+  --green: #4caf50;
+  --red: #e04050;
+  --orange: #e88040;
+  --text: #e0e0e0;
+  --text-dim: #888;
+  --text-disabled: #555;
+  --header-height: 24px;
+  --separator: #444;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); font-size: 13px; }
+.app { max-width: 520px; margin: 0 auto; padding: 8px 12px; }
+
+/* Header */
+.header { display: flex; align-items: baseline; gap: 8px; padding: 6px 0; }
+.header h1 { font-size: 14px; font-weight: 600; }
+.header .version { color: var(--text-dim); font-size: 12px; }
+.header .pending-badge { color: var(--yellow); font-size: 12px; font-weight: 600; display: none; }
+
+.separator { border: none; border-top: 1px solid var(--separator); margin: 4px 0; }
+
+/* Load catalog bar */
+.load-bar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 8px; background: var(--panel); border-radius: 4px; margin: 4px 0;
+  font-size: 12px;
+}
+.load-bar .status { flex: 1; color: var(--text-dim); }
+.load-bar .status.loaded { color: var(--green); }
+.load-bar button, .file-btn {
+  padding: 3px 10px; background: var(--accent); color: #fff;
+  border: none; border-radius: 3px; cursor: pointer; font-size: 11px;
+}
+.load-bar button:hover, .file-btn:hover { background: var(--accent-hover); }
+
+/* Collapsible sections */
+.section-header {
+  display: flex; align-items: center; cursor: pointer;
+  padding: 4px 0; user-select: none; font-size: 13px; font-weight: 600;
+}
+.section-header::before {
+  content: '\25BC'; font-size: 9px; margin-right: 6px;
+  transition: transform 0.15s;
+}
+.section-header.collapsed::before { transform: rotate(-90deg); }
+.section-body { overflow: hidden; }
+.section-body.collapsed { display: none; }
+
+/* Preset list */
+.preset-item {
+  display: flex; align-items: center; padding: 3px 8px;
+  cursor: pointer; border-radius: 3px; font-size: 12px;
+}
+.preset-item:hover { background: rgba(82, 148, 226, 0.15); }
+.preset-item.active { background: rgba(82, 148, 226, 0.25); font-weight: 600; }
+.preset-item .idx { color: var(--text-dim); margin-left: 4px; }
+
+.preset-actions {
+  display: flex; gap: 4px; margin: 6px 0; flex-wrap: wrap;
+}
+.preset-info { font-size: 11px; color: var(--text-dim); margin: 2px 0; }
+
+/* Buttons */
+.btn {
+  padding: 4px 12px; border: 1px solid var(--border); border-radius: 3px;
+  background: var(--panel); color: var(--text); cursor: pointer; font-size: 11px;
+}
+.btn:hover { background: #3a3a48; border-color: var(--accent); }
+.btn-apply { background: var(--panel); }
+.btn-apply.pending { background: var(--yellow); color: #000; border-color: var(--yellow); font-weight: 600; }
+.btn-apply.pending:hover { background: var(--yellow-hover); }
+.btn-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+.btn-primary:hover { background: var(--accent-hover); }
+
+/* Slot rows */
+.slot-row {
+  display: flex; align-items: center; gap: 6px;
+  padding: 3px 0; border-bottom: 1px solid rgba(255,255,255,0.03);
+}
+.slot-row input[type="checkbox"] { margin: 0; accent-color: var(--accent); }
+.slot-row .slot-label { width: 55px; font-size: 12px; font-weight: 600; }
+.slot-row .picker-btn {
+  flex: 1; text-align: left; padding: 3px 8px;
+  background: var(--input); border: 1px solid var(--border);
+  border-radius: 3px; color: var(--text); cursor: pointer;
+  font-size: 12px; min-width: 0; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+}
+.slot-row .picker-btn:hover { border-color: var(--accent); }
+.slot-row .picker-btn .item-id { color: var(--text-dim); }
+.slot-row .hex-input {
+  width: 50px; padding: 3px 4px; background: var(--input);
+  border: 1px solid var(--border); border-radius: 3px;
+  color: var(--text); font-family: monospace; font-size: 12px;
+  text-transform: uppercase;
+}
+
+/* Picker popup */
+.picker-overlay {
+  display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.5); z-index: 100;
+}
+.picker-overlay.open { display: flex; align-items: center; justify-content: center; }
+.picker-popup {
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: 6px; width: 400px; max-height: 500px;
+  display: flex; flex-direction: column; box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+}
+.picker-header { padding: 8px 10px; border-bottom: 1px solid var(--border); }
+.picker-header h3 { font-size: 13px; margin-bottom: 6px; }
+.picker-filters { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.picker-filters input[type="text"] {
+  flex: 1; min-width: 150px; padding: 4px 8px;
+  background: var(--input); border: 1px solid var(--border);
+  border-radius: 3px; color: var(--text); font-size: 12px;
+}
+.picker-filters label { font-size: 11px; color: var(--text-dim); display: flex; align-items: center; gap: 3px; }
+.picker-list {
+  flex: 1; overflow-y: auto; min-height: 200px; max-height: 350px;
+}
+.picker-entry {
+  padding: 4px 10px; cursor: pointer; font-size: 12px;
+  display: flex; align-items: center; gap: 6px;
+}
+.picker-entry:hover { background: rgba(82,148,226,0.15); }
+.picker-entry.selected { background: rgba(82,148,226,0.25); }
+.picker-entry .pe-name { flex: 1; }
+.picker-entry .pe-id { color: var(--text-dim); font-family: monospace; font-size: 11px; }
+.picker-entry .pe-tag { font-size: 10px; padding: 1px 4px; border-radius: 2px; }
+.pe-tag.variant { background: var(--orange); color: #000; }
+.pe-tag.unsafe { background: var(--red); color: #fff; }
+.picker-footer {
+  padding: 6px 10px; border-top: 1px solid var(--border);
+  font-size: 11px; color: var(--text-dim);
+}
+
+/* Action bar */
+.action-bar { display: flex; gap: 4px; margin: 6px 0; flex-wrap: wrap; }
+
+/* Status footer */
+.status-footer { font-size: 11px; color: var(--text-dim); padding: 4px 0; }
+.status-footer .ready { color: var(--green); }
+
+/* Character selector */
+.char-row { display: flex; gap: 4px; align-items: center; margin: 4px 0; }
+.char-btn { padding: 3px 10px; border: 1px solid var(--border); border-radius: 3px; background: var(--panel); color: var(--text); cursor: pointer; font-size: 11px; }
+.char-btn:hover { border-color: var(--accent); }
+.char-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+/* Export section */
+.export-area {
+  width: 100%; min-height: 120px; background: var(--input);
+  border: 1px solid var(--border); border-radius: 4px;
+  color: var(--green); font-family: monospace; font-size: 11px;
+  padding: 8px; resize: vertical; margin-top: 6px;
+}
+
+/* Import */
+.drop-zone {
+  border: 2px dashed var(--border); border-radius: 6px;
+  padding: 16px; text-align: center; color: var(--text-dim);
+  cursor: pointer; font-size: 12px; margin: 6px 0;
+}
+.drop-zone:hover { border-color: var(--accent); color: var(--text); }
+
+/* All checkbox row */
+.all-row { display: flex; align-items: center; gap: 6px; padding: 2px 0; margin-bottom: 2px; }
+.all-row label { font-size: 12px; }
+.all-row .hint { font-size: 11px; color: var(--text-dim); }
+
+/* Catalog table */
+.catalog-controls {
+  display: flex; gap: 6px; align-items: center; margin-bottom: 6px; flex-wrap: wrap;
+}
+.catalog-controls input[type="text"] {
+  flex: 1; min-width: 140px; padding: 4px 8px;
+  background: var(--input); border: 1px solid var(--border);
+  border-radius: 3px; color: var(--text); font-size: 12px;
+}
+.catalog-controls select {
+  padding: 4px 6px; background: var(--input); border: 1px solid var(--border);
+  border-radius: 3px; color: var(--text); font-size: 11px;
+}
+.catalog-controls label { font-size: 11px; color: var(--text-dim); display: flex; align-items: center; gap: 3px; }
+.catalog-count { font-size: 11px; color: var(--text-dim); margin-bottom: 4px; }
+
+.catalog-table-wrap { max-height: 500px; overflow-y: auto; border: 1px solid var(--border); border-radius: 4px; }
+.catalog-table {
+  width: 100%; border-collapse: collapse; font-size: 11px;
+}
+.catalog-table th {
+  position: sticky; top: 0; background: var(--panel);
+  padding: 5px 8px; text-align: left; font-weight: 600;
+  border-bottom: 2px solid var(--border); cursor: pointer; user-select: none;
+  white-space: nowrap;
+}
+.catalog-table th:hover { color: var(--accent); }
+.catalog-table th .sort-arrow { font-size: 9px; margin-left: 3px; color: var(--text-dim); }
+.catalog-table td {
+  padding: 3px 8px; border-bottom: 1px solid rgba(255,255,255,0.03);
+}
+.catalog-table tr:hover { background: rgba(82,148,226,0.08); }
+.catalog-table .col-id { font-family: monospace; color: var(--text-dim); width: 60px; }
+.catalog-table .col-slot { width: 55px; }
+.catalog-table .col-flags { width: 70px; font-size: 10px; }
+.catalog-table .flag-variant { color: var(--orange); }
+.catalog-table .flag-unsafe { color: var(--red); font-weight: 600; }
+.catalog-table .flag-ok { color: var(--green); }
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- Header -->
+  <div class="header">
+    <h1>CrimsonDesertLiveTransmog</h1>
+    <span class="version">Preset Builder</span>
+    <span class="pending-badge" id="pendingBadge">[PENDING]</span>
+  </div>
+
+  <!-- Load catalog -->
+  <div class="load-bar">
+    <span class="status" id="catalogStatus">No catalog loaded</span>
+    <label class="file-btn">
+      Load TSV
+      <input type="file" id="tsvFile" accept=".tsv,.txt,.csv" style="display:none">
+    </label>
+    <button id="loadBuiltinBtn">Use built-in (v1.03.01)</button>
+  </div>
+
+  <hr class="separator">
+
+  <!-- Character -->
+  <div class="char-row" id="charRow">
+    <span style="font-size:11px;color:var(--text-dim)">Character:</span>
+  </div>
+
+  <hr class="separator">
+
+  <!-- Presets -->
+  <div class="section-header" id="presetsHeader">Presets</div>
+  <div class="section-body" id="presetsBody">
+    <div id="presetList"></div>
+    <div class="preset-actions">
+      <button class="btn" onclick="appendPreset()">Append</button>
+      <button class="btn" onclick="replacePreset()">Replace</button>
+      <button class="btn" onclick="removePreset()">Remove</button>
+      <button class="btn" onclick="prevPreset()">Prev</button>
+      <button class="btn" onclick="nextPreset()">Next</button>
+    </div>
+    <div class="preset-info" id="presetInfo">No presets</div>
+    <div style="display:flex;gap:4px;align-items:center;margin:4px 0">
+      <input type="text" id="presetNameInput" placeholder="Preset name" value="Preset 1"
+        style="flex:1;padding:3px 6px;background:var(--input);border:1px solid var(--border);border-radius:3px;color:var(--text);font-size:12px">
+    </div>
+  </div>
+
+  <hr class="separator">
+
+  <!-- Slot Details -->
+  <div class="section-header" id="slotsHeader">Slot Details</div>
+  <div class="section-body" id="slotsBody">
+    <div id="catalogHint" style="font-size:11px;color:var(--text-dim);margin-bottom:4px;display:none">
+      Item catalog not ready - load a TSV first.
+    </div>
+    <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">
+      Click the picker button to browse items for each slot.
+    </div>
+    <div class="all-row">
+      <input type="checkbox" id="allCheck" checked>
+      <label for="allCheck">All</label>
+      <span class="hint">(toggle all slots)</span>
+    </div>
+    <div id="slotRows"></div>
+  </div>
+
+  <hr class="separator">
+
+  <!-- Actions -->
+  <div class="action-bar">
+    <button class="btn btn-apply" id="btnApply" onclick="doSave()">Save</button>
+    <button class="btn" onclick="clearAll()">Clear All</button>
+  </div>
+
+  <hr class="separator">
+
+  <!-- Export / Import -->
+  <div class="section-header" id="exportHeader">Export / Import</div>
+  <div class="section-body" id="exportBody">
+    <div class="action-bar">
+      <button class="btn btn-primary" onclick="generateJSON()">Generate JSON</button>
+      <button class="btn" onclick="downloadJSON()">Download</button>
+      <button class="btn" onclick="copyJSON()">Copy</button>
+    </div>
+    <textarea class="export-area" id="jsonOutput" readonly placeholder="Click Generate JSON to preview..."></textarea>
+
+    <div class="drop-zone" id="dropZoneJson">
+      Drop existing <b>CrimsonDesertLiveTransmog_presets.json</b> here to import
+      <input type="file" id="jsonFile" accept=".json" style="display:none">
+    </div>
+  </div>
+
+  <hr class="separator">
+
+  <!-- Item Catalog Browser -->
+  <div class="section-header collapsed" id="catalogBrowserHeader">Item Catalog</div>
+  <div class="section-body collapsed" id="catalogBrowserBody">
+    <div id="catalogBrowserEmpty" style="font-size:11px;color:var(--text-dim);padding:4px 0">
+      Load a catalog first to browse all items.
+    </div>
+    <div id="catalogBrowserContent" style="display:none">
+      <div class="catalog-controls">
+        <input type="text" id="catSearch" placeholder="Search by name...">
+        <select id="catSlotFilter">
+          <option value="">All Slots</option>
+          <option value="Helm">Helm</option>
+          <option value="Chest">Chest</option>
+          <option value="Cloak">Cloak</option>
+          <option value="Gloves">Gloves</option>
+          <option value="Boots">Boots</option>
+          <option value="Other">Other</option>
+        </select>
+        <label><input type="checkbox" id="catHideVariants"> Hide variants</label>
+        <label><input type="checkbox" id="catHideUnsafe"> Hide unsafe</label>
+      </div>
+      <div class="catalog-count" id="catCount"></div>
+      <div class="catalog-table-wrap">
+        <table class="catalog-table">
+          <thead>
+            <tr>
+              <th data-col="id">ID <span class="sort-arrow"></span></th>
+              <th data-col="slot">Slot <span class="sort-arrow"></span></th>
+              <th data-col="name">Name <span class="sort-arrow"></span></th>
+              <th data-col="flags">Flags <span class="sort-arrow"></span></th>
+            </tr>
+          </thead>
+          <tbody id="catTableBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <hr class="separator">
+
+  <!-- Status -->
+  <div class="status-footer">
+    <span id="footerStatus">Catalog: not loaded</span>
+    <span style="float:right" id="footerSlots">Active: 0/5</span>
+  </div>
+</div>
+
+<!-- Picker popup -->
+<div class="picker-overlay" id="pickerOverlay">
+  <div class="picker-popup">
+    <div class="picker-header">
+      <h3 id="pickerTitle">Select item</h3>
+      <div class="picker-filters">
+        <input type="text" id="pickerSearch" placeholder="search by name..." autofocus>
+        <label><input type="checkbox" id="pickerExact" checked> Exact slot</label>
+        <label><input type="checkbox" id="pickerHide" checked> Hide variants</label>
+      </div>
+    </div>
+    <div class="picker-list" id="pickerList"></div>
+    <div class="picker-footer" id="pickerFooter"></div>
+  </div>
+</div>
+
+<script>
+// ---- State ----
+const SLOTS = ['Helm','Chest','Cloak','Gloves','Boots'];
+const SLOT_MAP = {Helm:0, Chest:1, Cloak:2, Gloves:3, Boots:4};
+let catalog = [];
+let characters = {Kliff:{activePreset:0,presets:[]}, Damiane:{activePreset:0,presets:[]}, Oongka:{activePreset:0,presets:[]}};
+let activeChar = 'Kliff';
+let currentSlots = SLOTS.map(() => ({active:false, itemName:''}));
+let pickerSlotIdx = -1;
+
+// ---- Collapsible sections ----
+document.querySelectorAll('.section-header').forEach(h => {
+  const bodyId = h.id.replace('Header','Body');
+  h.addEventListener('click', () => {
+    h.classList.toggle('collapsed');
+    document.getElementById(bodyId).classList.toggle('collapsed');
+  });
+});
+
+// ---- Character buttons ----
+function renderCharButtons() {
+  const row = document.getElementById('charRow');
+  row.innerHTML = '<span style="font-size:11px;color:var(--text-dim)">Character:</span>';
+  for (const name of Object.keys(characters)) {
+    const b = document.createElement('button');
+    b.className = 'char-btn' + (name === activeChar ? ' active' : '');
+    b.textContent = name;
+    b.onclick = () => { activeChar = name; renderCharButtons(); loadActivePreset(); };
+    row.appendChild(b);
+  }
+}
+
+// ---- Preset management ----
+function cp() { return characters[activeChar]; }
+
+function renderPresets() {
+  const c = cp();
+  const list = document.getElementById('presetList');
+  if (!c.presets.length) {
+    list.innerHTML = '<div style="font-size:11px;color:var(--text-dim);padding:4px 0">No presets - use Append to create one</div>';
+    document.getElementById('presetInfo').textContent = 'No presets';
+    return;
+  }
+  list.innerHTML = c.presets.map((p,i) =>
+    `<div class="preset-item${i===c.activePreset?' active':''}" onclick="selectPreset(${i})">
+      ${esc(p.name)} <span class="idx">[${i}]</span>
+    </div>`
+  ).join('');
+  document.getElementById('presetInfo').textContent = `Active: ${c.activePreset+1} / ${c.presets.length}`;
+}
+
+function selectPreset(i) {
+  cp().activePreset = i;
+  loadActivePreset();
+}
+
+function loadActivePreset() {
+  const c = cp();
+  renderPresets();
+  if (!c.presets.length) { clearAll(); return; }
+  const p = c.presets[c.activePreset];
+  document.getElementById('presetNameInput').value = p.name;
+  currentSlots = p.slots.map(s => ({...s}));
+  while (currentSlots.length < 5) currentSlots.push({active:false, itemName:''});
+  renderSlots();
+}
+
+function appendPreset() {
+  const name = document.getElementById('presetNameInput').value.trim() || 'Unnamed';
+  const c = cp();
+  c.presets.push({ name, slots: currentSlots.map(s=>({...s})) });
+  c.activePreset = c.presets.length - 1;
+  renderPresets();
+  // Auto-increment name
+  const m = name.match(/^(.+?)(\d+)$/);
+  if (m) document.getElementById('presetNameInput').value = m[1] + (parseInt(m[2])+1);
+}
+
+function replacePreset() {
+  const c = cp();
+  if (!c.presets.length) return;
+  const name = document.getElementById('presetNameInput').value.trim() || 'Unnamed';
+  c.presets[c.activePreset] = { name, slots: currentSlots.map(s=>({...s})) };
+  renderPresets();
+}
+
+function removePreset() {
+  const c = cp();
+  if (!c.presets.length) return;
+  c.presets.splice(c.activePreset, 1);
+  if (c.activePreset >= c.presets.length) c.activePreset = Math.max(0, c.presets.length-1);
+  loadActivePreset();
+}
+
+function prevPreset() {
+  const c = cp();
+  if (c.presets.length < 2) return;
+  c.activePreset = (c.activePreset - 1 + c.presets.length) % c.presets.length;
+  loadActivePreset();
+}
+
+function nextPreset() {
+  const c = cp();
+  if (c.presets.length < 2) return;
+  c.activePreset = (c.activePreset + 1) % c.presets.length;
+  loadActivePreset();
+}
+
+// ---- Slot rendering ----
+function renderSlots() {
+  const container = document.getElementById('slotRows');
+  container.innerHTML = SLOTS.map((name,i) => {
+    const s = currentSlots[i];
+    const label = s.itemName ? `${s.itemName}` : '(none)';
+    return `<div class="slot-row">
+      <input type="checkbox" ${s.active?'checked':''} onchange="currentSlots[${i}].active=this.checked;updateFooter()">
+      <span class="slot-label">${name}</span>
+      <button class="picker-btn" onclick="openPicker(${i})">
+        ${esc(label)}
+      </button>
+    </div>`;
+  }).join('');
+  updateAllCheck();
+  updateFooter();
+}
+
+function updateAllCheck() {
+  document.getElementById('allCheck').checked = currentSlots.every(s=>s.active);
+}
+document.getElementById('allCheck').addEventListener('change', e => {
+  currentSlots.forEach(s => s.active = e.target.checked);
+  renderSlots();
+});
+
+function clearAll() {
+  currentSlots = SLOTS.map(() => ({active:false, itemName:''}));
+  renderSlots();
+}
+
+function updateFooter() {
+  const active = currentSlots.filter(s=>s.active && s.itemName).length;
+  document.getElementById('footerSlots').textContent = `Active: ${active}/5`;
+  document.getElementById('footerStatus').textContent =
+    catalog.length ? `Catalog: ${catalog.length} items` : 'Catalog: not loaded';
+}
+
+// ---- Picker ----
+function openPicker(slotIdx) {
+  if (!catalog.length) { alert('Load the item catalog TSV first.'); return; }
+  pickerSlotIdx = slotIdx;
+  document.getElementById('pickerTitle').textContent = `Select item - ${SLOTS[slotIdx]}`;
+  document.getElementById('pickerSearch').value = '';
+  document.getElementById('pickerExact').checked = true;
+  document.getElementById('pickerHide').checked = true;
+  document.getElementById('pickerOverlay').classList.add('open');
+  renderPicker();
+  setTimeout(() => document.getElementById('pickerSearch').focus(), 50);
+}
+
+function closePicker() {
+  document.getElementById('pickerOverlay').classList.remove('open');
+  pickerSlotIdx = -1;
+}
+
+document.getElementById('pickerOverlay').addEventListener('click', e => {
+  if (e.target === document.getElementById('pickerOverlay')) closePicker();
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closePicker();
+});
+
+['pickerSearch','pickerExact','pickerHide'].forEach(id => {
+  document.getElementById(id).addEventListener(
+    id === 'pickerSearch' ? 'input' : 'change', renderPicker);
+});
+
+function renderPicker() {
+  const list = document.getElementById('pickerList');
+  const query = document.getElementById('pickerSearch').value.toLowerCase();
+  const exact = document.getElementById('pickerExact').checked;
+  const hide = document.getElementById('pickerHide').checked;
+  const slotName = SLOTS[pickerSlotIdx];
+
+  let html = `<div class="picker-entry" onclick="pickItem('')">
+    <span class="pe-name" style="color:var(--text-dim)">(none - clear slot)</span>
+  </div>`;
+
+  let shown = 0, filtered = 0;
+  for (const item of catalog) {
+    if (exact && item.slot !== slotName && item.slot !== 'Other') { filtered++; continue; }
+    const nonEquip = (item.slot === 'Other');
+    const unsafe = item.variant || !item.playerSafe || nonEquip;
+    if (hide && unsafe) { filtered++; continue; }
+    if (query && !item.name.toLowerCase().includes(query)) continue;
+    if (shown >= 512) break;
+
+    let tag = '';
+    if (!item.playerSafe) tag = '<span class="pe-tag unsafe">CRASH RISK</span>';
+    else if (item.variant) tag = '<span class="pe-tag variant">variant</span>';
+
+    const sel = currentSlots[pickerSlotIdx]?.itemName === item.name ? ' selected' : '';
+    html += `<div class="picker-entry${sel}" onclick="pickItem('${esc(item.name)}')">
+      <span class="pe-name">${esc(item.name)}</span>
+      ${tag}
+      <span class="pe-id">${item.id}</span>
+    </div>`;
+    shown++;
+  }
+
+  if (shown === 0) {
+    if (filtered > 0)
+      html += '<div style="padding:8px;color:var(--text-dim);font-size:11px">No matches - uncheck filters to widen</div>';
+    else
+      html += '<div style="padding:8px;color:var(--text-dim);font-size:11px">No matches</div>';
+  }
+
+  list.innerHTML = html;
+  document.getElementById('pickerFooter').textContent =
+    `${shown} shown` + (filtered ? `, ${filtered} filtered` : '');
+}
+
+function pickItem(name) {
+  if (pickerSlotIdx < 0) return;
+  currentSlots[pickerSlotIdx] = { active: !!name, itemName: name };
+  closePicker();
+  renderSlots();
+}
+
+// ---- Save (replaces current preset or appends) ----
+function doSave() {
+  const c = cp();
+  if (c.presets.length) {
+    replacePreset();
+  } else {
+    appendPreset();
+  }
+}
+
+// ---- Catalog loading ----
+document.getElementById('tsvFile').addEventListener('change', e => {
+  if (e.target.files.length) loadTSVFile(e.target.files[0]);
+});
+
+function loadTSVFile(file) {
+  const reader = new FileReader();
+  reader.onload = e => parseTSV(e.target.result, file.name);
+  reader.readAsText(file);
+}
+
+function parseTSV(text, source) {
+  const lines = text.split('\n').filter(l => l.trim());
+  catalog = [];
+  for (let i = 1; i < lines.length; i++) {
+    const cols = lines[i].split('\t');
+    if (cols.length < 5) continue;
+    catalog.push({
+      id: cols[0].trim(),
+      slot: cols[1].trim(),
+      variant: cols[2].trim().toLowerCase() === 'yes',
+      playerSafe: cols[3].trim().toLowerCase() === 'yes',
+      name: cols[4].trim()
+    });
+  }
+  const el = document.getElementById('catalogStatus');
+  el.textContent = `${catalog.length} items (${source})`;
+  el.classList.add('loaded');
+  document.getElementById('catalogHint').style.display = 'none';
+  updateFooter();
+}
+
+// Built-in catalog
+document.getElementById('loadBuiltinBtn').addEventListener('click', async () => {
+  try {
+    const resp = await fetch('CrimsonDesertLiveTransmog_items_v1.03.01.tsv');
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const text = await resp.text();
+    parseTSV(text, 'built-in v1.03.01');
+  } catch (e) {
+    alert('Failed to load built-in catalog: ' + e.message + '\nUse "Load TSV" instead.');
+  }
+});
+
+// ---- JSON export ----
+function buildJSON() {
+  const out = { version: 3, activeCharacter: activeChar, characters: {} };
+  for (const [name, c] of Object.entries(characters)) {
+    out.characters[name] = {
+      activePreset: c.activePreset,
+      presets: c.presets.map(p => ({
+        name: p.name,
+        slots: p.slots.map(s => ({ active: s.active, itemName: s.itemName || '' }))
+      }))
+    };
+  }
+  return JSON.stringify(out, null, 2);
+}
+
+function generateJSON() { document.getElementById('jsonOutput').value = buildJSON(); }
+function downloadJSON() {
+  const blob = new Blob([buildJSON()], {type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'CrimsonDesertLiveTransmog_presets.json';
+  a.click(); URL.revokeObjectURL(a.href);
+}
+function copyJSON() {
+  navigator.clipboard.writeText(buildJSON()).then(() => alert('Copied!'));
+}
+
+// ---- JSON import ----
+const dzj = document.getElementById('dropZoneJson');
+const jf = document.getElementById('jsonFile');
+dzj.addEventListener('click', () => jf.click());
+dzj.addEventListener('dragover', e => { e.preventDefault(); });
+dzj.addEventListener('drop', e => { e.preventDefault(); if (e.dataTransfer.files.length) importJSON(e.dataTransfer.files[0]); });
+jf.addEventListener('change', e => { if (e.target.files.length) importJSON(e.target.files[0]); });
+
+function importJSON(file) {
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const root = JSON.parse(e.target.result);
+      characters = {};
+      if (root.characters) {
+        for (const [name, c] of Object.entries(root.characters)) {
+          characters[name] = {
+            activePreset: c.activePreset || 0,
+            presets: (c.presets||[]).map(p => ({
+              name: p.name || 'Unnamed',
+              slots: (p.slots||[]).map(s => ({active:s.active||false, itemName:s.itemName||''}))
+            }))
+          };
+          characters[name].presets.forEach(p => { while(p.slots.length<5) p.slots.push({active:false,itemName:''}); });
+        }
+      }
+      ['Kliff','Damiane','Oongka'].forEach(c => { if (!characters[c]) characters[c] = {activePreset:0,presets:[]}; });
+      activeChar = root.activeCharacter || 'Kliff';
+      renderCharButtons();
+      loadActivePreset();
+      alert(`Imported from ${file.name}`);
+    } catch(e) { alert('Parse error: ' + e.message); }
+  };
+  reader.readAsText(file);
+}
+
+// ---- Catalog browser table ----
+let catSortCol = 'name', catSortAsc = true;
+
+function renderCatalogTable() {
+  if (!catalog.length) {
+    document.getElementById('catalogBrowserEmpty').style.display = '';
+    document.getElementById('catalogBrowserContent').style.display = 'none';
+    return;
+  }
+  document.getElementById('catalogBrowserEmpty').style.display = 'none';
+  document.getElementById('catalogBrowserContent').style.display = '';
+
+  const query = document.getElementById('catSearch').value.toLowerCase();
+  const slotF = document.getElementById('catSlotFilter').value;
+  const hideVar = document.getElementById('catHideVariants').checked;
+  const hideUnsafe = document.getElementById('catHideUnsafe').checked;
+
+  let items = catalog.filter(item => {
+    if (query && !item.name.toLowerCase().includes(query)) return false;
+    if (slotF && item.slot !== slotF) return false;
+    if (hideVar && item.variant) return false;
+    if (hideUnsafe && !item.playerSafe) return false;
+    return true;
+  });
+
+  // Sort
+  items.sort((a, b) => {
+    let va, vb;
+    if (catSortCol === 'id') {
+      va = parseInt(a.id, 16) || 0; vb = parseInt(b.id, 16) || 0;
+    } else if (catSortCol === 'slot') {
+      va = a.slot; vb = b.slot;
+    } else if (catSortCol === 'flags') {
+      va = (a.variant?1:0) + (a.playerSafe?0:2); vb = (b.variant?1:0) + (b.playerSafe?0:2);
+    } else {
+      va = a.name.toLowerCase(); vb = b.name.toLowerCase();
+    }
+    if (va < vb) return catSortAsc ? -1 : 1;
+    if (va > vb) return catSortAsc ? 1 : -1;
+    return 0;
+  });
+
+  document.getElementById('catCount').textContent =
+    `${items.length} / ${catalog.length} items`;
+
+  const maxRows = 1000;
+  const body = document.getElementById('catTableBody');
+  body.innerHTML = items.slice(0, maxRows).map(item => {
+    let flags = '';
+    if (!item.playerSafe) flags = '<span class="flag-unsafe">unsafe</span>';
+    else if (item.variant) flags = '<span class="flag-variant">variant</span>';
+    else flags = '<span class="flag-ok">ok</span>';
+    return `<tr>
+      <td class="col-id">${item.id}</td>
+      <td class="col-slot">${item.slot}</td>
+      <td>${esc(item.name)}</td>
+      <td class="col-flags">${flags}</td>
+    </tr>`;
+  }).join('') + (items.length > maxRows
+    ? `<tr><td colspan="4" style="color:var(--text-dim);padding:6px">Showing ${maxRows} of ${items.length} - refine search</td></tr>` : '');
+
+  // Update sort arrows
+  document.querySelectorAll('.catalog-table th').forEach(th => {
+    const arrow = th.querySelector('.sort-arrow');
+    if (th.dataset.col === catSortCol) arrow.textContent = catSortAsc ? '\u25B2' : '\u25BC';
+    else arrow.textContent = '';
+  });
+}
+
+// Sort on header click
+document.querySelectorAll('.catalog-table th').forEach(th => {
+  th.addEventListener('click', () => {
+    const col = th.dataset.col;
+    if (catSortCol === col) catSortAsc = !catSortAsc;
+    else { catSortCol = col; catSortAsc = true; }
+    renderCatalogTable();
+  });
+});
+
+['catSearch','catSlotFilter','catHideVariants','catHideUnsafe'].forEach(id => {
+  const el = document.getElementById(id);
+  el.addEventListener(el.type === 'text' ? 'input' : 'change', renderCatalogTable);
+});
+
+// Hook into catalog load to refresh browser
+const _origParseTSV = parseTSV;
+parseTSV = function(text, source) {
+  _origParseTSV(text, source);
+  renderCatalogTable();
+};
+
+// ---- Utils ----
+function esc(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+
+// ---- Init ----
+renderCharButtons();
+renderSlots();
+renderPresets();
+if (!catalog.length) document.getElementById('catalogHint').style.display = '';
+
+// Auto-load built-in catalog on page load
+(async () => {
+  try {
+    const resp = await fetch('CrimsonDesertLiveTransmog_items_v1.03.01.tsv');
+    if (!resp.ok) return;
+    const text = await resp.text();
+    if (text.split('\n').length > 2) parseTSV(text, 'v1.03.01');
+  } catch (_) {}
+})();
+</script>
+</body>
+</html>

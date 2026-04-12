@@ -88,7 +88,7 @@ If you run into issues, check the OptiScaler and ReShade documentation for their
 
 ## Usage
 
-> **The in-game GUI is only available through ReShade.** If you do not have ReShade installed, you must configure transmog presets by editing `CrimsonDesertLiveTransmog_presets.json` directly and using hotkeys to apply/clear. See the [preset file format](#without-reshade-manual-json-editing) section below.
+> **The in-game GUI is only available through ReShade.** If you do not have ReShade installed, use the **[online Preset Builder](https://tkhquang.github.io/CrimsonDesertTools/live-transmog/)** or edit the JSON file manually. See the [Without ReShade](#without-reshade-web-preset-builder) section below.
 
 ### With ReShade (recommended)
 
@@ -100,19 +100,23 @@ If you run into issues, check the OptiScaler and ReShade documentation for their
 6. Use **Append** in the Presets section to save your current look
 7. Use **Prev** / **Next** to cycle through saved presets
 
-### Without ReShade (manual JSON editing)
+### Without ReShade (web preset builder)
 
-If you cannot or do not want to use ReShade, the mod still functions - but you lose the GUI entirely. To configure presets:
+If you cannot or do not want to use ReShade, use the **[online Preset Builder](https://tkhquang.github.io/CrimsonDesertTools/live-transmog/)** to create presets from your browser. It mirrors the in-game GUI - browse the full item catalog, pick armor per slot, save multiple presets, then download the JSON file.
+
+Alternatively, you can edit `CrimsonDesertLiveTransmog_presets.json` by hand:
 
 1. Launch the game once so the mod generates a default `CrimsonDesertLiveTransmog_presets.json`
 2. Close the game and open the JSON file in a text editor
-3. Each preset contains slot entries with `itemId` (numeric) and `itemName` (human-readable fallback). Set `active: true` and fill in the `itemId` for each slot you want to transmog
+3. Each preset contains slot entries with `itemName` (string identifier). Set `active: true` and fill in the item name for each slot you want to transmog
 4. Set hotkeys in the INI (e.g. `ApplyHotkey = F5`, `ClearHotkey = F6`, `CaptureHotkey = F7`) to apply/clear/capture in-game
 5. Launch the game - the mod loads presets on startup and applies them automatically
 
-> **Tip: Use Capture to get item IDs.** Equip the armor you want in-game, then press your **Capture** hotkey. This snapshots your currently equipped gear into the active preset's slot mappings. Check `CrimsonDesertLiveTransmog_presets.json` after - the captured item IDs will be filled in for each slot. You can then copy these IDs to build other presets manually.
->
-> **Note:** This version does not ship an item ID reference list. A sample `CrimsonDesertLiveTransmog_presets.json` with pre-filled armor sets is available in the **Miscellaneous** section of the Files tab - download it as a starting point or reference for valid item IDs.
+> **Tip: Use Capture to get item IDs.** Equip the armor you want in-game, then press your **Capture** hotkey. This snapshots your currently equipped gear into the active preset's slot mappings. Check `CrimsonDesertLiveTransmog_presets.json` after - the captured item names will be filled in for each slot. You can then copy these to build other presets manually.
+
+### Item Catalog
+
+The full item catalog for the current game version can be browsed on the **[online Preset Builder](https://tkhquang.github.io/CrimsonDesertTools/live-transmog/)** under the "Item Catalog" section. It shows all item IDs, slot categories, variant/safety flags, and names in a searchable, sortable table.
 
 ## Configuration
 

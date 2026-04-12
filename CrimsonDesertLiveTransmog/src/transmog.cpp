@@ -342,6 +342,8 @@ namespace Transmog
                     "[nametable] built synchronously at init "
                     "({} entries)",
                     ItemNameTable::instance().size());
+                if (logger.is_enabled(DMK::Logger::LogLevel::Trace))
+                    ItemNameTable::instance().dump_catalog_tsv();
             }
             else if (result == BR::Deferred)
             {

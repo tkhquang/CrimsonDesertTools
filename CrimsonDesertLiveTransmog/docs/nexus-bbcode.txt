@@ -97,7 +97,7 @@ If you run into issues, check the OptiScaler and ReShade documentation for their
 [size=5]How to Use[/size]
 
 [color=#ff6600][b]The in-game GUI is only available through ReShade.[/b][/color]
-If you do not have ReShade installed, see the [i]Without ReShade[/i] section below.
+If you do not have ReShade installed, use the [url=https://tkhquang.github.io/CrimsonDesertTools/live-transmog/][b]online Preset Builder[/b][/url] or see the manual editing section below.
 
 [size=4]With ReShade (recommended)[/size]
 [list=1]
@@ -110,21 +110,20 @@ If you do not have ReShade installed, see the [i]Without ReShade[/i] section bel
 [*]Use [b]Prev[/b] / [b]Next[/b] to cycle through saved presets
 [/list]
 
-[size=4]Without ReShade (manual JSON editing)[/size]
-If you cannot or do not want to install ReShade, the mod still functions -but [b]you lose the GUI entirely[/b].
+[size=4]Without ReShade (online Preset Builder)[/size]
+Use the [url=https://tkhquang.github.io/CrimsonDesertTools/live-transmog/][b]online Preset Builder[/b][/url] to create presets from your browser. It mirrors the in-game GUI - browse the full item catalog (auto-loaded for the latest game version), pick armor per slot, save multiple presets, then download the JSON file. The site also has a full searchable/sortable [b]Item Catalog[/b] table showing all item IDs, slot categories, and safety flags.
 
+Alternatively, you can edit the JSON manually:
 [list=1]
 [*]Launch the game once so the mod generates a default [b]CrimsonDesertLiveTransmog_presets.json[/b]
 [*]Close the game and open the JSON file in a text editor
-[*]Each preset contains slot entries with [b]itemId[/b] (numeric) and [b]itemName[/b] (human-readable fallback). Set [b]active: true[/b] and fill in the [b]itemId[/b] for each slot you want to transmog
+[*]Each preset contains slot entries with [b]itemName[/b] (string identifier). Set [b]active: true[/b] and fill in the item name for each slot you want to transmog
 [*]Set hotkeys in the INI (e.g. [b]ApplyHotkey = F5[/b], [b]ClearHotkey = F6[/b], [b]CaptureHotkey = F7[/b]) to apply/clear/capture in-game
-[*]Launch the game -the mod loads presets on startup and applies them automatically
+[*]Launch the game - the mod loads presets on startup and applies them automatically
 [/list]
 
-[color=#4CAF50][b]Tip: Use Capture to get item IDs.[/b][/color]
-Equip the armor you want in-game, then press your [b]Capture[/b] hotkey. This snapshots your currently equipped gear into the active preset's slot mappings. Check [b]CrimsonDesertLiveTransmog_presets.json[/b] after -the captured item IDs will be filled in for each slot. You can then copy these IDs to build other presets manually.
-
-[color=#ff6600][b]Note:[/b][/color] This version does not ship an item ID reference list. A sample [b]CrimsonDesertLiveTransmog_presets.json[/b] with pre-filled armor sets is available in the [b]Miscellaneous[/b] section of the [b]Files[/b] tab -download it as a starting point or reference for valid item IDs.
+[color=#4CAF50][b]Tip: Use Capture to get item names.[/b][/color]
+Equip the armor you want in-game, then press your [b]Capture[/b] hotkey. This snapshots your currently equipped gear into the active preset's slot mappings. Check [b]CrimsonDesertLiveTransmog_presets.json[/b] after - the captured item names will be filled in for each slot. You can then copy these to build other presets manually.
 
 [line]
 
@@ -173,7 +172,6 @@ See the full list at the [url=https://github.com/tkhquang/DetourModKit?tab=readm
 [*][b]Special effect armor may have visual quirks[/b] -armor with particle effects (e.g. Marni Laser Helm) may not render particles correctly. Hair may clip through some helmets.
 [*]Major game updates may break the mod until a new version is released.
 [*]Only tested with the Steam version.
-[*][b]ReShade overlay GUI is AI-generated[/b] -the overlay UI was auto-generated with AI assistance, so it may not be 100% reliable. If you run into GUI glitches or odd behavior, please report them.
 [/list]
 
 [line]

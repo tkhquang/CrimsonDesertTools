@@ -203,6 +203,10 @@ namespace Transmog
          */
         static TransmogSlot classify_slot(const std::string &name) noexcept;
 
+        /// Dump the full catalog to a TSV file next to the game exe.
+        /// Columns: ItemID, Slot, Variant, PlayerSafe, Name.
+        void dump_catalog_tsv() const;
+
     private:
         ItemNameTable() = default;
 
