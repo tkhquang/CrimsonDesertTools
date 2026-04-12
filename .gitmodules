@@ -4,6 +4,3 @@
 [submodule "CrimsonDesertLiveTransmog/external/DetourModKit"]
 	path = CrimsonDesertLiveTransmog/external/DetourModKit
 	url = https://github.com/tkhquang/DetourModKit.git
-[submodule "CrimsonDesertLiveTransmog/external/reshade-sdk"]
-	path = CrimsonDesertLiveTransmog/external/reshade-sdk
-	url = https://github.com/crosire/reshade.git
