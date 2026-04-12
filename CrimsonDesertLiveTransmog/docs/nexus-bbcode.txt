@@ -4,6 +4,8 @@
 [b][color=#ff6600]This mod is in BETA[/color][/b] -edge cases may exist. Use at your own risk. Please report any issues you find!
 [b][color=#ff6600]Currently only works with Kliff[/color][/b] -other playable characters are not supported yet.
 
+[youtube]B4xX3LkgXhs[/youtube]
+
 [line]
 
 [size=5]What It Does[/size]

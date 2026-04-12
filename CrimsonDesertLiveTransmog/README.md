@@ -2,6 +2,8 @@
 
 **This mod is in BETA** and edge cases may exist. Use at your own risk. Please report any issues you find! **Currently only works with Kliff** - other playable characters are not supported yet.
 
+[![Live Transmog Demo](https://img.youtube.com/vi/B4xX3LkgXhs/maxresdefault.jpg)](https://www.youtube.com/watch?v=B4xX3LkgXhs)
+
 ## Overview
 
 **CrimsonDesertLiveTransmog** is an ASI plugin for Crimson Desert that lets you change the visual appearance of equipped armor in real time without affecting stats. Browse the full item catalog through a ReShade overlay GUI, pick the armor you want to see, build presets, and apply instantly.
