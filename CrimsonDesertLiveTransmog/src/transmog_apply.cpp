@@ -261,6 +261,242 @@ namespace Transmog
         VirtualFree(hybrid, 0, MEM_RELEASE);
     }
 
+    // ── Single-slot apply ──────────────────────────────────────────────
+    //
+    // Scoped version of apply_all_transmog that only touches ONE slot.
+    // Used by hover-preview to avoid the full tear-down + re-apply of
+    // all 5 slots, which causes visible flicker on unchanged gear.
+    //
+    // Differences from apply_all_transmog:
+    //   - Dispatch cache: only clears entries matching this slot's game
+    //     tag (by walking the 24-byte stride array). Does NOT reset the
+    //     global count to zero — other slots' entries stay valid.
+    //   - Tear-down: Phase A (previous fake) and Phase B (real item)
+    //     scoped to one slot.
+    //   - Apply: single call to apply_transmog or
+    //     apply_transmog_with_carrier.
+    //   - State: only updates lastIds, carrier, suppress for this slot.
+
+    // Game slot tags per TransmogSlot index. Must stay in sync with
+    // k_tearDownSlots inside apply_all_transmog.
+    static constexpr std::uint16_t k_gameSlotTags[k_slotCount] = {
+        0x0003, // Helm
+        0x0004, // Chest
+        0x0010, // Cloak
+        0x0005, // Gloves
+        0x0006, // Boots
+    };
+
+    void apply_single_slot_transmog(__int64 a1, std::size_t slotIdx)
+    {
+        if (slotIdx >= k_slotCount)
+            return;
+
+        auto &logger = DMK::Logger::get_instance();
+        auto &mappings = slot_mappings();
+        auto &lastIds = last_applied_ids();
+        auto &m = mappings[slotIdx];
+
+        if (world_system_ptr().load(std::memory_order_acquire))
+        {
+            auto fresh = resolve_player_component();
+            if (fresh > 0x10000)
+                a1 = fresh;
+        }
+
+        __try
+        {
+            auto actor = *reinterpret_cast<uintptr_t *>(a1 + 8);
+            if (actor < 0x10000)
+            {
+                logger.warning("apply_single_slot: a1 invalid");
+                return;
+            }
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            logger.warning("apply_single_slot: a1 access fault");
+            return;
+        }
+
+        suppress_vec().store(true, std::memory_order_release);
+
+        const uint16_t prevId = lastIds[slotIdx];
+        const uint16_t gameTag = k_gameSlotTags[slotIdx];
+
+        // Compute target: active slot with non-zero id → transmog,
+        // otherwise clear this slot.
+        const uint16_t targetId =
+            (m.active && m.targetItemId != 0) ? m.targetItemId : 0;
+
+        // Early-out: nothing changed for this slot.
+        if (targetId == prevId && targetId != 0)
+        {
+            logger.trace("apply_single_slot: slot={} id={:#06x} unchanged",
+                         slotIdx, targetId);
+            suppress_vec().store(false, std::memory_order_release);
+            return;
+        }
+
+        // --- Scoped dispatch cache clear ---
+        // Walk the 24-byte stride cache and zero subCount only for
+        // entries whose slotNativeId matches our game tag. This leaves
+        // other slots' blobs untouched so VEC doesn't re-dispatch them.
+        __try
+        {
+            const auto count =
+                *reinterpret_cast<volatile uint32_t *>(a1 + 0x1C0);
+            const auto base =
+                *reinterpret_cast<volatile uintptr_t *>(a1 + 0x1B8);
+            if (base > 0x10000)
+            {
+                for (uint32_t e = 0; e < count; ++e)
+                {
+                    const auto entry = base + 24ULL * e;
+                    const auto slotId =
+                        *reinterpret_cast<volatile uint16_t *>(entry);
+                    if (slotId == gameTag)
+                        *reinterpret_cast<volatile uint32_t *>(
+                            entry + 0x10) = 0;
+                }
+            }
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            logger.warning("[dispatch] single-slot cache clear fault");
+            suppress_vec().store(false, std::memory_order_release);
+            return;
+        }
+
+        // --- Tear-down scoped to this slot ---
+        std::uint16_t realId = 0;
+        if (RealPartTearDown::is_ready())
+        {
+            realId = RealPartTearDown::get_real_item_id(
+                reinterpret_cast<void *>(a1), gameTag);
+
+            // Phase A: tear down previous fake.
+            if (prevId != 0 && prevId != realId)
+            {
+                const auto prevCarrier = last_applied_carrier_ids()[slotIdx];
+                const uintptr_t bypassAddr =
+                    resolved_addrs().charClassBypass;
+                bool bypassApplied = false;
+                if (prevCarrier != 0)
+                    bypassApplied =
+                        set_char_class_bypass(bypassAddr, 0xEB);
+
+                if (prevCarrier != 0 &&
+                    prevCarrier != static_cast<uint16_t>(prevId))
+                {
+                    RealPartTearDown::tear_down_by_item_id(
+                        reinterpret_cast<void *>(a1), prevCarrier, gameTag);
+                }
+                RealPartTearDown::tear_down_by_item_id(
+                    reinterpret_cast<void *>(a1),
+                    static_cast<uint16_t>(prevId), gameTag);
+
+                if (bypassApplied)
+                    set_char_class_bypass(bypassAddr, 0x74);
+            }
+
+            // Phase B: tear down real item if fake differs.
+            if (targetId != 0 && targetId != realId)
+            {
+                if (RealPartTearDown::tear_down_real_part(
+                        reinterpret_cast<void *>(a1), gameTag))
+                    real_damaged()[slotIdx] = true;
+            }
+        }
+
+        // --- Apply ---
+        if (targetId != 0)
+        {
+            const auto tmSlot = static_cast<TransmogSlot>(slotIdx);
+            const bool useCarrier = needs_carrier(targetId);
+            const uint16_t carrierId =
+                useCarrier ? default_carrier_for_slot(tmSlot) : 0;
+
+            if (useCarrier && carrierId != 0)
+            {
+                logger.debug("apply_single_slot: slot={} target={:#06x} "
+                             "carrier={:#06x}",
+                             slot_name(tmSlot), targetId, carrierId);
+                apply_transmog_with_carrier(a1, carrierId, targetId);
+            }
+            else
+            {
+                logger.debug("apply_single_slot: slot={} target={:#06x}",
+                             slot_name(tmSlot), targetId);
+                apply_transmog(a1, targetId);
+            }
+
+            lastIds[slotIdx] = targetId;
+            last_applied_carrier_ids()[slotIdx] =
+                (useCarrier && carrierId != 0) ? carrierId : 0;
+            // Phase B set real_damaged when tearing down the real item
+            // for this slot. Now that the fake is successfully applied,
+            // clear it so apply_all_transmog doesn't see stale damage
+            // state for this slot on subsequent cycles.
+            real_damaged()[slotIdx] = false;
+        }
+        else
+        {
+            // Clearing this slot. Two cases:
+            //  - active + none (checkbox ticked, picker = none): user
+            //    wants to show an EMPTY slot (bare head, etc.). Do NOT
+            //    restore the real item — Phase B already tore it down.
+            //  - inactive (!m.active): slot was previously controlled
+            //    by us; restore the real item so it reappears.
+            const bool showEmpty = m.active;
+            if (!showEmpty && (prevId != 0 || real_damaged()[slotIdx]))
+            {
+                if (realId != 0)
+                {
+                    logger.debug("apply_single_slot: slot={} restoring "
+                                 "real {:#06x}",
+                                 slot_name(static_cast<TransmogSlot>(
+                                     slotIdx)),
+                                 realId);
+                    apply_transmog(a1, realId);
+                }
+            }
+            lastIds[slotIdx] = 0;
+            last_applied_carrier_ids()[slotIdx] = 0;
+            // Clear damage flag so the slot is fully released back to
+            // the game. Without this, apply_all_transmog's untick-restore
+            // and slotNeedsWork checks see stale damage state and keep
+            // interfering with an unmanaged slot.
+            real_damaged()[slotIdx] = false;
+        }
+
+        // Update suppress mask for this slot only. Rebuild full mask
+        // from current state rather than toggling one bit, to stay
+        // consistent with apply_all_transmog's mask logic.
+        std::uint32_t suppressMask = 0;
+        for (std::size_t k = 0; k < k_slotCount; ++k)
+        {
+            const auto &sm = mappings[k];
+            if (!sm.active)
+                continue;
+            const std::uint16_t slotReal =
+                RealPartTearDown::is_ready()
+                    ? RealPartTearDown::get_real_item_id(
+                          reinterpret_cast<void *>(a1), k_gameSlotTags[k])
+                    : 0;
+            if (sm.targetItemId != 0 &&
+                static_cast<uint16_t>(sm.targetItemId) == slotReal)
+                continue;
+            suppressMask |= (std::uint32_t{1} << k);
+        }
+        PartShowSuppress::set_mask(suppressMask);
+
+        logger.trace("apply_single_slot: slot={} done, suppress={:#x}",
+                     slotIdx, suppressMask);
+
+        suppress_vec().store(false, std::memory_order_release);
+    }
+
     void apply_all_transmog(__int64 a1)
     {
         auto &logger = DMK::Logger::get_instance();
@@ -323,6 +559,7 @@ namespace Transmog
             }
         }
 
+        std::array<bool, k_slotCount> slotNeedsWork{};
         {
             bool presetChanged = false;
             for (std::size_t i = 0; i < k_slotCount; ++i)
@@ -399,7 +636,54 @@ namespace Transmog
                 }
             }
 
-            last_applied_real_ids() = liveRealIds;
+            // Per-slot "needs work" flags. Computed BEFORE overwriting
+            // last_applied_real_ids so we compare against the previous
+            // state. A slot needs tear-down + re-apply if its preset
+            // target changed OR its underlying real item changed.
+            // Unchanged slots are skipped — no tear-down, no cache
+            // clear, no SlotPopulator call — so they don't flicker.
+            //
+            // Unticked slots whose real changes ARE still marked: a
+            // prior restore via SlotPopulator may have left a dispatch
+            // cache entry and scene-graph mesh. The cleanup pass after
+            // the untick-restore loop relies on slotNeedsWork to find
+            // and tear down these stale entries.
+            for (std::size_t i = 0; i < k_slotCount; ++i)
+            {
+                const auto &m = mappings[i];
+                const uint16_t wouldBe =
+                    (m.active && m.targetItemId != 0) ? m.targetItemId
+                                                       : uint16_t{0};
+                if (wouldBe != prevIds[i])
+                {
+                    slotNeedsWork[i] = true;
+                    continue;
+                }
+
+                // Check if the real item changed for this slot.
+                // Unticked slots still need cache cleanup when their
+                // real changes — an earlier restore via SlotPopulator
+                // may have left a dispatch entry that the game's own
+                // unequip flow can't remove.
+                for (std::size_t k = 0; k < 5; ++k)
+                {
+                    if (static_cast<std::size_t>(k_earlyOutSlots[k]) == i &&
+                        liveRealIds[k] != last_applied_real_ids()[k])
+                    {
+                        slotNeedsWork[i] = true;
+                        break;
+                    }
+                }
+                // Active "none" slots always need work for suppress
+                // reinforcement.
+                if (m.active && m.targetItemId == 0)
+                    slotNeedsWork[i] = true;
+            }
+
+            // NOTE: last_applied_real_ids is updated at the END of the
+            // function, after all applies succeed. If we crash mid-apply
+            // (e.g. reload SEH), the old values remain so the next retry
+            // detects the real-armor change and tries again.
         }
 
         // Clear lastIds for slots without a new target.
@@ -429,27 +713,47 @@ namespace Transmog
         //      never clears subCount, so the previously queued blob
         //      lingers and gets replayed alongside the new one.
         //
-        // Fix: walk every existing cache entry while count is still
-        // valid and force-clear subCount=0 (defensive, O(n<=16)). Then
-        // zero count so SlotPopulator allocates fresh entries for our
-        // targeted slots. Finally restore count to OUR written count,
-        // not the saved one, so prior-preset entries stay invisible.
-        uint32_t savedCount = 0;
-        uintptr_t dispatchBase = 0;
+        // Fix: only clear subCount for dispatch cache entries whose
+        // slotNativeId matches a slot we are about to re-apply. This
+        // avoids nuking unchanged slots' blobs, which would force the
+        // game to re-dispatch them through VEC and cause visible
+        // flicker on gear that hasn't changed.
+        //
+        // Build a set of game tags that need clearing: any active slot
+        // with a non-zero target, plus any unticked slot that needs
+        // real-item restoration.
+        std::uint16_t clearTags[k_slotCount]{};
+        std::size_t clearTagCount = 0;
+        for (std::size_t i = 0; i < k_slotCount; ++i)
+        {
+            if (slotNeedsWork[i])
+                clearTags[clearTagCount++] = k_gameSlotTags[i];
+        }
+
         __try
         {
-            savedCount = *reinterpret_cast<volatile uint32_t *>(a1 + 0x1C0);
-            dispatchBase = *reinterpret_cast<volatile uintptr_t *>(a1 + 0x1B8);
-
-            if (dispatchBase > 0x10000)
+            const auto count =
+                *reinterpret_cast<volatile uint32_t *>(a1 + 0x1C0);
+            const auto base =
+                *reinterpret_cast<volatile uintptr_t *>(a1 + 0x1B8);
+            if (base > 0x10000)
             {
-                for (uint32_t e = 0; e < savedCount; ++e)
+                for (uint32_t e = 0; e < count; ++e)
                 {
-                    auto entry = dispatchBase + 24ULL * e;
-                    *reinterpret_cast<volatile uint32_t *>(entry + 0x10) = 0;
+                    const auto entry = base + 24ULL * e;
+                    const auto slotId =
+                        *reinterpret_cast<volatile uint16_t *>(entry);
+                    for (std::size_t t = 0; t < clearTagCount; ++t)
+                    {
+                        if (slotId == clearTags[t])
+                        {
+                            *reinterpret_cast<volatile uint32_t *>(
+                                entry + 0x10) = 0;
+                            break;
+                        }
+                    }
                 }
             }
-            *reinterpret_cast<volatile uint32_t *>(a1 + 0x1C0) = 0;
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
@@ -508,6 +812,8 @@ namespace Transmog
             {
                 const auto idx = static_cast<std::size_t>(
                     k_tearDownSlots[k].slot);
+                if (!slotNeedsWork[idx])
+                    continue;
                 if (last_applied_carrier_ids()[idx] != 0 && prevIds[idx] != 0)
                 { anyCarrierTearDown = true; break; }
             }
@@ -527,6 +833,8 @@ namespace Transmog
             {
                 const auto &td = k_tearDownSlots[k];
                 const auto idx = static_cast<std::size_t>(td.slot);
+                if (!slotNeedsWork[idx])
+                    continue;
                 const auto prevId = prevIds[idx];
                 const auto prevCarrier = last_applied_carrier_ids()[idx];
                 if (prevId == 0)
@@ -569,11 +877,13 @@ namespace Transmog
 
             // Phase B: real items for any active slot. Skip slots where
             // the NEW fake itemId matches the real equipped id AND the
-            // real is still intact.
+            // real is still intact. Also skip slots with no work needed.
             for (std::size_t k = 0; k < k_tearDownCount; ++k)
             {
                 const auto &td = k_tearDownSlots[k];
                 const auto idx = static_cast<std::size_t>(td.slot);
+                if (!slotNeedsWork[idx])
+                    continue;
                 auto &m = mappings[idx];
                 if (!m.active)
                     continue;
@@ -611,6 +921,15 @@ namespace Transmog
         for (std::size_t i = 0; i < k_slotCount; ++i)
         {
             auto &m = mappings[i];
+            if (!slotNeedsWork[i])
+            {
+                // Unchanged slot: preserve its lastIds entry but don't
+                // re-apply. If it has a live dispatch cache entry the
+                // game keeps rendering it.
+                if (m.active && m.targetItemId != 0)
+                    lastIds[i] = m.targetItemId;
+                continue;
+            }
             if (!m.active || m.targetItemId == 0)
                 continue;
 
@@ -698,25 +1017,84 @@ namespace Transmog
                     apply_transmog(a1, realId);
                     ++ourWrittenCount;
                 }
+                else if (real_damaged()[i])
+                {
+                    // Real item was unequipped (realId=0) but we
+                    // previously restored it via SlotPopulator, which
+                    // left a scene-graph mesh entry. Tear it down so
+                    // the visual actually disappears. The old real ID
+                    // is still in last_applied_real_ids (not yet
+                    // overwritten — moved to end of function).
+                    for (std::size_t k = 0; k < k_tearDownCount; ++k)
+                    {
+                        if (static_cast<std::size_t>(
+                                k_tearDownSlots[k].slot) != i)
+                            continue;
+                        const auto oldReal =
+                            last_applied_real_ids()[k];
+                        if (oldReal != 0)
+                        {
+                            logger.info(
+                                "[dispatch] slot={} unticked + "
+                                "unequipped — tearing down restored "
+                                "mesh {:#06x}",
+                                slot_name(static_cast<TransmogSlot>(i)),
+                                oldReal);
+                            RealPartTearDown::tear_down_by_item_id(
+                                reinterpret_cast<void *>(a1),
+                                oldReal,
+                                k_tearDownSlots[k].gameTag);
+                        }
+                        break;
+                    }
+                }
+                // Clear damage flag so this slot is fully released
+                // back to the game. Without this, future apply cycles
+                // keep treating it as managed.
+                real_damaged()[i] = false;
             }
             if (!m.active || m.targetItemId == 0)
                 last_applied_carrier_ids()[i] = 0;
         }
 
-        // Restore count to OUR writes only — stale entries in the
-        // range [ourWrittenCount .. savedCount) remain allocated
-        // (no leak) but are invisible to SlotPopulator's count-limited
-        // linear search.
+        // Cleanup pass: tear down stale scene-graph meshes left by a
+        // prior restore via SlotPopulator. This handles the case where
+        // apply_single_slot restored the real item (creating a scene
+        // graph entry), then the user unequipped in the game inventory.
+        // The untick-restore block above doesn't catch this because
+        // apply_single_slot already cleared prevIds and real_damaged.
+        // We detect it here via slotNeedsWork + unticked + real=0 +
+        // old real in last_applied_real_ids (not yet overwritten).
+        for (std::size_t k = 0; k < k_tearDownCount; ++k)
+        {
+            const auto &td = k_tearDownSlots[k];
+            const auto idx = static_cast<std::size_t>(td.slot);
+            if (!slotNeedsWork[idx])
+                continue;
+            if (mappings[idx].active)
+                continue;
+            if (realItemId[k] != 0)
+                continue;
+            const auto oldReal = last_applied_real_ids()[k];
+            if (oldReal == 0)
+                continue;
+            logger.info("[dispatch] slot={} cleanup — tearing down "
+                        "stale restore mesh {:#06x}",
+                        slot_name(td.slot), oldReal);
+            RealPartTearDown::tear_down_by_item_id(
+                reinterpret_cast<void *>(a1), oldReal, td.gameTag);
+        }
+
+        // Count was NOT zeroed — unchanged slots' entries are still
+        // live with their original subCount. Log the final state for
+        // diagnostics.
         __try
         {
             uint32_t liveCount =
                 *reinterpret_cast<volatile uint32_t *>(a1 + 0x1C0);
-            logger.trace("[dispatch] liveCount={} ourWrittenCount={}",
+            logger.trace("[dispatch] post-apply liveCount={} "
+                         "ourWrittenCount={}",
                          liveCount, ourWrittenCount);
-
-            uint32_t finalCount =
-                (liveCount > ourWrittenCount) ? liveCount : ourWrittenCount;
-            *reinterpret_cast<volatile uint32_t *>(a1 + 0x1C0) = finalCount;
         }
         __except (EXCEPTION_EXECUTE_HANDLER) {}
 
@@ -758,6 +1136,12 @@ namespace Transmog
             targetMask, activeMask, suppressMask);
 
         PartShowSuppress::set_mask(static_cast<uint32_t>(suppressMask));
+
+        // Commit the real-armor snapshot AFTER all applies succeed.
+        // If the function crashed (SEH during reload), this line is
+        // never reached and the next retry correctly detects the
+        // real-armor change.
+        last_applied_real_ids() = liveRealIds;
 
         suppress_vec().store(false, std::memory_order_release);
     }

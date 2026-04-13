@@ -101,6 +101,14 @@ namespace Transmog
     /// Set by manual_clear, consumed by the worker.
     std::atomic<bool> &clear_pending();
 
+    /// Slot index for single-slot hover-apply. k_slotCount means
+    /// "apply all" (the default). Values 0..4 scope the next
+    /// debounced apply to one slot only, avoiding full-gear flicker.
+    /// Last-writer-wins: if manual_apply (full) and manual_apply_slot
+    /// race before the worker wakes, only the latest store takes
+    /// effect. This is acceptable — the user's most recent action wins.
+    std::atomic<std::size_t> &pending_slot_index();
+
     // --- Hot-path utilities ---
 
     inline int64_t steady_ms() noexcept

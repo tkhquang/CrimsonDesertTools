@@ -32,6 +32,11 @@ namespace Transmog
     /// or is not player-compatible).
     bool needs_carrier(std::uint16_t itemId);
 
+    /// Single-slot apply: tears down and re-applies only the given slot.
+    /// Used by hover-preview to avoid full-gear flicker. Only clears
+    /// dispatch cache entries matching this slot's game tag.
+    void apply_single_slot_transmog(__int64 a1, std::size_t slotIdx);
+
     /// Full apply pass: two-phase tear-down + SlotPopulator for all active
     /// slots. Updates dispatch cache, suppress mask, and last-applied state.
     void apply_all_transmog(__int64 a1);

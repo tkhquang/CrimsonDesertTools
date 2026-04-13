@@ -413,8 +413,14 @@ namespace Transmog
         {
             p.slots[i].active = mappings[i].active;
             p.slots[i].itemId = mappings[i].targetItemId;
-            if (table.ready())
+            // id 0 means "none" — don't resolve a name for it.
+            // The catalog's entry at index 0 is a real item
+            // (Pyeonjeon_Arrow) and saving that name would cause
+            // the preset to load an unintended item on reresolve.
+            if (table.ready() && mappings[i].targetItemId != 0)
                 p.slots[i].itemName = table.name_of(mappings[i].targetItemId);
+            else
+                p.slots[i].itemName.clear();
         }
         return p;
     }

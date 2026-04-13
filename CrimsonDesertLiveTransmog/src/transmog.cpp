@@ -157,6 +157,24 @@ namespace Transmog
 
         DMK::Logger::get_instance().debug("Manual apply: scheduling (debounced)");
         clear_pending().store(false, std::memory_order_release);
+        // Reset to "all slots" so the worker runs the full path.
+        pending_slot_index().store(k_slotCount, std::memory_order_release);
+        schedule_transmog_ms(k_manualDebounceMs);
+    }
+
+    void manual_apply_slot(std::size_t slotIdx)
+    {
+        if (!is_world_ready())
+        {
+            DMK::Logger::get_instance().debug(
+                "Manual apply slot={}: player not found", slotIdx);
+            return;
+        }
+
+        DMK::Logger::get_instance().debug(
+            "Manual apply slot={}: scheduling (debounced)", slotIdx);
+        clear_pending().store(false, std::memory_order_release);
+        pending_slot_index().store(slotIdx, std::memory_order_release);
         schedule_transmog_ms(k_manualDebounceMs);
     }
 

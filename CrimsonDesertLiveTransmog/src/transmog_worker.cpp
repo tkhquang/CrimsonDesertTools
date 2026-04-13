@@ -205,12 +205,23 @@ namespace Transmog
         if (a1 <= 0x10000)
             return;
 
+        // Consume the single-slot index. k_slotCount means "all slots".
+        const auto slotIdx =
+            pending_slot_index().exchange(k_slotCount,
+                                          std::memory_order_acq_rel);
+
         __try
         {
             if (do_clear)
             {
                 clear_all_transmog(a1);
                 logger.debug("Transmog cleared (debounced)");
+            }
+            else if (slotIdx < k_slotCount)
+            {
+                apply_single_slot_transmog(a1, slotIdx);
+                logger.debug("Transmog applied slot={} (debounced)",
+                             slotIdx);
             }
             else
             {
@@ -348,6 +359,22 @@ namespace Transmog
                             static_cast<uint64_t>(comp));
                 prevComp = comp;
                 player_a1().store(comp, std::memory_order_release);
+
+                // Reset cached apply state so the early-out in
+                // apply_all_transmog doesn't suppress the re-apply.
+                // The scene graph is fresh after reload — old fake
+                // meshes are gone even though the IDs haven't changed.
+                //
+                // Held under s_applyCvMtx to prevent racing with an
+                // in-flight apply on the worker thread, which reads
+                // and writes these same non-atomic arrays.
+                {
+                    std::lock_guard<std::mutex> lk(s_applyCvMtx);
+                    last_applied_ids().fill(0);
+                    last_applied_real_ids().fill(0);
+                    last_applied_carrier_ids().fill(0);
+                    real_damaged().fill(false);
+                }
 
                 if (!flag_enabled().load(std::memory_order_relaxed))
                     continue;
