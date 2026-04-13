@@ -36,7 +36,7 @@ namespace Transmog
         // relevant items instead of all 6024.
         bool exactFilter = true;
         bool hideIncompatible = true;   // hide crash-risk + non-equipment
-        bool hideVariants = false; // hide NPC variants (carrier items)
+        bool hideVariants = false; // hide NPC variant items
     };
 
     static SlotUIState s_slotUI[k_slotCount]{};
@@ -165,20 +165,20 @@ namespace Transmog
 
             // Tag items with visible badges:
             //   - "CRASH RISK"  -> !isPlayerCompatible (red)
-            //   - "carrier"     -> hasVariantMeta, rendered via carrier
-            //                      + char-class bypass (cyan)
+            //   - "NPC variant" -> hasVariantMeta, rendered via
+            //                      char-class bypass (cyan)
             char label[200];
             const char *tag = nullptr;
             // NPC variant items (hasVariantMeta) are humanoid and now
-            // render via carrier + char-class bypass. True crash risks
-            // are non-player items WITHOUT variant meta (horse tack, etc).
-            const bool usesCarrier = e.hasVariantMeta;
+            // render via char-class bypass. True crash risks are
+            // non-player items WITHOUT variant meta (horse tack, etc).
+            const bool isVariant = e.hasVariantMeta;
             const bool crashRisk =
                 !e.isPlayerCompatible && !e.hasVariantMeta;
             if (crashRisk)
                 tag = "non-player -- CRASH RISK";
-            else if (usesCarrier)
-                tag = "carrier";
+            else if (isVariant)
+                tag = "NPC variant";
 
             if (tag)
                 std::snprintf(label, sizeof(label),
@@ -191,7 +191,7 @@ namespace Transmog
             if (crashRisk)
                 ImGui::PushStyleColor(ImGuiCol_Text,
                                       ImVec4(1.0f, 0.35f, 0.35f, 1.0f));
-            else if (usesCarrier)
+            else if (isVariant)
                 ImGui::PushStyleColor(ImGuiCol_Text,
                                       ImVec4(0.5f, 0.85f, 1.0f, 1.0f));
 
@@ -203,7 +203,7 @@ namespace Transmog
                 ImGui::CloseCurrentPopup();
             }
 
-            if (crashRisk || usesCarrier)
+            if (crashRisk || isVariant)
                 ImGui::PopStyleColor();
 
             ++shown;

@@ -417,8 +417,8 @@ namespace Transmog
         }
 
         // CharClassBypass: single-byte patch site in CondPrefab evaluator.
-        // Toggled 0x74↔0xEB around each carrier apply so NPC items
-        // pass the character-class hash check.
+        // Toggled 0x74↔0xEB during each apply cycle so NPC/variant
+        // items pass the character-class hash check.
         addrs.charClassBypass = resolve_address(
             k_charClassBypassCandidates,
             std::size(k_charClassBypassCandidates),

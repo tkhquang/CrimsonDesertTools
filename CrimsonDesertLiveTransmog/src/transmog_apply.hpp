@@ -10,28 +10,6 @@ namespace Transmog
     /// Builds the 16-byte item data structure and empty swap entry internally.
     void apply_transmog(__int64 a1, std::uint16_t targetId);
 
-    /// Applies transmog using a carrier item to bypass equip gates.
-    ///
-    /// Temporarily swaps the carrier's descriptor pointer in the global
-    /// iteminfo ptrArray to point at the target's descriptor, then calls
-    /// SlotPopulator with the carrier's itemId. The game reads the target's
-    /// visual data (mesh hashes, CondPrefab, etc.) while all equip gates
-    /// see a valid carrier. Restores the original pointer immediately after.
-    ///
-    /// @param carrierId  Valid Kliff-equippable item for the slot
-    /// @param targetId   Item whose visual to display (may be NPC variant)
-    void apply_transmog_with_carrier(
-        __int64 a1, std::uint16_t carrierId, std::uint16_t targetId);
-
-    /// Resolve the default carrier itemId for a given transmog slot.
-    /// Returns 0 if no carrier is needed (item is directly equippable)
-    /// or if the carrier name can't be resolved.
-    std::uint16_t default_carrier_for_slot(TransmogSlot slot);
-
-    /// Returns true if the given item needs a carrier (has variant meta
-    /// or is not player-compatible).
-    bool needs_carrier(std::uint16_t itemId);
-
     /// Full apply pass: two-phase tear-down + SlotPopulator for all active
     /// slots. Updates dispatch cache, suppress mask, and last-applied state.
     void apply_all_transmog(__int64 a1);

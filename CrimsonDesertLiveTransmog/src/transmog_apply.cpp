@@ -1,5 +1,4 @@
 #include "transmog_apply.hpp"
-#include "item_name_table.hpp"
 #include "part_show_suppress.hpp"
 #include "real_part_tear_down.hpp"
 #include "shared_state.hpp"
@@ -39,70 +38,6 @@ namespace Transmog
         in_transmog().store(false, std::memory_order_relaxed);
     }
 
-    // ── Default carrier set (Kliff PlateArmor) ──────────────────────────
-    // These are valid Kliff-equippable base items resolved by name at
-    // runtime. If a name fails to resolve, the slot falls back to direct
-    // equip (which may silently fail for NPC/variant items).
-
-    static constexpr const char *k_defaultCarrierNames[] = {
-        "Kliff_PlateArmor_Helm",    // TransmogSlot::Helm
-        "Kliff_PlateArmor_Armor",   // TransmogSlot::Chest
-        "Kliff_PlateArmor_Cloak",   // TransmogSlot::Cloak
-        "Kliff_PlateArmor_Gloves",  // TransmogSlot::Gloves
-        "Kliff_Plate_Boots",        // TransmogSlot::Boots
-    };
-
-    uint16_t default_carrier_for_slot(TransmogSlot slot)
-    {
-        const auto idx = static_cast<std::size_t>(slot);
-        if (idx >= k_slotCount)
-            return 0;
-        const auto &table = ItemNameTable::instance();
-        if (!table.ready())
-            return 0;
-        auto id = table.id_of(k_defaultCarrierNames[idx]);
-        return id.value_or(0);
-    }
-
-    bool needs_carrier(uint16_t itemId)
-    {
-        const auto &table = ItemNameTable::instance();
-        if (!table.ready())
-            return false;
-        return table.has_variant_meta(itemId) ||
-               !table.is_player_compatible(itemId);
-    }
-
-    // SEH-safe memory helpers (MSVC: __try cannot coexist with C++
-    // object unwinding in the same function).
-    static uintptr_t read_qword_seh(uintptr_t addr) noexcept
-    {
-        __try { return *reinterpret_cast<volatile uintptr_t *>(addr); }
-        __except (EXCEPTION_EXECUTE_HANDLER) { return 0; }
-    }
-    static bool memcpy_seh(void *dst, const void *src, size_t n) noexcept
-    {
-        __try { std::memcpy(dst, src, n); return true; }
-        __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
-    }
-
-    // Descriptor size. Stride between consecutive descriptors observed
-    // in CE: 0x400 (1024). Over-read is fine -- we copy into a private
-    // buffer and only the game's actual reads matter.
-    static constexpr std::size_t k_descBufSize = 0x400;
-
-    // Descriptor offsets read by SlotPopulator for character-context
-    // matching BEFORE visual/mesh data. Must come from the CARRIER so
-    // Kliff's evaluator matches; everything else comes from TARGET.
-    //
-    // +0x042  2B  equip-type u16 (Kliff=4, NPC=1)
-    //             SlotPopulator reads *(desc+0x42) for the visual-config
-    //             matching loop (sub_14076CAED).
-    struct PatchRange { std::ptrdiff_t off; std::size_t len; };
-    static constexpr PatchRange k_carrierPatches[] = {
-        {0x042, 0x002},  // equip-type u16 (Kliff=4, NPC=1)
-    };
-
     // Write the char-class bypass byte unconditionally. No from-check:
     // the read-after-write can see stale values when page protection
     // is restored between enable/restore cycles.
@@ -115,150 +50,52 @@ namespace Transmog
             reinterpret_cast<std::byte *>(addr), &byteVal, 1).has_value();
     }
 
-    // Swaps descriptor pointer, toggles char-class bypass, calls
-    // SlotPopulator, then unconditionally restores both via __finally.
-    //
-    // __finally (not __except): runs cleanup WITHOUT catching the
-    // exception. Game-internal SEH exceptions (lazy loading, page
-    // faults) continue propagating to the game's own handlers.
-    // __except would intercept them and break the game.
-    //
-    // This is critical because apply_transmog faults on early load
-    // attempts (game data not ready). Without __finally, the
-    // descriptor pointer and bypass byte would be left corrupted.
-    static void carrier_swap_and_call(
-        __int64 a1, uint16_t carrierId,
-        uintptr_t carrierSlotAddr, uintptr_t hybridAddr,
-        uintptr_t bypassAddr) noexcept
+    // SEH-safe volatile memory readers. Isolated into noinline helpers
+    // so the main apply logic can use C++ objects (lambdas, std::array)
+    // without hitting MSVC C2712 ("cannot use __try in functions that
+    // require object unwinding").
+    __declspec(noinline) static uint32_t read_u32_vol(
+        uintptr_t addr, bool &ok) noexcept
     {
-        const auto savedDesc = static_cast<LONG64>(
-            InterlockedExchange64(
-                reinterpret_cast<volatile LONG64 *>(carrierSlotAddr),
-                static_cast<LONG64>(hybridAddr)));
+        __try { ok = true; return *reinterpret_cast<volatile uint32_t *>(addr); }
+        __except (EXCEPTION_EXECUTE_HANDLER) { ok = false; return 0; }
+    }
 
-        const bool bypassApplied =
-            set_char_class_bypass(bypassAddr, 0xEB);
+    // Forward declaration — apply_all_transmog delegates its core
+    // work to this function so the bypass enable/restore can live in
+    // the outer SEH frame (__try/__finally) while the inner function
+    // is free to use C++ objects (MSVC C2712 prevents mixing __try
+    // with objects that require unwinding in the same function).
+    static void apply_all_transmog_inner(__int64 a1);
+
+    // SEH-safe bypass wrapper. Enables the char-class bypass (jz→jmp),
+    // runs the full apply cycle, then unconditionally restores jz via
+    // __finally. This guarantees restore even if an SEH exception
+    // propagates out of apply_all_transmog_inner (early-load faults,
+    // game-internal page faults). Without __finally, a mid-cycle fault
+    // would leave jmp permanently active, disabling the character-class
+    // hash check for all actors until game restart.
+    //
+    // __finally (not __except): cleanup runs WITHOUT catching the
+    // exception — game-internal SEH handlers still see it. __except
+    // would intercept and break the game's own fault recovery.
+    static void apply_with_bypass(__int64 a1, uintptr_t bypassAddr) noexcept
+    {
+        // Always attempt restore in __finally regardless of enable result.
+        // write_bytes returns failure if VirtualProtect cannot restore the
+        // original page protection AFTER successfully writing the byte.
+        // Keying __finally on that return would skip the restore even though
+        // 0xEB was actually written — leaving the bypass permanently active.
+        set_char_class_bypass(bypassAddr, 0xEB);
 
         __try
         {
-            apply_transmog(a1, carrierId);
+            apply_all_transmog_inner(a1);
         }
         __finally
         {
-            if (bypassApplied)
-                set_char_class_bypass(bypassAddr, 0x74);
-
-            InterlockedExchange64(
-                reinterpret_cast<volatile LONG64 *>(carrierSlotAddr),
-                savedDesc);
+            set_char_class_bypass(bypassAddr, 0x74);
         }
-    }
-
-    void apply_transmog_with_carrier(
-        __int64 a1, uint16_t carrierId, uint16_t targetId)
-    {
-        auto &logger = DMK::Logger::get_instance();
-
-        if (carrierId == 0 || carrierId == targetId)
-        {
-            logger.trace("[carrier] carrierId={:#06x} == targetId={:#06x}, "
-                         "direct apply", carrierId, targetId);
-            apply_transmog(a1, targetId);
-            return;
-        }
-
-        const auto &table = ItemNameTable::instance();
-        const auto ci = table.catalog_info();
-        if (ci.ptrArray == 0 || ci.count == 0)
-        {
-            logger.warning("[carrier] catalog not ready, direct fallback");
-            apply_transmog(a1, targetId);
-            return;
-        }
-        if (carrierId >= ci.count || targetId >= ci.count)
-        {
-            logger.warning("[carrier] id out of range: "
-                           "carrier={:#06x} target={:#06x} count={}",
-                           carrierId, targetId, ci.count);
-            apply_transmog(a1, targetId);
-            return;
-        }
-
-        const auto carrierSlotAddr =
-            ci.ptrArray + static_cast<uint64_t>(carrierId) * 8;
-        const uintptr_t targetDesc = read_qword_seh(
-            ci.ptrArray + static_cast<uint64_t>(targetId) * 8);
-        const uintptr_t carrierDesc = read_qword_seh(carrierSlotAddr);
-
-        if (targetDesc < 0x10000 || carrierDesc < 0x10000)
-        {
-            logger.warning("[carrier] bad descriptor: "
-                           "carrier={:#06x}={:#018x} target={:#06x}={:#018x}",
-                           carrierId, carrierDesc, targetId, targetDesc);
-            apply_transmog(a1, targetId);
-            return;
-        }
-
-        // ── Build hybrid descriptor on the heap ─────────────────────────
-        // Must use VirtualAlloc so the address is in the high heap range
-        // (game may reject low stack addresses in pointer sanity checks).
-        // Base = target's visual data. Overlay = carrier's matching fields.
-        auto *hybrid = static_cast<uint8_t *>(
-            VirtualAlloc(nullptr, k_descBufSize,
-                         MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE));
-        if (!hybrid)
-        {
-            logger.warning("[carrier] VirtualAlloc failed for hybrid buffer");
-            apply_transmog(a1, targetId);
-            return;
-        }
-
-        if (!memcpy_seh(hybrid, reinterpret_cast<const void *>(targetDesc),
-                        k_descBufSize))
-        {
-            logger.warning("[carrier] fault copying target descriptor");
-            VirtualFree(hybrid, 0, MEM_RELEASE);
-            apply_transmog(a1, targetId);
-            return;
-        }
-
-        // Overlay carrier fields used for character-context matching.
-        std::size_t patchedBytes = 0;
-        for (const auto &p : k_carrierPatches)
-        {
-            if (p.off + p.len > k_descBufSize) continue;
-            if (!memcpy_seh(hybrid + p.off,
-                            reinterpret_cast<const void *>(carrierDesc + p.off),
-                            p.len))
-            {
-                logger.warning("[carrier] fault patching carrier field "
-                               "at +{:#x} len={}", p.off, p.len);
-                VirtualFree(hybrid, 0, MEM_RELEASE);
-                apply_transmog(a1, targetId);
-                return;
-            }
-            patchedBytes += p.len;
-        }
-
-        const auto hybridAddr = reinterpret_cast<uintptr_t>(hybrid);
-        const uintptr_t bypassAddr = resolved_addrs().charClassBypass;
-
-        logger.trace("[carrier] HYBRID built: {} bytes patched, "
-                     "carrier={:#06x} desc={:#018x}, "
-                     "target={:#06x} desc={:#018x}, hybrid={:#018x}",
-                     patchedBytes,
-                     carrierId, carrierDesc, targetId, targetDesc,
-                     hybridAddr);
-
-        // SEH-isolated: swap descriptor, toggle bypass, call
-        // SlotPopulator, then unconditionally restore both.
-        carrier_swap_and_call(
-            a1, carrierId, carrierSlotAddr, hybridAddr, bypassAddr);
-
-        logger.trace("[carrier] POST: carrier={:#06x} target={:#06x}",
-                     carrierId, targetId);
-
-        VirtualFree(hybrid, 0, MEM_RELEASE);
     }
 
     void apply_all_transmog(__int64 a1)
@@ -402,14 +239,6 @@ namespace Transmog
             last_applied_real_ids() = liveRealIds;
         }
 
-        // Clear lastIds for slots without a new target.
-        for (std::size_t i = 0; i < k_slotCount; ++i)
-        {
-            auto &m = mappings[i];
-            if (!m.active || m.targetItemId == 0)
-                lastIds[i] = 0;
-        }
-
         // SlotPopulator (sub_14076C960) maintains a dispatch cache at
         // a1+0x1B8 (base ptr), a1+0x1C0 (count), a1+0x1C4 (cap). Each
         // entry is 24 bytes:
@@ -458,6 +287,33 @@ namespace Transmog
             return;
         }
 
+        // Delegate to apply_with_bypass which wraps the core work in
+        // __try/__finally to guarantee the char-class bypass byte is
+        // restored even on SEH exceptions (early-load faults, etc).
+        apply_with_bypass(a1, resolved_addrs().charClassBypass);
+
+        suppress_vec().store(false, std::memory_order_release);
+    }
+
+    static void apply_all_transmog_inner(__int64 a1)
+    {
+        auto &logger = DMK::Logger::get_instance();
+        auto &mappings = slot_mappings();
+        auto &lastIds = last_applied_ids();
+
+        // Snapshot BEFORE clearing so Phase A tear-down knows which
+        // fakes to remove (e.g. Antra helm → "none" transition).
+        const std::array<uint16_t, k_slotCount> prevIds = lastIds;
+
+        // Clear lastIds for slots without a new target. Must happen
+        // AFTER the prevIds snapshot above — Phase A needs the old IDs.
+        for (std::size_t i = 0; i < k_slotCount; ++i)
+        {
+            const auto &m = mappings[i];
+            if (!m.active || m.targetItemId == 0)
+                lastIds[i] = 0;
+        }
+
         // Two-phase scene-graph tear-down before applying fakes.
         //
         // Phase A — tear down the previous preset's fake meshes using
@@ -498,73 +354,29 @@ namespace Transmog
                     reinterpret_cast<void *>(a1), k_tearDownSlots[k].gameTag);
             }
 
-            // Phase A: previous fakes (from lastIds before this apply).
-            // When the previous apply used a carrier, enable the
-            // char-class bypass so the tear-down can trace the NPC
-            // resource entries in the scene graph (they were loaded
-            // with the bypass active).
-            bool anyCarrierTearDown = false;
-            for (std::size_t k = 0; k < k_tearDownCount; ++k)
-            {
-                const auto idx = static_cast<std::size_t>(
-                    k_tearDownSlots[k].slot);
-                if (last_applied_carrier_ids()[idx] != 0 && prevIds[idx] != 0)
-                { anyCarrierTearDown = true; break; }
-            }
-
-            const uintptr_t bypassAddr = resolved_addrs().charClassBypass;
-            bool bypassForTearDown = false;
-            if (anyCarrierTearDown)
-            {
-                bypassForTearDown =
-                    set_char_class_bypass(bypassAddr, 0xEB);
-                if (bypassForTearDown)
-                    logger.trace("[carrier] charClass bypass ENABLED "
-                                 "for Phase A tear-down");
-            }
-
+            // Phase A: tear down previous fakes (from lastIds before
+            // this apply). Skip items that match the real equipped id
+            // — those are still live in the scene graph.
             for (std::size_t k = 0; k < k_tearDownCount; ++k)
             {
                 const auto &td = k_tearDownSlots[k];
                 const auto idx = static_cast<std::size_t>(td.slot);
                 const auto prevId = prevIds[idx];
-                const auto prevCarrier = last_applied_carrier_ids()[idx];
                 if (prevId == 0)
                     continue;
-                if (static_cast<std::uint16_t>(prevId) == realItemId[k] &&
-                    prevCarrier == 0)
+                if (static_cast<std::uint16_t>(prevId) == realItemId[k])
                 {
                     logger.trace(
                         "[dispatch] tear_down_fake slot={:#06x} itemId={:#06x} "
-                        "skipped (matches real, no carrier)",
+                        "skipped (matches real)",
                         td.gameTag,
                         static_cast<std::uint16_t>(prevId));
                     continue;
-                }
-                if (prevCarrier != 0 &&
-                    prevCarrier != static_cast<std::uint16_t>(prevId))
-                {
-                    logger.trace(
-                        "[dispatch] tear_down_fake slot={:#06x} "
-                        "carrier={:#06x} (then target={:#06x})",
-                        td.gameTag, prevCarrier,
-                        static_cast<std::uint16_t>(prevId));
-                    RealPartTearDown::tear_down_by_item_id(
-                        reinterpret_cast<void *>(a1),
-                        prevCarrier,
-                        td.gameTag);
                 }
                 RealPartTearDown::tear_down_by_item_id(
                     reinterpret_cast<void *>(a1),
                     static_cast<std::uint16_t>(prevId),
                     td.gameTag);
-            }
-
-            if (bypassForTearDown)
-            {
-                set_char_class_bypass(bypassAddr, 0x74);
-                logger.trace("[carrier] charClass bypass RESTORED "
-                             "after Phase A tear-down");
             }
 
             // Phase B: real items for any active slot. Skip slots where
@@ -634,47 +446,21 @@ namespace Transmog
                 continue;
             }
 
-            // Decide: direct apply or carrier-assisted apply.
             const auto tmSlot = static_cast<TransmogSlot>(i);
             const auto targetId = m.targetItemId;
-            const bool useCarrier = needs_carrier(targetId);
-            const uint16_t carrierId =
-                useCarrier ? default_carrier_for_slot(tmSlot) : 0;
 
-            if (useCarrier && carrierId != 0)
-            {
-                logger.debug("Transmog APPLY (carrier): slot={}, "
-                             "target={:#06x}, carrier={:#06x}",
-                             slot_name(tmSlot), targetId, carrierId);
-                logger.trace("[dispatch] applying slot={} targetId={:#06x} "
-                             "via carrier={:#06x}",
-                             i, targetId, carrierId);
-                apply_transmog_with_carrier(a1, carrierId, targetId);
-            }
-            else
-            {
-                if (useCarrier)
-                    logger.warning("Transmog APPLY: slot={} needs carrier "
-                                   "but none resolved, falling back to direct",
-                                   slot_name(tmSlot));
-                logger.debug("Transmog APPLY: slot={}, target={:#06x}",
-                             slot_name(tmSlot), targetId);
-                logger.trace("[dispatch] applying slot={} itemId={:#06x}",
-                             i, targetId);
-                apply_transmog(a1, targetId);
-            }
-            uint32_t postCount = 0;
-            __try
-            {
-                postCount =
-                    *reinterpret_cast<volatile uint32_t *>(a1 + 0x1C0);
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER) {}
+            logger.debug("Transmog APPLY: slot={}, target={:#06x}",
+                         slot_name(tmSlot), targetId);
+            logger.trace("[dispatch] applying slot={} itemId={:#06x}",
+                         i, targetId);
+            apply_transmog(a1, targetId);
+
+            bool countOk = false;
+            const uint32_t postCount = read_u32_vol(
+                static_cast<uintptr_t>(a1) + 0x1C0, countOk);
             logger.trace("[dispatch] post-apply slot={} liveCount={}",
                          i, postCount);
             lastIds[i] = m.targetItemId;
-            last_applied_carrier_ids()[i] =
-                (useCarrier && carrierId != 0) ? carrierId : 0;
             ++ourWrittenCount;
         }
 
@@ -699,26 +485,25 @@ namespace Transmog
                     ++ourWrittenCount;
                 }
             }
-            if (!m.active || m.targetItemId == 0)
-                last_applied_carrier_ids()[i] = 0;
         }
 
         // Restore count to OUR writes only — stale entries in the
         // range [ourWrittenCount .. savedCount) remain allocated
         // (no leak) but are invisible to SlotPopulator's count-limited
         // linear search.
-        __try
         {
-            uint32_t liveCount =
-                *reinterpret_cast<volatile uint32_t *>(a1 + 0x1C0);
-            logger.trace("[dispatch] liveCount={} ourWrittenCount={}",
-                         liveCount, ourWrittenCount);
-
-            uint32_t finalCount =
-                (liveCount > ourWrittenCount) ? liveCount : ourWrittenCount;
-            *reinterpret_cast<volatile uint32_t *>(a1 + 0x1C0) = finalCount;
+            bool countOk = false;
+            const uint32_t liveCount = read_u32_vol(
+                static_cast<uintptr_t>(a1) + 0x1C0, countOk);
+            if (countOk)
+            {
+                logger.trace("[dispatch] liveCount={} ourWrittenCount={}",
+                             liveCount, ourWrittenCount);
+                const uint32_t finalCount =
+                    (liveCount > ourWrittenCount) ? liveCount : ourWrittenCount;
+                *reinterpret_cast<volatile uint32_t *>(a1 + 0x1C0) = finalCount;
+            }
         }
-        __except (EXCEPTION_EXECUTE_HANDLER) {}
 
         // targetMask: slots with a fake mesh to render. activeMask: slots
         // the user explicitly controls.
@@ -758,8 +543,6 @@ namespace Transmog
             targetMask, activeMask, suppressMask);
 
         PartShowSuppress::set_mask(static_cast<uint32_t>(suppressMask));
-
-        suppress_vec().store(false, std::memory_order_release);
     }
 
     void clear_all_transmog(__int64 a1)
@@ -795,19 +578,10 @@ namespace Transmog
             prevFakeId[k] = static_cast<std::uint16_t>(lastIds[idx]);
         }
 
-        // Snapshot carrier IDs before clearing.
-        std::uint16_t prevCarrierId[std::size(k_clearSlots)]{};
-        for (std::size_t k = 0; k < std::size(k_clearSlots); ++k)
-        {
-            const auto idx = static_cast<std::size_t>(k_clearSlots[k].slot);
-            prevCarrierId[k] = last_applied_carrier_ids()[idx];
-        }
-
-        // Clear lastIds, carrier IDs, and per-slot damage flags.
+        // Clear lastIds and per-slot damage flags.
         for (std::size_t i = 0; i < k_slotCount; ++i)
         {
             lastIds[i] = 0;
-            last_applied_carrier_ids()[i] = 0;
             real_damaged()[i] = false;
         }
 
@@ -817,35 +591,22 @@ namespace Transmog
             for (std::size_t k = 0; k < std::size(k_clearSlots); ++k)
             {
                 const auto fakeId = prevFakeId[k];
-                const auto cId = prevCarrierId[k];
                 if (fakeId == 0)
                     continue;
                 const auto realId = RealPartTearDown::get_real_item_id(
                     reinterpret_cast<void *>(a1), k_clearSlots[k].gameTag);
-                if (realId == fakeId && cId == 0)
+                if (realId == fakeId)
                 {
                     logger.trace(
                         "[clear] orphan-check slot={:#06x} fake={:#06x} "
-                        "skipped (matches real, no carrier)",
+                        "skipped (matches real)",
                         k_clearSlots[k].gameTag, fakeId);
                     continue;
                 }
-                // Tear down carrier identity first if used.
-                if (cId != 0 && cId != fakeId)
-                {
-                    logger.info(
-                        "[clear] tearing carrier slot={:#06x} "
-                        "carrier={:#06x} (real={:#06x})",
-                        k_clearSlots[k].gameTag, cId, realId);
-                    RealPartTearDown::tear_down_by_item_id(
-                        reinterpret_cast<void *>(a1),
-                        cId,
-                        k_clearSlots[k].gameTag);
-                }
                 logger.info(
                     "[clear] tearing orphan fake slot={:#06x} itemId={:#06x} "
-                    "(real={:#06x} carrier={:#06x})",
-                    k_clearSlots[k].gameTag, fakeId, realId, cId);
+                    "(real={:#06x})",
+                    k_clearSlots[k].gameTag, fakeId, realId);
                 RealPartTearDown::tear_down_by_item_id(
                     reinterpret_cast<void *>(a1),
                     fakeId,

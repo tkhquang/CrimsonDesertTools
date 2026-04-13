@@ -20,7 +20,6 @@ namespace Transmog
     static std::array<bool, k_slotCount> s_realDamaged{};
     static std::array<std::uint16_t, 5> s_lastAppliedRealIds{};
     static std::atomic<bool> s_clearPending{false};
-    static std::array<std::uint16_t, k_slotCount> s_lastAppliedCarrierIds{};
 
     ResolvedAddresses &resolved_addrs() { return s_resolvedAddrs; }
     std::array<SlotMapping, k_slotCount> &slot_mappings() { return s_slotMappings; }
@@ -39,7 +38,6 @@ namespace Transmog
     std::atomic<uintptr_t> &world_system_ptr() { return s_worldSystemPtr; }
     std::array<bool, k_slotCount> &real_damaged() { return s_realDamaged; }
     std::array<std::uint16_t, 5> &last_applied_real_ids() { return s_lastAppliedRealIds; }
-    std::array<std::uint16_t, k_slotCount> &last_applied_carrier_ids() { return s_lastAppliedCarrierIds; }
     std::atomic<bool> &clear_pending() { return s_clearPending; }
 
 } // namespace Transmog

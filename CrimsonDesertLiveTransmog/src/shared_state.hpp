@@ -92,11 +92,6 @@ namespace Transmog
     /// Compared against live auth state to detect real-armor swaps.
     std::array<std::uint16_t, 5> &last_applied_real_ids();
 
-    /// Carrier itemIds used in the last apply, indexed by TransmogSlot.
-    /// 0 means no carrier was used (direct apply). Used by tear-down
-    /// Phase A to find the correct scene-graph identity.
-    std::array<std::uint16_t, k_slotCount> &last_applied_carrier_ids();
-
     /// When true the debounce worker runs clear instead of apply.
     /// Set by manual_clear, consumed by the worker.
     std::atomic<bool> &clear_pending();

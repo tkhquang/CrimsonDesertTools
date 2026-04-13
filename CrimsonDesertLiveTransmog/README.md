@@ -13,7 +13,7 @@
 - In-game item browser with search-filterable dropdown, auto-categorized by slot (Helm, Chest, Cloak, Gloves, Boots)
 - ReShade overlay GUI for full point-and-click control (Home key)
 - Preset system: save, load, rename, and cycle through multiple transmog presets per character
-- NPC armor variants and damaged variants render via automatic carrier swap
+- NPC armor variants and damaged variants render via character-class bypass
 - Safety filters: non-player gear (horse tack, pet armor) and wrong-slot items are hidden by default
 - Per-slot control: enable/disable transmog independently for each equipment slot
 - Optional hotkeys: all disabled by default, configurable via INI
@@ -157,7 +157,7 @@ See the full list at the [Supported Input Names](https://github.com/tkhquang/Det
 ## Known Limitations
 
 - **Item catalog may be incomplete** - the armor list is filtered to exclude known-broken items. Some wearable items may be missing. Report missing items in the Bugs or Posts tab.
-- **NPC armor variants and damaged variants render via carrier** — items tagged `(carrier)` in the picker use an automatic carrier swap + character-class bypass to render. Most work; a few may still produce empty slots depending on the item's internal skeleton bindings.
+- **NPC armor variants and damaged variants render via bypass** — items tagged `(NPC variant)` in the picker use a character-class bypass to render. Most work; a few may still produce empty slots depending on the item's internal skeleton bindings.
 - **Non-humanoid items crash** — horse tack, pet armor, and wagon gear crash the mesh binder. The "Safe only" filter hides these by default.
 - **Wrong-slot or non-equipment items will crash** - selecting a chest piece for the helm slot, or non-armor items (dog armor, recipes, etc.) crashes the game. Safety filters prevent this by default. Do not disable them unless you know what you are doing.
 - **Dyeing is not supported yet** - transmog items use their default colors.
