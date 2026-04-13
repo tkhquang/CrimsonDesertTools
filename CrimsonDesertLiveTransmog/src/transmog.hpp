@@ -1,11 +1,19 @@
 #pragma once
 
+#include <cstddef>
+
 namespace Transmog
 {
     bool init();
     void shutdown();
 
     void manual_apply();
+
+    /// @brief Schedule a single-slot transmog apply via the debounce worker.
+    /// @param slotIdx TransmogSlot index (0..4). Only this slot is torn
+    ///        down and re-applied; other slots are untouched.
+    void manual_apply_slot(std::size_t slotIdx);
+
     void manual_clear();
     void capture_outfit();
 

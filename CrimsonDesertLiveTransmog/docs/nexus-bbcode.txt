@@ -55,6 +55,8 @@ Download the [b]x64[/b] build of [url=https://github.com/ThirteenAG/Ultimate-ASI
 
 [b]How to verify:[/b] After completing Step 3, launch the game once. If no [b]CrimsonDesertLiveTransmog.log[/b] file appears in [b]bin64[/b], the ASI Loader is not loading. Try renaming the DLL to one of the other variants listed above.
 
+[color=#ff6600][b]Note:[/b][/color] If you are using a newer version of Ultimate ASI Loader and the log file is not generated, try the [b]win64[/b] (x64) build from [url=https://github.com/ThirteenAG/Ultimate-ASI-Loader/releases/tag/v9.1.0]v9.1.0[/url] instead.
+
 [size=4]Step 3 -Install the mod[/size]
 [list=1]
 [*]Download the latest release from the Files tab
@@ -68,6 +70,7 @@ Launch the game. Press [b]Home[/b] to open ReShade, find the [b]Transmog[/b] tab
 [code]
 <Crimson Desert>/bin64/
 ├── CrimsonDesert.exe                          (Game executable)
+├── dxgi.dll                                   (ReShade)
 ├── winmm.dll                                  (ASI Loader)
 ├── CrimsonDesertLiveTransmog.asi              (This mod)
 ├── CrimsonDesertLiveTransmog.ini              (Configuration)
@@ -186,6 +189,7 @@ If you encounter issues:
 [*]Set [b]LogLevel = Debug[/b] in the INI file
 [*]Check the log file in your game directory ([b]CrimsonDesertLiveTransmog.log[/b])
 [*]For memory pattern errors, the mod needs an update for the current game version
+[*]If the log file is not generated after updating to a newer version of Ultimate ASI Loader, try the [b]win64[/b] (x64) build from [url=https://github.com/ThirteenAG/Ultimate-ASI-Loader/releases/tag/v9.1.0]Ultimate ASI Loader v9.1.0[/url] instead
 [/list]
 
 [line]

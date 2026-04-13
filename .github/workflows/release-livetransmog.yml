@@ -202,8 +202,8 @@ jobs:
           ### Installation
 
           1. Extract all files to your Crimson Desert `bin64/plugins/` directory
-          2. Edit the INI file to configure your transmog swaps
-          3. Launch the game and press T (default) to toggle transmog
+          2. Launch the game and press **Home** to open the ReShade overlay
+          3. Find the **Transmog** tab, browse armor, and click **Apply All**
 
           ### Note
           This package includes everything you need:

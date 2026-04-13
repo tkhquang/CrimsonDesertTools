@@ -24,6 +24,22 @@ namespace Transmog
     static HMODULE s_overlayModule = nullptr;
     static bool s_overlayRegistered = false;
 
+    // Minimum time (ms) the cursor must rest on a picker item before
+    // hover-apply fires. Prevents rapid apply cycles while scrolling.
+    static constexpr int64_t k_hoverDebounceMs = 300;
+
+    // --- Overlay preferences (render-thread only) ---
+
+    // Instant Apply mode: applies transmog immediately on hover, pick,
+    // slot toggle, and clear — no Apply All click needed. Off by default
+    // because each action triggers a tear-down + SlotPopulator cycle.
+    static bool s_autoApply = false;
+
+    // When true, preserve the search text between picker opens so the
+    // user can re-open the same slot and keep browsing where they left
+    // off. Off by default to match legacy behaviour (clear on open).
+    static bool s_keepSearchText = true;
+
     // --- Per-slot UI state ---
 
     struct SlotUIState
@@ -35,8 +51,22 @@ namespace Transmog
         // matches THIS slot. Defaults to ON so the dropdown shows ~350
         // relevant items instead of all 6024.
         bool exactFilter = true;
-        bool hideIncompatible = true;   // hide crash-risk + non-equipment
-        bool hideVariants = false; // hide NPC variants (carrier items)
+        bool hideIncompatible = true; // hide crash-risk + non-equipment
+        bool hideVariants = false;    // hide NPC variants (carrier items)
+        // Hover-apply debounce state. We track which item the cursor is
+        // on and when it first landed there. Apply fires only after the
+        // cursor has settled on the same item for k_hoverDebounceMs,
+        // preventing rapid-fire apply cycles when scrolling the list.
+        uint16_t hoverPendingId = 0;
+        uint16_t hoverAppliedId = 0;
+        int64_t hoverStartMs = 0;
+        // Button-driven navigation index into the visible (filtered)
+        // list. -1 = no highlight. Up/Down buttons move this; Enter
+        // commits the highlighted item. lastVisibleCount stores the
+        // previous frame's visible count for clamping.
+        int navIndex = -1;
+        int lastVisibleCount = 0;
+        bool navMoved{false}; // true only on the frame a nav button was pressed
     };
 
     static SlotUIState s_slotUI[k_slotCount]{};
@@ -72,15 +102,28 @@ namespace Transmog
 
     // Draw a search-filterable picker popup for one slot. Returns true if
     // the user committed a selection this frame (caller is responsible for
-    // persisting it).
-    static bool draw_item_picker_popup(const char *popupId,
+    // persisting it). When autoApply is true, hovering an item starts a
+    // debounce timer; once it expires the slot-scoped apply fires via
+    // manual_apply_slot so only the hovered slot re-equips.
+    [[nodiscard]] static bool draw_item_picker_popup(const char *popupId,
                                        SlotUIState &ui,
                                        TransmogSlot slotCategory,
-                                       uint16_t &targetItemId)
+                                       uint16_t &targetItemId,
+                                       bool autoApply,
+                                       std::size_t slotIdx)
     {
         bool committed = false;
         if (!ImGui::BeginPopup(popupId))
             return false;
+
+        // Reset hover-debounce state on first frame so stale state from
+        // a previous open doesn't suppress or prematurely fire an apply.
+        if (ImGui::IsWindowAppearing())
+        {
+            ui.hoverPendingId = targetItemId;
+            ui.hoverAppliedId = targetItemId;
+            ui.hoverStartMs = 0;
+        }
 
         ImGui::TextDisabled("Item picker");
         ImGui::Separator();
@@ -99,28 +142,70 @@ namespace Transmog
         ImGui::SameLine();
         ImGui::Checkbox("Hide variants", &ui.hideVariants);
 
-        ImGui::SetNextItemWidth(260.0f);
+        ImGui::SetNextItemWidth(200.0f);
         if (ImGui::IsWindowAppearing())
+        {
             ImGui::SetKeyboardFocusHere();
-        ImGui::InputTextWithHint("##search", "search by name...",
-                                 ui.searchBuf, sizeof(ui.searchBuf));
+            ui.navIndex = -1;
+        }
+        const bool searchEdited = ImGui::InputTextWithHint(
+            "##search", "search by name...",
+            ui.searchBuf, sizeof(ui.searchBuf));
+        if (searchEdited)
+            ui.navIndex = 0;
 
         ImGui::SameLine();
         if (ImGui::SmallButton("Clear##search"))
+        {
             ui.searchBuf[0] = '\0';
+            ui.navIndex = 0;
+        }
+
+        // Navigation buttons: move the highlight through the visible
+        // list. Placed next to the search bar so they're always
+        // reachable without scrolling. Enter commits the highlighted
+        // item.
+        ImGui::SameLine();
+        ui.navMoved = false;
+        {
+            const int maxNav = ui.lastVisibleCount - 1;
+            if (ImGui::SmallButton("^##nav_up"))
+            {
+                ui.navIndex = (ui.navIndex > 0) ? ui.navIndex - 1 : 0;
+                ui.navMoved = true;
+            }
+            ImGui::SameLine();
+            if (ImGui::SmallButton("v##nav_down"))
+            {
+                ui.navIndex = (ui.navIndex < maxNav)
+                                  ? ui.navIndex + 1
+                                  : (maxNav >= 0 ? maxNav : 0);
+                ui.navMoved = true;
+            }
+        }
 
         const auto &table = ItemNameTable::instance();
         const auto &entries = table.sorted_entries();
 
-        // Fixed-height scrollable region so the popup doesn't resize per
-        // keystroke as the filter narrows.
         const float rowH = ImGui::GetTextLineHeightWithSpacing();
+
+        // Fixed-height scrollable region so the popup doesn't resize
+        // per keystroke as the filter narrows.
         ImGui::BeginChild("##itemlist",
-                          ImVec2(320.0f, rowH * 14.0f),
+                          ImVec2(340.0f, rowH * 22.0f),
                           true);
 
-        // "None" / clear entry — maps to id 0 so the user can disable a
-        // slot without typing hex.
+        // Increase vertical spacing between items for easier click/hover
+        // targets. Pushed INSIDE BeginChild so the popup-level spacing
+        // stays default — otherwise the popup's own scroll region may
+        // capture mouse wheel events instead of the child.
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing,
+                            ImVec2(ImGui::GetStyle().ItemSpacing.x,
+                                   rowH * 0.35f));
+
+        // "None" / clear entry at the top of the scroll region.
+        // Hover-preview shows bare head/body (empty slot) via the
+        // active+none path in apply_single_slot.
         {
             const bool selected = (targetItemId == 0);
             if (ImGui::Selectable("(none -- id 0)##picker_none", selected))
@@ -128,6 +213,14 @@ namespace Transmog
                 targetItemId = 0;
                 committed = true;
                 ImGui::CloseCurrentPopup();
+            }
+            if (selected)
+                ImGui::SetItemDefaultFocus();
+            if (autoApply && ImGui::IsItemHovered() &&
+                ui.hoverPendingId != 0)
+            {
+                ui.hoverPendingId = 0;
+                ui.hoverStartMs = steady_ms();
             }
         }
 
@@ -195,12 +288,54 @@ namespace Transmog
                 ImGui::PushStyleColor(ImGuiCol_Text,
                                       ImVec4(0.5f, 0.85f, 1.0f, 1.0f));
 
-            const bool selected = (targetItemId == e.id);
-            if (ImGui::Selectable(label, selected))
+            const bool isNavTarget = (shown == ui.navIndex);
+            const bool highlighted =
+                (targetItemId == e.id) || isNavTarget;
+            if (ImGui::Selectable(label, highlighted))
             {
                 targetItemId = e.id;
                 committed = true;
                 ImGui::CloseCurrentPopup();
+            }
+
+            // Scroll the nav-highlighted row into view and handle
+            // Enter to commit.
+            if (isNavTarget)
+            {
+                if (ui.navMoved)
+                    ImGui::SetScrollHereY();
+                if (ImGui::IsKeyPressed(ImGuiKey_Enter) ||
+                    ImGui::IsKeyPressed(ImGuiKey_KeypadEnter))
+                {
+                    targetItemId = e.id;
+                    committed = true;
+                    ImGui::CloseCurrentPopup();
+                }
+                // Feed nav target into hover-apply debounce so
+                // button navigation previews items when auto-apply
+                // is on.
+                if (autoApply && ui.hoverPendingId != e.id)
+                {
+                    ui.hoverPendingId = e.id;
+                    ui.hoverStartMs = steady_ms();
+                }
+            }
+            else if (targetItemId == e.id)
+            {
+                // Scroll to the currently selected item on popup
+                // open so it's visible without manual scrolling.
+                ImGui::SetItemDefaultFocus();
+            }
+
+            // Live preview: record the mouse-hovered item and start
+            // the debounce timer. Sync nav cursor to mouse so the
+            // highlight follows the cursor.
+            if (autoApply && ImGui::IsItemHovered() &&
+                ui.hoverPendingId != e.id)
+            {
+                ui.hoverPendingId = e.id;
+                ui.hoverStartMs = steady_ms();
+                ui.navIndex = shown;
             }
 
             if (crashRisk || usesCarrier)
@@ -226,7 +361,31 @@ namespace Transmog
             ImGui::TextDisabled("(truncated -- narrow your search)");
         }
 
+        // Clamp nav index to the actual visible count so stale values
+        // from a wider filter don't point past the end of the list.
+        ui.lastVisibleCount = shown;
+        if (ui.navIndex >= shown)
+            ui.navIndex = shown > 0 ? shown - 1 : -1;
+
+        ImGui::PopStyleVar(); // ItemSpacing
         ImGui::EndChild();
+
+        // --- Hover-apply debounce ---
+        // Fire manual_apply_slot() only after the cursor has rested on
+        // the same item for k_hoverDebounceMs. Uses the slot-scoped
+        // apply path so only this slot re-equips — other slots are
+        // untouched and don't flicker.
+        if (autoApply &&
+            ui.hoverPendingId != ui.hoverAppliedId &&
+            ui.hoverStartMs != 0 &&
+            (steady_ms() - ui.hoverStartMs) >= k_hoverDebounceMs)
+        {
+            targetItemId = ui.hoverPendingId;
+            ui.hoverAppliedId = ui.hoverPendingId;
+            flag_enabled().store(true, std::memory_order_relaxed);
+            manual_apply_slot(slotIdx);
+        }
+
         ImGui::EndPopup();
 
         return committed;
@@ -246,7 +405,7 @@ namespace Transmog
     // (targetItemId when active, else 0) differs from what's currently
     // committed to the game. Lets the overlay show a "[PENDING]" badge
     // so users don't close the GUI and lose track of their edits.
-    static bool has_pending_changes() noexcept
+    [[nodiscard]] static bool has_pending_changes() noexcept
     {
         const auto &mappings = slot_mappings();
         const auto &lastIds = last_applied_ids();
@@ -263,7 +422,11 @@ namespace Transmog
     static void draw_overlay(reshade::api::effect_runtime *)
     {
         auto &pm = PresetManager::instance();
-        const bool pending = has_pending_changes();
+        // When auto-apply is on, picks are applied immediately so
+        // there's never a meaningful "pending" state. Suppress the
+        // badge and yellow button tint to reduce visual noise.
+        const bool pending =
+            !s_autoApply && has_pending_changes();
 
         // --- Header ---
 
@@ -299,6 +462,18 @@ namespace Transmog
             else
                 manual_clear();
         }
+
+        ImGui::Checkbox("Instant Apply", &s_autoApply);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Apply changes immediately on hover, "
+                              "pick, toggle, and clear — no Apply All "
+                              "needed");
+
+        ImGui::SameLine();
+        ImGui::Checkbox("Keep Search Text", &s_keepSearchText);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Preserve the search field when "
+                              "re-opening a slot picker");
 
         // --- Player Only / Character selector ---
         //
@@ -507,9 +682,18 @@ namespace Transmog
                 {
                     for (std::size_t i = 0; i < k_slotCount; ++i)
                         mappings[i].active = allActive;
+                    if (s_autoApply)
+                    {
+                        flag_enabled().store(true,
+                                             std::memory_order_relaxed);
+                        manual_apply();
+                    }
                 }
-                ImGui::SameLine();
-                ImGui::TextDisabled("(pending -- Apply All to commit)");
+                if (!s_autoApply)
+                {
+                    ImGui::SameLine();
+                    ImGui::TextDisabled("(pending -- Apply All to commit)");
+                }
             }
 
             for (std::size_t i = 0; i < k_slotCount; ++i)
@@ -520,7 +704,11 @@ namespace Transmog
 
                 ImGui::PushID(static_cast<int>(i) + 100);
 
-                ImGui::Checkbox(slotLabel, &m.active);
+                if (ImGui::Checkbox(slotLabel, &m.active) && s_autoApply)
+                {
+                    flag_enabled().store(true, std::memory_order_relaxed);
+                    manual_apply_slot(i);
+                }
 
                 ImGui::SameLine(120.0f);
 
@@ -555,12 +743,28 @@ namespace Transmog
                                   m.targetItemId);
 
                     ImGui::SetNextItemWidth(240.0f);
-                    if (ImGui::Button(btnLabel, ImVec2(260.0f, 0.0f)))
+                    if (ImGui::Button(btnLabel, ImVec2(240.0f, 0.0f)))
                     {
                         if (tableReady)
                         {
-                            ui.searchBuf[0] = '\0';
+                            if (!s_keepSearchText)
+                                ui.searchBuf[0] = '\0';
                             ImGui::OpenPopup("##slot_picker");
+                        }
+                    }
+
+                    // Quick-clear button: sets slot to (none) without
+                    // opening the picker. Auto-applies if enabled.
+                    ImGui::SameLine();
+                    if (ImGui::SmallButton("X##clr") && m.targetItemId != 0)
+                    {
+                        m.targetItemId = 0;
+                        std::snprintf(ui.hexBuf, sizeof(ui.hexBuf), "0000");
+                        if (s_autoApply)
+                        {
+                            flag_enabled().store(true,
+                                                 std::memory_order_relaxed);
+                            manual_apply_slot(i);
                         }
                     }
 
@@ -568,19 +772,23 @@ namespace Transmog
                         draw_item_picker_popup(
                             "##slot_picker", ui,
                             static_cast<TransmogSlot>(i),
-                            m.targetItemId))
+                            m.targetItemId,
+                            s_autoApply, i))
                     {
-                        // Picker commits stay PENDING in slot_mappings.
-                        // The visual does not change until the user
-                        // explicitly clicks Apply All -- no auto-apply.
-                        // This lets users edit all 5 slots and then push
-                        // them as a batch, avoiding flicker and partial
-                        // transmog states.
-                        //
                         // Keep the hex field in sync so toggling back to
                         // manual entry doesn't show a stale value.
                         std::snprintf(ui.hexBuf, sizeof(ui.hexBuf), "%04X",
                                       m.targetItemId);
+
+                        // When auto-apply is on, commit the pick
+                        // immediately so clicking an item behaves the
+                        // same as hovering (instant feedback).
+                        if (s_autoApply)
+                        {
+                            flag_enabled().store(true,
+                                                 std::memory_order_relaxed);
+                            manual_apply_slot(i);
+                        }
 
                         // Focused debug log for "picked but no visual"
                         // cases: prints slot, id, resolved name, and
@@ -589,16 +797,16 @@ namespace Transmog
                         // now deferred -- no longer a live event.
                         {
                             const auto name = (m.targetItemId == 0)
-                                ? std::string("(none)")
-                                : table.name_of(m.targetItemId);
+                                                  ? std::string("(none)")
+                                                  : table.name_of(m.targetItemId);
                             const auto cat =
                                 ItemNameTable::classify_slot(name);
                             const char *catName =
                                 (m.targetItemId == 0)
                                     ? "clear"
-                                    : (cat == static_cast<TransmogSlot>(i))
-                                        ? "slot-match"
-                                        : "slot-MISMATCH";
+                                : (cat == static_cast<TransmogSlot>(i))
+                                    ? "slot-match"
+                                    : "slot-MISMATCH";
                             DMK::Logger::get_instance().info(
                                 "[picker] slot={} id=0x{:04X} name='{}' "
                                 "category={} ({}) -- pending Apply All",
