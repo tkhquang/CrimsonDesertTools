@@ -2,6 +2,17 @@
 
 All notable changes to the CrimsonDesertLiveTransmog mod will be documented in this file.
 
+## [0.3.0] - Instant Apply and Overlay Improvements
+
+- Added **Instant Apply** mode - preview armor in real-time by hovering over items in the picker, no need to click Apply All
+- Clicking an item or toggling a slot checkbox now applies immediately when Instant Apply is on
+- Added **Keep Search Text** option - search field preserves your text between picker opens
+- Added **X** button next to each slot for quick one-click clear
+- Added **navigation buttons** (^/v) in the item picker for browsing without scrolling
+- Changing one armor slot no longer causes all other slots to briefly flicker
+- Unticking a slot then unequipping that armor in the inventory now correctly removes the visual
+- Fixed a bug where clearing a slot could save "Pyeonjeon_Arrow" in the preset file instead of leaving it empty
+
 ## [0.2.0] - NPC and Damaged Armor Support
 
 - **NPC and damaged armor variants now work** - items previously greyed out or invisible (like Antra, Aant, and other NPC-specific armors) can now be equipped as transmog. The mod automatically handles the conversion behind the scenes.
@@ -18,5 +29,6 @@ All notable changes to the CrimsonDesertLiveTransmog mod will be documented in t
 - Modular code split: `transmog_apply` (apply/clear logic), `transmog_hooks` (VEC/BatchEquip callbacks), `transmog_worker` (debounce/load-detect/nametable threads), `shared_state` (cross-TU atomics)
 - Docs clarify ReShade is required for GUI; without it, users edit JSON manually via Capture hotkey
 
+[0.3.0]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.3.0
 [0.2.0]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.2.0
 [0.1.0]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.1.0
