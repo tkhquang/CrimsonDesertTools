@@ -18,7 +18,8 @@ Change the visual appearance of your equipped armor [b]in real time[/b] without 
 [*][b]In-game item browser[/b] -searchable dropdown with all armor pieces, auto-categorized by slot (Helm, Chest, Cloak, Gloves, Boots)
 [*][b]ReShade overlay GUI[/b] -full point-and-click control via the ReShade overlay ([b]Home[/b] key). No hotkeys required
 [*][b]Preset system[/b] -save, load, rename, and cycle through multiple transmog presets per character
-[*][b]Safety filters[/b] -items that crash or won't render are filtered out by default (variant metadata, non-player gear, wrong-slot items)
+[*][b]NPC and damaged variants[/b] -NPC armor variants and damaged variants render via automatic carrier swap
+[*][b]Safety filters[/b] -non-player gear (horse tack, pet armor) and wrong-slot items are filtered out by default
 [*][b]Per-slot control[/b] -enable/disable transmog independently for each equipment slot
 [*][b]Optional hotkeys[/b] -all disabled by default; bind any action via INI if you prefer keyboard shortcuts
 [*][url=https://github.com/tkhquang/CrimsonDesertTools]Open-source[/url] with full transparency
@@ -167,8 +168,8 @@ See the full list at the [url=https://github.com/tkhquang/DetourModKit?tab=readm
 
 [list]
 [*][b]Item catalog may be incomplete[/b] -the armor list is filtered to exclude known-broken items. Some wearable items may be missing. If you find one, please report it in the Bugs or Posts tab.
-[*][b]Some listed items cannot be worn[/b] -items from other body types (e.g. Oongka gear on Kliff) appear in the catalog but fail to render. These are NOT caught by the "Hide variants" filter and may look valid in the picker but produce an empty slot.
-[*][b]Damaged armor variants don't render[/b] -the game's internal variant-metadata system blocks damaged gear. The "Hide variants" filter catches these by default. You can disable it to see them in the picker, but they still won't show in-game.
+[*][b]NPC armor variants and damaged variants render via carrier[/b] -items tagged [b](carrier)[/b] in the picker use an automatic carrier swap + character-class bypass. Most work; a few may still produce empty slots depending on the item's internal skeleton bindings.
+[*][b]Non-humanoid items crash[/b] -horse tack, pet armor, and wagon gear crash the mesh binder. The "Safe only" filter hides these by default.
 [*][color=#ff0000][b]Wrong-slot or non-equipment items will crash[/b][/color] -selecting a chest piece for the helm slot, or picking non-armor items (dog armor, recipes, seeds, etc.) will crash the game. The safety filters prevent this by default -[b]do not disable them unless you know what you're doing[/b].
 [*][b]Dyeing is not supported yet[/b] -transmog items use their default colors.
 [*][b]Special effect armor may have visual quirks[/b] -armor with particle effects (e.g. Marni Laser Helm) may not render particles correctly. Hair may clip through some helmets.

@@ -16,6 +16,7 @@ namespace Transmog
         uintptr_t subTranslator        = 0; // sub_14076D950 — anchor for iteminfo item-name table scan
         uintptr_t safeTearDown         = 0; // sub_14075FE60 — scene-graph tear-down used by real_part_tear_down
         uintptr_t indexedStringLookup  = 0; // sub_1402D75D0 — IndexedStringA short->hash; resolved via ItemNameTable chain walk (50+ template siblings prevent direct AOB)
+        uintptr_t charClassBypass      = 0; // 0x141D5F538 — jz byte in CondPrefab evaluator secondary hash check. Toggle 0x74↔0xEB for NPC item support.
     };
 
     ResolvedAddresses &resolved_addrs();
@@ -90,6 +91,11 @@ namespace Transmog
     /// Snapshot of auth-table real itemId per armor slot at last apply.
     /// Compared against live auth state to detect real-armor swaps.
     std::array<std::uint16_t, 5> &last_applied_real_ids();
+
+    /// Carrier itemIds used in the last apply, indexed by TransmogSlot.
+    /// 0 means no carrier was used (direct apply). Used by tear-down
+    /// Phase A to find the correct scene-graph identity.
+    std::array<std::uint16_t, k_slotCount> &last_applied_carrier_ids();
 
     /// When true the debounce worker runs clear instead of apply.
     /// Set by manual_clear, consumed by the worker.
