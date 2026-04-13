@@ -69,7 +69,7 @@ namespace Transmog
                     "[nametable] deferred scan succeeded on attempt {} "
                     "({} entries)",
                     attempt + 1, size);
-                if (logger.is_enabled(DMK::Logger::LogLevel::Trace))
+                if (logger.is_enabled(DMK::LogLevel::Trace))
                     ItemNameTable::instance().dump_catalog_tsv();
 
                 // Re-resolve all loaded preset slots against the now-

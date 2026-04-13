@@ -136,6 +136,30 @@ namespace Transmog
         std::size_t size() const noexcept { return m_idToName.size(); }
 
         /**
+         * @brief Read the live descriptor pointer for an item.
+         *
+         * Dereferences the iteminfo global cached during build(), walks
+         * `*(globalPtr + 0x50)` (ptrArray) and returns `ptrArray[itemId*8]`.
+         * Returns 0 on any fault or if the catalog is not yet built.
+         * Thread-safe (reads only; no mutation).
+         */
+        uintptr_t descriptor_of(uint16_t itemId) const noexcept;
+
+        /**
+         * @brief Live ptrArray base and entry count.
+         *
+         * Returns {ptrArray, count}. Either or both may be 0 if the
+         * catalog global is not yet initialized. Callers MUST check
+         * both > 0 before indexing.
+         */
+        struct CatalogInfo
+        {
+            uintptr_t ptrArray = 0;
+            uint32_t count = 0;
+        };
+        CatalogInfo catalog_info() const noexcept;
+
+        /**
          * @brief Address of sub_1402D75D0 (IndexedStringA short->hash
          *        lookup), cached during the build() chain walk.
          *

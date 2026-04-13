@@ -342,7 +342,7 @@ namespace Transmog
                     "[nametable] built synchronously at init "
                     "({} entries)",
                     ItemNameTable::instance().size());
-                if (logger.is_enabled(DMK::Logger::LogLevel::Trace))
+                if (logger.is_enabled(DMK::LogLevel::Trace))
                     ItemNameTable::instance().dump_catalog_tsv();
             }
             else if (result == BR::Deferred)
@@ -414,6 +414,40 @@ namespace Transmog
                     "InitSwapEntry AOB scan failed — transmog apply will "
                     "be disabled this session");
             }
+        }
+
+        // CharClassBypass: single-byte patch site in CondPrefab evaluator.
+        // Toggled 0x74↔0xEB around each carrier apply so NPC items
+        // pass the character-class hash check.
+        addrs.charClassBypass = resolve_address(
+            k_charClassBypassCandidates,
+            std::size(k_charClassBypassCandidates),
+            "CharClassBypass");
+        if (addrs.charClassBypass)
+        {
+            // Verify the resolved byte is 0x74 (jz). SEH-isolated via
+            // noinline lambda (C++ objects in parent block unwinding).
+            uint8_t probe = 0;
+            [&]() __declspec(noinline) {
+                __try { probe = *reinterpret_cast<volatile uint8_t *>(addrs.charClassBypass); }
+                __except (EXCEPTION_EXECUTE_HANDLER) { probe = 0; }
+            }();
+            if (probe == 0x74)
+                logger.info("CharClassBypass at 0x{:X} (byte=0x{:02X} OK)",
+                            addrs.charClassBypass, probe);
+            else
+            {
+                logger.warning("CharClassBypass at 0x{:X} byte=0x{:02X} "
+                               "(expected 0x74) -- disabling",
+                               addrs.charClassBypass, probe);
+                addrs.charClassBypass = 0;
+            }
+        }
+        else
+        {
+            logger.warning(
+                "CharClassBypass AOB scan failed -- NPC-variant transmog "
+                "will fall back to direct apply (may not render)");
         }
 
         // --- Load config ---

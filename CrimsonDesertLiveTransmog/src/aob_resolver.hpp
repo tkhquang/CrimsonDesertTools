@@ -320,6 +320,58 @@ namespace Transmog
     };
 
     /**
+     * @brief Patch site: CondPrefab evaluator secondary hash check.
+     *
+     * sub_141D5F470 at +0xC8 (0x141D5F538 on v1.02.00): the `jz` that
+     * jumps on character-class hash match. NPC items lack Kliff's class
+     * in their secondary hash array, so this `jz` never fires → evaluator
+     * returns empty → no mesh.
+     *
+     * Toggling this single byte from `0x74` (jz) to `0xEB` (jmp) forces
+     * the match, making the evaluator emit resource names for NPC items.
+     *
+     * The AOB anchors on the surrounding instruction sequence:
+     *   66 45 3B 0C 48   cmp  r9w, [r8+rcx*2]
+     *   74 08             jz   +8              ← PATCH BYTE (offset +5)
+     *   FF C1             inc  ecx
+     *   3B CA             cmp  ecx, edx
+     *   72 F3             jb   loop_top
+     *
+     * The patch byte is at AOB match + 5. Resolution mode is Direct
+     * with offsetToHook = +5 so the resolved address points at the jz.
+     */
+    inline constexpr AddrCandidate k_charClassBypassCandidates[] = {
+        // All patterns wildcard fragile bytes (rel8 jump distances,
+        // struct offsets) and append the trailing `EB` (jmp opcode)
+        // to disambiguate from a structurally identical loop at +0x70
+        // in the same function.
+
+        // P1: mov r8,[rbx+??] + movzx r9d,[rax+??] + inner loop + jmp.
+        // IDA find_bytes verified unique 1-hit at 0x141D5F527.
+        // Patch byte (the jz) is at match + 0x11.
+        {"CCB_P1_MovzxCmpLoop",
+         "4C 8B 43 ?? 44 0F B7 88 ?? ?? 00 00 "
+         "66 45 3B 0C 48 74 ?? FF C1 3B CA 72 ?? EB",
+         ResolveMode::Direct, 0x11, 0},
+
+        // P2: test edx,edx + jz + mov + movzx + cmp+jz + loop + jmp.
+        // IDA find_bytes verified unique 1-hit at 0x141D5F523.
+        // Patch byte is at match + 0x15.
+        {"CCB_P2_TestMovzxCmp",
+         "85 D2 74 ?? 4C 8B 43 ?? 44 0F B7 88 ?? ?? 00 00 "
+         "66 45 3B 0C 48 74 ?? FF C1 3B CA 72 ?? EB",
+         ResolveMode::Direct, 0x15, 0},
+
+        // P3: xor ecx,ecx + test + jz + full inner loop + jmp.
+        // IDA find_bytes verified unique 1-hit at 0x141D5F521.
+        // Deepest anchor, most context. Patch byte at match + 0x17.
+        {"CCB_P3_XorTestCmpLoop",
+         "33 C9 85 D2 74 ?? 4C 8B 43 ?? 44 0F B7 88 ?? ?? 00 00 "
+         "66 45 3B 0C 48 74 ?? FF C1 3B CA 72 ?? EB",
+         ResolveMode::Direct, 0x17, 0},
+    };
+
+    /**
      * @brief Inline hook: PartInOut direct-show bypass (sub_14081DC20).
      *        Copied verbatim from CrimsonDesertEquipHide/aob_resolver.hpp.
      *

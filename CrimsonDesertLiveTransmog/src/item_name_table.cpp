@@ -561,6 +561,43 @@ namespace Transmog
         return cached_chain().itemAccessor;
     }
 
+    ItemNameTable::CatalogInfo ItemNameTable::catalog_info() const noexcept
+    {
+        CatalogInfo info;
+        const auto &chain = cached_chain();
+        if (!chain.resolved)
+            return info;
+        bool ok = false;
+        const uintptr_t globalPtr = read_qword_safe(chain.globalHolder, ok);
+        if (!ok || globalPtr < 0x10000)
+            return info;
+        info.count = read_u32_safe(globalPtr + k_iteminfoCountOffset, ok);
+        if (!ok || info.count == 0 || info.count > k_maxCatalogSize)
+        {
+            info.count = 0;
+            return info;
+        }
+        info.ptrArray = read_qword_safe(
+            globalPtr + k_iteminfoPtrArrayOffset, ok);
+        if (!ok || info.ptrArray < 0x10000)
+        {
+            info.ptrArray = 0;
+            info.count = 0;
+        }
+        return info;
+    }
+
+    uintptr_t ItemNameTable::descriptor_of(uint16_t itemId) const noexcept
+    {
+        const auto ci = catalog_info();
+        if (ci.ptrArray == 0 || itemId >= ci.count)
+            return 0;
+        bool ok = false;
+        const uintptr_t desc = read_qword_safe(
+            ci.ptrArray + static_cast<uint64_t>(itemId) * 8, ok);
+        return (ok && desc > 0x10000) ? desc : 0;
+    }
+
     ItemNameTable::BuildResult ItemNameTable::build(uintptr_t subTranslatorAddr)
     {
         auto &logger = DMK::Logger::get_instance();

@@ -13,7 +13,8 @@
 - In-game item browser with search-filterable dropdown, auto-categorized by slot (Helm, Chest, Cloak, Gloves, Boots)
 - ReShade overlay GUI for full point-and-click control (Home key)
 - Preset system: save, load, rename, and cycle through multiple transmog presets per character
-- Safety filters: damaged variants, non-player gear (horse tack, pet armor), and wrong-slot items are hidden by default
+- NPC armor variants and damaged variants render via automatic carrier swap
+- Safety filters: non-player gear (horse tack, pet armor) and wrong-slot items are hidden by default
 - Per-slot control: enable/disable transmog independently for each equipment slot
 - Optional hotkeys: all disabled by default, configurable via INI
 - Open-source with full transparency
@@ -156,8 +157,8 @@ See the full list at the [Supported Input Names](https://github.com/tkhquang/Det
 ## Known Limitations
 
 - **Item catalog may be incomplete** - the armor list is filtered to exclude known-broken items. Some wearable items may be missing. Report missing items in the Bugs or Posts tab.
-- **Cross-body-type items don't render** - items from other body types (e.g. Oongka gear on Kliff) appear in the catalog but produce an empty slot. These are not caught by the "Hide variants" filter.
-- **Damaged armor variants don't render** - the "Hide variants" filter catches these by default. Disabling the filter shows them in the picker, but they still won't render in-game.
+- **NPC armor variants and damaged variants render via carrier** — items tagged `(carrier)` in the picker use an automatic carrier swap + character-class bypass to render. Most work; a few may still produce empty slots depending on the item's internal skeleton bindings.
+- **Non-humanoid items crash** — horse tack, pet armor, and wagon gear crash the mesh binder. The "Safe only" filter hides these by default.
 - **Wrong-slot or non-equipment items will crash** - selecting a chest piece for the helm slot, or non-armor items (dog armor, recipes, etc.) crashes the game. Safety filters prevent this by default. Do not disable them unless you know what you are doing.
 - **Dyeing is not supported yet** - transmog items use their default colors.
 - **Special-effect armor may have visual quirks** - armor with particle effects (e.g. Marni Laser Helm) may not render particles correctly. Hair may clip through some helmets. I haven't been able to make these work yet.

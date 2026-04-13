@@ -35,11 +35,8 @@ namespace Transmog
         // matches THIS slot. Defaults to ON so the dropdown shows ~350
         // relevant items instead of all 6024.
         bool exactFilter = true;
-        // "Hide variants" hides items whose descriptor has a non-sentinel
-        // variant-metadata pointer at +0x3A0. These items failed to render
-        // via runtime transmog on every tested sample, so hiding them by
-        // default prevents users from picking non-functional items.
-        bool hideVariants = true;
+        bool hideIncompatible = true;   // hide crash-risk + non-equipment
+        bool hideVariants = false; // hide NPC variants (carrier items)
     };
 
     static SlotUIState s_slotUI[k_slotCount]{};
@@ -98,16 +95,9 @@ namespace Transmog
         //        picker free of non-functional items.
         ImGui::Checkbox("Exact", &ui.exactFilter);
         ImGui::SameLine();
+        ImGui::Checkbox("Safe only", &ui.hideIncompatible);
+        ImGui::SameLine();
         ImGui::Checkbox("Hide variants", &ui.hideVariants);
-
-        // Disclosure: Hide variants covers (1) the variant-meta pool that
-        // fails to render, and (2) non-player items whose rule classifiers
-        // would crash the mesh binder (horse tack, pet armor). It does NOT
-        // catch body-type-incompatible cases (e.g. Oongka items on Kliff)
-        // that look clean catalog-wise but still fail downstream in the
-        // mesh/skeleton binder. Users may discover those empirically.
-        ImGui::TextDisabled("Hide variants covers won't-render + crash "
-                            "items. Other rendering quirks remain.");
 
         ImGui::SetNextItemWidth(260.0f);
         if (ImGui::IsWindowAppearing())
@@ -152,23 +142,18 @@ namespace Transmog
                 ++filteredByCategory;
                 continue;
             }
-            // "Hide unsafe" covers three distinct failure modes:
-            //   1. hasVariantMeta -- engine-linked variant pool, never
-            //      renders via runtime transmog (mesh/skeleton gate).
-            //   2. !isPlayerCompatible -- rule classifier list has no
-            //      player body-type token, so equipping it crashes the
-            //      mesh binder (horse tack, wagon gear, pet armor).
-            //   3. category == Count -- item has no recognized armor-slot
-            //      suffix (weapons, accessories, consumables, recipes,
-            //      books, seeds, etc). These are not transmog targets.
-            // Default ON so users don't footgun themselves; power users
-            // can disable the filter if they need to inspect the full
-            // catalog.
             const bool nonEquipment =
                 (e.category == TransmogSlot::Count);
-            const bool unsafe =
-                e.hasVariantMeta || !e.isPlayerCompatible || nonEquipment;
-            if (ui.hideVariants && unsafe)
+            const bool incompatible =
+                (!e.isPlayerCompatible && !e.hasVariantMeta) ||
+                nonEquipment;
+            const bool npcVariant = e.hasVariantMeta;
+            if (ui.hideIncompatible && incompatible)
+            {
+                ++filteredByUnsafe;
+                continue;
+            }
+            if (ui.hideVariants && npcVariant)
             {
                 ++filteredByUnsafe;
                 continue;
@@ -178,20 +163,22 @@ namespace Transmog
             if (shown >= k_maxShown)
                 break;
 
-            // Tag unsafe items that slip past the filter with a visible
-            // orange badge so the user sees the warning before clicking.
-            // The label distinguishes the two failure modes:
-            //   - "variant"    -> hasVariantMeta only (won't render)
-            //   - "non-player" -> !isPlayerCompatible only (CRASH RISK)
-            //   - "unsafe"     -> both conditions (CRASH RISK)
+            // Tag items with visible badges:
+            //   - "CRASH RISK"  -> !isPlayerCompatible (red)
+            //   - "carrier"     -> hasVariantMeta, rendered via carrier
+            //                      + char-class bypass (cyan)
             char label[200];
             const char *tag = nullptr;
-            if (e.hasVariantMeta && !e.isPlayerCompatible)
-                tag = "unsafe -- CRASH RISK";
-            else if (!e.isPlayerCompatible)
+            // NPC variant items (hasVariantMeta) are humanoid and now
+            // render via carrier + char-class bypass. True crash risks
+            // are non-player items WITHOUT variant meta (horse tack, etc).
+            const bool usesCarrier = e.hasVariantMeta;
+            const bool crashRisk =
+                !e.isPlayerCompatible && !e.hasVariantMeta;
+            if (crashRisk)
                 tag = "non-player -- CRASH RISK";
-            else if (e.hasVariantMeta)
-                tag = "variant -- may not render";
+            else if (usesCarrier)
+                tag = "carrier";
 
             if (tag)
                 std::snprintf(label, sizeof(label),
@@ -201,13 +188,12 @@ namespace Transmog
                 std::snprintf(label, sizeof(label), "%s  [0x%04X]##picker",
                               e.name.c_str(), e.id);
 
-            const bool crashRisk = !e.isPlayerCompatible;
             if (crashRisk)
                 ImGui::PushStyleColor(ImGuiCol_Text,
                                       ImVec4(1.0f, 0.35f, 0.35f, 1.0f));
-            else if (e.hasVariantMeta)
+            else if (usesCarrier)
                 ImGui::PushStyleColor(ImGuiCol_Text,
-                                      ImVec4(1.0f, 0.55f, 0.35f, 1.0f));
+                                      ImVec4(0.5f, 0.85f, 1.0f, 1.0f));
 
             const bool selected = (targetItemId == e.id);
             if (ImGui::Selectable(label, selected))
@@ -217,7 +203,7 @@ namespace Transmog
                 ImGui::CloseCurrentPopup();
             }
 
-            if (crashRisk || e.hasVariantMeta)
+            if (crashRisk || usesCarrier)
                 ImGui::PopStyleColor();
 
             ++shown;
@@ -228,9 +214,10 @@ namespace Transmog
             if (ui.exactFilter && filteredByCategory > 0)
                 ImGui::TextDisabled("no matches in this category -- "
                                     "uncheck Exact to widen");
-            else if (ui.hideVariants && filteredByUnsafe > 0)
-                ImGui::TextDisabled("no matches -- uncheck Hide variants "
-                                    "to include unsafe items");
+            else if ((ui.hideIncompatible || ui.hideVariants) &&
+                     filteredByUnsafe > 0)
+                ImGui::TextDisabled("no matches -- uncheck filters "
+                                    "to show more items");
             else
                 ImGui::TextDisabled("no matches");
         }
