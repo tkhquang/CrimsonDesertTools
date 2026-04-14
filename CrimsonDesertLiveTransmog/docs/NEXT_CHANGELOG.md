@@ -2,4 +2,3 @@
 
 - NPC armor from other characters (Oongka, etc.) can now be worn by Kliff
 - Items with non-player equip types are automatically detected and handled via the carrier system
-- Carrier hybrid descriptor now includes a self-contained copy of the item's rule and classifier data for improved stability
