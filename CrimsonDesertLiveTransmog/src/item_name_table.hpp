@@ -55,13 +55,13 @@ namespace Transmog
          */
         enum class BuildResult
         {
-            Ok,             // Catalog walked successfully, table populated.
-            Deferred,       // Address chain resolved but the iteminfo
-                            // global is still null — retry later on a
-                            // background thread.
-            Fatal,          // Address resolution failed (bounded AOB
-                            // anchor missed, no relative call found, etc).
-                            // Do not retry — address chain is broken.
+            Ok,       // Catalog walked successfully, table populated.
+            Deferred, // Address chain resolved but the iteminfo
+                      // global is still null — retry later on a
+                      // background thread.
+            Fatal,    // Address resolution failed (bounded AOB
+                      // anchor missed, no relative call found, etc).
+                      // Do not retry — address chain is broken.
         };
 
         /**
@@ -131,6 +131,17 @@ namespace Transmog
          * game patch.
          */
         bool is_player_compatible(uint16_t itemId) const;
+
+        /**
+         * @brief True if the item's equip-type u16 at desc+0x42 differs
+         *        from the player's value (0x0004 for Kliff).
+         *
+         * Items with NPC equip-type need the carrier path even when their
+         * classifier array includes player tokens (is_player_compatible).
+         * The equip-type controls downstream VEC processing gates that
+         * reject non-Kliff types.  Live read via descriptor_of().
+         */
+        bool has_npc_equip_type(uint16_t itemId) const noexcept;
 
         bool ready() const noexcept { return !m_idToName.empty(); }
         std::size_t size() const noexcept { return m_idToName.size(); }

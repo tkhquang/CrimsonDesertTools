@@ -45,11 +45,11 @@ namespace Transmog
     // equip (which may silently fail for NPC/variant items).
 
     static constexpr const char *k_defaultCarrierNames[] = {
-        "Kliff_PlateArmor_Helm",    // TransmogSlot::Helm
-        "Kliff_PlateArmor_Armor",   // TransmogSlot::Chest
-        "Kliff_PlateArmor_Cloak",   // TransmogSlot::Cloak
-        "Kliff_PlateArmor_Gloves",  // TransmogSlot::Gloves
-        "Kliff_Plate_Boots",        // TransmogSlot::Boots
+        "Kliff_PlateArmor_Helm",   // TransmogSlot::Helm
+        "Kliff_PlateArmor_Armor",  // TransmogSlot::Chest
+        "Kliff_PlateArmor_Cloak",  // TransmogSlot::Cloak
+        "Kliff_PlateArmor_Gloves", // TransmogSlot::Gloves
+        "Kliff_Plate_Boots",       // TransmogSlot::Boots
     };
 
     uint16_t default_carrier_for_slot(TransmogSlot slot)
@@ -70,20 +70,34 @@ namespace Transmog
         if (!table.ready())
             return false;
         return table.has_variant_meta(itemId) ||
-               !table.is_player_compatible(itemId);
+               !table.is_player_compatible(itemId) ||
+               table.has_npc_equip_type(itemId);
     }
 
     // SEH-safe memory helpers (MSVC: __try cannot coexist with C++
     // object unwinding in the same function).
     static uintptr_t read_qword_seh(uintptr_t addr) noexcept
     {
-        __try { return *reinterpret_cast<volatile uintptr_t *>(addr); }
-        __except (EXCEPTION_EXECUTE_HANDLER) { return 0; }
+        __try
+        {
+            return *reinterpret_cast<volatile uintptr_t *>(addr);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return 0;
+        }
     }
     static bool memcpy_seh(void *dst, const void *src, size_t n) noexcept
     {
-        __try { std::memcpy(dst, src, n); return true; }
-        __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+        __try
+        {
+            std::memcpy(dst, src, n);
+            return true;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return false;
+        }
     }
 
     // Descriptor size. Stride between consecutive descriptors observed
@@ -98,9 +112,13 @@ namespace Transmog
     // +0x042  2B  equip-type u16 (Kliff=4, NPC=1)
     //             SlotPopulator reads *(desc+0x42) for the visual-config
     //             matching loop (sub_14076CAED).
-    struct PatchRange { std::ptrdiff_t off; std::size_t len; };
+    struct PatchRange
+    {
+        std::ptrdiff_t off;
+        std::size_t len;
+    };
     static constexpr PatchRange k_carrierPatches[] = {
-        {0x042, 0x002},  // equip-type u16 (Kliff=4, NPC=1)
+        {0x042, 0x002}, // equip-type u16 (Kliff=4, NPC=1)
     };
 
     // Write the char-class bypass byte unconditionally. No from-check:
@@ -112,7 +130,8 @@ namespace Transmog
             return false;
         const auto byteVal = static_cast<std::byte>(val);
         return DMK::Memory::write_bytes(
-            reinterpret_cast<std::byte *>(addr), &byteVal, 1).has_value();
+                   reinterpret_cast<std::byte *>(addr), &byteVal, 1)
+            .has_value();
     }
 
     // Swaps descriptor pointer, toggles char-class bypass, calls
@@ -162,7 +181,8 @@ namespace Transmog
         if (carrierId == 0 || carrierId == targetId)
         {
             logger.trace("[carrier] carrierId={:#06x} == targetId={:#06x}, "
-                         "direct apply", carrierId, targetId);
+                         "direct apply",
+                         carrierId, targetId);
             apply_transmog(a1, targetId);
             return;
         }
@@ -226,13 +246,15 @@ namespace Transmog
         std::size_t patchedBytes = 0;
         for (const auto &p : k_carrierPatches)
         {
-            if (p.off + p.len > k_descBufSize) continue;
+            if (p.off + p.len > k_descBufSize)
+                continue;
             if (!memcpy_seh(hybrid + p.off,
                             reinterpret_cast<const void *>(carrierDesc + p.off),
                             p.len))
             {
                 logger.warning("[carrier] fault patching carrier field "
-                               "at +{:#x} len={}", p.off, p.len);
+                               "at +{:#x} len={}",
+                               p.off, p.len);
                 VirtualFree(hybrid, 0, MEM_RELEASE);
                 apply_transmog(a1, targetId);
                 return;
@@ -592,7 +614,10 @@ namespace Transmog
             for (std::size_t i = 0; i < k_slotCount; ++i)
             {
                 if (mappings[i].active && mappings[i].targetItemId == 0)
-                { hasActiveNone = true; break; }
+                {
+                    hasActiveNone = true;
+                    break;
+                }
             }
 
             if (!presetChanged && !realChanged && !hasActiveNone)
@@ -653,7 +678,7 @@ namespace Transmog
                 const auto &m = mappings[i];
                 const uint16_t wouldBe =
                     (m.active && m.targetItemId != 0) ? m.targetItemId
-                                                       : uint16_t{0};
+                                                      : uint16_t{0};
                 if (wouldBe != prevIds[i])
                 {
                     slotNeedsWork[i] = true;
@@ -815,7 +840,10 @@ namespace Transmog
                 if (!slotNeedsWork[idx])
                     continue;
                 if (last_applied_carrier_ids()[idx] != 0 && prevIds[idx] != 0)
-                { anyCarrierTearDown = true; break; }
+                {
+                    anyCarrierTearDown = true;
+                    break;
+                }
             }
 
             const uintptr_t bypassAddr = resolved_addrs().charClassBypass;
@@ -908,7 +936,8 @@ namespace Transmog
 
         // Helper: look up a slot's real itemId from the snapshot taken
         // during the tear-down phase.
-        auto lookup_real_id = [&](std::size_t slotIdx) -> std::uint16_t {
+        auto lookup_real_id = [&](std::size_t slotIdx) -> std::uint16_t
+        {
             for (std::size_t k = 0; k < k_tearDownCount; ++k)
             {
                 if (static_cast<std::size_t>(k_tearDownSlots[k].slot) == slotIdx)
@@ -988,7 +1017,9 @@ namespace Transmog
                 postCount =
                     *reinterpret_cast<volatile uint32_t *>(a1 + 0x1C0);
             }
-            __except (EXCEPTION_EXECUTE_HANDLER) {}
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+            }
             logger.trace("[dispatch] post-apply slot={} liveCount={}",
                          i, postCount);
             lastIds[i] = m.targetItemId;
@@ -1096,7 +1127,9 @@ namespace Transmog
                          "ourWrittenCount={}",
                          liveCount, ourWrittenCount);
         }
-        __except (EXCEPTION_EXECUTE_HANDLER) {}
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+        }
 
         // targetMask: slots with a fake mesh to render. activeMask: slots
         // the user explicitly controls.
@@ -1154,7 +1187,8 @@ namespace Transmog
         if (world_system_ptr().load(std::memory_order_acquire))
         {
             auto fresh = resolve_player_component();
-            if (fresh > 0x10000) a1 = fresh;
+            if (fresh > 0x10000)
+                a1 = fresh;
         }
 
         suppress_vec().store(true, std::memory_order_release);
@@ -1166,11 +1200,11 @@ namespace Transmog
             std::uint16_t gameTag;
         };
         static constexpr ClearSlot k_clearSlots[] = {
-            {TransmogSlot::Helm,   0x0003},
-            {TransmogSlot::Chest,  0x0004},
+            {TransmogSlot::Helm, 0x0003},
+            {TransmogSlot::Chest, 0x0004},
             {TransmogSlot::Gloves, 0x0005},
-            {TransmogSlot::Boots,  0x0006},
-            {TransmogSlot::Cloak,  0x0010},
+            {TransmogSlot::Boots, 0x0006},
+            {TransmogSlot::Cloak, 0x0010},
         };
         std::uint16_t prevFakeId[std::size(k_clearSlots)]{};
         for (std::size_t k = 0; k < std::size(k_clearSlots); ++k)
