@@ -2,6 +2,11 @@
 
 All notable changes to the CrimsonDesertLiveTransmog mod will be documented in this file.
 
+## [0.3.1] - Cross-Character Armor Support & Carrier System Improvements
+
+- NPC armor from other characters (Oongka, etc.) can now be worn by Kliff
+- Items with non-player equip types are automatically detected and handled via the carrier system
+
 ## [0.3.0] - Instant Apply and Overlay Improvements
 
 - Added **Instant Apply** mode - preview armor in real-time by hovering over items in the picker, no need to click Apply All
@@ -29,6 +34,7 @@ All notable changes to the CrimsonDesertLiveTransmog mod will be documented in t
 - Modular code split: `transmog_apply` (apply/clear logic), `transmog_hooks` (VEC/BatchEquip callbacks), `transmog_worker` (debounce/load-detect/nametable threads), `shared_state` (cross-TU atomics)
 - Docs clarify ReShade is required for GUI; without it, users edit JSON manually via Capture hotkey
 
+[0.3.1]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.3.1
 [0.3.0]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.3.0
 [0.2.0]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.2.0
 [0.1.0]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.1.0
