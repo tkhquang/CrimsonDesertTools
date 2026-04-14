@@ -43,8 +43,8 @@ namespace Transmog
     // offsets (not code) so they cannot be AOB-scanned; if a future patch
     // reshapes the struct the catalog walk will produce an implausible
     // count/ptrArray and bail at the existing sanity checks below.
-    static constexpr std::ptrdiff_t k_iteminfoCountOffset     = 0x08; // dword entry count
-    static constexpr std::ptrdiff_t k_iteminfoPtrArrayOffset  = 0x50; // 80: qword base of descriptor ptr array
+    static constexpr std::ptrdiff_t k_iteminfoCountOffset = 0x08;    // dword entry count
+    static constexpr std::ptrdiff_t k_iteminfoPtrArrayOffset = 0x50; // 80: qword base of descriptor ptr array
 
     // Resolved sentinel, cached after first successful build().
     // 0 means "not yet resolved" — has_variant_meta() falls back to false
@@ -137,15 +137,19 @@ namespace Transmog
     // If a future patch changes the player classifier set, re-run the
     // catalog differential against known-player vs known-mount items.
     static constexpr std::uint16_t k_playerClassifiers[] = {
-        0x0015, 0x0018, 0x0058, 0x02E3, 0x039D,
+        0x0015,
+        0x0018,
+        0x0058,
+        0x02E3,
+        0x039D,
     };
-    static constexpr std::ptrdiff_t k_ruleListPtrOffset    = 0x248;
-    static constexpr std::ptrdiff_t k_ruleListCountOffset  = 0x250;
-    static constexpr std::size_t    k_ruleStride           = 0x38;
-    static constexpr std::ptrdiff_t k_ruleClassPtrOffset   = 0x20;
+    static constexpr std::ptrdiff_t k_ruleListPtrOffset = 0x248;
+    static constexpr std::ptrdiff_t k_ruleListCountOffset = 0x250;
+    static constexpr std::size_t k_ruleStride = 0x38;
+    static constexpr std::ptrdiff_t k_ruleClassPtrOffset = 0x20;
     static constexpr std::ptrdiff_t k_ruleClassCountOffset = 0x28;
-    static constexpr std::uint32_t  k_maxPlausibleRuleCount  = 64;
-    static constexpr std::uint32_t  k_maxPlausibleClassCount = 32;
+    static constexpr std::uint32_t k_maxPlausibleRuleCount = 64;
+    static constexpr std::uint32_t k_maxPlausibleClassCount = 32;
 
     // Returns true if the item at `descPtr` has at least one rule whose
     // classifier array contains a player body-type token. Items with no
@@ -270,7 +274,8 @@ namespace Transmog
     // _Large/_XLarge/_Medium/_Small, _Pancake.
     static void strip_variant_tail(std::string &s) noexcept
     {
-        auto ends_with = [](const std::string &str, const char *suf) {
+        auto ends_with = [](const std::string &str, const char *suf)
+        {
             const auto n = std::strlen(suf);
             if (str.size() < n)
                 return false;
@@ -666,7 +671,7 @@ namespace Transmog
         {
             uint16_t id;
             std::string name;
-            uintptr_t metaPtr;       // 0 on read fault
+            uintptr_t metaPtr; // 0 on read fault
             bool playerCompatible;
         };
         std::vector<ScratchEntry> scratch;
@@ -741,9 +746,9 @@ namespace Transmog
             if (valid == 0 || sentinelCount * 3 < valid)
             {
                 logger.debug("[nametable] variant sentinel not dominant "
-                               "(best=0x{:X} count={}/{}) — disabling "
-                               "variant-meta filter",
-                               resolvedSentinel, sentinelCount, valid);
+                             "(best=0x{:X} count={}/{}) — disabling "
+                             "variant-meta filter",
+                             resolvedSentinel, sentinelCount, valid);
                 resolvedSentinel = 0;
             }
             else
@@ -857,6 +862,31 @@ namespace Transmog
         return it->second != 0;
     }
 
+    bool ItemNameTable::has_npc_equip_type(uint16_t itemId) const noexcept
+    {
+        // Player (Kliff) equip-type u16 at desc+0x42 is 0x0004.
+        // NPC items use 0x0001. Any value != 0x0004 needs the carrier
+        // path so the pipeline sees a Kliff-compatible descriptor.
+        static constexpr std::ptrdiff_t k_equipTypeOffset = 0x42;
+        static constexpr std::uint16_t k_playerEquipType = 0x0004;
+
+        const auto desc = descriptor_of(itemId);
+        if (desc == 0)
+            return false; // can't read — default to direct apply
+
+        __try
+        {
+            const auto eType =
+                *reinterpret_cast<const volatile std::uint16_t *>(
+                    desc + k_equipTypeOffset);
+            return eType != k_playerEquipType;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return false;
+        }
+    }
+
     const std::vector<ItemNameTable::Entry> &
     ItemNameTable::sorted_entries() const
     {
@@ -881,7 +911,8 @@ namespace Transmog
         }
 
         std::sort(m_sortedCache.begin(), m_sortedCache.end(),
-                  [](const Entry &a, const Entry &b) {
+                  [](const Entry &a, const Entry &b)
+                  {
                       // Case-insensitive lexicographic compare so "Kliff"
                       // and "kliff" sort together; items lowercase anyway
                       // but this survives future catalog changes.
