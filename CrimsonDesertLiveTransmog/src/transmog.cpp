@@ -8,6 +8,7 @@
 #include "preset_manager.hpp"
 #include "real_part_tear_down.hpp"
 #include "shared_state.hpp"
+#include "overlay.hpp"
 #include "transmog_apply.hpp"
 #include "transmog_hooks.hpp"
 #include "transmog_map.hpp"
@@ -49,6 +50,17 @@ namespace Transmog
                 flag_player_only().store(val, std::memory_order_relaxed);
             },
             true);
+
+        // When true, always use the standalone transparent overlay window
+        // instead of the ReShade addon tab.  Useful if ReShade is installed
+        // but the user prefers the standalone overlay.
+        DMK::Config::register_bool(
+            "General", "ForceStandaloneOverlay", "Force Standalone Overlay",
+            [](bool val)
+            {
+                set_force_standalone(val);
+            },
+            false);
 
         DMK::Config::register_key_combo(
             "General", "ToggleHotkey", "Toggle Hotkey",
@@ -122,6 +134,15 @@ namespace Transmog
             },
             "");
 
+        // Default to Home.  Configurable via INI.
+        DMK::Config::register_key_combo(
+            "General", "OverlayToggleHotkey", "Overlay Toggle Hotkey",
+            [](const DMK::Config::KeyComboList &combos)
+            {
+                set_overlay_toggle_combos(combos);
+            },
+            "Home");
+
         DMK::Config::load(INI_FILE);
         DMK::Config::log_all();
     }
@@ -149,6 +170,11 @@ namespace Transmog
 
     void manual_apply()
     {
+        if (!slot_populator_fn())
+        {
+            DMK::Logger::get_instance().debug("Manual apply: SlotPopulator not resolved (AOB failed)");
+            return;
+        }
         if (!is_world_ready())
         {
             DMK::Logger::get_instance().debug("Manual apply: player not found");
@@ -164,6 +190,8 @@ namespace Transmog
 
     void manual_apply_slot(std::size_t slotIdx)
     {
+        if (!slot_populator_fn())
+            return;
         if (!is_world_ready())
         {
             DMK::Logger::get_instance().debug(
@@ -180,6 +208,8 @@ namespace Transmog
 
     void manual_clear()
     {
+        if (!slot_populator_fn())
+            return;
         if (!is_world_ready())
         {
             DMK::Logger::get_instance().warning("Manual clear: player not found");
@@ -193,6 +223,8 @@ namespace Transmog
 
     void capture_outfit()
     {
+        if (!slot_populator_fn())
+            return;
         auto &logger = DMK::Logger::get_instance();
         auto a1 = get_player_a1();
         if (a1 < 0x10000)
@@ -300,6 +332,11 @@ namespace Transmog
             logger.warning("Memory cache init failed — pointer reads may be slower");
 
         // --- Resolve AOB addresses ---
+        //
+        // The game may restart its exe during shader compilation.  If
+        // we load before the code section is fully populated, all scans
+        // fail.  Retry up to 5 times with a 3-second delay if the
+        // critical SlotPopulator pattern isn't found.
 
         auto &addrs = resolved_addrs();
 
