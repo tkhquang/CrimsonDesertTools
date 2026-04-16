@@ -171,7 +171,7 @@ See the full list at the [url=https://github.com/tkhquang/DetourModKit?tab=readm
 
 [list]
 [*][b]Item catalog may be incomplete[/b] -the armor list is filtered to exclude known-broken items. Some wearable items may be missing. If you find one, please report it in the Bugs or Posts tab.
-[*][b]Yann leather armor has quirks[/b] -[b]Yann_Basic_Leather_Armor[/b] may flash briefly when switching presets. Workaround: untick the chest slot, then retick it. Also, Yann leather is a single-mesh outfit that covers both chest and cloak regions -deactivate the Cloak slot when using it to avoid visual conflicts.
+[*][b]Silverwolf Leather Armor[/b]* and some other armor seems to have combined with cloak. If you apply it and it disappears right afterwards, you should try setting the cloak slot and armor slot to none, save, then reapply the armor again.
 [*][b]NPC armor variants and damaged variants render via carrier[/b] -items tagged [b](carrier)[/b] in the picker use an automatic carrier swap + character-class bypass. Most work; a few may still produce empty slots depending on the item's internal skeleton bindings.
 [*][b]Non-humanoid items crash[/b] -horse tack, pet armor, and wagon gear crash the mesh binder. The "Safe only" filter hides these by default.
 [*][color=#ff0000][b]Wrong-slot or non-equipment items will crash[/b][/color] -selecting a chest piece for the helm slot, or picking non-armor items (dog armor, recipes, seeds, etc.) will crash the game. The safety filters prevent this by default -[b]do not disable them unless you know what you're doing[/b].

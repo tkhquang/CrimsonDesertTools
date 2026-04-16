@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -209,6 +210,7 @@ namespace Transmog
             bool hasVariantMeta;
             bool isPlayerCompatible;
             std::string name;
+            std::string displayName; // human-readable name from display_names.json
         };
         const std::vector<Entry> &sorted_entries() const;
 
@@ -242,6 +244,29 @@ namespace Transmog
         /// Columns: ItemID, Slot, Variant, PlayerSafe, Name.
         void dump_catalog_tsv() const;
 
+        /**
+         * @brief Load human-readable display names from a TSV file.
+         *
+         * Each line is `internalName<TAB>displayName`. Keys are
+         * lowercased at load time for case-insensitive matching.
+         * Must be called after a successful build(). Invalidates the
+         * sorted cache so the next sorted_entries() picks up display
+         * names.
+         *
+         * @param tsvPath Path to the display names TSV file.
+         */
+        void load_display_names(const std::string &tsvPath);
+
+        /**
+         * @brief Look up a display name by internal name.
+         *
+         * @param internalName The item's internal catalog name.
+         * @return The human-readable display name, or empty string
+         *         if no mapping exists.
+         */
+        [[nodiscard]] std::string display_name_of(
+            std::string_view internalName) const;
+
     private:
         ItemNameTable() = default;
 
@@ -249,6 +274,7 @@ namespace Transmog
         std::unordered_map<std::string, uint16_t> m_nameToId;
         std::unordered_map<uint16_t, uint8_t> m_variantFlag;
         std::unordered_map<uint16_t, uint8_t> m_playerFlag;
+        std::unordered_map<std::string, std::string> m_displayNames; // lowercase internal -> display
         mutable std::vector<Entry> m_sortedCache;
 
         // Stability detector: tracks the valid count from the previous

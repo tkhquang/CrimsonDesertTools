@@ -360,6 +360,16 @@ namespace Transmog
                     "[nametable] built synchronously at init "
                     "({} entries)",
                     ItemNameTable::instance().size());
+                // Load display names BEFORE dump_catalog_tsv so the
+                // sorted cache (built lazily by the dump) already
+                // contains display names and doesn't need a second
+                // rebuild that would stall the overlay render thread.
+                {
+                    const auto dir = runtime_dir_utf8();
+                    if (!dir.empty())
+                        ItemNameTable::instance().load_display_names(
+                            dir + DISPLAY_NAMES_FILE);
+                }
                 if (logger.is_enabled(DMK::LogLevel::Trace))
                     ItemNameTable::instance().dump_catalog_tsv();
             }
@@ -475,26 +485,8 @@ namespace Transmog
         // --- Load presets ---
 
         {
-            std::wstring rtDirW = DMK::Filesystem::get_runtime_directory();
-            std::string rtDir;
-            if (!rtDirW.empty())
-            {
-                int needed = WideCharToMultiByte(
-                    CP_UTF8, 0,
-                    rtDirW.data(), static_cast<int>(rtDirW.size()),
-                    nullptr, 0, nullptr, nullptr);
-                if (needed > 0)
-                {
-                    rtDir.resize(static_cast<std::size_t>(needed));
-                    WideCharToMultiByte(
-                        CP_UTF8, 0,
-                        rtDirW.data(), static_cast<int>(rtDirW.size()),
-                        rtDir.data(), needed, nullptr, nullptr);
-                }
-            }
-            if (!rtDir.empty() && rtDir.back() != '\\' && rtDir.back() != '/')
-                rtDir.push_back('\\');
-            std::string presetsPath = rtDir + PRESETS_FILE;
+            const auto rtDir = runtime_dir_utf8();
+            const std::string presetsPath = rtDir + PRESETS_FILE;
 
             auto &pm = PresetManager::instance();
             pm.load(presetsPath);

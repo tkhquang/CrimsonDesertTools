@@ -11,6 +11,7 @@
 #include <chrono>
 #include <cstring>
 #include <fstream>
+#include <string_view>
 #include <mutex>
 #include <unordered_map>
 
@@ -268,85 +269,6 @@ namespace Transmog
 
     // --- Slot classification ---
 
-    // Strip trailing variant/noise tokens in-place so the tail-match below
-    // sees the meaningful last segment. CE-verified noise tokens against
-    // the v1.02.00 catalog: _UpgradeN, _IVX (roman), _NN (numeric),
-    // _Large/_XLarge/_Medium/_Small, _Pancake.
-    static void strip_variant_tail(std::string &s) noexcept
-    {
-        auto ends_with = [](const std::string &str, const char *suf)
-        {
-            const auto n = std::strlen(suf);
-            if (str.size() < n)
-                return false;
-            return std::memcmp(str.data() + str.size() - n, suf, n) == 0;
-        };
-
-        for (;;)
-        {
-            const auto prev = s.size();
-
-            // _UpgradeN? (N optional, 1-3 digits)
-            {
-                auto pos = s.rfind("_Upgrade");
-                if (pos != std::string::npos)
-                {
-                    bool allDigits = true;
-                    for (auto i = pos + 8; i < s.size(); ++i)
-                    {
-                        if (!std::isdigit(static_cast<unsigned char>(s[i])))
-                        {
-                            allDigits = false;
-                            break;
-                        }
-                    }
-                    if (allDigits)
-                        s.resize(pos);
-                }
-            }
-
-            // _<roman> (single trailing run of I/V/X)
-            if (auto pos = s.find_last_of('_'); pos != std::string::npos)
-            {
-                bool romanOnly = (pos + 1 < s.size());
-                for (auto i = pos + 1; i < s.size() && romanOnly; ++i)
-                {
-                    const char c = s[i];
-                    if (c != 'I' && c != 'V' && c != 'X')
-                        romanOnly = false;
-                }
-                if (romanOnly)
-                    s.resize(pos);
-            }
-
-            // _<digits>
-            if (auto pos = s.find_last_of('_'); pos != std::string::npos)
-            {
-                bool digitsOnly = (pos + 1 < s.size());
-                for (auto i = pos + 1; i < s.size() && digitsOnly; ++i)
-                {
-                    if (!std::isdigit(static_cast<unsigned char>(s[i])))
-                        digitsOnly = false;
-                }
-                if (digitsOnly)
-                    s.resize(pos);
-            }
-
-            // Size tags.
-            for (const char *suf : {"_Large", "_XLarge", "_Medium", "_Small", "_Pancake"})
-            {
-                if (ends_with(s, suf))
-                {
-                    s.resize(s.size() - std::strlen(suf));
-                    break;
-                }
-            }
-
-            if (s.size() == prev)
-                break;
-        }
-    }
-
     // Returns true if the item name starts with a known non-equipment
     // prefix — crafting recipes, recipe books, knowledge books, etc.
     // These items sometimes end with armor-slot suffixes (e.g.
@@ -373,15 +295,18 @@ namespace Transmog
         return false;
     }
 
-    // Case-insensitive comparison helper for suffix matching.
-    static bool tail_eq_ci(const std::string &tail, const char *target) noexcept
+    // Case-insensitive comparison of a token view against a compile-time
+    // literal. Zero-allocation — operates on the caller's string_view
+    // without copying.
+    static bool token_eq_ci(std::string_view token,
+                            const char *target,
+                            std::size_t targetLen) noexcept
     {
-        const auto n = std::strlen(target);
-        if (tail.size() != n)
+        if (token.size() != targetLen)
             return false;
-        for (std::size_t i = 0; i < n; ++i)
+        for (std::size_t i = 0; i < targetLen; ++i)
         {
-            if (std::tolower(static_cast<unsigned char>(tail[i])) !=
+            if (std::tolower(static_cast<unsigned char>(token[i])) !=
                 std::tolower(static_cast<unsigned char>(target[i])))
                 return false;
         }
@@ -399,27 +324,40 @@ namespace Transmog
         if (is_non_equipment_prefix(name))
             return TransmogSlot::Count;
 
-        std::string stripped = name;
-        strip_variant_tail(stripped);
+        // Scan underscore-delimited tokens right-to-left for the first
+        // slot keyword match. This naturally ignores arbitrary trailing
+        // suffixes (roman numerals, upgrade tiers, size tags, NPC
+        // variant ids like _XL, _XX, _I) without enumerating them.
+        // Case-insensitive — CE-verified: v1.02.00 has 4 items with
+        // lowercase "_cloak" that are real equippable cloaks.
+        const std::string_view sv{name};
+        std::size_t end = sv.size();
+        while (end > 0)
+        {
+            const auto dash = sv.find_last_of('_', end - 1);
+            const std::size_t start =
+                (dash == std::string_view::npos) ? 0 : dash + 1;
+            const std::string_view token = sv.substr(start, end - start);
 
-        // Find the last underscore and compare the tail. Case-INSENSITIVE —
-        // CE-verified: v1.02.00 has 4 items with lowercase "_cloak" that
-        // are real equippable cloaks (Paulus_Basic_Leather_cloak, etc).
-        const auto dash = stripped.find_last_of('_');
-        std::string tail = (dash == std::string::npos)
-                               ? stripped
-                               : stripped.substr(dash + 1);
+            // Ordered by catalog frequency (v1.02.00):
+            // Armor=984, Helm=367, Boots=339, Gloves=352, Cloak=111.
+            if (token_eq_ci(token, "Armor", 5))
+                return TransmogSlot::Chest;
+            if (token_eq_ci(token, "Helm", 4))
+                return TransmogSlot::Helm;
+            if (token_eq_ci(token, "Boots", 5))
+                return TransmogSlot::Boots;
+            if (token_eq_ci(token, "Gloves", 6))
+                return TransmogSlot::Gloves;
+            if (token_eq_ci(token, "Cloak", 5))
+                return TransmogSlot::Cloak;
+            if (token_eq_ci(token, "Cloth", 5))
+                return TransmogSlot::Chest;
 
-        if (tail_eq_ci(tail, "Helm"))
-            return TransmogSlot::Helm;
-        if (tail_eq_ci(tail, "Armor") || tail_eq_ci(tail, "Cloth"))
-            return TransmogSlot::Chest;
-        if (tail_eq_ci(tail, "Cloak"))
-            return TransmogSlot::Cloak;
-        if (tail_eq_ci(tail, "Gloves"))
-            return TransmogSlot::Gloves;
-        if (tail_eq_ci(tail, "Boots"))
-            return TransmogSlot::Boots;
+            if (dash == std::string_view::npos)
+                break;
+            end = dash;
+        }
 
         return TransmogSlot::Count;
     }
@@ -901,23 +839,37 @@ namespace Transmog
             const bool hasVariant = (vit != m_variantFlag.end()) && (vit->second != 0);
             auto pit = m_playerFlag.find(id);
             const bool isPlayer = (pit == m_playerFlag.end()) || (pit->second != 0);
+            // Look up display name by lowercased internal name.
+            std::string lowerName = name;
+            for (auto &c : lowerName)
+                c = static_cast<char>(
+                    std::tolower(static_cast<unsigned char>(c)));
+            auto dit = m_displayNames.find(lowerName);
+            std::string dispName =
+                (dit != m_displayNames.end()) ? dit->second : std::string();
+
             m_sortedCache.push_back({
                 id,
                 classify_slot(name),
                 hasVariant,
                 isPlayer,
                 name,
+                std::move(dispName),
             });
         }
 
         std::sort(m_sortedCache.begin(), m_sortedCache.end(),
                   [](const Entry &a, const Entry &b)
                   {
-                      // Case-insensitive lexicographic compare so "Kliff"
-                      // and "kliff" sort together; items lowercase anyway
-                      // but this survives future catalog changes.
-                      const auto &sa = a.name;
-                      const auto &sb = b.name;
+                      // Sort by display name when available, else by
+                      // internal name. Case-insensitive so "Kliff" and
+                      // "kliff" sort together.
+                      const auto &sa = a.displayName.empty()
+                                           ? a.name
+                                           : a.displayName;
+                      const auto &sb = b.displayName.empty()
+                                           ? b.name
+                                           : b.displayName;
                       const std::size_t n = (std::min)(sa.size(), sb.size());
                       for (std::size_t i = 0; i < n; ++i)
                       {
@@ -975,6 +927,73 @@ namespace Transmog
 
         logger.info("[nametable] dumped {} entries to CrimsonDesertLiveTransmog_items.tsv",
                     entries.size());
+    }
+
+    void ItemNameTable::load_display_names(const std::string &tsvPath)
+    {
+        auto &logger = DMK::Logger::get_instance();
+
+        std::ifstream file(tsvPath);
+        if (!file.is_open())
+        {
+            logger.warning("[nametable] display names file not found: '{}'",
+                           tsvPath);
+            return;
+        }
+
+        std::unordered_map<std::string, std::string> names;
+        names.reserve(6100);
+        std::string line;
+        while (std::getline(file, line))
+        {
+            if (line.empty())
+                continue;
+            if (line.back() == '\r')
+                line.pop_back();
+
+            const auto tab = line.find('\t');
+            if (tab == std::string::npos || tab == 0 ||
+                tab + 1 >= line.size())
+                continue;
+
+            std::string key = line.substr(0, tab);
+            for (auto &c : key)
+                c = static_cast<char>(
+                    std::tolower(static_cast<unsigned char>(c)));
+            names.emplace(std::move(key), line.substr(tab + 1));
+        }
+
+        {
+            std::lock_guard<std::mutex> lk(s_tableMtx);
+            m_displayNames = std::move(names);
+            // Callers must invoke load_display_names() before any
+            // sorted_entries() access (i.e. before dump_catalog_tsv)
+            // so the cache is still empty here — no re-sort needed.
+            m_sortedCache.clear();
+        }
+
+        logger.info("[nametable] loaded {} display names from '{}'",
+                    m_displayNames.size(), tsvPath);
+    }
+
+    std::string ItemNameTable::display_name_of(
+        std::string_view internalName) const
+    {
+        // Lowercase into a stack buffer to avoid heap allocation.
+        // Item names in the catalog are bounded by k_maxNameLen (256).
+        char buf[256];
+        const auto len = (std::min)(internalName.size(), sizeof(buf) - 1);
+        for (std::size_t i = 0; i < len; ++i)
+            buf[i] = static_cast<char>(
+                std::tolower(static_cast<unsigned char>(internalName[i])));
+        buf[len] = '\0';
+        const std::string key{buf, len};
+
+        std::lock_guard<std::mutex> lk(s_tableMtx);
+        const auto it = m_displayNames.find(key);
+        if (it == m_displayNames.end())
+            return {};
+        return it->second;
     }
 
 } // namespace Transmog

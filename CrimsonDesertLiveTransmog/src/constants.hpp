@@ -12,6 +12,7 @@ namespace Transmog
     inline constexpr const char *LOG_FILE = "CrimsonDesertLiveTransmog.log";
     inline constexpr const char *INI_FILE = "CrimsonDesertLiveTransmog.ini";
     inline constexpr const char *PRESETS_FILE = "CrimsonDesertLiveTransmog_presets.json";
+    inline constexpr const char *DISPLAY_NAMES_FILE = "CrimsonDesertLiveTransmog_display_names.tsv";
     inline constexpr const wchar_t *INSTANCE_MUTEX_PREFIX = L"CrimsonDesertLiveTransmog_";
 
     // --- Process gate ---

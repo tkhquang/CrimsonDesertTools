@@ -1,4 +1,5 @@
 #include "transmog_worker.hpp"
+#include "constants.hpp"
 #include "item_name_table.hpp"
 #include "preset_manager.hpp"
 #include "shared_state.hpp"
@@ -35,7 +36,6 @@ namespace Transmog
 
     static constexpr int k_nametableInitialDelayMs = 8000;
     static constexpr int k_nametableRetryMs = 2000;
-    static constexpr int k_nametableMaxAttempts = 15;
 
     static void deferred_nametable_scan_fn() noexcept
     {
@@ -69,6 +69,14 @@ namespace Transmog
                     "[nametable] deferred scan succeeded on attempt {} "
                     "({} entries)",
                     attempt + 1, size);
+                // Load display names before dump so the sorted cache
+                // built by the dump already contains them.
+                {
+                    const auto dir = runtime_dir_utf8();
+                    if (!dir.empty())
+                        ItemNameTable::instance().load_display_names(
+                            dir + DISPLAY_NAMES_FILE);
+                }
                 if (logger.is_enabled(DMK::LogLevel::Trace))
                     ItemNameTable::instance().dump_catalog_tsv();
 
@@ -94,17 +102,12 @@ namespace Transmog
                 return;
             }
 
-            // Deferred: sleep and retry.
+            // Deferred: sleep and retry indefinitely until the game
+            // populates the catalog or shutdown is requested.
             ++attempt;
-            if (attempt >= k_nametableMaxAttempts)
-            {
-                logger.error(
-                    "[nametable] deferred scan exhausted {} attempts — "
-                    "item catalog unavailable, mod disabled",
-                    k_nametableMaxAttempts);
-                flag_enabled().store(false, std::memory_order_release);
-                return;
-            }
+            if (attempt % 50 == 0)
+                logger.warning(
+                    "[nametable] still waiting after {} attempts", attempt);
 
             for (int slept = 0; slept < k_nametableRetryMs; slept += 250)
             {
