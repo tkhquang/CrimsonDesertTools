@@ -142,14 +142,14 @@ namespace Transmog
         ImGui::SameLine();
         ImGui::Checkbox("Hide variants", &ui.hideVariants);
 
-        ImGui::SetNextItemWidth(200.0f);
+        ImGui::SetNextItemWidth(250.0f);
         if (ImGui::IsWindowAppearing())
         {
             ImGui::SetKeyboardFocusHere();
             ui.navIndex = -1;
         }
         const bool searchEdited = ImGui::InputTextWithHint(
-            "##search", "search by name...",
+            "##search", "search by name or id...",
             ui.searchBuf, sizeof(ui.searchBuf));
         if (searchEdited)
             ui.navIndex = 0;
@@ -188,11 +188,14 @@ namespace Transmog
         const auto &entries = table.sorted_entries();
 
         const float rowH = ImGui::GetTextLineHeightWithSpacing();
+        const float lineH = ImGui::GetTextLineHeight();
+        // Two-line row: display name + smaller internal name line.
+        const float twoLineH = lineH * 2.0f + 4.0f;
 
         // Fixed-height scrollable region so the popup doesn't resize
         // per keystroke as the filter narrows.
         ImGui::BeginChild("##itemlist",
-                          ImVec2(340.0f, rowH * 22.0f),
+                          ImVec2(420.0f, twoLineH * 12.0f),
                           true);
 
         // Increase vertical spacing between items for easier click/hover
@@ -224,6 +227,15 @@ namespace Transmog
             }
         }
 
+        // Hoist draw-list pointer outside the loop — it is stable for
+        // the entire BeginChild region and avoids a per-item lookup.
+        ImDrawList *const dl = ImGui::GetWindowDrawList();
+
+        // Semantic color constants for the two-line item display.
+        static constexpr ImU32 k_colorCrashRisk = IM_COL32(255, 89, 89, 255);
+        static constexpr ImU32 k_colorCarrier = IM_COL32(128, 217, 255, 255);
+        static constexpr ImU32 k_colorDimmed = IM_COL32(160, 160, 160, 200);
+
         int shown = 0;
         int filteredByCategory = 0;
         int filteredByUnsafe = 0;
@@ -251,7 +263,8 @@ namespace Transmog
                 ++filteredByUnsafe;
                 continue;
             }
-            if (!name_contains_ci(e.name, ui.searchBuf))
+            if (!name_contains_ci(e.name, ui.searchBuf) &&
+                !name_contains_ci(e.displayName, ui.searchBuf))
                 continue;
             if (shown >= k_maxShown)
                 break;
@@ -260,7 +273,6 @@ namespace Transmog
             //   - "CRASH RISK"  -> !isPlayerCompatible (red)
             //   - "carrier"     -> hasVariantMeta, rendered via carrier
             //                      + char-class bypass (cyan)
-            char label[200];
             const char *tag = nullptr;
             // NPC variant items (hasVariantMeta) are humanoid and now
             // render via carrier + char-class bypass. True crash risks
@@ -273,30 +285,59 @@ namespace Transmog
             else if (usesCarrier)
                 tag = "carrier";
 
-            if (tag)
-                std::snprintf(label, sizeof(label),
-                              "%s  [0x%04X]  (%s)##picker",
-                              e.name.c_str(), e.id, tag);
-            else
-                std::snprintf(label, sizeof(label), "%s  [0x%04X]##picker",
-                              e.name.c_str(), e.id);
-
-            if (crashRisk)
-                ImGui::PushStyleColor(ImGuiCol_Text,
-                                      ImVec4(1.0f, 0.35f, 0.35f, 1.0f));
-            else if (usesCarrier)
-                ImGui::PushStyleColor(ImGuiCol_Text,
-                                      ImVec4(0.5f, 0.85f, 1.0f, 1.0f));
-
             const bool isNavTarget = (shown == ui.navIndex);
             const bool highlighted =
                 (targetItemId == e.id) || isNavTarget;
-            if (ImGui::Selectable(label, highlighted))
+
+            // Two-line selectable: hidden label, custom text overlay.
+            char hiddenId[32];
+            std::snprintf(hiddenId, sizeof(hiddenId),
+                          "##picker_%04X", e.id);
+            ImVec2 pos = ImGui::GetCursorScreenPos();
+            if (crashRisk)
+                ImGui::PushStyleColor(ImGuiCol_Header,
+                                      ImVec4(0.4f, 0.1f, 0.1f, 0.6f));
+            else if (usesCarrier)
+                ImGui::PushStyleColor(ImGuiCol_Header,
+                                      ImVec4(0.1f, 0.2f, 0.35f, 0.6f));
+            if (ImGui::Selectable(hiddenId, highlighted,
+                                  0, ImVec2(0, twoLineH)))
             {
                 targetItemId = e.id;
                 committed = true;
                 ImGui::CloseCurrentPopup();
             }
+
+            // Overlay text on top of the selectable region.
+            const bool hasDisplay = !e.displayName.empty();
+            const char *primaryName =
+                hasDisplay ? e.displayName.c_str() : e.name.c_str();
+
+            // Line 1: display name (or internal name fallback) + tag.
+            char line1[256];
+            if (tag)
+                std::snprintf(line1, sizeof(line1), "%s  (%s)",
+                              primaryName, tag);
+            else
+                std::snprintf(line1, sizeof(line1), "%s", primaryName);
+
+            const ImU32 mainColor = crashRisk    ? k_colorCrashRisk
+                                    : usesCarrier ? k_colorCarrier
+                                    : ImGui::GetColorU32(ImGuiCol_Text);
+
+            dl->AddText(ImVec2(pos.x + 2.0f, pos.y + 1.0f),
+                        mainColor, line1);
+
+            // Line 2: internal name + hex id (dimmed).
+            char line2[256];
+            if (hasDisplay)
+                std::snprintf(line2, sizeof(line2),
+                              "  %s  [0x%04X]", e.name.c_str(), e.id);
+            else
+                std::snprintf(line2, sizeof(line2),
+                              "  [0x%04X]", e.id);
+            dl->AddText(ImVec2(pos.x + 2.0f, pos.y + lineH + 2.0f),
+                        k_colorDimmed, line2);
 
             // Scroll the nav-highlighted row into view and handle
             // Enter to commit.
@@ -339,7 +380,7 @@ namespace Transmog
             }
 
             if (crashRisk || usesCarrier)
-                ImGui::PopStyleColor();
+                ImGui::PopStyleColor(); // Header color
 
             ++shown;
         }
@@ -726,11 +767,14 @@ namespace Transmog
                     }
                     else if (tableReady)
                     {
-                        auto name = table.name_of(m.targetItemId);
-                        if (name.empty())
-                            pickerLabel = "(unknown)";
+                        auto internalName = table.name_of(m.targetItemId);
+                        auto dispName = table.display_name_of(internalName);
+                        if (!dispName.empty())
+                            pickerLabel = dispName;
+                        else if (!internalName.empty())
+                            pickerLabel = internalName;
                         else
-                            pickerLabel = std::move(name);
+                            pickerLabel = "(unknown)";
                     }
                     else
                     {
@@ -742,8 +786,8 @@ namespace Transmog
                                   "%s  [0x%04X]##pick", pickerLabel.c_str(),
                                   m.targetItemId);
 
-                    ImGui::SetNextItemWidth(240.0f);
-                    if (ImGui::Button(btnLabel, ImVec2(240.0f, 0.0f)))
+                    ImGui::SetNextItemWidth(280.0f);
+                    if (ImGui::Button(btnLabel, ImVec2(280.0f, 0.0f)))
                     {
                         if (tableReady)
                         {

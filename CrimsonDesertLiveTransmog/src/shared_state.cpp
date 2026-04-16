@@ -1,7 +1,30 @@
 #include "shared_state.hpp"
 
+#include <DetourModKit.hpp>
+
+#include <Windows.h>
+
 namespace Transmog
 {
+    std::string runtime_dir_utf8()
+    {
+        std::wstring dirW = DMK::Filesystem::get_runtime_directory();
+        if (dirW.empty())
+            return {};
+        const int n = WideCharToMultiByte(
+            CP_UTF8, 0, dirW.data(), static_cast<int>(dirW.size()),
+            nullptr, 0, nullptr, nullptr);
+        if (n <= 0)
+            return {};
+        std::string dir(static_cast<std::size_t>(n), '\0');
+        WideCharToMultiByte(
+            CP_UTF8, 0, dirW.data(), static_cast<int>(dirW.size()),
+            dir.data(), n, nullptr, nullptr);
+        if (dir.back() != '\\' && dir.back() != '/')
+            dir.push_back('\\');
+        return dir;
+    }
+
     static ResolvedAddresses s_resolvedAddrs{};
     static std::array<SlotMapping, k_slotCount> s_slotMappings{};
     static std::array<uint16_t, k_slotCount> s_lastAppliedIds{};

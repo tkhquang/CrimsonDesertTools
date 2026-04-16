@@ -4,6 +4,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <string>
 
 namespace Transmog
 {
@@ -117,5 +118,10 @@ namespace Transmog
                    std::chrono::steady_clock::now().time_since_epoch())
             .count();
     }
+
+    /// Convert the wide runtime directory to a UTF-8 string with a
+    /// trailing path separator. Returns empty on failure. Used by
+    /// init and deferred-scan paths to locate sidecar data files.
+    std::string runtime_dir_utf8();
 
 } // namespace Transmog
