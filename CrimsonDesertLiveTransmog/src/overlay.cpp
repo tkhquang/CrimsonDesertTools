@@ -1,11 +1,9 @@
-// ====================================================================== //
-//  overlay.cpp — Standalone overlay path (D3D11 WARP + GDI blit)         //
-//                                                                         //
-//  This TU includes overlay_ui.inl which resolves ImGui calls against     //
-//  imgui_lib (the real ImGui compiled from source).  The ReShade path     //
-//  lives in overlay_reshade.cpp which resolves against ReShade's          //
-//  function-table wrappers instead.                                       //
-// ====================================================================== //
+// overlay.cpp — Standalone overlay path (D3D11 WARP + GDI blit).
+//
+// This TU includes overlay_ui.inl which resolves ImGui calls against
+// imgui_lib (the real ImGui compiled from source).  The ReShade path
+// lives in overlay_reshade.cpp which resolves against ReShade's
+// function-table wrappers instead.
 
 #include "overlay.hpp"
 #include "constants.hpp"
@@ -58,6 +56,7 @@ namespace Transmog
             ImGui::End();
             return;
         }
+        s_standaloneMode = true;
         draw_overlay_content();
         ImGui::End();
     }

@@ -21,19 +21,16 @@
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(
     HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
-// ====================================================================== //
-//  Swap-chain-free transparent overlay                                    //
-//                                                                         //
-//  OptiScaler hooks ALL DXGI swap chain creation and asserts on its        //
-//  ImGui re-init.  This approach creates NO swap chain at all:             //
-//    1. D3D11 WARP device (no swap chain — only CreateDevice)              //
-//    2. Offscreen Texture2D render target                                  //
-//    3. ImGui renders to the texture via ImGui_ImplDX11                    //
-//    4. Texture pixels copied to a DIB section                             //
-//    5. UpdateLayeredWindow composites the DIB onto the screen             //
-//                                                                         //
-//  Zero DXGI swap chain → zero OptiScaler interference.                   //
-// ====================================================================== //
+// Swap-chain-free transparent overlay.
+//
+// OptiScaler hooks all DXGI swap chain creation and asserts on its
+// ImGui re-init.  This approach creates no swap chain at all:
+//   1. D3D11 WARP device (CreateDevice only, no swap chain)
+//   2. Offscreen Texture2D render target
+//   3. ImGui renders to the texture via ImGui_ImplDX11
+//   4. Texture pixels copied to a DIB section
+//   5. UpdateLayeredWindow composites the DIB onto the screen
+// Zero DXGI swap chain means zero OptiScaler interference.
 
 namespace Transmog
 {
@@ -62,9 +59,7 @@ namespace Transmog
 
     static HANDLE s_renderThread = nullptr;
 
-    // ------------------------------------------------------------------ //
-    //  Render target + staging + DIB management                           //
-    // ------------------------------------------------------------------ //
+    // --- Render target + staging + DIB management ---
 
     static void release_targets()
     {
@@ -179,9 +174,7 @@ namespace Transmog
                             s_memDC, &ptSrc, 0, &blend, ULW_ALPHA);
     }
 
-    // ------------------------------------------------------------------ //
-    //  Helpers                                                            //
-    // ------------------------------------------------------------------ //
+    // --- Helpers ---
 
     static HWND find_game_hwnd()
     {
@@ -207,9 +200,7 @@ namespace Transmog
         return ctx.result;
     }
 
-    // ------------------------------------------------------------------ //
-    //  Overlay WndProc                                                    //
-    // ------------------------------------------------------------------ //
+    // --- Overlay WndProc ---
 
     static LRESULT CALLBACK overlay_wndproc(HWND hWnd, UINT msg,
                                             WPARAM wParam, LPARAM lParam)
@@ -230,9 +221,7 @@ namespace Transmog
         return DefWindowProcW(hWnd, msg, wParam, lParam);
     }
 
-    // ------------------------------------------------------------------ //
-    //  Render loop                                                        //
-    // ------------------------------------------------------------------ //
+    // --- Render loop ---
 
     static DWORD WINAPI render_thread(LPVOID)
     {
@@ -435,9 +424,7 @@ namespace Transmog
         return 0;
     }
 
-    // ------------------------------------------------------------------ //
-    //  Public API                                                         //
-    // ------------------------------------------------------------------ //
+    // --- Public API ---
 
     bool init_dx_overlay()
     {

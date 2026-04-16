@@ -1,32 +1,25 @@
-// ====================================================================== //
-//  overlay_ui.inl — Shared transmog overlay widget code                   //
-//                                                                         //
-//  Included by BOTH overlay.cpp (standalone D3D11 path) and               //
-//  overlay_reshade.cpp (ReShade addon path).  Each TU provides its own    //
-//  ImGui symbols — the standalone path links against imgui_lib while the  //
-//  ReShade path uses the function-table wrappers from reshade.hpp.        //
-//                                                                         //
-//  Everything here is static (internal linkage per TU).  Only one path    //
-//  is active at runtime so the duplicated state is harmless (~2 KB).      //
-//                                                                         //
-//  REQUIRES the including TU to have these headers already included:      //
-//    - imgui.h (either real or ReShade wrapper — controls which ImGui)    //
-//    - constants.hpp, item_name_table.hpp, preset_manager.hpp,            //
-//      shared_state.hpp, transmog.hpp, transmog_map.hpp                   //
-//    - <DetourModKit.hpp>                                                 //
-//    - <cstdio>, <cstring>, <string>                                      //
-// ====================================================================== //
+// overlay_ui.inl — Shared transmog overlay widget code.
+//
+// Included by both overlay.cpp (standalone D3D11 path) and
+// overlay_reshade.cpp (ReShade addon path).  Each TU provides its own
+// ImGui symbols: the standalone path links against imgui_lib while the
+// ReShade path uses the function-table wrappers from reshade.hpp.
+//
+// Everything here is static (internal linkage per TU).  Only one path
+// is active at runtime so the duplicated state is harmless (~2 KB).
+//
+// Requires the including TU to have these headers already included:
+//   imgui.h (either real or ReShade wrapper), constants.hpp,
+//   item_name_table.hpp, preset_manager.hpp, shared_state.hpp,
+//   transmog.hpp, transmog_map.hpp, <DetourModKit.hpp>,
+//   <cstdarg>, <cstdio>, <cstring>, <string>
 
-// ------------------------------------------------------------------ //
-//  Non-variadic ImGui wrappers                                        //
-//                                                                      //
-//  ImGui::Text, TextColored, TextDisabled, and SetTooltip are          //
-//  variadic (va_args).  The compiler cannot inline them, so ReShade's  //
-//  reshade_overlay.hpp emits out-of-line COMDAT copies that conflict   //
-//  with imgui_lib's strong symbols at link time.  These helpers call   //
-//  only non-variadic ImGui functions (TextUnformatted, PushStyleColor) //
-//  which inline correctly in both the ReShade and standalone paths.    //
-// ------------------------------------------------------------------ //
+// ImGui::Text, TextColored, TextDisabled, and SetTooltip are variadic.
+// The compiler cannot inline them, so ReShade's reshade_overlay.hpp
+// emits out-of-line COMDAT copies that conflict with imgui_lib's strong
+// symbols at link time.  These helpers call only non-variadic ImGui
+// functions (TextUnformatted, PushStyleColor) which inline correctly
+// in both the ReShade and standalone paths.
 
 static void ui_text(const char *fmt, ...)
 {
@@ -69,6 +62,13 @@ static void ui_tooltip(const char *text)
     ImGui::TextUnformatted(text);
     ImGui::EndTooltip();
 }
+
+// Set by the including TU before draw_overlay_content runs.
+// true  = standalone overlay (wider layout for high-DPI)
+// false = ReShade addon tab  (compact layout)
+// Cannot use FontGlobalScale to detect this because ReShade at 4K
+// also sets FontGlobalScale > 1.
+static bool s_standaloneMode = false;
 
 // Minimum time (ms) the cursor must rest on a picker item before
 // hover-apply fires.  Prevents rapid apply cycles while scrolling.
@@ -243,8 +243,7 @@ static bool name_contains_ci(const std::string &hay, const char *needle) noexcep
 
     // Fixed-height scrollable region so the popup doesn't resize
     // per keystroke as the filter narrows.
-    const float popupScale = ImGui::GetIO().FontGlobalScale;
-    const float popupW = popupScale > 1.05f ? 420.0f * popupScale : 520.0f;
+    const float popupW = s_standaloneMode ? 720.0f : 560.0f;
     ImGui::BeginChild("##itemlist",
                       ImVec2(popupW, twoLineH * 12.0f),
                       true);
@@ -733,10 +732,7 @@ static void draw_overlay_content()
                 manual_apply_slot(i);
             }
 
-            {
-                const float s = ImGui::GetIO().FontGlobalScale;
-                ImGui::SameLine(s > 1.05f ? 90.0f * s : 120.0f);
-            }
+            ImGui::SameLine(s_standaloneMode ? 160.0f : 120.0f);
 
             // --- Picker button ---
             {
@@ -766,11 +762,10 @@ static void draw_overlay_content()
                               "%s  [0x%04X]##pick", pickerLabel.c_str(),
                               m.targetItemId);
 
-                const float s = ImGui::GetIO().FontGlobalScale;
-                const float bw = s > 1.05f ? 280.0f * s : 380.0f;
+                const float bw = s_standaloneMode ? 520.0f : 380.0f;
                 ImGui::SetNextItemWidth(bw);
                 ImGui::PushStyleVar(ImGuiStyleVar_ButtonTextAlign,
-                                    ImVec2(0.03f, 0.5f));
+                                    ImVec2(0.02f, 0.5f));
                 if (ImGui::Button(btnLabel, ImVec2(bw, 0.0f)))
                 {
                     if (tableReady)
@@ -828,10 +823,7 @@ static void draw_overlay_content()
                 std::snprintf(ui.hexBuf, sizeof(ui.hexBuf), "%04X",
                               m.targetItemId);
 
-            {
-                const float hs = ImGui::GetIO().FontGlobalScale;
-                ImGui::SetNextItemWidth(hs > 1.05f ? 64.0f * hs : 64.0f);
-            }
+            ImGui::SetNextItemWidth(64.0f);
             if (ImGui::InputText(
                     "##hex", ui.hexBuf, sizeof(ui.hexBuf),
                     ImGuiInputTextFlags_CharsHexadecimal |
