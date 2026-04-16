@@ -180,6 +180,11 @@ namespace Transmog
     static std::atomic<std::uint64_t> s_applyDeadlineTick{0};
     static std::atomic<bool> s_applyPending{false};
 
+    // Set by run_debounced_apply: true if the last apply completed
+    // without SEH fault, false on exception. Used by load-detect to
+    // stop retrying once a boot-time apply succeeds.
+    static std::atomic<bool> s_lastApplyOk{false};
+
     static std::mutex s_applyCvMtx;
     static std::condition_variable s_applyCv;
     static std::thread s_applyWorker;
@@ -231,9 +236,11 @@ namespace Transmog
                 apply_all_transmog(a1);
                 logger.debug("Transmog applied (debounced)");
             }
+            s_lastApplyOk.store(true, std::memory_order_release);
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
+            s_lastApplyOk.store(false, std::memory_order_release);
             // Expected during load-retry window (game visual state not
             // ready yet). Logged at debug to avoid false-alarm noise.
             logger.debug("Transmog {} exception (debounced)",
@@ -384,20 +391,45 @@ namespace Transmog
 
                 // Retry through the debounce worker. The game's visual
                 // state isn't ready immediately after load detect — the
-                // first attempt often faults. Each schedule fires the
-                // worker with deadline=now (immediate), and the 2s
-                // sleep gives the game time to finish loading between
-                // attempts. Applies are serialized through the single
-                // worker thread, avoiding data races.
-                for (int attempt = 0; attempt < 5; ++attempt)
+                // first attempt often faults because the PartDef array
+                // and scene graph are still being populated. We retry
+                // with exponential backoff up to ~90s total, exiting
+                // early once the apply succeeds (no SEH fault).
+                //
+                // Backoff schedule: 2s, 2s, 3s, 4s, 5s, 5s, 5s, ...
+                // This gives fast feedback when the game loads quickly
+                // but doesn't burn CPU during longer load screens.
+                static constexpr int k_maxAutoApplyAttempts = 20;
+                s_lastApplyOk.store(false, std::memory_order_release);
+
+                for (int attempt = 0; attempt < k_maxAutoApplyAttempts;
+                     ++attempt)
                 {
-                    sleep_interruptible(2000);
+                    const int delayMs =
+                        (attempt < 2) ? 2000 :
+                        (attempt < 3) ? 3000 :
+                        (attempt < 4) ? 4000 : 5000;
+                    sleep_interruptible(delayMs);
                     if (shutdown_requested().load(std::memory_order_relaxed))
                         break;
                     schedule_transmog_ms(0);
-                    logger.info("Load detect: scheduled apply (attempt {})",
+                    logger.debug("Load detect: scheduled apply (attempt {})",
                                 attempt + 1);
+
+                    // Give the worker time to finish, then check result.
+                    sleep_interruptible(500);
+                    if (s_lastApplyOk.load(std::memory_order_acquire))
+                    {
+                        logger.info(
+                            "Load detect: auto-apply succeeded on attempt {}",
+                            attempt + 1);
+                        break;
+                    }
                 }
+                if (!s_lastApplyOk.load(std::memory_order_acquire))
+                    logger.warning(
+                        "Load detect: auto-apply failed after {} attempts",
+                        k_maxAutoApplyAttempts);
             }
             else if (comp > 0x10000)
             {
@@ -418,8 +450,9 @@ namespace Transmog
     {
         if (s_loadDetectThread)
         {
-            // Polls via sleep_interruptible(1000), retries up to 5x
-            // with 2s intervals. Worst case: 1s + 5*2s + margin = 12s.
+            // Polls via sleep_interruptible(1000), auto-apply retries up
+            // to 20x with backoff. All sleeps check shutdown_requested
+            // every 100ms, so drain completes well under 1s.
             WaitForSingleObject(s_loadDetectThread, 15000);
             CloseHandle(s_loadDetectThread);
             s_loadDetectThread = nullptr;

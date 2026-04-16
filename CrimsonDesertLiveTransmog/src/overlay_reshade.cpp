@@ -1,19 +1,16 @@
-// ====================================================================== //
-//  overlay_reshade.cpp — ReShade addon overlay path                       //
-//                                                                         //
-//  This TU includes the ReShade SDK's imgui.h which defines ImGui         //
-//  functions as inline wrappers that call through ReShade's function       //
-//  table.  This is a DIFFERENT ImGui from imgui_lib (the real compiled     //
-//  ImGui used by the standalone overlay).                                  //
-//                                                                         //
-//  overlay_ui.inl is included here so draw_overlay_content() resolves     //
-//  ImGui calls to ReShade's wrappers — rendering appears inside           //
-//  ReShade's addon tab, not a separate window.                            //
-//                                                                         //
-//  IMPORTANT: This file must NOT see imgui_lib's include path.  The       //
-//  CMakeLists.txt configures this TU with the ReShade SDK include         //
-//  directory instead.                                                     //
-// ====================================================================== //
+// overlay_reshade.cpp — ReShade addon overlay path.
+//
+// This TU includes the ReShade SDK's imgui.h which defines ImGui
+// functions as inline wrappers that call through ReShade's function
+// table.  This is a different ImGui from imgui_lib (the real compiled
+// ImGui used by the standalone overlay).
+//
+// overlay_ui.inl is included here so draw_overlay_content() resolves
+// ImGui calls to ReShade's wrappers, rendering appears inside
+// ReShade's addon tab, not a separate window.
+//
+// This file must NOT see imgui_lib's include path.  The CMakeLists.txt
+// configures this TU with the ReShade SDK include directory instead.
 
 #include "constants.hpp"
 #include "item_name_table.hpp"
