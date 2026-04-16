@@ -1,4 +1,5 @@
 #include "input_handler.hpp"
+#include "dx_overlay.hpp"
 #include "preset_manager.hpp"
 #include "shared_state.hpp"
 #include "transmog.hpp"
@@ -19,6 +20,7 @@ namespace Transmog
     static DMK::Config::KeyComboList s_presetRemoveCombos;
     static DMK::Config::KeyComboList s_presetNextCombos;
     static DMK::Config::KeyComboList s_presetPrevCombos;
+    static DMK::Config::KeyComboList s_overlayToggleCombos;
 
     // --- Combo setters ---
 
@@ -65,6 +67,11 @@ namespace Transmog
     void set_preset_prev_combos(DMK::Config::KeyComboList combos)
     {
         s_presetPrevCombos = std::move(combos);
+    }
+
+    void set_overlay_toggle_combos(DMK::Config::KeyComboList combos)
+    {
+        s_overlayToggleCombos = std::move(combos);
     }
 
     // --- Registration ---
@@ -217,6 +224,18 @@ namespace Transmog
                     pm.prev_preset();
                     DMK::Logger::get_instance().info("Preset prev hotkey pressed");
                     Transmog::manual_apply();
+                });
+            ++count;
+        }
+
+        if (!s_overlayToggleCombos.empty())
+        {
+            inputMgr.register_press(
+                "OverlayToggle",
+                s_overlayToggleCombos,
+                []()
+                {
+                    toggle_overlay_visible();
                 });
             ++count;
         }

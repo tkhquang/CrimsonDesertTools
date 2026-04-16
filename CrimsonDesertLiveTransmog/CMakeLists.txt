@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(CrimsonDesertLiveTransmog VERSION 0.1.0 LANGUAGES CXX)
+project(CrimsonDesertLiveTransmog VERSION 0.4.0 LANGUAGES CXX)
 
 # --- Standard and Compiler Options ---
 set(CMAKE_CXX_STANDARD 23)
@@ -30,6 +30,30 @@ FetchContent_Declare(
     GIT_SHALLOW    TRUE
 )
 FetchContent_MakeAvailable(nlohmann_json)
+
+# --- Dear ImGui (compiled from source — no binary dependency) ---
+FetchContent_Declare(
+    imgui
+    GIT_REPOSITORY https://github.com/ocornut/imgui.git
+    GIT_TAG        v1.91.8
+    GIT_SHALLOW    TRUE
+)
+FetchContent_MakeAvailable(imgui)
+
+# Build ImGui as a static library with D3D11 + Win32 backends.
+add_library(imgui_lib STATIC
+    ${imgui_SOURCE_DIR}/imgui.cpp
+    ${imgui_SOURCE_DIR}/imgui_draw.cpp
+    ${imgui_SOURCE_DIR}/imgui_tables.cpp
+    ${imgui_SOURCE_DIR}/imgui_widgets.cpp
+    ${imgui_SOURCE_DIR}/backends/imgui_impl_win32.cpp
+    ${imgui_SOURCE_DIR}/backends/imgui_impl_dx11.cpp
+)
+target_include_directories(imgui_lib PUBLIC
+    ${imgui_SOURCE_DIR}
+    ${imgui_SOURCE_DIR}/backends
+)
+target_compile_options(imgui_lib PRIVATE /W0)
 
 # --- DetourModKit Dependency ---
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/external/DetourModKit/CMakeLists.txt")
@@ -65,6 +89,7 @@ set(COMMON_SOURCES
     src/transmog_hooks.cpp
     src/transmog_worker.cpp
     src/overlay.cpp
+    src/dx_overlay.cpp
     src/preset_manager.cpp
     src/part_show_suppress.cpp
     src/real_part_tear_down.cpp
@@ -77,8 +102,21 @@ set(ASI_SOURCES
 # --- Include Directories ---
 set(COMMON_INCLUDE_DIRS
     src
+)
+
+# overlay_reshade.cpp uses ReShade SDK's imgui.h (function-table wrappers)
+# instead of imgui_lib's imgui.h (real compiled ImGui).  It is compiled as
+# a separate OBJECT library with the ReShade SDK include path and WITHOUT
+# imgui_lib's include path to avoid symbol conflicts.
+add_library(overlay_reshade_obj OBJECT src/overlay_reshade.cpp)
+target_include_directories(overlay_reshade_obj PRIVATE
+    src
     external/reshade-sdk/include
 )
+target_link_libraries(overlay_reshade_obj PRIVATE
+    DetourModKit
+)
+target_compile_options(overlay_reshade_obj PRIVATE /W4)
 
 # --- Game Output Directory (dev builds) ---
 set(GAME_BIN_DIR "D:/Games/SteamLibrary/steamapps/common/Crimson Desert/bin64/plugins")
@@ -129,6 +167,7 @@ endif()
     add_library(transmog_logic SHARED
         ${COMMON_SOURCES}
         src/dev/logic_exports.cpp
+        $<TARGET_OBJECTS:overlay_reshade_obj>
     )
 
     target_include_directories(transmog_logic PRIVATE ${COMMON_INCLUDE_DIRS})
@@ -138,6 +177,10 @@ endif()
     target_link_libraries(transmog_logic PRIVATE
         DetourModKit
         nlohmann_json::nlohmann_json
+        imgui_lib
+        d3d11
+        dxgi
+        dwmapi
         psapi
         user32
         kernel32
@@ -198,20 +241,27 @@ endif()
     )
 
     target_compile_options(transmog_logic PRIVATE /W4 /Zi)
-    target_link_options(transmog_logic PRIVATE /DEBUG /INCREMENTAL:NO /OPT:REF /OPT:ICF)
+    target_link_options(transmog_logic PRIVATE /DEBUG /INCREMENTAL:NO /OPT:REF /OPT:ICF ${RESHADE_FORCE_LINK_FLAGS})
 
 else() # TRANSMOG_DEV_BUILD=OFF
     # =====================================================================
     # Production Build: single ASI
     # =====================================================================
 
-    add_library(${PROJECT_NAME}-ASI SHARED ${ASI_SOURCES})
+    add_library(${PROJECT_NAME}-ASI SHARED
+        ${ASI_SOURCES}
+        $<TARGET_OBJECTS:overlay_reshade_obj>
+    )
 
     target_include_directories(${PROJECT_NAME}-ASI PRIVATE ${COMMON_INCLUDE_DIRS})
 
     target_link_libraries(${PROJECT_NAME}-ASI PRIVATE
         DetourModKit
         nlohmann_json::nlohmann_json
+        imgui_lib
+        d3d11
+        dxgi
+        dwmapi
         psapi
         user32
         kernel32
@@ -229,7 +279,7 @@ else() # TRANSMOG_DEV_BUILD=OFF
 
     target_link_options(${PROJECT_NAME}-ASI PRIVATE
         $<$<CONFIG:Release>:/OPT:REF /OPT:ICF>
-    )
+           )
 
     include(CheckIPOSupported)
     check_ipo_supported(RESULT _ipo_supported LANGUAGES CXX OUTPUT _ipo_error)

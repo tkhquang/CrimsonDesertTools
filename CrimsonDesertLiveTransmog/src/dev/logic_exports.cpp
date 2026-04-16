@@ -12,9 +12,22 @@
 #include <Windows.h>
 
 static HMODULE g_hModule = nullptr;
+static HANDLE g_instanceMutex = nullptr;
 
 extern "C" __declspec(dllexport) bool Init()
 {
+    // Process gate — UAL loads ASIs into ALL processes in the game
+    // directory, including crashpad_handler.exe.  Bail immediately
+    // if we're not in the real game.
+    {
+        char exePath[MAX_PATH];
+        GetModuleFileNameA(nullptr, exePath, MAX_PATH);
+        const char *exeName = std::strrchr(exePath, '\\');
+        exeName = exeName ? exeName + 1 : exePath;
+        if (_stricmp(exeName, Transmog::GAME_PROCESS_NAME) != 0)
+            return false;
+    }
+
     DMK::Logger::configure("Transmog", Transmog::LOG_FILE, "%Y-%m-%d %H:%M:%S");
     auto &logger = DMK::Logger::get_instance();
 
@@ -24,16 +37,29 @@ extern "C" __declspec(dllexport) bool Init()
 
     logger.info("[DEV] Logic DLL Init() called");
 
+    // Per-PID mutex — prevents duplicate ASI loading within the same
+    // process (e.g. old production ASI alongside the dev build).
+    wchar_t mutexName[64];
+    wsprintfW(mutexName, L"%s%lu",
+              Transmog::INSTANCE_MUTEX_PREFIX, GetCurrentProcessId());
+    g_instanceMutex = CreateMutexW(nullptr, FALSE, mutexName);
+    if (g_instanceMutex && GetLastError() == ERROR_ALREADY_EXISTS)
+    {
+        logger.error("Another instance of CrimsonDesertLiveTransmog is "
+                     "already loaded. Check for duplicate .asi files.");
+        CloseHandle(g_instanceMutex);
+        g_instanceMutex = nullptr;
+        return false;
+    }
+
     if (!Transmog::init())
     {
         logger.error("Transmog initialization FAILED.");
         return false;
     }
 
-    if (Transmog::init_overlay(g_hModule))
-        logger.info("ReShade overlay registered — open ReShade (Home key) for Transmog UI");
-    else
-        logger.info("ReShade not detected — overlay unavailable (mod still works via hotkeys)");
+    // Overlay is best-effort; mod still works via hotkeys if it fails.
+    (void)Transmog::init_overlay(g_hModule);
 
     logger.info("Transmog initialization complete.");
     return true;
@@ -46,6 +72,12 @@ extern "C" __declspec(dllexport) void Shutdown()
 
     Transmog::shutdown_overlay();
     Transmog::shutdown();
+
+    if (g_instanceMutex)
+    {
+        CloseHandle(g_instanceMutex);
+        g_instanceMutex = nullptr;
+    }
 }
 
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID /*lpReserved*/)

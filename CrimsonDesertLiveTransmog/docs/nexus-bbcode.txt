@@ -10,13 +10,13 @@
 
 [size=5]What It Does[/size]
 
-Change the visual appearance of your equipped armor [b]in real time[/b] without affecting stats. Browse the full item catalog through an in-game GUI, pick the armor you want to see, and apply -no game restart, no file editing required. Build and save presets to quickly swap between your favorite looks.
+Change the visual appearance of your equipped armor [b]in real time[/b] without affecting stats. Browse the full item catalog through a built-in overlay GUI, pick the armor you want to see, and apply -no game restart, no file editing required. Build and save presets to quickly swap between your favorite looks.
 
 [size=5]Key Features[/size]
 
 [list]
+[*][b]Built-in overlay[/b] -no external tools required. Press [b]Home[/b] to toggle the overlay
 [*][b]In-game item browser[/b] -searchable dropdown with all armor pieces, auto-categorized by slot (Helm, Chest, Cloak, Gloves, Boots)
-[*][b]ReShade overlay GUI[/b] -full point-and-click control via the ReShade overlay ([b]Home[/b] key). No hotkeys required
 [*][b]Preset system[/b] -save, load, rename, and cycle through multiple transmog presets per character
 [*][b]NPC and damaged variants[/b] -NPC armor variants and damaged variants render via automatic carrier swap
 [*][b]Safety filters[/b] -non-player gear (horse tack, pet armor) and wrong-slot items are filtered out by default
@@ -31,20 +31,16 @@ Change the visual appearance of your equipped armor [b]in real time[/b] without 
 
 [list]
 [*]Crimson Desert (Steam version)
-[*][url=https://reshade.me/]ReShade[/url] -[b][color=#ff6600]required for the in-game GUI[/color][/b]
+[*]ASI Loader ([url=https://github.com/ThirteenAG/Ultimate-ASI-Loader/releases]Ultimate ASI Loader[/url] recommended)
+[*]ReShade is [b]optional[/b]. If installed, the transmog UI registers as a ReShade addon tab. If not, the mod provides its own standalone overlay window.
 [/list]
-
-The item browser, preset management, and per-slot controls are all part of a [b]ReShade addon overlay[/b]. Without ReShade installed, [b]there is no GUI[/b] -you would need to configure presets by editing [b]CrimsonDesertLiveTransmog_presets.json[/b] manually and using hotkeys to apply/clear. See the [i]Without ReShade[/i] section below for details.
 
 [line]
 
 [size=5]Installation[/size]
 
-[size=4]Step 1 -Install ReShade[/size]
-Download and install [url=https://reshade.me/]ReShade[/url] for Crimson Desert. The transmog overlay registers as a ReShade addon tab. Press [b]Home[/b] in-game to open the ReShade menu, then find the [b]Transmog[/b] tab.
-
-[size=4]Step 2 -Install an ASI Loader[/size]
-You need an ASI Loader to load [b].asi[/b] mods. If you already have one (e.g. from another mod), skip to Step 3.
+[size=4]Step 1 -Install an ASI Loader[/size]
+You need an ASI Loader to load [b].asi[/b] mods. If you already have one (e.g. from another mod), skip to Step 2.
 
 Download the [b]x64[/b] build of [url=https://github.com/ThirteenAG/Ultimate-ASI-Loader/releases]Ultimate ASI Loader[/url] and place one of the following DLLs into your [b]bin64[/b] folder:
 [list]
@@ -53,24 +49,23 @@ Download the [b]x64[/b] build of [url=https://github.com/ThirteenAG/Ultimate-ASI
 [*][b]dinput8.dll[/b] -another alternative
 [/list]
 
-[b]How to verify:[/b] After completing Step 3, launch the game once. If no [b]CrimsonDesertLiveTransmog.log[/b] file appears in [b]bin64[/b], the ASI Loader is not loading. Try renaming the DLL to one of the other variants listed above.
+[b]How to verify:[/b] After completing Step 2, launch the game once. If no [b]CrimsonDesertLiveTransmog.log[/b] file appears in [b]bin64[/b], the ASI Loader is not loading. Try renaming the DLL to one of the other variants listed above.
 
 [color=#ff6600][b]Note:[/b][/color] If you are using a newer version of Ultimate ASI Loader and the log file is not generated, try the [b]win64[/b] (x64) build from [url=https://github.com/ThirteenAG/Ultimate-ASI-Loader/releases/tag/v9.1.0]v9.1.0[/url] instead.
 
-[size=4]Step 3 -Install the mod[/size]
+[size=4]Step 2 -Install the mod[/size]
 [list=1]
 [*]Download the latest release from the Files tab
 [*]Extract [b]CrimsonDesertLiveTransmog.asi[/b] and [b]CrimsonDesertLiveTransmog.ini[/b] into your [b]bin64[/b] folder
 [/list]
 
-[size=4]Step 4 -Launch and play[/size]
-Launch the game. Press [b]Home[/b] to open ReShade, find the [b]Transmog[/b] tab, and start browsing armor.
+[size=4]Step 3 -Launch and play[/size]
+Launch the game. Press [b]Home[/b] to open the transmog overlay and start browsing armor.
 
 [size=4]File placement[/size]
 [code]
 <Crimson Desert>/bin64/
 ├── CrimsonDesert.exe                          (Game executable)
-├── dxgi.dll                                   (ReShade)
 ├── winmm.dll                                  (ASI Loader)
 ├── CrimsonDesertLiveTransmog.asi              (This mod)
 ├── CrimsonDesertLiveTransmog.ini              (Configuration)
@@ -78,45 +73,56 @@ Launch the game. Press [b]Home[/b] to open ReShade, find the [b]Transmog[/b] tab
 └── ...
 [/code]
 
-[size=4]Using with OptiScaler[/size]
-If you use [url=https://github.com/cdozdil/OptiScaler]OptiScaler[/url] for frame generation or upscaling, you need to make sure that ReShade, OptiScaler, and an ASI Loader can coexist. There are multiple valid setups depending on which DLL names each tool uses.
+[size=4]Using with ReShade[/size]
+If [url=https://reshade.me/]ReShade[/url] is installed, the mod automatically registers as a ReShade addon. Open the ReShade menu ([b]Home[/b] key) and find the [b]Transmog[/b] tab. No extra setup is needed.
 
-I cannot provide a definitive guide here because the correct setup depends on your specific combination of tools and versions. You may need to experiment with DLL names and load order. One example that has worked:
+If you prefer the standalone overlay window instead of the ReShade tab, set [b]ForceStandaloneOverlay = true[/b] in the INI. Both the ReShade tab and the standalone window will be available.
+
+[size=4]Using with OptiScaler[/size]
+If you use [url=https://github.com/cdozdil/OptiScaler]OptiScaler[/url] for frame generation or upscaling:
+
+[list=1]
+[*][b]Delete[/b] [b]winmm.dll[/b] (or whichever ASI Loader DLL you placed) from [b]bin64[/b]. OptiScaler will handle mod loading instead
+[*]Open [b]OptiScaler.ini[/b], find the [b][Plugins][/b] section, and set [b]LoadAsiPlugins = true[/b]
+[*]Create a [b]plugins[/b] folder inside [b]bin64[/b]
+[*]Move [b]CrimsonDesertLiveTransmog.asi[/b] and [b]CrimsonDesertLiveTransmog.ini[/b] into the [b]plugins[/b] folder
+[/list]
 
 [code]
 <Crimson Desert>/bin64/
 ├── CrimsonDesert.exe
-├── winmm.dll                                  (OptiScaler, renamed)
-├── dxgi.dll                                   (ReShade)
 ├── OptiScaler.ini                             (LoadAsiPlugins = true)
+├── dxgi.dll                                   (OptiScaler)
 ├── plugins/
 │   ├── CrimsonDesertLiveTransmog.asi
 │   ├── CrimsonDesertLiveTransmog.ini
-│   └── ...
+│   └── ...                                    (Other ASI mods go here too)
 └── ...
 [/code]
 
-If you run into issues, check the OptiScaler and ReShade documentation for their respective DLL naming and compatibility options.
+If you run into issues, check the OptiScaler documentation for DLL naming and compatibility options.
+
+[color=#ff6600][b]Note:[/b][/color] This applies to any ASI mod, not just this one. If you have other [b].asi[/b] mods, move them into the [b]plugins[/b] folder as well.
 
 [line]
 
 [size=5]How to Use[/size]
 
-[color=#ff6600][b]The in-game GUI is only available through ReShade.[/b][/color]
-If you do not have ReShade installed, use the [url=https://tkhquang.github.io/CrimsonDesertTools/live-transmog/][b]online Preset Builder[/b][/url] or see the manual editing section below.
-
-[size=4]With ReShade (recommended)[/size]
+[size=4]In-game overlay[/size]
 [list=1]
-[*]Open ReShade overlay ([b]Home[/b] key) and find the [b]Transmog[/b] tab
+[*]Press [b]Home[/b] to open the transmog overlay
 [*]In [b]Slot Details[/b], click the picker button next to a slot (e.g. Helm) to browse available armor
 [*]Use the search box to filter by name -items are auto-categorized to the correct slot
 [*]Select an item -changes stay [b]pending[/b] until you click [b]Apply All[/b]
 [*]Click [b]Apply All[/b] to commit all slot changes at once
 [*]Use [b]Append[/b] in the Presets section to save your current look
 [*]Use [b]Prev[/b] / [b]Next[/b] to cycle through saved presets
+[*]Press [b]Home[/b] again to close the overlay
 [/list]
 
-[size=4]Without ReShade (online Preset Builder)[/size]
+[color=#4CAF50][b]Tip:[/b][/color] Enable [b]Instant Apply[/b] in the overlay to preview items on hover without needing to click Apply All.
+
+[size=4]Without the overlay (online Preset Builder)[/size]
 Use the [url=https://tkhquang.github.io/CrimsonDesertTools/live-transmog/][b]online Preset Builder[/b][/url] to create presets from your browser. It mirrors the in-game GUI - browse the full item catalog (auto-loaded for the latest game version), pick armor per slot, save multiple presets, then download the JSON file. The site also has a full searchable/sortable [b]Item Catalog[/b] table showing all item IDs, slot categories, and safety flags.
 
 Alternatively, you can edit the JSON manually:
@@ -135,13 +141,17 @@ Equip the armor you want in-game, then press your [b]Capture[/b] hotkey. This sn
 
 [size=5]Configuration[/size]
 
-Edit [b]CrimsonDesertLiveTransmog.ini[/b] for global settings and optional hotkey bindings. All hotkeys are [b]disabled by default[/b] -the ReShade overlay is the primary interface.
+Edit [b]CrimsonDesertLiveTransmog.ini[/b] for global settings and optional hotkey bindings.
 
 [code]
 [General]
 LogLevel = Info
 Enabled = true
-; All hotkeys disabled by default -set via INI if needed
+; Launch standalone overlay even when ReShade is installed
+ForceStandaloneOverlay = false
+; Toggle the overlay GUI. Default: Home
+OverlayToggleHotkey = Home
+; All other hotkeys disabled by default -set via INI if needed
 ToggleHotkey =
 ApplyHotkey =
 ClearHotkey =
@@ -193,6 +203,8 @@ If you encounter issues:
 [*]If the log file is not generated after updating to a newer version of Ultimate ASI Loader, try the [b]win64[/b] (x64) build from [url=https://github.com/ThirteenAG/Ultimate-ASI-Loader/releases/tag/v9.1.0]Ultimate ASI Loader v9.1.0[/url] instead
 [/list]
 
+[color=#ff6600][b]Important: removing or disabling ASI mods.[/b][/color] Ultimate ASI Loader scans subdirectories recursively. Moving an [b].asi[/b] file into a subfolder (e.g. [b]plugins/backup/[/b]) does [b]not[/b] prevent it from loading. To fully disable an ASI mod, move it [b]outside the game's root directory entirely[/b], or rename the file extension (e.g. [b].asi.bak[/b]).
+
 [line]
 
 [size=5]Credits & Source Code[/size]
@@ -203,7 +215,7 @@ Built with [url=https://github.com/tkhquang/DetourModKit]DetourModKit[/url] for 
 [*][url=https://github.com/ThirteenAG]ThirteenAG[/url] -Ultimate ASI Loader
 [*][url=https://github.com/cursey]cursey[/url] -SafetyHook
 [*]Brodie Thiesfield -SimpleIni
-[*][url=https://reshade.me/]crosire[/url] -ReShade
+[*][url=https://github.com/ocornut]Omar Cornut[/url] -Dear ImGui
 [*]Pearl Abyss -Crimson Desert
 [/list]
 

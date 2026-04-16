@@ -70,10 +70,8 @@ static DWORD WINAPI lifecycle_thread(LPVOID /*param*/)
         return 1;
     }
 
-    if (Transmog::init_overlay(g_hModule))
-        logger.info("ReShade overlay registered — open ReShade (Home key) for Transmog UI");
-    else
-        logger.info("ReShade not detected — overlay unavailable (mod still works via hotkeys)");
+    // Overlay is best-effort; mod still works via hotkeys if it fails.
+    (void)Transmog::init_overlay(g_hModule);
 
     logger.info("Transmog initialization complete.");
 

@@ -36,6 +36,8 @@ Download the **x64** build of [Ultimate ASI Loader](https://github.com/ThirteenA
 | `dinput8.dll`  | Another alternative                      |
 
 > **How to verify:** After completing Step 2, launch the game once. If no `CrimsonDesertEquipHide.log` file appears in `bin64`, the ASI Loader is not loading. Try renaming the DLL to one of the other variants listed above.
+>
+> **Note:** If you are using a newer version of Ultimate ASI Loader and the log file is not generated, try the **win64** (x64) build from [v9.1.0](https://github.com/ThirteenAG/Ultimate-ASI-Loader/releases/tag/v9.1.0) instead.
 
 ### Step 2: Install the mod
 
@@ -59,7 +61,7 @@ Launch the game. Press `V` (default) to toggle equipment visibility. By default,
 
 ### Using with OptiScaler
 
-If you use [OptiScaler](https://github.com/cdozdil/OptiScaler) for frame generation or upscaling, the standard ASI Loader (`version.dll`) will conflict with OptiScaler's own `dxgi.dll`. Follow these steps instead:
+If you use [OptiScaler](https://github.com/cdozdil/OptiScaler) for frame generation or upscaling, you need to make sure that both OptiScaler and an ASI Loader can coexist. Follow these steps:
 
 1. **Delete** `winmm.dll` (or whichever ASI Loader DLL you placed) from `bin64`. OptiScaler will handle mod loading instead
 2. Open `OptiScaler.ini`, find the `[Plugins]` section, and set:
@@ -82,6 +84,8 @@ If you use [OptiScaler](https://github.com/cdozdil/OptiScaler) for frame generat
 │   └── ...                        (Other ASI mods go here too)
 └── ...
 ```
+
+If you run into issues, check the OptiScaler documentation for DLL naming and compatibility options.
 
 > This applies to any ASI mod, not just this one. If you have other `.asi` mods (e.g. CDSprintHold), move them into the `plugins` folder as well.
 

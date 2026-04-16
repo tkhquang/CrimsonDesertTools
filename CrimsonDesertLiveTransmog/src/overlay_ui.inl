@@ -1,0 +1,937 @@
+// ====================================================================== //
+//  overlay_ui.inl — Shared transmog overlay widget code                   //
+//                                                                         //
+//  Included by BOTH overlay.cpp (standalone D3D11 path) and               //
+//  overlay_reshade.cpp (ReShade addon path).  Each TU provides its own    //
+//  ImGui symbols — the standalone path links against imgui_lib while the  //
+//  ReShade path uses the function-table wrappers from reshade.hpp.        //
+//                                                                         //
+//  Everything here is static (internal linkage per TU).  Only one path    //
+//  is active at runtime so the duplicated state is harmless (~2 KB).      //
+//                                                                         //
+//  REQUIRES the including TU to have these headers already included:      //
+//    - imgui.h (either real or ReShade wrapper — controls which ImGui)    //
+//    - constants.hpp, item_name_table.hpp, preset_manager.hpp,            //
+//      shared_state.hpp, transmog.hpp, transmog_map.hpp                   //
+//    - <DetourModKit.hpp>                                                 //
+//    - <cstdio>, <cstring>, <string>                                      //
+// ====================================================================== //
+
+// ------------------------------------------------------------------ //
+//  Non-variadic ImGui wrappers                                        //
+//                                                                      //
+//  ImGui::Text, TextColored, TextDisabled, and SetTooltip are          //
+//  variadic (va_args).  The compiler cannot inline them, so ReShade's  //
+//  reshade_overlay.hpp emits out-of-line COMDAT copies that conflict   //
+//  with imgui_lib's strong symbols at link time.  These helpers call   //
+//  only non-variadic ImGui functions (TextUnformatted, PushStyleColor) //
+//  which inline correctly in both the ReShade and standalone paths.    //
+// ------------------------------------------------------------------ //
+
+static void ui_text(const char *fmt, ...)
+{
+    char buf[512];
+    va_list args;
+    va_start(args, fmt);
+    std::vsnprintf(buf, sizeof(buf), fmt, args);
+    va_end(args);
+    ImGui::TextUnformatted(buf);
+}
+
+static void ui_text_disabled(const char *fmt, ...)
+{
+    char buf[512];
+    va_list args;
+    va_start(args, fmt);
+    std::vsnprintf(buf, sizeof(buf), fmt, args);
+    va_end(args);
+    ImGui::PushStyleColor(ImGuiCol_Text,
+                          ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+    ImGui::TextUnformatted(buf);
+    ImGui::PopStyleColor();
+}
+
+static void ui_text_colored(const ImVec4 &col, const char *fmt, ...)
+{
+    char buf[512];
+    va_list args;
+    va_start(args, fmt);
+    std::vsnprintf(buf, sizeof(buf), fmt, args);
+    va_end(args);
+    ImGui::PushStyleColor(ImGuiCol_Text, col);
+    ImGui::TextUnformatted(buf);
+    ImGui::PopStyleColor();
+}
+
+static void ui_tooltip(const char *text)
+{
+    ImGui::BeginTooltip();
+    ImGui::TextUnformatted(text);
+    ImGui::EndTooltip();
+}
+
+// Minimum time (ms) the cursor must rest on a picker item before
+// hover-apply fires.  Prevents rapid apply cycles while scrolling.
+static constexpr int64_t k_hoverDebounceMs = 300;
+
+// --- Overlay preferences (render-thread only) ---
+
+// Instant Apply mode: applies transmog immediately on hover, pick,
+// slot toggle, and clear — no Apply All click needed.  Off by default
+// because each action triggers a tear-down + SlotPopulator cycle.
+static bool s_autoApply = false;
+
+// When true, preserve the search text between picker opens so the
+// user can re-open the same slot and keep browsing where they left
+// off.  Off by default to match legacy behaviour (clear on open).
+static bool s_keepSearchText = true;
+
+// --- Per-slot UI state ---
+
+struct SlotUIState
+{
+    char hexBuf[8]{"0000"};
+    bool editing = false;
+    char searchBuf[64]{};
+    // "Exact" means: only list items whose auto-detected category
+    // matches THIS slot.  Defaults to ON so the dropdown shows ~350
+    // relevant items instead of all 6024.
+    bool exactFilter = true;
+    bool hideIncompatible = true; // hide crash-risk + non-equipment
+    bool hideVariants = false;    // hide NPC variants (carrier items)
+    // Hover-apply debounce state.  We track which item the cursor is
+    // on and when it first landed there.  Apply fires only after the
+    // cursor has settled on the same item for k_hoverDebounceMs,
+    // preventing rapid-fire apply cycles when scrolling the list.
+    uint16_t hoverPendingId = 0;
+    uint16_t hoverAppliedId = 0;
+    int64_t hoverStartMs = 0;
+    // Button-driven navigation index into the visible (filtered)
+    // list.  -1 = no highlight.  Up/Down buttons move this; Enter
+    // commits the highlighted item.  lastVisibleCount stores the
+    // previous frame's visible count for clamping.
+    int navIndex = -1;
+    int lastVisibleCount = 0;
+    bool navMoved{false}; // true only on the frame a nav button was pressed
+};
+
+static SlotUIState s_slotUI[Transmog::k_slotCount]{};
+
+// --- Item picker helpers ---
+
+// Case-insensitive substring search.  Returns true if `needle` is
+// empty or found anywhere in `hay`.
+static bool name_contains_ci(const std::string &hay, const char *needle) noexcept
+{
+    if (!needle || needle[0] == '\0')
+        return true;
+    const auto nlen = std::strlen(needle);
+    if (nlen > hay.size())
+        return false;
+    for (std::size_t i = 0; i + nlen <= hay.size(); ++i)
+    {
+        std::size_t k = 0;
+        for (; k < nlen; ++k)
+        {
+            const auto a = static_cast<unsigned char>(
+                std::tolower(static_cast<unsigned char>(hay[i + k])));
+            const auto b = static_cast<unsigned char>(
+                std::tolower(static_cast<unsigned char>(needle[k])));
+            if (a != b)
+                break;
+        }
+        if (k == nlen)
+            return true;
+    }
+    return false;
+}
+
+// Draw a search-filterable picker popup for one slot.  Returns true
+// if the user committed a selection this frame (caller is responsible
+// for persisting it).  When autoApply is true, hovering an item
+// starts a debounce timer; once it expires the slot-scoped apply
+// fires via manual_apply_slot so only the hovered slot re-equips.
+[[nodiscard]] static bool draw_item_picker_popup(const char *popupId,
+                                   SlotUIState &ui,
+                                   Transmog::TransmogSlot slotCategory,
+                                   uint16_t &targetItemId,
+                                   bool autoApply,
+                                   std::size_t slotIdx)
+{
+    bool committed = false;
+    if (!ImGui::BeginPopup(popupId))
+        return false;
+
+    // Reset hover-debounce state on first frame so stale state from
+    // a previous open doesn't suppress or prematurely fire an apply.
+    if (ImGui::IsWindowAppearing())
+    {
+        ui.hoverPendingId = targetItemId;
+        ui.hoverAppliedId = targetItemId;
+        ui.hoverStartMs = 0;
+    }
+
+    ui_text_disabled("Item picker");
+    ImGui::Separator();
+
+    // --- Filter toggles ---
+    //
+    // Exact: only show items whose auto-detected category matches
+    //        this slot (helm-suffixed items for the helm slot, etc.)
+    // Hide variants: hide items with variant metadata at desc+0x3A0;
+    //        all tested samples in that bucket failed to render via
+    //        runtime transmog, so hiding them by default keeps the
+    //        picker free of non-functional items.
+    ImGui::Checkbox("Exact", &ui.exactFilter);
+    ImGui::SameLine();
+    ImGui::Checkbox("Safe only", &ui.hideIncompatible);
+    ImGui::SameLine();
+    ImGui::Checkbox("Hide variants", &ui.hideVariants);
+
+    ImGui::SetNextItemWidth(320.0f);
+    if (ImGui::IsWindowAppearing())
+    {
+        ImGui::SetKeyboardFocusHere();
+        ui.navIndex = -1;
+    }
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,
+                        ImVec2(ImGui::GetStyle().FramePadding.x, 6.0f));
+    const bool searchEdited = ImGui::InputTextWithHint(
+        "##search", "Search by name or id...",
+        ui.searchBuf, sizeof(ui.searchBuf));
+    ImGui::PopStyleVar();
+    if (searchEdited)
+        ui.navIndex = 0;
+
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Clear##search"))
+    {
+        ui.searchBuf[0] = '\0';
+        ui.navIndex = 0;
+    }
+
+    // Navigation buttons: move the highlight through the visible
+    // list.  Placed next to the search bar so they're always
+    // reachable without scrolling.  Enter commits the highlighted
+    // item.
+    ImGui::SameLine();
+    ui.navMoved = false;
+    {
+        const int maxNav = ui.lastVisibleCount - 1;
+        if (ImGui::SmallButton("^##nav_up"))
+        {
+            ui.navIndex = (ui.navIndex > 0) ? ui.navIndex - 1 : 0;
+            ui.navMoved = true;
+        }
+        ImGui::SameLine();
+        if (ImGui::SmallButton("v##nav_down"))
+        {
+            ui.navIndex = (ui.navIndex < maxNav)
+                              ? ui.navIndex + 1
+                              : (maxNav >= 0 ? maxNav : 0);
+            ui.navMoved = true;
+        }
+    }
+
+    const auto &table = Transmog::ItemNameTable::instance();
+    const auto &entries = table.sorted_entries();
+
+    const float rowH = ImGui::GetTextLineHeightWithSpacing();
+    const float lineH = ImGui::GetTextLineHeight();
+    // Two-line row: display name + smaller internal name line.
+    const float twoLineH = lineH * 2.0f + 4.0f;
+
+    // Fixed-height scrollable region so the popup doesn't resize
+    // per keystroke as the filter narrows.
+    const float popupScale = ImGui::GetIO().FontGlobalScale;
+    const float popupW = popupScale > 1.05f ? 420.0f * popupScale : 520.0f;
+    ImGui::BeginChild("##itemlist",
+                      ImVec2(popupW, twoLineH * 12.0f),
+                      true);
+
+    // Increase vertical spacing between items for easier click/hover
+    // targets.  Pushed INSIDE BeginChild so the popup-level spacing
+    // stays default — otherwise the popup's own scroll region may
+    // capture mouse wheel events instead of the child.
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing,
+                        ImVec2(ImGui::GetStyle().ItemSpacing.x,
+                               rowH * 0.35f));
+
+    // "None" / clear entry at the top of the scroll region.
+    // Hover-preview shows bare head/body (empty slot) via the
+    // active+none path in apply_single_slot.
+    {
+        const bool selected = (targetItemId == 0);
+        if (ImGui::Selectable("(none -- id 0)##picker_none", selected))
+        {
+            targetItemId = 0;
+            committed = true;
+            ImGui::CloseCurrentPopup();
+        }
+        if (selected)
+            ImGui::SetItemDefaultFocus();
+        if (autoApply && ImGui::IsItemHovered() &&
+            ui.hoverPendingId != 0)
+        {
+            ui.hoverPendingId = 0;
+            ui.hoverStartMs = Transmog::steady_ms();
+        }
+    }
+
+    // Hoist draw-list pointer outside the loop — it is stable for
+    // the entire BeginChild region and avoids a per-item lookup.
+    ImDrawList *const dl = ImGui::GetWindowDrawList();
+
+    // Semantic color constants for the two-line item display.
+    static constexpr ImU32 k_colorCrashRisk = IM_COL32(255, 89, 89, 255);
+    static constexpr ImU32 k_colorCarrier = IM_COL32(128, 217, 255, 255);
+    static constexpr ImU32 k_colorDimmed = IM_COL32(160, 160, 160, 200);
+
+    int shown = 0;
+    int filteredByCategory = 0;
+    int filteredByUnsafe = 0;
+    constexpr int k_maxShown = 512;
+    for (const auto &e : entries)
+    {
+        if (ui.exactFilter && e.category != slotCategory)
+        {
+            ++filteredByCategory;
+            continue;
+        }
+        const bool nonEquipment =
+            (e.category == Transmog::TransmogSlot::Count);
+        const bool incompatible =
+            (!e.isPlayerCompatible && !e.hasVariantMeta) ||
+            nonEquipment;
+        const bool npcVariant = e.hasVariantMeta;
+        if (ui.hideIncompatible && incompatible)
+        {
+            ++filteredByUnsafe;
+            continue;
+        }
+        if (ui.hideVariants && npcVariant)
+        {
+            ++filteredByUnsafe;
+            continue;
+        }
+        if (!name_contains_ci(e.name, ui.searchBuf) &&
+            !name_contains_ci(e.displayName, ui.searchBuf))
+            continue;
+        if (shown >= k_maxShown)
+            break;
+
+        // Tag items with visible badges:
+        //   - "CRASH RISK"  -> !isPlayerCompatible (red)
+        //   - "carrier"     -> hasVariantMeta, rendered via carrier
+        //                      + char-class bypass (cyan)
+        const char *tag = nullptr;
+        // NPC variant items (hasVariantMeta) are humanoid and now
+        // render via carrier + char-class bypass.  True crash risks
+        // are non-player items WITHOUT variant meta (horse tack, etc).
+        const bool usesCarrier = e.hasVariantMeta;
+        const bool crashRisk =
+            !e.isPlayerCompatible && !e.hasVariantMeta;
+        if (crashRisk)
+            tag = "non-player -- CRASH RISK";
+        else if (usesCarrier)
+            tag = "carrier";
+
+        const bool isNavTarget = (shown == ui.navIndex);
+        const bool highlighted =
+            (targetItemId == e.id) || isNavTarget;
+
+        // Two-line selectable: hidden label, custom text overlay.
+        char hiddenId[32];
+        std::snprintf(hiddenId, sizeof(hiddenId),
+                      "##picker_%04X", e.id);
+        ImVec2 pos = ImGui::GetCursorScreenPos();
+        if (crashRisk)
+            ImGui::PushStyleColor(ImGuiCol_Header,
+                                  ImVec4(0.4f, 0.1f, 0.1f, 0.6f));
+        else if (usesCarrier)
+            ImGui::PushStyleColor(ImGuiCol_Header,
+                                  ImVec4(0.1f, 0.2f, 0.35f, 0.6f));
+        if (ImGui::Selectable(hiddenId, highlighted,
+                              0, ImVec2(0, twoLineH)))
+        {
+            targetItemId = e.id;
+            committed = true;
+            ImGui::CloseCurrentPopup();
+        }
+
+        // Overlay text on top of the selectable region.
+        const bool hasDisplay = !e.displayName.empty();
+        const char *primaryName =
+            hasDisplay ? e.displayName.c_str() : e.name.c_str();
+
+        // Line 1: display name (or internal name fallback) + tag.
+        char line1[256];
+        if (tag)
+            std::snprintf(line1, sizeof(line1), "%s  (%s)",
+                          primaryName, tag);
+        else
+            std::snprintf(line1, sizeof(line1), "%s", primaryName);
+
+        const ImU32 mainColor = crashRisk    ? k_colorCrashRisk
+                                : usesCarrier ? k_colorCarrier
+                                : ImGui::GetColorU32(ImGuiCol_Text);
+
+        dl->AddText(ImVec2(pos.x + 2.0f, pos.y + 1.0f),
+                    mainColor, line1);
+
+        // Line 2: internal name + hex id (dimmed).
+        char line2[256];
+        if (hasDisplay)
+            std::snprintf(line2, sizeof(line2),
+                          "  %s  [0x%04X]", e.name.c_str(), e.id);
+        else
+            std::snprintf(line2, sizeof(line2),
+                          "  [0x%04X]", e.id);
+        dl->AddText(ImVec2(pos.x + 2.0f, pos.y + lineH + 2.0f),
+                    k_colorDimmed, line2);
+
+        // Scroll the nav-highlighted row into view and handle
+        // Enter to commit.
+        if (isNavTarget)
+        {
+            if (ui.navMoved)
+                ImGui::SetScrollHereY();
+            if (ImGui::IsKeyPressed(ImGuiKey_Enter) ||
+                ImGui::IsKeyPressed(ImGuiKey_KeypadEnter))
+            {
+                targetItemId = e.id;
+                committed = true;
+                ImGui::CloseCurrentPopup();
+            }
+            // Feed nav target into hover-apply debounce so
+            // button navigation previews items when auto-apply
+            // is on.
+            if (autoApply && ui.hoverPendingId != e.id)
+            {
+                ui.hoverPendingId = e.id;
+                ui.hoverStartMs = Transmog::steady_ms();
+            }
+        }
+        else if (targetItemId == e.id)
+        {
+            // Scroll to the currently selected item on popup
+            // open so it's visible without manual scrolling.
+            ImGui::SetItemDefaultFocus();
+        }
+
+        // Live preview: record the mouse-hovered item and start
+        // the debounce timer.  Sync nav cursor to mouse so the
+        // highlight follows the cursor.
+        if (autoApply && ImGui::IsItemHovered() &&
+            ui.hoverPendingId != e.id)
+        {
+            ui.hoverPendingId = e.id;
+            ui.hoverStartMs = Transmog::steady_ms();
+            ui.navIndex = shown;
+        }
+
+        if (crashRisk || usesCarrier)
+            ImGui::PopStyleColor(); // Header color
+
+        ++shown;
+    }
+
+    if (shown == 0)
+    {
+        if (ui.exactFilter && filteredByCategory > 0)
+            ui_text_disabled("no matches in this category -- "
+                            "uncheck Exact to widen");
+        else if ((ui.hideIncompatible || ui.hideVariants) &&
+                 filteredByUnsafe > 0)
+            ui_text_disabled("no matches -- uncheck filters "
+                            "to show more items");
+        else
+            ui_text_disabled("no matches");
+    }
+    else if (shown >= k_maxShown)
+    {
+        ui_text_disabled("(truncated -- narrow your search)");
+    }
+
+    // Clamp nav index to the actual visible count so stale values
+    // from a wider filter don't point past the end of the list.
+    ui.lastVisibleCount = shown;
+    if (ui.navIndex >= shown)
+        ui.navIndex = shown > 0 ? shown - 1 : -1;
+
+    ImGui::PopStyleVar(); // ItemSpacing
+    ImGui::EndChild();
+
+    // --- Hover-apply debounce ---
+    // Fire manual_apply_slot() only after the cursor has rested on
+    // the same item for k_hoverDebounceMs.  Uses the slot-scoped
+    // apply path so only this slot re-equips — other slots are
+    // untouched and don't flicker.
+    if (autoApply &&
+        ui.hoverPendingId != ui.hoverAppliedId &&
+        ui.hoverStartMs != 0 &&
+        (Transmog::steady_ms() - ui.hoverStartMs) >= k_hoverDebounceMs)
+    {
+        targetItemId = ui.hoverPendingId;
+        ui.hoverAppliedId = ui.hoverPendingId;
+        Transmog::flag_enabled().store(true, std::memory_order_relaxed);
+        Transmog::manual_apply_slot(slotIdx);
+    }
+
+    ImGui::EndPopup();
+
+    return committed;
+}
+
+// --- Preset UI state ---
+
+static char s_newCharName[64]{};
+static char s_renamePresetBuf[64]{};
+static bool s_renameActive = false;
+static int s_renameIndex = -1;
+
+// Compare staged slot_mappings vs last_applied_ids to detect unsaved
+// picker/checkbox edits.  Returns true if ANY slot's effective target
+// (targetItemId when active, else 0) differs from what's currently
+// committed to the game.
+[[nodiscard]] static bool has_pending_changes() noexcept
+{
+    const auto &mappings = Transmog::slot_mappings();
+    const auto &lastIds = Transmog::last_applied_ids();
+    for (std::size_t i = 0; i < Transmog::k_slotCount; ++i)
+    {
+        const uint16_t staged =
+            mappings[i].active ? mappings[i].targetItemId : uint16_t{0};
+        if (staged != lastIds[i])
+            return true;
+    }
+    return false;
+}
+
+// --- draw_overlay_content ---
+// All ImGui widget calls for the transmog UI.  Called by both the
+// ReShade tab callback and the standalone window wrapper.
+
+static void draw_overlay_content()
+{
+    using namespace Transmog;
+
+    auto &pm = PresetManager::instance();
+    // When auto-apply is on, picks are applied immediately so
+    // there's never a meaningful "pending" state.  Suppress the
+    // badge and yellow button tint to reduce visual noise.
+    const bool pending =
+        !s_autoApply && has_pending_changes();
+
+    // --- Header ---
+
+    ImGui::TextUnformatted(MOD_NAME);
+    ImGui::SameLine();
+    ui_text_disabled("v%s", MOD_VERSION);
+
+    if (pending)
+    {
+        ImGui::SameLine();
+        ui_text_colored(ImVec4(1.0f, 0.85f, 0.2f, 1.0f),
+                        "  [PENDING -- click Apply All]");
+    }
+
+    ImGui::Separator();
+
+    // --- Global toggles ---
+
+    bool enabled = flag_enabled().load(std::memory_order_relaxed);
+    if (ImGui::Checkbox("Enabled", &enabled))
+    {
+        flag_enabled().store(enabled, std::memory_order_relaxed);
+        if (enabled)
+            manual_apply();
+        else
+            manual_clear();
+    }
+
+    ImGui::Checkbox("Instant Apply", &s_autoApply);
+    if (ImGui::IsItemHovered())
+        ui_tooltip("Apply changes immediately on hover, "
+                   "pick, toggle, and clear — no Apply All "
+                   "needed");
+
+    ImGui::SameLine();
+    ImGui::Checkbox("Keep Search Text", &s_keepSearchText);
+    if (ImGui::IsItemHovered())
+        ui_tooltip("Preserve the search field when "
+                   "re-opening a slot picker");
+
+    ImGui::Separator();
+
+    // --- Presets ---
+
+    if (ImGui::CollapsingHeader("Presets", ImGuiTreeNodeFlags_DefaultOpen))
+    {
+        auto &presetList = pm.presets();
+        int activeIdx = pm.active_preset_index();
+        int count = pm.preset_count();
+
+        for (int i = 0; i < count; ++i)
+        {
+            ImGui::PushID(i);
+
+            bool isActive = (i == activeIdx);
+
+            if (s_renameActive && s_renameIndex == i)
+            {
+                ImGui::SetNextItemWidth(140.0f);
+                if (ImGui::InputText("##rename", s_renamePresetBuf,
+                                     sizeof(s_renamePresetBuf),
+                                     ImGuiInputTextFlags_EnterReturnsTrue))
+                {
+                    if (auto *p = pm.active_preset_mut())
+                    {
+                    }
+                    pm.set_active_preset(i);
+                    if (auto *p = pm.active_preset_mut())
+                        p->name = s_renamePresetBuf;
+                    pm.set_active_preset(activeIdx);
+                    pm.save();
+                    s_renameActive = false;
+                    s_renameIndex = -1;
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("OK"))
+                {
+                    pm.set_active_preset(i);
+                    if (auto *p = pm.active_preset_mut())
+                        p->name = s_renamePresetBuf;
+                    pm.set_active_preset(activeIdx);
+                    pm.save();
+                    s_renameActive = false;
+                    s_renameIndex = -1;
+                }
+            }
+            else
+            {
+                char label[128];
+                std::snprintf(label, sizeof(label), "%s [%d]##preset",
+                              presetList[static_cast<std::size_t>(i)].name.c_str(), i);
+
+                if (ImGui::Selectable(label, isActive))
+                {
+                    pm.set_active_preset(i);
+                    pm.apply_to_state();
+                    manual_apply();
+                    pm.save();
+                }
+
+                if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0))
+                {
+                    s_renameActive = true;
+                    s_renameIndex = i;
+                    std::snprintf(s_renamePresetBuf, sizeof(s_renamePresetBuf), "%s",
+                                  presetList[static_cast<std::size_t>(i)].name.c_str());
+                }
+            }
+
+            ImGui::PopID();
+        }
+
+        if (count == 0)
+            ui_text_disabled("No presets — use Append to create one");
+
+        ImGui::Spacing();
+
+        if (ImGui::Button("Append"))
+        {
+            capture_outfit();
+            pm.append_from_state();
+            manual_apply();
+        }
+
+        ImGui::SameLine();
+
+        if (ImGui::Button("Replace") && count > 0)
+            pm.replace_current_from_state();
+
+        ImGui::SameLine();
+
+        if (ImGui::Button("Remove") && count > 0)
+            pm.remove_current();
+
+        ImGui::SameLine();
+
+        if (ImGui::Button("Prev") && count > 1)
+        {
+            pm.prev_preset();
+            manual_apply();
+        }
+
+        ImGui::SameLine();
+
+        if (ImGui::Button("Next") && count > 1)
+        {
+            pm.next_preset();
+            manual_apply();
+        }
+
+        if (count > 0)
+            ui_text("Active: %d / %d", activeIdx + 1, count);
+    }
+
+    ImGui::Separator();
+
+    // --- Per-slot controls ---
+
+    if (ImGui::CollapsingHeader("Slot Details", ImGuiTreeNodeFlags_DefaultOpen))
+    {
+        auto &mappings = slot_mappings();
+        const auto &table = ItemNameTable::instance();
+        const bool tableReady = table.ready();
+
+        if (!tableReady)
+            ui_text_disabled("Item catalog not ready — hex entry only.");
+
+        ui_text_disabled("Toggle which slots the next Apply All will touch.");
+
+        {
+            bool allActive = true;
+            for (std::size_t i = 0; i < k_slotCount; ++i)
+            {
+                if (!mappings[i].active)
+                {
+                    allActive = false;
+                    break;
+                }
+            }
+            if (ImGui::Checkbox("All", &allActive))
+            {
+                for (std::size_t i = 0; i < k_slotCount; ++i)
+                    mappings[i].active = allActive;
+                if (s_autoApply)
+                {
+                    flag_enabled().store(true,
+                                         std::memory_order_relaxed);
+                    manual_apply();
+                }
+            }
+            if (!s_autoApply)
+            {
+                ImGui::SameLine();
+                ui_text_disabled("(pending -- Apply All to commit)");
+            }
+        }
+
+        for (std::size_t i = 0; i < k_slotCount; ++i)
+        {
+            auto &m = mappings[i];
+            auto &ui = s_slotUI[i];
+            const char *slotLabel = slot_name(static_cast<TransmogSlot>(i));
+
+            ImGui::PushID(static_cast<int>(i) + 100);
+
+            if (ImGui::Checkbox(slotLabel, &m.active) && s_autoApply)
+            {
+                flag_enabled().store(true, std::memory_order_relaxed);
+                manual_apply_slot(i);
+            }
+
+            {
+                const float s = ImGui::GetIO().FontGlobalScale;
+                ImGui::SameLine(s > 1.05f ? 90.0f * s : 120.0f);
+            }
+
+            // --- Picker button ---
+            {
+                std::string pickerLabel;
+                if (m.targetItemId == 0)
+                {
+                    pickerLabel = "(none)";
+                }
+                else if (tableReady)
+                {
+                    auto internalName = table.name_of(m.targetItemId);
+                    auto dispName = table.display_name_of(internalName);
+                    if (!dispName.empty())
+                        pickerLabel = dispName;
+                    else if (!internalName.empty())
+                        pickerLabel = internalName;
+                    else
+                        pickerLabel = "(unknown)";
+                }
+                else
+                {
+                    pickerLabel = "(catalog N/A)";
+                }
+
+                char btnLabel[192];
+                std::snprintf(btnLabel, sizeof(btnLabel),
+                              "%s  [0x%04X]##pick", pickerLabel.c_str(),
+                              m.targetItemId);
+
+                const float s = ImGui::GetIO().FontGlobalScale;
+                const float bw = s > 1.05f ? 280.0f * s : 380.0f;
+                ImGui::SetNextItemWidth(bw);
+                ImGui::PushStyleVar(ImGuiStyleVar_ButtonTextAlign,
+                                    ImVec2(0.03f, 0.5f));
+                if (ImGui::Button(btnLabel, ImVec2(bw, 0.0f)))
+                {
+                    if (tableReady)
+                    {
+                        if (!s_keepSearchText)
+                            ui.searchBuf[0] = '\0';
+                        ImGui::OpenPopup("##slot_picker");
+                    }
+                }
+                ImGui::PopStyleVar(); // ButtonTextAlign
+
+                if (tableReady &&
+                    draw_item_picker_popup(
+                        "##slot_picker", ui,
+                        static_cast<TransmogSlot>(i),
+                        m.targetItemId,
+                        s_autoApply, i))
+                {
+                    std::snprintf(ui.hexBuf, sizeof(ui.hexBuf), "%04X",
+                                  m.targetItemId);
+
+                    if (s_autoApply)
+                    {
+                        flag_enabled().store(true,
+                                             std::memory_order_relaxed);
+                        manual_apply_slot(i);
+                    }
+
+                    {
+                        const auto name = (m.targetItemId == 0)
+                                              ? std::string("(none)")
+                                              : table.name_of(m.targetItemId);
+                        const auto cat =
+                            ItemNameTable::classify_slot(name);
+                        const char *catName =
+                            (m.targetItemId == 0)
+                                ? "clear"
+                            : (cat == static_cast<TransmogSlot>(i))
+                                ? "slot-match"
+                                : "slot-MISMATCH";
+                        DMK::Logger::get_instance().info(
+                            "[picker] slot={} id=0x{:04X} name='{}' "
+                            "category={} ({}) -- pending Apply All",
+                            slotLabel, m.targetItemId,
+                            name.empty() ? "<unknown>" : name,
+                            static_cast<int>(cat), catName);
+                    }
+                }
+            }
+
+            // --- Hex input ---
+            ImGui::SameLine();
+
+            if (!ui.editing)
+                std::snprintf(ui.hexBuf, sizeof(ui.hexBuf), "%04X",
+                              m.targetItemId);
+
+            {
+                const float hs = ImGui::GetIO().FontGlobalScale;
+                ImGui::SetNextItemWidth(hs > 1.05f ? 64.0f * hs : 64.0f);
+            }
+            if (ImGui::InputText(
+                    "##hex", ui.hexBuf, sizeof(ui.hexBuf),
+                    ImGuiInputTextFlags_CharsHexadecimal |
+                        ImGuiInputTextFlags_CharsUppercase))
+            {
+                unsigned long val = std::strtoul(ui.hexBuf, nullptr, 16);
+                m.targetItemId = static_cast<uint16_t>(val);
+            }
+            ui.editing = ImGui::IsItemActive();
+
+            // Quick-clear button.
+            ImGui::SameLine();
+            if (ImGui::SmallButton("X##clr") && m.targetItemId != 0)
+            {
+                m.targetItemId = 0;
+                std::snprintf(ui.hexBuf, sizeof(ui.hexBuf), "0000");
+                if (s_autoApply)
+                {
+                    flag_enabled().store(true, std::memory_order_relaxed);
+                    manual_apply_slot(i);
+                }
+            }
+
+            ImGui::PopID();
+        }
+    }
+
+    ImGui::Separator();
+
+    // --- Action buttons ---
+
+    // Gate on WorldSystem so we don't spam "player not found" before
+    // the first world load.
+    const bool worldReady = Transmog::is_world_ready();
+    ImGui::BeginDisabled(!worldReady);
+
+    if (pending)
+    {
+        ImGui::PushStyleColor(ImGuiCol_Button,
+                              ImVec4(0.75f, 0.55f, 0.10f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered,
+                              ImVec4(0.90f, 0.65f, 0.15f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive,
+                              ImVec4(1.00f, 0.72f, 0.20f, 1.0f));
+    }
+    if (ImGui::Button(pending ? "Apply All *" : "Apply All"))
+    {
+        flag_enabled().store(true, std::memory_order_relaxed);
+        manual_apply();
+    }
+    if (pending)
+        ImGui::PopStyleColor(3);
+
+    ImGui::SameLine();
+
+    if (ImGui::Button("Clear All"))
+    {
+        flag_enabled().store(false, std::memory_order_relaxed);
+        manual_clear();
+    }
+
+    ImGui::SameLine();
+
+    if (ImGui::Button("Capture Outfit"))
+        capture_outfit();
+
+    ImGui::SameLine();
+
+    if (ImGui::Button("Save"))
+    {
+        pm.replace_current_from_state();
+        pm.save();
+    }
+
+    ImGui::EndDisabled();
+
+    if (!worldReady)
+    {
+        ImGui::SameLine();
+        ui_text_disabled("(waiting for world load)");
+    }
+
+    // --- Status footer ---
+
+    ImGui::Separator();
+    ui_text_disabled("Status");
+
+    if (slot_populator_fn())
+        ui_text_colored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), "SlotPopulator: READY");
+    else
+        ui_text_colored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "SlotPopulator: UNAVAILABLE");
+
+    auto &mappings = slot_mappings();
+    int activeCount = 0;
+    for (std::size_t i = 0; i < k_slotCount; ++i)
+    {
+        if (mappings[i].active && mappings[i].targetItemId != 0)
+            ++activeCount;
+    }
+
+    ui_text("Active slots: %d / %zu", activeCount, k_slotCount);
+    ui_text("Character: %s", pm.active_character().c_str());
+}
