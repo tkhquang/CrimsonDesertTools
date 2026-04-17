@@ -2,6 +2,22 @@
 
 All notable changes to the CrimsonDesertLiveTransmog mod will be documented in this file.
 
+## [0.5.0] - Built-in Overlay (Removed ReShade Hard Requirement)
+
+- The mod now includes its own overlay window. ReShade is no longer needed to use the in-game GUI
+- If ReShade is installed, the mod still registers as a ReShade addon tab automatically
+- New `ForceStandaloneOverlay` setting in INI to use the standalone window alongside ReShade
+- Overlay toggle key is now configurable via `OverlayToggleHotkey` in INI (default: Home)
+- Standalone overlay: press Esc to close, window follows game focus and hides on alt-tab
+- Compatible with OptiScaler and other DXGI wrappers (no swap chain hooking)
+
+## Human-Readable Item Names & Overlay Improvements
+
+- Item picker now shows human-readable display names (e.g. "Kliff's Leather Armor" instead of "Kliff_Leather_Armor") with the internal name shown below in gray
+- Search now matches both display names and internal names
+- Item slot detection rewritten to be more accurate across the full catalog
+- Name table scan no longer gives up after 15 attempts, it keeps retrying until the game is ready
+
 ## [0.3.1] - Cross-Character Armor Support & Carrier System Improvements
 
 - NPC armor from other characters (Oongka, etc.) can now be worn by Kliff
@@ -34,6 +50,7 @@ All notable changes to the CrimsonDesertLiveTransmog mod will be documented in t
 - Modular code split: `transmog_apply` (apply/clear logic), `transmog_hooks` (VEC/BatchEquip callbacks), `transmog_worker` (debounce/load-detect/nametable threads), `shared_state` (cross-TU atomics)
 - Docs clarify ReShade is required for GUI; without it, users edit JSON manually via Capture hotkey
 
+[0.5.0]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.5.0
 [0.3.1]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.3.1
 [0.3.0]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.3.0
 [0.2.0]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.2.0
