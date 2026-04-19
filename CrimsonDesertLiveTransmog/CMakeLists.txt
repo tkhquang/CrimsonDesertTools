@@ -55,21 +55,20 @@ target_include_directories(imgui_lib PUBLIC
 )
 target_compile_options(imgui_lib PRIVATE /W0)
 
-# --- DetourModKit Dependency ---
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/external/DetourModKit/CMakeLists.txt")
-    message(STATUS "Configuring DetourModKit from: external/DetourModKit")
-    add_subdirectory(external/DetourModKit SYSTEM)
-
-    if(TARGET DetourModKit)
-        set(DETOURMODKIT_TARGET DetourModKit)
-        message(STATUS "DetourModKit target found: ${DETOURMODKIT_TARGET}")
-    else()
-        message(FATAL_ERROR "DetourModKit target not created by subdirectory")
-    endif()
+# --- CrimsonDesertCore (shared library, monorepo sibling) ---
+# Core owns DetourModKit as its own submodule and re-exports it via PUBLIC
+# link, so this target gets the DetourModKit target transitively — no
+# separate add_subdirectory for DMK is needed at this level.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../CrimsonDesertCore/CMakeLists.txt")
+    add_subdirectory(
+        ${CMAKE_CURRENT_SOURCE_DIR}/../CrimsonDesertCore
+        ${CMAKE_BINARY_DIR}/CrimsonDesertCore
+    )
 else()
-    message(FATAL_ERROR "DetourModKit not found at 'external/DetourModKit'. "
-        "Please ensure the submodule is initialized: "
-        "'git submodule update --init --recursive'")
+    message(FATAL_ERROR "CrimsonDesertCore not found at sibling "
+        "'../CrimsonDesertCore'. The monorepo must include it, and its "
+        "DetourModKit submodule must be initialized: "
+        "'git submodule update --init --recursive'.")
 endif()
 
 # --- Dev Build Option ---
@@ -78,8 +77,8 @@ option(TRANSMOG_DEV_BUILD "Build two-DLL hot-reload configuration for developmen
 # --- Source Files ---
 set(COMMON_SOURCES
     src/dllmain.cpp
+    src/version.cpp
     src/shared_state.cpp
-    src/aob_resolver.cpp
     src/indexed_string_table.cpp
     src/item_name_table.cpp
     src/transmog_map.cpp
@@ -128,7 +127,14 @@ if(TRANSMOG_DEV_BUILD)
     message(STATUS "DEV BUILD enabled — building loader + logic DLL pair")
 
     # --- Loader ASI (thin stub, no DetourModKit) ---
-    add_library(transmog_loader SHARED src/dev/loader_main.cpp)
+    # Sources live in CrimsonDesertCore; parameterized via CDCORE_LOADER_* macros.
+    add_library(transmog_loader SHARED ${CDCORE_DEV_LOADER_SRC})
+
+    target_compile_definitions(transmog_loader PRIVATE
+        CDCORE_LOADER_DLL_NAME="CrimsonDesertLiveTransmog_Logic.dll"
+        CDCORE_LOADER_PDB_NAME="CrimsonDesertLiveTransmog_Logic.pdb"
+        CDCORE_LOADER_LOG_PREFIX="[TransmogLoader] "
+    )
 
     target_link_libraries(transmog_loader PRIVATE
         kernel32
@@ -176,6 +182,7 @@ endif()
 
     target_link_libraries(transmog_logic PRIVATE
         DetourModKit
+        CrimsonDesertCore::core
         nlohmann_json::nlohmann_json
         imgui_lib
         d3d11
@@ -257,6 +264,7 @@ else() # TRANSMOG_DEV_BUILD=OFF
 
     target_link_libraries(${PROJECT_NAME}-ASI PRIVATE
         DetourModKit
+        CrimsonDesertCore::core
         nlohmann_json::nlohmann_json
         imgui_lib
         d3d11

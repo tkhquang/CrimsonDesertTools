@@ -21,22 +21,20 @@ if(WIN32)
     )
 endif()
 
-# --- DetourModKit Dependency ---
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/external/DetourModKit/CMakeLists.txt")
-    message(STATUS "Configuring DetourModKit from: external/DetourModKit")
-    add_subdirectory(external/DetourModKit SYSTEM)
-
-    # Use the exact target name from DetourModKit
-    if(TARGET DetourModKit)
-        set(DETOURMODKIT_TARGET DetourModKit)
-        message(STATUS "DetourModKit target found: ${DETOURMODKIT_TARGET}")
-    else()
-        message(FATAL_ERROR "DetourModKit target not created by subdirectory")
-    endif()
+# --- CrimsonDesertCore (shared library, monorepo sibling) ---
+# Core owns DetourModKit as its own submodule and re-exports it via PUBLIC
+# link, so this target gets the DetourModKit target transitively — no
+# separate add_subdirectory for DMK is needed at this level.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../CrimsonDesertCore/CMakeLists.txt")
+    add_subdirectory(
+        ${CMAKE_CURRENT_SOURCE_DIR}/../CrimsonDesertCore
+        ${CMAKE_BINARY_DIR}/CrimsonDesertCore
+    )
 else()
-    message(FATAL_ERROR "DetourModKit not found at 'external/DetourModKit'. "
-        "Please ensure the submodule is initialized: "
-        "'git submodule update --init --recursive'")
+    message(FATAL_ERROR "CrimsonDesertCore not found at sibling "
+        "'../CrimsonDesertCore'. The monorepo must include it, and its "
+        "DetourModKit submodule must be initialized: "
+        "'git submodule update --init --recursive'.")
 endif()
 
 # --- Dev Build Option ---
@@ -45,8 +43,8 @@ option(EQUIPHIDE_DEV_BUILD "Build two-DLL hot-reload configuration for developme
 # --- Source Files ---
 set(COMMON_SOURCES
     src/dllmain.cpp
+    src/version.cpp
     src/shared_state.cpp
-    src/aob_resolver.cpp
     src/indexed_string_table.cpp
     src/player_detection.cpp
     src/visibility_write.cpp
@@ -79,7 +77,14 @@ if(EQUIPHIDE_DEV_BUILD)
     message(STATUS "DEV BUILD enabled — building loader + logic DLL pair")
 
     # --- Loader ASI (thin stub, no DetourModKit) ---
-    add_library(equip_hide_loader SHARED src/dev/loader_main.cpp)
+    # Sources live in CrimsonDesertCore; parameterized via CDCORE_LOADER_* macros.
+    add_library(equip_hide_loader SHARED ${CDCORE_DEV_LOADER_SRC})
+
+    target_compile_definitions(equip_hide_loader PRIVATE
+        CDCORE_LOADER_DLL_NAME="CrimsonDesertEquipHide_Logic.dll"
+        CDCORE_LOADER_PDB_NAME="CrimsonDesertEquipHide_Logic.pdb"
+        CDCORE_LOADER_LOG_PREFIX="[EquipHideLoader] "
+    )
 
     target_link_libraries(equip_hide_loader PRIVATE
         kernel32
@@ -128,6 +133,7 @@ endif()
 
     target_link_libraries(equip_hide_logic PRIVATE
         DetourModKit
+        CrimsonDesertCore::core
         psapi
         user32
         kernel32
@@ -209,6 +215,7 @@ else() # EQUIPHIDE_DEV_BUILD=OFF
 
     target_link_libraries(${PROJECT_NAME}-ASI PRIVATE
         DetourModKit
+        CrimsonDesertCore::core
         psapi
         user32
         kernel32

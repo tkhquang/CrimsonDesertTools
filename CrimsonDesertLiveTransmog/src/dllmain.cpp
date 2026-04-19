@@ -3,12 +3,13 @@
 #include "constants.hpp"
 #include "overlay.hpp"
 #include "transmog.hpp"
+#include "version.hpp"
+
+#include <cdcore/dev_helpers.hpp>
 
 #include <DetourModKit.hpp>
 
 #include <Windows.h>
-
-#include <cstring>
 
 static HANDLE g_shutdownEvent = nullptr;
 static HANDLE g_instanceMutex = nullptr;
@@ -17,14 +18,10 @@ static HMODULE g_hModule = nullptr;
 
 static DWORD WINAPI lifecycle_thread(LPVOID /*param*/)
 {
-    {
-        char exePath[MAX_PATH];
-        GetModuleFileNameA(nullptr, exePath, MAX_PATH);
-        const char *exeName = std::strrchr(exePath, '\\');
-        exeName = exeName ? exeName + 1 : exePath;
-        if (_stricmp(exeName, Transmog::GAME_PROCESS_NAME) != 0)
-            return 0;
-    }
+    // Process gate — UAL loads ASIs into every process in the game
+    // directory including crashpad_handler.exe. Bail immediately.
+    if (!CDCore::Dev::is_target_process(Transmog::GAME_PROCESS_NAME))
+        return 0;
 
     DMK::Logger::configure("Transmog", Transmog::LOG_FILE, "%Y-%m-%d %H:%M:%S");
     auto &logger = DMK::Logger::get_instance();
@@ -32,6 +29,8 @@ static DWORD WINAPI lifecycle_thread(LPVOID /*param*/)
     DMK::AsyncLoggerConfig asyncCfg;
     asyncCfg.overflow_policy = DMK::OverflowPolicy::SyncFallback;
     logger.enable_async_mode(asyncCfg);
+
+    Transmog::Version::logVersionInfo();
 
     std::wstring runtimeDirW = DMK::Filesystem::get_runtime_directory();
     std::string runtimeDir;
@@ -52,15 +51,11 @@ static DWORD WINAPI lifecycle_thread(LPVOID /*param*/)
     }
     logger.info("DLL loaded, runtime dir: {}", runtimeDir);
 
-    wchar_t mutexName[64];
-    wsprintfW(mutexName, L"%s%lu", Transmog::INSTANCE_MUTEX_PREFIX, GetCurrentProcessId());
-    g_instanceMutex = CreateMutexW(nullptr, FALSE, mutexName);
-    if (g_instanceMutex && GetLastError() == ERROR_ALREADY_EXISTS)
+    if (!CDCore::Dev::acquire_instance_mutex(
+            Transmog::INSTANCE_MUTEX_PREFIX, g_instanceMutex))
     {
         logger.error("Another instance of CrimsonDesertLiveTransmog is already loaded. "
                      "Check for duplicate .asi files in the game directory.");
-        CloseHandle(g_instanceMutex);
-        g_instanceMutex = nullptr;
         return 1;
     }
 
@@ -117,11 +112,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
             CloseHandle(g_lifecycleThread);
             g_lifecycleThread = nullptr;
         }
-        if (g_instanceMutex)
-        {
-            CloseHandle(g_instanceMutex);
-            g_instanceMutex = nullptr;
-        }
+        CDCore::Dev::release_instance_mutex(g_instanceMutex);
         break;
 
     default:

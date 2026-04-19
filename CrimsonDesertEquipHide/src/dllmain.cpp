@@ -2,12 +2,13 @@
 
 #include "constants.hpp"
 #include "equip_hide.hpp"
+#include "version.hpp"
+
+#include <cdcore/dev_helpers.hpp>
 
 #include <DetourModKit.hpp>
 
 #include <Windows.h>
-
-#include <cstring>
 
 static HANDLE g_shutdownEvent = nullptr;
 static HANDLE g_instanceMutex = nullptr;
@@ -15,14 +16,10 @@ static HANDLE g_lifecycleThread = nullptr;
 
 static DWORD WINAPI lifecycle_thread(LPVOID /*param*/)
 {
-    {
-        char exePath[MAX_PATH];
-        GetModuleFileNameA(nullptr, exePath, MAX_PATH);
-        const char *exeName = std::strrchr(exePath, '\\');
-        exeName = exeName ? exeName + 1 : exePath;
-        if (_stricmp(exeName, EquipHide::GAME_PROCESS_NAME) != 0)
-            return 0;
-    }
+    // Process gate — UAL loads ASIs into every process in the game
+    // directory including crashpad_handler.exe. Bail immediately.
+    if (!CDCore::Dev::is_target_process(EquipHide::GAME_PROCESS_NAME))
+        return 0;
 
     DMK::Logger::configure("EquipHide", EquipHide::LOG_FILE, "%Y-%m-%d %H:%M:%S");
     auto &logger = DMK::Logger::get_instance();
@@ -31,19 +28,17 @@ static DWORD WINAPI lifecycle_thread(LPVOID /*param*/)
     asyncCfg.overflow_policy = DMK::OverflowPolicy::SyncFallback;
     logger.enable_async_mode(asyncCfg);
 
+    EquipHide::Version::logVersionInfo();
+
     std::wstring runtimeDirW = DMK::Filesystem::get_runtime_directory();
     std::string runtimeDir(runtimeDirW.begin(), runtimeDirW.end());
     logger.info("DLL loaded, runtime dir: {}", runtimeDir);
 
-    wchar_t mutexName[64];
-    wsprintfW(mutexName, L"%s%lu", EquipHide::INSTANCE_MUTEX_PREFIX, GetCurrentProcessId());
-    g_instanceMutex = CreateMutexW(nullptr, FALSE, mutexName);
-    if (g_instanceMutex && GetLastError() == ERROR_ALREADY_EXISTS)
+    if (!CDCore::Dev::acquire_instance_mutex(
+            EquipHide::INSTANCE_MUTEX_PREFIX, g_instanceMutex))
     {
         logger.error("Another instance of CrimsonDesertEquipHide is already loaded. "
                      "Check for duplicate .asi files in the game directory.");
-        CloseHandle(g_instanceMutex);
-        g_instanceMutex = nullptr;
         return 1;
     }
 
@@ -95,11 +90,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
             CloseHandle(g_lifecycleThread);
             g_lifecycleThread = nullptr;
         }
-        if (g_instanceMutex)
-        {
-            CloseHandle(g_instanceMutex);
-            g_instanceMutex = nullptr;
-        }
+        CDCore::Dev::release_instance_mutex(g_instanceMutex);
         break;
 
     default:
