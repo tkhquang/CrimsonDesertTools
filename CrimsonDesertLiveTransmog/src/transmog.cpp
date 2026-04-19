@@ -323,11 +323,6 @@ namespace Transmog
     {
         auto &logger = DMK::Logger::get_instance();
 
-        logger.info("{} v{}", MOD_NAME, MOD_VERSION);
-        logger.info("By {}", MOD_AUTHOR);
-        logger.info("Source: {}", MOD_SOURCE);
-        logger.debug("Built on " __DATE__ " at " __TIME__);
-
         if (!DMK::Memory::init_cache())
             logger.warning("Memory cache init failed — pointer reads may be slower");
 

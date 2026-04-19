@@ -18,6 +18,4 @@ namespace Transmog
     // --- Process gate ---
     inline constexpr const char *GAME_PROCESS_NAME = "CrimsonDesert.exe";
 
-    // --- Game-version target ---
-    // Stored in CrimsonDesertLiveTransmog_presets.json. Numeric itemIds are
 } // namespace Transmog

@@ -1,5 +1,9 @@
 #pragma once
 
+// Thin wrapper over CDCore::scan_indexed_string_table. Preserves the
+// existing free-function signature so call sites (transmog.cpp,
+// part_show_suppress.cpp, etc.) don't need to change.
+
 #include <cstdint>
 #include <string>
 #include <unordered_map>
@@ -7,21 +11,14 @@
 namespace Transmog
 {
     /**
-     * @brief Scan the IndexedStringA global table for name-to-hash mappings.
+     * @brief Scan the IndexedStringA global table for "CD_"-prefixed
+     *        name -> hash mappings.
      *
-     * Table layout (resolved from mapLookupFunc + 20 `mov rax, [rip+disp]`):
-     *   globalPtr   = *(qword*)(mapLookupFunc + 20 + rip_disp)
-     *   tableArray  = *(qword*)(globalPtr + 0x58)
-     *   entry[hash] = tableArray + hash * 16
-     *   entry[hash]+0 = pointer to null-terminated string (or 0)
-     *
-     * Returns the subset of entries whose string begins with "CD_" — this is
-     * the only prefix live-transmog cares about (slot part names).
-     *
-     * Returns empty map if the global pointer is not yet initialized or if
-     * the mapLookup prologue doesn't match the expected shape.
+     * LiveTransmog only needs the slot part names (CD_Helm, CD_Upperbody,
+     * CD_Cloak, CD_Hand, CD_Foot), so the default CDCore config (primary
+     * range 0xAC00..0xCFFF, no wide-scan) is sufficient.
      */
-    std::unordered_map<std::string, uint32_t> scan_indexed_string_table(
-        uintptr_t mapLookupFunc);
+    std::unordered_map<std::string, std::uint32_t> scan_indexed_string_table(
+        std::uintptr_t mapLookupFunc);
 
 } // namespace Transmog

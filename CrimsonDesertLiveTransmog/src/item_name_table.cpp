@@ -435,7 +435,8 @@ namespace Transmog
             return false;
         }
         // offset marker `|` points one past the E8 = start of disp32.
-        const uintptr_t dispAddr1 = reinterpret_cast<uintptr_t>(match1) + anchor1->offset;
+        // DMK v3.0.2+ applies pattern.offset internally; do NOT add it again.
+        const uintptr_t dispAddr1 = reinterpret_cast<uintptr_t>(match1);
         bool ok = false;
         const auto disp1 = read_i32_safe(dispAddr1, ok);
         if (!ok)
@@ -481,7 +482,8 @@ namespace Transmog
             return false;
         }
         // `|` points at start of `48 8B 1D disp32` instruction.
-        const uintptr_t ripInstr = reinterpret_cast<uintptr_t>(match3) + anchor3->offset;
+        // DMK v3.0.2+ applies pattern.offset internally; do NOT add it again.
+        const uintptr_t ripInstr = reinterpret_cast<uintptr_t>(match3);
         const auto disp = read_i32_safe(ripInstr + 3, ok);
         if (!ok)
         {

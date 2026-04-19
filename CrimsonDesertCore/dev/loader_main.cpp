@@ -1,9 +1,23 @@
 /**
  * @file loader_main.cpp
- * @brief Hot-reload loader stub for development builds.
+ * @brief Hot-reload loader stub shared by all CrimsonDesert mod dev builds.
  *
- * Loads equip_hide_logic.dll, polls Numpad 0 to unload/reload it in-place.
- * No DetourModKit dependency — logging via OutputDebugStringA only.
+ * Loads the configured logic DLL and polls Numpad 0 to unload/reload it
+ * in-place. No DetourModKit dependency — logging via OutputDebugStringA
+ * only so this stays a thin stub.
+ *
+ * Parameterized by three macros the consumer's CMakeLists.txt is expected
+ * to supply via target_compile_definitions:
+ *
+ *   CDCORE_LOADER_DLL_NAME   : filename of the logic DLL to load,
+ *                              e.g. "CrimsonDesertLiveTransmog_Logic.dll"
+ *   CDCORE_LOADER_PDB_NAME   : companion PDB to move from staging/,
+ *                              e.g. "CrimsonDesertLiveTransmog_Logic.pdb"
+ *   CDCORE_LOADER_LOG_PREFIX : debug-log prefix string,
+ *                              e.g. "[TransmogLoader] "
+ *
+ * These are strings (with quotes) baked at compile time; the loader holds
+ * no game-specific knowledge beyond them.
  */
 
 #include <Windows.h>
@@ -13,9 +27,37 @@
 #include <cstring>
 #include <string>
 
-static constexpr const char *k_logicDllName   = "CrimsonDesertEquipHide_Logic.dll";
+// IntelliSense parses this file from the CDCore workspace without a
+// consumer's compile_commands entry, so the macros aren't defined during
+// that standalone parse. Stub them under __INTELLISENSE__ so the linter
+// doesn't cascade-error on every reference below. The `#error` still
+// fires on a real compile where the consumer must supply the macros.
+#if defined(__INTELLISENSE__)
+#  ifndef CDCORE_LOADER_DLL_NAME
+#    define CDCORE_LOADER_DLL_NAME "stub_logic.dll"
+#  endif
+#  ifndef CDCORE_LOADER_PDB_NAME
+#    define CDCORE_LOADER_PDB_NAME "stub_logic.pdb"
+#  endif
+#  ifndef CDCORE_LOADER_LOG_PREFIX
+#    define CDCORE_LOADER_LOG_PREFIX "[StubLoader] "
+#  endif
+#else
+#  ifndef CDCORE_LOADER_DLL_NAME
+#    error "CDCORE_LOADER_DLL_NAME must be defined to the logic DLL filename (string)"
+#  endif
+#  ifndef CDCORE_LOADER_PDB_NAME
+#    error "CDCORE_LOADER_PDB_NAME must be defined to the logic PDB filename (string)"
+#  endif
+#  ifndef CDCORE_LOADER_LOG_PREFIX
+#    error "CDCORE_LOADER_LOG_PREFIX must be defined to a debug-log prefix (string)"
+#  endif
+#endif
+
+static constexpr const char *k_logicDllName   = CDCORE_LOADER_DLL_NAME;
+static constexpr const char *k_logicPdbName   = CDCORE_LOADER_PDB_NAME;
+static constexpr const char *k_logPrefix      = CDCORE_LOADER_LOG_PREFIX;
 static constexpr const char *k_stagingSubdir  = "staging";
-static constexpr const char *k_logPrefix      = "[EquipHideLoader] ";
 static constexpr int         k_pollIntervalMs = 100;
 static constexpr int         k_postShutdownMs = 100;
 static constexpr int         k_preLoadDelayMs = 200;
@@ -39,7 +81,14 @@ static void log_msg(const char *msg)
     if (len > 0 && static_cast<size_t>(len) < sizeof(buf))
         OutputDebugStringA(buf);
     else
-        OutputDebugStringA("[EquipHideLoader] (message truncated)\n");
+    {
+        // Truncation fallback — keep the prefix so the message still
+        // routes to the right filter in DbgView.
+        char fallback[128];
+        snprintf(fallback, sizeof(fallback),
+                 "%s(message truncated)\n", k_logPrefix);
+        OutputDebugStringA(fallback);
+    }
 }
 
 static std::string get_loader_dir(HMODULE hSelf)
@@ -83,7 +132,7 @@ static bool copy_from_staging(const std::string &loaderDir)
     }
     DeleteFileA(stagingDll.c_str());
 
-    move_staged_file(stagingDir, loaderDir, "CrimsonDesertEquipHide_Logic.pdb");
+    move_staged_file(stagingDir, loaderDir, k_logicPdbName);
 
     log_msg("Copied logic DLL from staging");
     return true;
