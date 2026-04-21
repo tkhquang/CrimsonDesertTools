@@ -2,6 +2,15 @@
 
 All notable changes to the CrimsonDesertLiveTransmog mod will be documented in this file.
 
+## [0.6.0] - Multi-Character Support (Kliff, Damiane, Oongka)
+
+- Preset lists are now stored per character. The active list swaps automatically when you change who you are controlling in-game, and each character remembers its own "last applied" preset ([#34](https://github.com/tkhquang/CrimsonDesertTools/pull/34))
+- New body-kind (male / female) filter in the picker so mismatched-body armor is hidden by default. Per-character override available in the overlay for body-swap mod users ([#34](https://github.com/tkhquang/CrimsonDesertTools/pull/34))
+- Display name table is now loaded from `CrimsonDesertLiveTransmog_display_names.tsv`. The `.tsv` must be installed alongside the `.asi`; without it the picker falls back to raw item ids ([#34](https://github.com/tkhquang/CrimsonDesertTools/pull/34))
+- Added `LICENSE` (MIT) to the mod folder ([#34](https://github.com/tkhquang/CrimsonDesertTools/pull/34))
+- Shared AOB utilities moved into the new `CrimsonDesertCore` static library. No behavioural change ([#33](https://github.com/tkhquang/CrimsonDesertTools/pull/33))
+- README, Nexus bbcode, template readme, and Acknowledgements refreshed for the multi-character release
+
 ## [0.5.0] - Built-in Overlay (Removed ReShade Hard Requirement)
 
 - The mod now includes its own overlay window. ReShade is no longer needed to use the in-game GUI
@@ -50,6 +59,7 @@ All notable changes to the CrimsonDesertLiveTransmog mod will be documented in t
 - Modular code split: `transmog_apply` (apply/clear logic), `transmog_hooks` (VEC/BatchEquip callbacks), `transmog_worker` (debounce/load-detect/nametable threads), `shared_state` (cross-TU atomics)
 - Docs clarify ReShade is required for GUI; without it, users edit JSON manually via Capture hotkey
 
+[0.6.0]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.6.0
 [0.5.0]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.5.0
 [0.3.1]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.3.1
 [0.3.0]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.3.0

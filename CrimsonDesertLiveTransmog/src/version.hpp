@@ -7,7 +7,7 @@
 //            >>> MODIFY ONLY THESE VALUES WHEN UPDATING VERSION <<<          //
 // ========================================================================== //
 #define VERSION_MAJOR 0
-#define VERSION_MINOR 5
+#define VERSION_MINOR 6
 #define VERSION_PATCH 0
 // ========================================================================== //
 
