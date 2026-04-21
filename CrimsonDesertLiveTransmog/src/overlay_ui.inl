@@ -1,4 +1,4 @@
-// overlay_ui.inl — Shared transmog overlay widget code.
+// overlay_ui.inl -- Shared transmog overlay widget code.
 //
 // Included by both overlay.cpp (standalone D3D11 path) and
 // overlay_reshade.cpp (ReShade addon path).  Each TU provides its own
@@ -20,6 +20,12 @@
 // symbols at link time.  These helpers call only non-variadic ImGui
 // functions (TextUnformatted, PushStyleColor) which inline correctly
 // in both the ReShade and standalone paths.
+
+// Anonymous namespace wraps the entire body so each including TU
+// (overlay.cpp, overlay_reshade.cpp) gets its own unique implicit
+// namespace name -- makes TU-locality explicit and silences
+// IntelliSense's cross-TU "ambiguous declaration" diagnostics.
+namespace {
 
 static void ui_text(const char *fmt, ...)
 {
@@ -77,7 +83,7 @@ static constexpr int64_t k_hoverDebounceMs = 300;
 // --- Overlay preferences (render-thread only) ---
 
 // Instant Apply mode: applies transmog immediately on hover, pick,
-// slot toggle, and clear — no Apply All click needed.  Off by default
+// slot toggle, and clear -- no Apply All click needed.  Off by default
 // because each action triggers a tear-down + SlotPopulator cycle.
 static bool s_autoApply = false;
 
@@ -97,8 +103,10 @@ struct SlotUIState
     // matches THIS slot.  Defaults to ON so the dropdown shows ~350
     // relevant items instead of all 6024.
     bool exactFilter = true;
-    bool hideIncompatible = true; // hide crash-risk + non-equipment
-    bool hideVariants = false;    // hide NPC variants (carrier items)
+    bool hideIncompatible = true;   // hide crash-risk + non-equipment
+    bool hideVariants = false;      // hide NPC variants (carrier items)
+    bool hideBodyMismatch = true;   // hide items whose body type doesn't
+                                    // match the active character's
     // Hover-apply debounce state.  We track which item the cursor is
     // on and when it first landed there.  Apply fires only after the
     // cursor has settled on the same item for k_hoverDebounceMs,
@@ -187,6 +195,12 @@ static bool name_contains_ci(const std::string &hay, const char *needle) noexcep
     ImGui::Checkbox("Safe only", &ui.hideIncompatible);
     ImGui::SameLine();
     ImGui::Checkbox("Hide variants", &ui.hideVariants);
+    ImGui::SameLine();
+    ImGui::Checkbox("Hide cross-body", &ui.hideBodyMismatch);
+    if (ImGui::IsItemHovered())
+        ui_tooltip("Hide items whose body type (male/female) "
+                   "doesn't match the active character. Cross-body "
+                   "items may render with broken meshes.");
 
     ImGui::SetNextItemWidth(320.0f);
     if (ImGui::IsWindowAppearing())
@@ -250,7 +264,7 @@ static bool name_contains_ci(const std::string &hay, const char *needle) noexcep
 
     // Increase vertical spacing between items for easier click/hover
     // targets.  Pushed INSIDE BeginChild so the popup-level spacing
-    // stays default — otherwise the popup's own scroll region may
+    // stays default -- otherwise the popup's own scroll region may
     // capture mouse wheel events instead of the child.
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing,
                         ImVec2(ImGui::GetStyle().ItemSpacing.x,
@@ -277,13 +291,23 @@ static bool name_contains_ci(const std::string &hay, const char *needle) noexcep
         }
     }
 
-    // Hoist draw-list pointer outside the loop — it is stable for
+    // Hoist draw-list pointer outside the loop -- it is stable for
     // the entire BeginChild region and avoids a per-item lookup.
     ImDrawList *const dl = ImGui::GetWindowDrawList();
 
     // Semantic color constants for the two-line item display.
     static constexpr ImU32 k_colorCrashRisk = IM_COL32(255, 89, 89, 255);
     static constexpr ImU32 k_colorCarrier = IM_COL32(128, 217, 255, 255);
+    // Orange -- carrier path works but body type mismatched. Item
+    // will equip and may display with minor mesh artifacts; we show
+    // it when the user disables "Hide cross-body".
+    static constexpr ImU32 k_colorCrossBody = IM_COL32(255, 176, 64, 255);
+    // Amber -- item has humanoid-range classifier tokens but none are
+    // in the male/female body set (e.g. NPC variants like
+    // Antumbra/Badran gloves with only `0x012F`). Equip goes through
+    // the carrier path but render fidelity is inconsistent -- some
+    // items resolve correctly, others show as broken meshes.
+    static constexpr ImU32 k_colorAmbiguous = IM_COL32(230, 210, 120, 255);
     static constexpr ImU32 k_colorDimmed = IM_COL32(160, 160, 160, 200);
 
     int shown = 0;
@@ -299,11 +323,61 @@ static bool name_contains_ci(const std::string &hay, const char *needle) noexcep
         }
         const bool nonEquipment =
             (e.category == Transmog::TransmogSlot::Count);
-        const bool incompatible =
-            (!e.isPlayerCompatible && !e.hasVariantMeta) ||
-            nonEquipment;
+        // Per-character body-kind filter (CE-verified 2026-04-21).
+        // Armor rule classifier tokens partition the catalog into
+        // disjoint body families:
+        //   Male:   {0x0018, 0x0058, 0x02E3}
+        //   Female: {0x0072, 0x0382, 0x0300}
+        //   Horse / pet / wagon / dragon: separate token pools with
+        //     zero overlap with humanoid. Flagged as NonHumanoid and
+        //     hidden unconditionally -- these never render on a human
+        //     skeleton (horse saddles, cat backpacks, etc.).
+        const auto &pm = Transmog::PresetManager::instance();
+        using BK = Transmog::ItemNameTable::BodyKind;
+        // Resolve the active character's body kind: per-character
+        // override in presets.json wins, "Auto" falls through to the
+        // hardcoded default (Kliff/Oongka = Male, Damiane = Female).
+        BK charBody;
+        {
+            const std::string ov =
+                pm.body_kind_of(pm.active_character());
+            if (ov == "Male")
+                charBody = BK::Male;
+            else if (ov == "Female")
+                charBody = BK::Female;
+            else if (ov == "Both")
+                charBody = BK::Both;
+            else // "Auto" or unrecognised
+                charBody =
+                    Transmog::ItemNameTable::body_kind_for_character(
+                        pm.active_character());
+        }
+        const bool nonHumanoid = (e.bodyKind == BK::NonHumanoid);
+        const bool ambiguousBody = (e.bodyKind == BK::Ambiguous);
+        // Ambiguous items pass the body-match gate (still humanoid-
+        // range), but get an amber tag in the color logic below so
+        // the user knows render fidelity is inconsistent.
+        const bool bodyMatches =
+            !nonHumanoid && (
+                ambiguousBody ||
+                (e.bodyKind == BK::Generic) ||
+                (e.bodyKind == BK::Both) ||
+                (charBody == BK::Generic) ||
+                (e.bodyKind == charBody));
+        // Non-humanoid items are always treated as "incompatible" --
+        // there's no toggle to show them; they'd never render.
+        const bool incompatible = nonEquipment || nonHumanoid;
         const bool npcVariant = e.hasVariantMeta;
         if (ui.hideIncompatible && incompatible)
+        {
+            ++filteredByUnsafe;
+            continue;
+        }
+        // Cross-body filter: hide items whose body type doesn't
+        // match the active character. Default on; can be toggled
+        // off for experimentation (they may still partially render
+        // via the carrier path but often look broken).
+        if (ui.hideBodyMismatch && !bodyMatches)
         {
             ++filteredByUnsafe;
             continue;
@@ -328,10 +402,29 @@ static bool name_contains_ci(const std::string &hay, const char *needle) noexcep
         // render via carrier + char-class bypass.  True crash risks
         // are non-player items WITHOUT variant meta (horse tack, etc).
         const bool usesCarrier = e.hasVariantMeta;
-        const bool crashRisk =
-            !e.isPlayerCompatible && !e.hasVariantMeta;
+        // Colour tiers:
+        //   red    CRASH RISK         -- rule list rejects this body,
+        //                               no carrier path rescue.
+        //   orange BODY MISMATCH      -- cross-body carrier, will equip
+        //                               but mesh likely breaks.
+        //   amber  UNCERTAIN BODY     -- humanoid-range but no body-
+        //                               set match (e.g. 0x012F-only
+        //                               NPC variants); render may or
+        //                               may not resolve correctly.
+        //   blue   carrier            -- NPC variant, same-body match,
+        //                               reliable carrier path.
+        const bool crashRisk = !bodyMatches && !e.hasVariantMeta;
+        const bool crossBodyCarrier = !bodyMatches && e.hasVariantMeta;
+        // Only flag ambiguous when it's actually a carrier item and
+        // not already bucketed as cross-body (it isn't -- ambiguous
+        // passes bodyMatches above).
+        const bool ambiguousCarrier = ambiguousBody && e.hasVariantMeta;
         if (crashRisk)
             tag = "non-player -- CRASH RISK";
+        else if (crossBodyCarrier)
+            tag = "carrier -- BODY MISMATCH";
+        else if (ambiguousCarrier)
+            tag = "carrier -- UNCERTAIN BODY";
         else if (usesCarrier)
             tag = "carrier";
 
@@ -347,6 +440,12 @@ static bool name_contains_ci(const std::string &hay, const char *needle) noexcep
         if (crashRisk)
             ImGui::PushStyleColor(ImGuiCol_Header,
                                   ImVec4(0.4f, 0.1f, 0.1f, 0.6f));
+        else if (crossBodyCarrier)
+            ImGui::PushStyleColor(ImGuiCol_Header,
+                                  ImVec4(0.45f, 0.28f, 0.08f, 0.6f));
+        else if (ambiguousCarrier)
+            ImGui::PushStyleColor(ImGuiCol_Header,
+                                  ImVec4(0.38f, 0.32f, 0.12f, 0.6f));
         else if (usesCarrier)
             ImGui::PushStyleColor(ImGuiCol_Header,
                                   ImVec4(0.1f, 0.2f, 0.35f, 0.6f));
@@ -371,8 +470,10 @@ static bool name_contains_ci(const std::string &hay, const char *needle) noexcep
         else
             std::snprintf(line1, sizeof(line1), "%s", primaryName);
 
-        const ImU32 mainColor = crashRisk    ? k_colorCrashRisk
-                                : usesCarrier ? k_colorCarrier
+        const ImU32 mainColor = crashRisk          ? k_colorCrashRisk
+                                : crossBodyCarrier ? k_colorCrossBody
+                                : ambiguousCarrier ? k_colorAmbiguous
+                                : usesCarrier      ? k_colorCarrier
                                 : ImGui::GetColorU32(ImGuiCol_Text);
 
         dl->AddText(ImVec2(pos.x + 2.0f, pos.y + 1.0f),
@@ -429,7 +530,7 @@ static bool name_contains_ci(const std::string &hay, const char *needle) noexcep
             ui.navIndex = shown;
         }
 
-        if (crashRisk || usesCarrier)
+        if (crashRisk || crossBodyCarrier || ambiguousCarrier || usesCarrier)
             ImGui::PopStyleColor(); // Header color
 
         ++shown;
@@ -440,7 +541,8 @@ static bool name_contains_ci(const std::string &hay, const char *needle) noexcep
         if (ui.exactFilter && filteredByCategory > 0)
             ui_text_disabled("no matches in this category -- "
                             "uncheck Exact to widen");
-        else if ((ui.hideIncompatible || ui.hideVariants) &&
+        else if ((ui.hideIncompatible || ui.hideVariants ||
+                  ui.hideBodyMismatch) &&
                  filteredByUnsafe > 0)
             ui_text_disabled("no matches -- uncheck filters "
                             "to show more items");
@@ -464,7 +566,7 @@ static bool name_contains_ci(const std::string &hay, const char *needle) noexcep
     // --- Hover-apply debounce ---
     // Fire manual_apply_slot() only after the cursor has rested on
     // the same item for k_hoverDebounceMs.  Uses the slot-scoped
-    // apply path so only this slot re-equips — other slots are
+    // apply path so only this slot re-equips -- other slots are
     // untouched and don't flicker.
     if (autoApply &&
         ui.hoverPendingId != ui.hoverAppliedId &&
@@ -552,7 +654,7 @@ static void draw_overlay_content()
     ImGui::Checkbox("Instant Apply", &s_autoApply);
     if (ImGui::IsItemHovered())
         ui_tooltip("Apply changes immediately on hover, "
-                   "pick, toggle, and clear — no Apply All "
+                   "pick, toggle, and clear -- no Apply All "
                    "needed");
 
     ImGui::SameLine();
@@ -560,6 +662,126 @@ static void draw_overlay_content()
     if (ImGui::IsItemHovered())
         ui_tooltip("Preserve the search field when "
                    "re-opening a slot picker");
+
+    ImGui::Separator();
+
+    // --- Character picker ---
+    //
+    // Presets are stored per character (Kliff / Damiane / Oongka).
+    // Selecting a character swaps the active preset list to that
+    // character's, re-applies its active preset, and clears the
+    // drop-detection state so the next apply pass does not confuse
+    // the previous character's cached itemIds with the new one's.
+    //
+    // Auto-detection of the currently-controlled character from a1
+    // is deferred: the type-byte at *(actor+0x88)+1 is role-based
+    // (controlled vs background), not character-based, and the
+    // static WorldSystem → ActorManager → UserActor chain did not
+    // update live on control-swap in our 1.03.01 probe. Until that
+    // RE lands, the user picks the character manually here.
+    {
+        // Fixed stack buffer -- the game has a small, closed roster of
+        // playable characters (Kliff / Damiane / Oongka at time of
+        // writing). k_maxChars is oversized so adding a new playable
+        // character later doesn't need a code change here beyond
+        // adding its preset in the JSON.
+        constexpr std::size_t k_maxChars = 8;
+        const auto names = pm.character_names();
+        const std::size_t n =
+            (names.size() < k_maxChars) ? names.size() : k_maxChars;
+        if (n > 0)
+        {
+            const char *cstrs[k_maxChars]{};
+            int selectedIdx = 0;
+            for (std::size_t i = 0; i < n; ++i)
+            {
+                cstrs[i] = names[i].c_str();
+                if (names[i] == pm.active_character())
+                    selectedIdx = static_cast<int>(i);
+            }
+
+            // Character picker is READ-ONLY for now. Load-detect writes
+            // active_character on every char-swap (ActorManager+0x30
+            // byte) so manual picks get snapped back instantly. The
+            // fix is to split active_character into controlled (game-
+            // driven) and editing (UI-driven) states plus per-char
+            // actor enumeration from user+0xD0..+0x108 -- see memory
+            // note `project_per_companion_edit_deferred`. Until then
+            // the combo just shows which character load-detect
+            // currently thinks is controlled.
+            ImGui::SetNextItemWidth(200.0f);
+            ImGui::BeginDisabled(true);
+            if (ImGui::Combo("Character##char_picker",
+                             &selectedIdx,
+                             cstrs,
+                             static_cast<int>(n)))
+            {
+                const auto &pick = names[static_cast<std::size_t>(selectedIdx)];
+                if (pick != pm.active_character())
+                {
+                    pm.set_active_character(pick);
+                    for (auto &m : slot_mappings())
+                    {
+                        m.active = false;
+                        m.targetItemId = 0;
+                    }
+                    pm.apply_to_state();
+                    last_applied_ids().fill(0);
+                    real_damaged().fill(false);
+                    last_applied_real_ids().fill(0);
+                    last_applied_carrier_ids().fill(0);
+                    manual_apply();
+                    pm.save();
+                }
+            }
+            ImGui::EndDisabled();
+            if (ImGui::IsItemHovered())
+                ui_tooltip("Read-only for now -- follows the character you "
+                           "control in-game. Editing another character's "
+                           "preset while controlling someone else is "
+                           "planned (see per-companion-edit memory note).");
+
+            // Body-kind override. Lets body-swap mod users mark e.g.
+            // Kliff as Female so the picker shows the female-body-
+            // token pool. "Auto" defers to the hardcoded default
+            // (Kliff/Oongka = Male, Damiane = Female).
+            //
+            // Saved per character in presets.json. Only affects the
+            // picker filter -- no effect on apply / render behaviour.
+            static constexpr const char *k_bodyItems[] = {
+                "Auto", "Male", "Female", "Both",
+            };
+            constexpr int k_bodyCount =
+                static_cast<int>(sizeof(k_bodyItems) / sizeof(k_bodyItems[0]));
+
+            const std::string currentBody =
+                pm.body_kind_of(pm.active_character());
+            int bodyIdx = 0;
+            for (int i = 0; i < k_bodyCount; ++i)
+            {
+                if (currentBody == k_bodyItems[i])
+                {
+                    bodyIdx = i;
+                    break;
+                }
+            }
+            ImGui::SameLine(0.0f, 24.0f);
+            ImGui::SetNextItemWidth(140.0f);
+            if (ImGui::Combo("Body##body_kind",
+                             &bodyIdx,
+                             k_bodyItems,
+                             k_bodyCount))
+            {
+                pm.set_body_kind_of(pm.active_character(),
+                                    k_bodyItems[bodyIdx]);
+            }
+            if (ImGui::IsItemHovered())
+                ui_tooltip("Override the body type used for picker "
+                           "filtering. Use if you run a body-swap "
+                           "mod that changes this character's "
+                           "skeleton (e.g. Kliff -> Female).");
+        }
+    }
 
     ImGui::Separator();
 
@@ -634,7 +856,7 @@ static void draw_overlay_content()
         }
 
         if (count == 0)
-            ui_text_disabled("No presets — use Append to create one");
+            ui_text_disabled("No presets -- use Append to create one");
 
         ImGui::Spacing();
 
@@ -644,16 +866,42 @@ static void draw_overlay_content()
             pm.append_from_state();
             manual_apply();
         }
+        if (ImGui::IsItemHovered())
+            ui_tooltip("Capture your currently-worn real armor as a "
+                       "new preset, then apply it.");
 
         ImGui::SameLine();
 
-        if (ImGui::Button("Replace") && count > 0)
-            pm.replace_current_from_state();
+        // Copy: like Append but skips capture_outfit -- forks the
+        // current slot-mapping state (loaded from the active preset +
+        // any edits you made in the rows) into a brand-new preset.
+        // Useful for duplicating an existing preset and tweaking the
+        // fork without overwriting the source.
+        if (ImGui::Button("Copy"))
+        {
+            pm.append_from_state();
+            manual_apply();
+        }
+        if (ImGui::IsItemHovered())
+            ui_tooltip("Duplicate the current slot rows into a new "
+                       "preset (without re-capturing real armor), "
+                       "then apply it. Use after selecting a preset "
+                       "and tweaking the rows to fork it.");
 
         ImGui::SameLine();
 
         if (ImGui::Button("Remove") && count > 0)
+        {
             pm.remove_current();
+            // remove_current auto-selects a neighbouring preset.
+            // Apply it so the visible outfit matches the new active
+            // preset instead of leaving the old (now-deleted) one on
+            // screen.
+            if (pm.preset_count() > 0)
+                manual_apply();
+            else
+                manual_clear();
+        }
 
         ImGui::SameLine();
 
@@ -686,7 +934,7 @@ static void draw_overlay_content()
         const bool tableReady = table.ready();
 
         if (!tableReady)
-            ui_text_disabled("Item catalog not ready — hex entry only.");
+            ui_text_disabled("Item catalog not ready -- hex entry only.");
 
         ui_text_disabled("Toggle which slots the next Apply All will touch.");
 
@@ -799,7 +1047,9 @@ static void draw_overlay_content()
                                               ? std::string("(none)")
                                               : table.name_of(m.targetItemId);
                         const auto cat =
-                            ItemNameTable::classify_slot(name);
+                            (m.targetItemId == 0)
+                                ? TransmogSlot::Count
+                                : table.category_of(m.targetItemId);
                         const char *catName =
                             (m.targetItemId == 0)
                                 ? "clear"
@@ -925,5 +1175,6 @@ static void draw_overlay_content()
     }
 
     ui_text("Active slots: %d / %zu", activeCount, k_slotCount);
-    ui_text("Character: %s", pm.active_character().c_str());
 }
+
+} // anonymous namespace

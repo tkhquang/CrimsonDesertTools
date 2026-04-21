@@ -34,14 +34,11 @@ namespace EquipHide
                 if (!vc)
                     continue;
 
-                // v1.03.01 shifted comp from +0x48 to +0x58.
                 auto comp = read_ptr_unsafe(vc, 0x58);
                 if (!comp)
-                    comp = read_ptr_unsafe(vc, 0x48);
-                if (!comp)
                 {
-                    logger.trace("DirectWrite [{}]: vc=0x{:X} comp=NULL "
-                                 "(+0x58 and +0x48 both null)", i, vc);
+                    logger.trace("DirectWrite [{}]: vc=0x{:X} comp=NULL (+0x58)",
+                                 i, vc);
                     continue;
                 }
                 auto descNode = read_ptr_unsafe(comp, 0x218);

@@ -1,6 +1,6 @@
 # Crimson Desert - Live Transmog
 
-**This mod is in BETA** and edge cases may exist. Use at your own risk. Please report any issues you find! **Currently only works with Kliff** - other playable characters are not supported yet.
+**This mod is in BETA** and edge cases may exist. Use at your own risk. Please report any issues you find! Supports **Kliff, Damiane, and Oongka** -- presets are stored per character and the active preset swaps automatically when you switch who you are controlling in-game.
 
 [![Live Transmog Demo](https://img.youtube.com/vi/B4xX3LkgXhs/maxresdefault.jpg)](https://www.youtube.com/watch?v=B4xX3LkgXhs)
 
@@ -10,11 +10,12 @@
 
 ## Features
 
-- Built-in overlay GUI — no external tools required (toggle with **Home** key)
+- Built-in overlay GUI -- no external tools required (toggle with **Home** key)
 - In-game item browser with search-filterable dropdown, auto-categorized by slot (Helm, Chest, Cloak, Gloves, Boots)
 - Preset system: save, load, rename, and cycle through multiple transmog presets per character
+- Multi-character support: independent preset lists for Kliff, Damiane, and Oongka; the active preset swaps automatically when you change who you control
 - NPC armor variants and damaged variants render via automatic carrier swap
-- Safety filters: non-player gear (horse tack, pet armor) and wrong-slot items are hidden by default
+- Body-type picker filter: hides items whose body (male/female) does not match the active character so broken meshes stay out of the list. Per-character override available in the overlay for body-swap mod users
 - Per-slot control: enable/disable transmog independently for each equipment slot
 - Optional hotkeys: all disabled by default, configurable via INI
 - Open-source with full transparency
@@ -174,8 +175,8 @@ See the full list at the [Supported Input Names](https://github.com/tkhquang/Det
 
 - **Item catalog may be incomplete** - the armor list is filtered to exclude known-broken items. Some wearable items may be missing. Report missing items in the Bugs or Posts tab.
 - **Silverwolf Leather Armor** and some other armor seems to have combined with cloak. If you apply it and it disappears right afterwards, you should try setting the cloak slot and armor slot to none, save, then reapply the armor again.
-- **NPC armor variants and damaged variants render via carrier** — items tagged `(carrier)` in the picker use an automatic carrier swap + character-class bypass to render. Most work; a few may still produce empty slots depending on the item's internal skeleton bindings.
-- **Non-humanoid items crash** — horse tack, pet armor, and wagon gear crash the mesh binder. The "Safe only" filter hides these by default.
+- **NPC armor variants and damaged variants render via carrier** -- items tagged `(carrier)` in the picker use an automatic carrier swap + character-class bypass to render. Most work; a few may still produce empty slots depending on the item's internal skeleton bindings.
+- **Non-humanoid items crash** -- horse tack, pet armor, and wagon gear crash the mesh binder. The "Safe only" filter hides these by default.
 - **Wrong-slot or non-equipment items will crash** - selecting a chest piece for the helm slot, or non-armor items (dog armor, recipes, etc.) crashes the game. Safety filters prevent this by default. Do not disable them unless you know what you are doing.
 - **Dyeing is not supported yet** - transmog items use their default colors.
 - **Special-effect armor may have visual quirks** - armor with particle effects (e.g. Marni Laser Helm) may not render particles correctly. Hair may clip through some helmets. I haven't been able to make these work yet.

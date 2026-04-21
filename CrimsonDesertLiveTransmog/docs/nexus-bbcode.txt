@@ -2,7 +2,7 @@
 [size=4]Runtime Armor Appearance Swap for Crimson Desert[/size][/center]
 
 [b][color=#ff6600]This mod is in BETA[/color][/b] -edge cases may exist. Use at your own risk. Please report any issues you find!
-[b][color=#ff6600]Currently only works with Kliff[/color][/b] -other playable characters are not supported yet.
+[b]Supports Kliff, Damiane, and Oongka.[/b] Presets are stored per character and the active preset swaps automatically when you switch who you control in-game.
 
 [youtube]B4xX3LkgXhs[/youtube]
 
@@ -18,6 +18,8 @@ Change the visual appearance of your equipped armor [b]in real time[/b] without 
 [*][b]Built-in overlay[/b] -no external tools required. Press [b]Home[/b] to toggle the overlay
 [*][b]In-game item browser[/b] -searchable dropdown with all armor pieces, auto-categorized by slot (Helm, Chest, Cloak, Gloves, Boots)
 [*][b]Preset system[/b] -save, load, rename, and cycle through multiple transmog presets per character
+[*][b]Multi-character support[/b] -independent preset lists for Kliff, Damiane, and Oongka; the active preset swaps automatically when you change who you control
+[*][b]Body-type filter[/b] -hides items whose body type (male/female) does not match the active character so broken meshes stay out of the picker. Per-character override available in the overlay for body-swap mod users
 [*][b]NPC and damaged variants[/b] -NPC armor variants and damaged variants render via automatic carrier swap
 [*][b]Safety filters[/b] -non-player gear (horse tack, pet armor) and wrong-slot items are filtered out by default
 [*][b]Per-slot control[/b] -enable/disable transmog independently for each equipment slot
@@ -56,8 +58,15 @@ Download the [b]x64[/b] build of [url=https://github.com/ThirteenAG/Ultimate-ASI
 [size=4]Step 2 -Install the mod[/size]
 [list=1]
 [*]Download the latest release from the Files tab
-[*]Extract [b]CrimsonDesertLiveTransmog.asi[/b] and [b]CrimsonDesertLiveTransmog.ini[/b] into your [b]bin64[/b] folder
+[*]Extract [b]ALL[/b] of the following into your [b]bin64[/b] folder:
+[list]
+[*][b]CrimsonDesertLiveTransmog.asi[/b] -the mod binary
+[*][b]CrimsonDesertLiveTransmog.ini[/b] -configuration
+[*][b]CrimsonDesertLiveTransmog_display_names.tsv[/b] -human-readable item names for the picker
 [/list]
+[/list]
+
+[color=#ff6600][b]Important:[/b][/color] the [b].tsv[/b] file must sit next to the [b].asi[/b]. It maps internal item ids to display names shown in the overlay picker. Without it, the picker shows raw ids only.
 
 [size=4]Step 3 -Launch and play[/size]
 Launch the game. Press [b]Home[/b] to open the transmog overlay and start browsing armor.
@@ -65,11 +74,12 @@ Launch the game. Press [b]Home[/b] to open the transmog overlay and start browsi
 [size=4]File placement[/size]
 [code]
 <Crimson Desert>/bin64/
-├── CrimsonDesert.exe                          (Game executable)
-├── winmm.dll                                  (ASI Loader)
-├── CrimsonDesertLiveTransmog.asi              (This mod)
-├── CrimsonDesertLiveTransmog.ini              (Configuration)
-├── CrimsonDesertLiveTransmog_presets.json     (Auto-generated preset file)
+├── CrimsonDesert.exe                                (Game executable)
+├── winmm.dll                                        (ASI Loader)
+├── CrimsonDesertLiveTransmog.asi                    (This mod)
+├── CrimsonDesertLiveTransmog.ini                    (Configuration)
+├── CrimsonDesertLiveTransmog_display_names.tsv      (Item display names, REQUIRED)
+├── CrimsonDesertLiveTransmog_presets.json           (Auto-generated preset file)
 └── ...
 [/code]
 
@@ -91,12 +101,13 @@ If you use [url=https://github.com/cdozdil/OptiScaler]OptiScaler[/url] for frame
 [code]
 <Crimson Desert>/bin64/
 ├── CrimsonDesert.exe
-├── OptiScaler.ini                             (LoadAsiPlugins = true)
-├── dxgi.dll                                   (OptiScaler)
+├── OptiScaler.ini                                   (LoadAsiPlugins = true)
+├── dxgi.dll                                         (OptiScaler)
 ├── plugins/
 │   ├── CrimsonDesertLiveTransmog.asi
 │   ├── CrimsonDesertLiveTransmog.ini
-│   └── ...                                    (Other ASI mods go here too)
+│   ├── CrimsonDesertLiveTransmog_display_names.tsv  (REQUIRED, keep next to the .asi)
+│   └── ...                                          (Other ASI mods go here too)
 └── ...
 [/code]
 
@@ -209,14 +220,25 @@ If you encounter issues:
 
 [size=5]Credits & Source Code[/size]
 
-Built with [url=https://github.com/tkhquang/DetourModKit]DetourModKit[/url] for core functionality.
+[b]Author:[/b] tkhquang ([url=https://github.com/tkhquang]GitHub[/url] / [url=https://next.nexusmods.com/profile/tkhquang]Nexus[/url])
+[b]Source:[/b] [url=https://github.com/tkhquang/CrimsonDesertTools]github.com/tkhquang/CrimsonDesertTools[/url]
+[b]Report issues:[/b] [url=https://github.com/tkhquang/CrimsonDesertTools/issues]GitHub Issues[/url] or the Bugs tab on this Nexus page
 
+Built with [url=https://github.com/tkhquang/DetourModKit]DetourModKit[/url] for core functionality (AOB scanning, hook management, logging, input).
+
+[b]Third-party libraries:[/b]
 [list]
-[*][url=https://github.com/ThirteenAG]ThirteenAG[/url] -Ultimate ASI Loader
-[*][url=https://github.com/cursey]cursey[/url] -SafetyHook
-[*]Brodie Thiesfield -SimpleIni
-[*][url=https://github.com/ocornut]Omar Cornut[/url] -Dear ImGui
+[*][url=https://github.com/ThirteenAG/Ultimate-ASI-Loader]Ultimate ASI Loader[/url] by ThirteenAG -ASI loading layer
+[*][url=https://github.com/cursey/safetyhook]SafetyHook[/url] by cursey -inline / mid-function hooking
+[*][url=https://github.com/zyantific/zydis]Zydis[/url] / [url=https://github.com/zyantific/zycore-c]Zycore[/url] by Florian Bernd & Joel Höner -x86/x64 disassembly (used by SafetyHook)
+[*][url=https://github.com/brofield/simpleini]SimpleIni[/url] by Brodie Thiesfield -INI configuration parser
+[*][url=https://github.com/nlohmann/json]nlohmann/json[/url] by Niels Lohmann -JSON preset serialization
+[*][url=https://github.com/ocornut/imgui]Dear ImGui[/url] by Omar Cornut -overlay GUI
+[*][url=https://github.com/microsoft/DirectXMath]DirectXMath[/url] by Microsoft -math primitives
+[*][url=https://reshade.me/]ReShade[/url] by crosire -optional addon host
 [*]Pearl Abyss -Crimson Desert
 [/list]
 
-All Crimson Desert mods and tools can be found in this [url=https://github.com/tkhquang/CrimsonDesertTools]GitHub repository[/url]. Feel free to contribute or suggest improvements!
+See [b]CrimsonDesertLiveTransmog_Acknowledgements.txt[/b] bundled with the download for full license texts.
+
+All Crimson Desert mods and tools in this series can be found in the [url=https://github.com/tkhquang/CrimsonDesertTools]CrimsonDesertTools GitHub repository[/url]. Feel free to contribute or suggest improvements!

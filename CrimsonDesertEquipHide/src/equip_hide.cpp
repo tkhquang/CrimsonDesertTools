@@ -24,11 +24,6 @@
 
 namespace EquipHide
 {
-    // v1.03.01 changed register allocation: PartInOut struct pointer moved
-    // from R13 to RAX (loaded from [RBP+5Fh]).  Set by init() based on
-    // which AOB pattern matched (V103_ prefix → true).
-    static bool s_partInOutFromRax{false};
-
     // Indexed by truncated part hash; R8B gate-skip lock prevents PartInOut
     // from re-running the transition dispatch after the first vis=2 frame.
     static uint8_t s_hideLocked[0x10000]{};
@@ -206,9 +201,8 @@ namespace EquipHide
         if (mask == 0)
             return;
 
-        // v1.03.01: PartInOut struct is in RAX (loaded from [rbp+5F] before hook).
-        // v1.02.00: PartInOut struct is in R13 directly.
-        auto partInOut = s_partInOutFromRax ? ctx.rax : ctx.r13;
+        // PartInOut struct pointer is in RAX (loaded from [rbp+5F] before hook).
+        auto partInOut = ctx.rax;
         if (partInOut < 0x10000)
             return;
 
@@ -287,7 +281,7 @@ namespace EquipHide
 
     /* SEH wrapper: separate function because MSVC SEH cannot coexist with
        C++ destructors in the same frame. Swallows faults if the mod is
-       outdated and register layout has changed — don't crash the game. */
+       outdated and register layout has changed -- don't crash the game. */
     static int seh_filter(unsigned int /*code*/) { return EXCEPTION_EXECUTE_HANDLER; }
 
     static void on_vis_check(SafetyHookContext &ctx)
@@ -307,7 +301,7 @@ namespace EquipHide
         auto &logger = DMK::Logger::get_instance();
 
         if (!DMK::Memory::init_cache())
-            logger.warning("Memory cache init failed — pointer reads may be slower");
+            logger.warning("Memory cache init failed -- pointer reads may be slower");
 
         auto &addrs = resolved_addrs();
 
@@ -406,15 +400,6 @@ namespace EquipHide
             return false;
         }
 
-        // v1.03.01 moved PartInOut struct pointer from R13 to RAX
-        // and shifted struct offsets (+0x48 → +0x58). body_to_vis_ctrl
-        // chain is still correct; comp offset fix handles the rest.
-        if (matchedSource && std::string_view(matchedSource->name).starts_with("V103_"))
-        {
-            s_partInOutFromRax = true;
-            logger.info("v1.03.01 layout detected (partInOut via RAX, comp at +0x58)");
-        }
-
         auto &hookMgr = DMK::HookManager::get_instance();
         auto hookResult = hookMgr.create_mid_hook("EquipVisCheck", hookAddr, on_vis_check);
 
@@ -450,12 +435,12 @@ namespace EquipHide
                                 partAddShowAddr);
                 }
                 else
-                    logger.warning("PartAddShow hook failed: {} — gliding flash fix disabled",
+                    logger.warning("PartAddShow hook failed: {} -- gliding flash fix disabled",
                                    DetourModKit::Hook::error_to_string(result.error()));
             }
             else
             {
-                logger.warning("PartAddShow AOB scan failed — gliding flash fix disabled");
+                logger.warning("PartAddShow AOB scan failed -- gliding flash fix disabled");
             }
         }
 
@@ -480,21 +465,21 @@ namespace EquipHide
                 if (result.has_value())
                 {
                     set_postfix_eval_trampoline(trampoline);
-                    logger.info("PostfixEval inline hook installed at 0x{:X} — bald fix active",
+                    logger.info("PostfixEval inline hook installed at 0x{:X} -- bald fix active",
                                 postfixEvalAddr);
                 }
                 else
-                    logger.warning("PostfixEval hook failed: {} — bald fix disabled",
+                    logger.warning("PostfixEval hook failed: {} -- bald fix disabled",
                                    DetourModKit::Hook::error_to_string(result.error()));
             }
             else
             {
-                logger.warning("PostfixEval AOB scan failed — bald fix disabled");
+                logger.warning("PostfixEval AOB scan failed -- bald fix disabled");
             }
         }
         else
         {
-            logger.info("BaldFix disabled in config — hair-hiding rules will apply normally");
+            logger.info("BaldFix disabled in config -- hair-hiding rules will apply normally");
         }
 
         // Equipment change detection for CascadeFix re-sync.

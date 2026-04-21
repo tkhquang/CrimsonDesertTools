@@ -14,7 +14,7 @@ namespace Transmog
     {
         bool active = false;
         // Runtime-only item id resolved from `itemName` against the
-        // item catalog. Never persisted — rebuilt on every load by
+        // item catalog. Never persisted -- rebuilt on every load by
         // slot_from_json() or reresolve_all_names().
         uint16_t itemId = 0;
         // Stable game-data item name (e.g. "Kliff_PlateArmor_Helm").
@@ -33,6 +33,14 @@ namespace Transmog
     {
         int activePreset = 0;
         std::vector<Preset> presets;
+        /// Body-kind override used by the picker filter. One of:
+        ///   "Auto"   (default) -- fall back to the hardcoded map
+        ///                        (Kliff/Oongka = Male, Damiane = Female)
+        ///   "Male" / "Female" / "Both"
+        /// Lets body-swap mod users mark Kliff as "Female" so his
+        /// picker shows the female-body-token pool. Persisted in
+        /// presets.json per character.
+        std::string bodyKind = "Auto";
     };
 
     class PresetManager
@@ -51,6 +59,14 @@ namespace Transmog
         std::vector<std::string> character_names() const;
         const std::string &active_character() const;
         void set_active_character(const std::string &name);
+
+        /// Get/set the per-character body-kind override. Empty or
+        /// "Auto" falls back to the hardcoded default in
+        /// ItemNameTable::body_kind_for_character(). Values are saved
+        /// to presets.json on set.
+        std::string body_kind_of(const std::string &charName) const;
+        void set_body_kind_of(const std::string &charName,
+                              const std::string &bodyKind);
 
         // --- Preset management (operates on active character) ---
 

@@ -48,7 +48,7 @@ namespace Transmog
         else
         {
             DMK::Logger::get_instance().warning(
-                "[preset] item name '{}' not in current catalog — "
+                "[preset] item name '{}' not in current catalog -- "
                 "slot disabled; re-pick in the overlay",
                 s.itemName);
             s.active = false;
@@ -85,13 +85,18 @@ namespace Transmog
         for (auto &p : cp.presets)
             presetsArr.push_back(preset_to_json(p));
 
-        return json{{"activePreset", cp.activePreset}, {"presets", presetsArr}};
+        return json{
+            {"activePreset", cp.activePreset},
+            {"presets", presetsArr},
+            {"bodyKind", cp.bodyKind},
+        };
     }
 
     static CharacterPresets character_from_json(const json &j)
     {
         CharacterPresets cp;
         cp.activePreset = j.value("activePreset", 0);
+        cp.bodyKind = j.value("bodyKind", std::string("Auto"));
 
         if (j.contains("presets") && j["presets"].is_array())
         {
@@ -125,7 +130,7 @@ namespace Transmog
         std::ifstream file(path);
         if (!file.is_open())
         {
-            logger.info("Presets file not found — starting with defaults");
+            logger.info("Presets file not found -- starting with defaults");
 
             // Create default entries for known characters.
             ensure_character("Kliff");
@@ -139,7 +144,12 @@ namespace Transmog
         {
             json root = json::parse(file);
 
-            m_activeCharacter = root.value("activeCharacter", std::string("Kliff"));
+            // `activeCharacter` JSON field is no longer used -- the
+            // runtime active character is driven by the live WS
+            // chain via the char-swap detector. Kept here only to
+            // silently tolerate old presets.json files that still
+            // carry it; the value is discarded.
+            (void)root.value("activeCharacter", std::string{});
 
             if (root.contains("characters") && root["characters"].is_object())
             {
@@ -158,7 +168,7 @@ namespace Transmog
             if (!ItemNameTable::instance().ready())
             {
                 logger.info(
-                    "[preset] item catalog not ready at load time — name "
+                    "[preset] item catalog not ready at load time -- name "
                     "resolution deferred until background scan completes");
             }
         }
@@ -187,7 +197,9 @@ namespace Transmog
         // Schema v3: slots carry only itemName (stable identifier).
         // itemId is resolved at runtime from the item catalog.
         root["version"] = 3;
-        root["activeCharacter"] = m_activeCharacter;
+        // `activeCharacter` is intentionally NOT written -- the live
+        // controlled character drives apply at runtime, so the field
+        // would just be a stale last-viewed-UI hint.
 
         json chars = json::object();
         for (auto &[name, cp] : m_characters)
@@ -227,6 +239,34 @@ namespace Transmog
     {
         m_activeCharacter = name;
         ensure_character(name);
+    }
+
+    std::string PresetManager::body_kind_of(const std::string &charName) const
+    {
+        auto it = m_characters.find(charName);
+        if (it == m_characters.end())
+            return "Auto";
+        return it->second.bodyKind.empty() ? std::string("Auto")
+                                            : it->second.bodyKind;
+    }
+
+    void PresetManager::set_body_kind_of(const std::string &charName,
+                                         const std::string &bodyKind)
+    {
+        auto &cp = ensure_character(charName);
+        // Normalise: accept only known values; anything else collapses
+        // to "Auto" so the JSON stays clean and the picker filter has
+        // a well-defined fallback.
+        if (bodyKind == "Male" || bodyKind == "Female" ||
+            bodyKind == "Both" || bodyKind == "Auto")
+        {
+            cp.bodyKind = bodyKind;
+        }
+        else
+        {
+            cp.bodyKind = "Auto";
+        }
+        save();
     }
 
     // --- Preset management ---
@@ -389,7 +429,7 @@ namespace Transmog
         auto &mappings = slot_mappings();
 
         // NOTE: must NOT touch last_applied_ids() here. lastIds tracks what
-        // apply_all_transmog has actively injected into the game — the diff
+        // apply_all_transmog has actively injected into the game -- the diff
         // logic depends on lastIds holding the PREVIOUS applied state so it
         // can compute drop-masks on preset switching. Writing to lastIds
         // here would pre-populate it with the NEW preset values before the
@@ -413,7 +453,7 @@ namespace Transmog
         {
             p.slots[i].active = mappings[i].active;
             p.slots[i].itemId = mappings[i].targetItemId;
-            // id 0 means "none" — don't resolve a name for it.
+            // id 0 means "none" -- don't resolve a name for it.
             // The catalog's entry at index 0 is a real item
             // (Pyeonjeon_Arrow) and saving that name would cause
             // the preset to load an unintended item on reresolve.
@@ -432,7 +472,7 @@ namespace Transmog
         if (!table.ready())
         {
             logger.warning(
-                "[preset] reresolve_all_names called before catalog ready — "
+                "[preset] reresolve_all_names called before catalog ready -- "
                 "no-op");
             return 0;
         }
@@ -458,7 +498,7 @@ namespace Transmog
                     else
                     {
                         logger.warning(
-                            "[preset] '{}' not in catalog — disabling "
+                            "[preset] '{}' not in catalog -- disabling "
                             "(char='{}' preset='{}')",
                             slot.itemName, charName, preset.name);
                         slot.itemId = 0;

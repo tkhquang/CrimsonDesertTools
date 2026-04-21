@@ -1,15 +1,11 @@
 # IDE / editor
-.idea
+00_idea
 .vscode/*
 
 # Build artifacts
-CrimsonDesertEquipHide/build/*
-CrimsonDesertEquipHide/build_*/*
-!CrimsonDesertEquipHide/build/template
-
-CrimsonDesertLiveTransmog/build/*
-CrimsonDesertLiveTransmog/build_*/*
-!CrimsonDesertLiveTransmog/build/template
+CrimsonDesert*/build/*
+CrimsonDesert*/build_*/*
+!CrimsonDesert*/build/template
 
 # Keep marker files
 !/**/.gitkeep

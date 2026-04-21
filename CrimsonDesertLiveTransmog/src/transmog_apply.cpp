@@ -1,6 +1,7 @@
 #include "transmog_apply.hpp"
 #include "item_name_table.hpp"
 #include "part_show_suppress.hpp"
+#include "preset_manager.hpp"
 #include "real_part_tear_down.hpp"
 #include "shared_state.hpp"
 #include "transmog_map.hpp"
@@ -39,12 +40,19 @@ namespace Transmog
         in_transmog().store(false, std::memory_order_relaxed);
     }
 
-    // ── Default carrier set (Kliff PlateArmor) ──────────────────────────
-    // These are valid Kliff-equippable base items resolved by name at
-    // runtime. If a name fails to resolve, the slot falls back to direct
-    // equip (which may silently fail for NPC/variant items).
+    // ── Default carrier set (per character) ─────────────────────────────
+    // Each entry must be a valid item for THAT character in the given
+    // slot -- something the engine's equip class-gate accepts. Kliff and
+    // Oongka share Kliff_PlateArmor_* (Oongka's equip-type matches
+    // Kliff's). Damiane has her own armor namespace (Demian_*) which
+    // Kliff cannot wear, but the engine accepts them on Damiane even
+    // though they are marked PlayerSafe=no in the item catalog. The
+    // PlayerSafe flag reflects Kliff compatibility only.
+    //
+    // If a name fails to resolve the slot falls back to direct equip
+    // (which may silently fail for NPC/variant items).
 
-    static constexpr const char *k_defaultCarrierNames[] = {
+    static constexpr const char *k_kliffCarriers[] = {
         "Kliff_PlateArmor_Helm",   // TransmogSlot::Helm
         "Kliff_PlateArmor_Armor",  // TransmogSlot::Chest
         "Kliff_PlateArmor_Cloak",  // TransmogSlot::Cloak
@@ -52,7 +60,30 @@ namespace Transmog
         "Kliff_Plate_Boots",       // TransmogSlot::Boots
     };
 
-    uint16_t default_carrier_for_slot(TransmogSlot slot)
+    static constexpr const char *k_damianeCarriers[] = {
+        "Demian_PlateArmor_Helm_I",   // TransmogSlot::Helm
+        "Demian_Leather_Armor",       // TransmogSlot::Chest
+        "Demian_Leather_Cloak",       // TransmogSlot::Cloak
+        "Demian_Leather_Gloves_I",    // TransmogSlot::Gloves
+        "Demian_Plate_Boots_III",     // TransmogSlot::Boots
+    };
+
+    // Oongka carriers. Despite sharing 3/4 male-body classifier
+    // tokens with Kliff, the engine rejects Kliff-equip-type (0x0004)
+    // items at Oongka's equip gate -- Oongka's slot class is 0x0001.
+    // Native Oongka_* items pass the gate cleanly; the hybrid then
+    // patches their +0x42 over a Kliff target so Oongka can wear
+    // cross-character armor visuals.
+    static constexpr const char *k_oongkaCarriers[] = {
+        "Oongka_PlateArmor_Helm_II",   // TransmogSlot::Helm
+        "Oongka_Basic_Leather_Armor",  // TransmogSlot::Chest
+        "Oongka_Basic_Leather_Cloak",  // TransmogSlot::Cloak
+        "Oongka_Basic_Leather_Gloves", // TransmogSlot::Gloves
+        "Oongka_PlateArmor_Boots_II",  // TransmogSlot::Boots
+    };
+
+    uint16_t default_carrier_for_slot(
+        TransmogSlot slot, const std::string &charName)
     {
         const auto idx = static_cast<std::size_t>(slot);
         if (idx >= k_slotCount)
@@ -60,18 +91,80 @@ namespace Transmog
         const auto &table = ItemNameTable::instance();
         if (!table.ready())
             return 0;
-        auto id = table.id_of(k_defaultCarrierNames[idx]);
-        return id.value_or(0);
+
+        const char *name = k_kliffCarriers[idx];
+        if (charName == "Damiane")
+            name = k_damianeCarriers[idx];
+        else if (charName == "Oongka")
+            name = k_oongkaCarriers[idx];
+
+        auto id = table.id_of(name);
+        if (id.has_value())
+            return *id;
+
+        // Fallback: if a character-specific carrier name did not
+        // resolve (missing from catalog, renamed), try Kliff's set.
+        if (name != k_kliffCarriers[idx])
+        {
+            auto kliff = table.id_of(k_kliffCarriers[idx]);
+            return kliff.value_or(0);
+        }
+        return 0;
     }
 
-    bool needs_carrier(uint16_t itemId)
+    // Expected equip-type u16 (at desc+0x42) for the given playable
+    // character. CE-verified 2026-04-21:
+    //   Kliff   = 0x0004
+    //   Oongka  = 0x0001
+    //   Damiane = 0x0001
+    // Unknown characters default to Kliff's value so legacy call
+    // paths keep their prior behaviour.
+    static std::uint16_t expected_equip_type_for_char(
+        const std::string &charName) noexcept
+    {
+        if (charName == "Damiane" || charName == "Oongka")
+            return 0x0001;
+        return 0x0004;
+    }
+
+    bool needs_carrier(uint16_t itemId, const std::string &charName)
     {
         const auto &table = ItemNameTable::instance();
         if (!table.ready())
             return false;
-        return table.has_variant_meta(itemId) ||
-               !table.is_player_compatible(itemId) ||
-               table.has_npc_equip_type(itemId);
+
+        // Variant-meta items always need the carrier-patch path so
+        // the NPC variant descriptor gets swapped in for visuals
+        // while a clean carrier supplies the rule list.
+        if (table.has_variant_meta(itemId))
+            return true;
+
+        // Equip-type mismatch: the item's +0x42 slot class doesn't
+        // match what the active character's inventory slot accepts.
+        // Without the carrier path the engine rejects the item at
+        // the equip gate (Oongka picking Kliff's 0x0004 armor, Kliff
+        // picking Damiane's 0x0001 armor, etc.). The hybrid patches
+        // the carrier's equip-type over the target descriptor so
+        // the slot accepts while the target's visuals render.
+        const std::uint16_t expected =
+            expected_equip_type_for_char(charName);
+        const std::uint16_t actual = table.equip_type_of(itemId);
+        // equip_type_of returns 0 if the catalog hasn't resolved this
+        // id yet; fall back to the old broad "is_player_compatible"
+        // gate in that case so we don't silently direct-apply a
+        // cross-class item during the deferred-scan window.
+        if (actual == 0)
+            return !table.is_player_compatible(itemId) ||
+                   table.has_npc_equip_type(itemId);
+
+        return actual != expected;
+    }
+
+    // Legacy wrapper retained for any call sites that still assume
+    // Kliff. Matches the pre-2026-04-21 behaviour exactly.
+    bool needs_carrier(uint16_t itemId)
+    {
+        return needs_carrier(itemId, std::string("Kliff"));
     }
 
     // SEH-safe memory helpers (MSVC: __try cannot coexist with C++
@@ -292,7 +385,7 @@ namespace Transmog
     // Differences from apply_all_transmog:
     //   - Dispatch cache: only clears entries matching this slot's game
     //     tag (by walking the 24-byte stride array). Does NOT reset the
-    //     global count to zero — other slots' entries stay valid.
+    //     global count to zero -- other slots' entries stay valid.
     //   - Tear-down: Phase A (previous fake) and Phase B (real item)
     //     scoped to one slot.
     //   - Apply: single call to apply_transmog or
@@ -319,7 +412,13 @@ namespace Transmog
         auto &lastIds = last_applied_ids();
         auto &m = mappings[slotIdx];
 
-        if (world_system_ptr().load(std::memory_order_acquire))
+        // resolve_player_component() walks WorldSystem → ActorManager
+        // → UserActor → actor, which we confirmed in 2026-04-21 CE
+        // probes always returns Kliff's component regardless of the
+        // currently-controlled character. Using it unconditionally
+        // clobbered per-character a1 values from VEC/BatchEquip hooks.
+        // Keep it ONLY as a fallback when the passed-in a1 is invalid.
+        if (a1 < 0x10000 && world_system_ptr().load(std::memory_order_acquire))
         {
             auto fresh = resolve_player_component();
             if (fresh > 0x10000)
@@ -397,8 +496,11 @@ namespace Transmog
             realId = RealPartTearDown::get_real_item_id(
                 reinterpret_cast<void *>(a1), gameTag);
 
-            // Phase A: tear down previous fake.
-            if (prevId != 0 && prevId != realId)
+            // Phase A: tear down previous fake. Runs even when the
+            // previous fake itemId matches the live real item; we
+            // treat fake and real the same so the tear-down/apply
+            // sequence is always complete.
+            if (prevId != 0)
             {
                 const auto prevCarrier = last_applied_carrier_ids()[slotIdx];
                 const uintptr_t bypassAddr =
@@ -422,8 +524,9 @@ namespace Transmog
                     set_char_class_bypass(bypassAddr, 0x74);
             }
 
-            // Phase B: tear down real item if fake differs.
-            if (targetId != 0 && targetId != realId)
+            // Phase B: tear down the real item. Runs unconditionally
+            // (fake == real is treated the same as fake != real).
+            if (targetId != 0)
             {
                 if (RealPartTearDown::tear_down_real_part(
                         reinterpret_cast<void *>(a1), gameTag))
@@ -435,9 +538,13 @@ namespace Transmog
         if (targetId != 0)
         {
             const auto tmSlot = static_cast<TransmogSlot>(slotIdx);
-            const bool useCarrier = needs_carrier(targetId);
+            const auto &activeChar =
+                PresetManager::instance().active_character();
+            const bool useCarrier = needs_carrier(targetId, activeChar);
             const uint16_t carrierId =
-                useCarrier ? default_carrier_for_slot(tmSlot) : 0;
+                useCarrier
+                    ? default_carrier_for_slot(tmSlot, activeChar)
+                    : 0;
 
             if (useCarrier && carrierId != 0)
             {
@@ -467,7 +574,7 @@ namespace Transmog
             // Clearing this slot. Two cases:
             //  - active + none (checkbox ticked, picker = none): user
             //    wants to show an EMPTY slot (bare head, etc.). Do NOT
-            //    restore the real item — Phase B already tore it down.
+            //    restore the real item -- Phase B already tore it down.
             //  - inactive (!m.active): slot was previously controlled
             //    by us; restore the real item so it reappears.
             const bool showEmpty = m.active;
@@ -525,7 +632,8 @@ namespace Transmog
         auto &mappings = slot_mappings();
         auto &lastIds = last_applied_ids();
 
-        if (world_system_ptr().load(std::memory_order_acquire))
+        // Fallback only -- see apply_single_slot_transmog comment.
+        if (a1 < 0x10000 && world_system_ptr().load(std::memory_order_acquire))
         {
             auto fresh = resolve_player_component();
             if (fresh > 0x10000)
@@ -563,7 +671,7 @@ namespace Transmog
         //
         // Slot tag order here must match k_tearDownSlots inside the
         // tear-down block: Helm(3), Chest(4), Gloves(5), Boots(6),
-        // Cloak(16). TransmogSlot enum indices differ — we translate.
+        // Cloak(16). TransmogSlot enum indices differ -- we translate.
         static constexpr std::uint16_t k_earlyOutSlotTags[5] = {
             0x0003, 0x0004, 0x0005, 0x0006, 0x0010};
         static constexpr TransmogSlot k_earlyOutSlots[5] = {
@@ -606,7 +714,7 @@ namespace Transmog
                 }
             }
 
-            // Check for active "none" slots — these need Phase B
+            // Check for active "none" slots -- these need Phase B
             // tear-down and suppress reinforcement even when nothing
             // else changed (the game may re-equip real items after our
             // initial tear-down during the load sequence).
@@ -665,8 +773,8 @@ namespace Transmog
             // last_applied_real_ids so we compare against the previous
             // state. A slot needs tear-down + re-apply if its preset
             // target changed OR its underlying real item changed.
-            // Unchanged slots are skipped — no tear-down, no cache
-            // clear, no SlotPopulator call — so they don't flicker.
+            // Unchanged slots are skipped -- no tear-down, no cache
+            // clear, no SlotPopulator call -- so they don't flicker.
             //
             // Unticked slots whose real changes ARE still marked: a
             // prior restore via SlotPopulator may have left a dispatch
@@ -687,7 +795,7 @@ namespace Transmog
 
                 // Check if the real item changed for this slot.
                 // Unticked slots still need cache cleanup when their
-                // real changes — an earlier restore via SlotPopulator
+                // real changes -- an earlier restore via SlotPopulator
                 // may have left a dispatch entry that the game's own
                 // unequip flow can't remove.
                 for (std::size_t k = 0; k < 5; ++k)
@@ -732,7 +840,7 @@ namespace Transmog
         //      restore count, which re-exposed previous-preset entries
         //      and caused SlotPopulator's linear search (14076ca7b) to
         //      find an old slotNativeId and *append* a new blob to its
-        //      existing subArray — the stale blob still gets dispatched
+        //      existing subArray -- the stale blob still gets dispatched
         //      to VEC via sub_14076D520, producing the stale helm bug.
         //  (2) Even on a slot we ARE re-populating this frame, the game
         //      never clears subCount, so the previously queued blob
@@ -789,9 +897,9 @@ namespace Transmog
 
         // Two-phase scene-graph tear-down before applying fakes.
         //
-        // Phase A — tear down the previous preset's fake meshes using
+        // Phase A -- tear down the previous preset's fake meshes using
         //   lastIds[] as the itemId source.
-        // Phase B — tear down the REAL item in the auth table for every
+        // Phase B -- tear down the REAL item in the auth table for every
         //   active slot whose new fake differs from the real.
         //
         // Both phases go through sub_14075FE60 which detaches particle
@@ -867,16 +975,9 @@ namespace Transmog
                 const auto prevCarrier = last_applied_carrier_ids()[idx];
                 if (prevId == 0)
                     continue;
-                if (static_cast<std::uint16_t>(prevId) == realItemId[k] &&
-                    prevCarrier == 0)
-                {
-                    logger.trace(
-                        "[dispatch] tear_down_fake slot={:#06x} itemId={:#06x} "
-                        "skipped (matches real, no carrier)",
-                        td.gameTag,
-                        static_cast<std::uint16_t>(prevId));
-                    continue;
-                }
+                // Phase A runs unconditionally: fake and real are
+                // treated equally, so even when the previous fake
+                // matched the live real item we still tear it down.
                 if (prevCarrier != 0 &&
                     prevCarrier != static_cast<std::uint16_t>(prevId))
                 {
@@ -903,9 +1004,11 @@ namespace Transmog
                              "after Phase A tear-down");
             }
 
-            // Phase B: real items for any active slot. Skip slots where
-            // the NEW fake itemId matches the real equipped id AND the
-            // real is still intact. Also skip slots with no work needed.
+            // Phase B: real items for any active slot. Runs
+            // unconditionally -- fake and real are treated equally,
+            // so even when the new fake matches the live real we
+            // still tear down the real part. Only slots that had no
+            // slotNeedsWork flag or are inactive skip.
             for (std::size_t k = 0; k < k_tearDownCount; ++k)
             {
                 const auto &td = k_tearDownSlots[k];
@@ -915,17 +1018,6 @@ namespace Transmog
                 auto &m = mappings[idx];
                 if (!m.active)
                     continue;
-                if (m.targetItemId != 0 &&
-                    static_cast<std::uint16_t>(m.targetItemId) == realItemId[k] &&
-                    !real_damaged()[idx])
-                {
-                    logger.trace(
-                        "[dispatch] tear_down slot={:#06x} itemId={:#06x} "
-                        "skipped (fake matches intact real)",
-                        td.gameTag,
-                        static_cast<std::uint16_t>(m.targetItemId));
-                    continue;
-                }
                 if (RealPartTearDown::tear_down_real_part(
                         reinterpret_cast<void *>(a1), td.gameTag))
                 {
@@ -962,32 +1054,22 @@ namespace Transmog
             if (!m.active || m.targetItemId == 0)
                 continue;
 
-            // Skip SlotPopulator when the fake matches the INTACT live
-            // real item. Once the real has been damaged by a previous
-            // phase-B tear-down, fall through so SlotPopulator can
-            // restore the mesh — the layer-2 effects are already lost.
+            // Fake and real are treated equally -- SlotPopulator runs
+            // unconditionally even when the new fake itemId matches
+            // the intact live real item. The earlier skip-on-match
+            // fast-path was removed per user preference (predictable
+            // apply sequence over incremental CPU savings).
             //
-            // Important: do NOT increment ourWrittenCount on the skip
-            // path. We did not actually write a dispatch cache entry.
-            const std::uint16_t realId = lookup_real_id(i);
-            if (realId != 0 &&
-                static_cast<std::uint16_t>(m.targetItemId) == realId &&
-                !real_damaged()[i])
-            {
-                logger.trace(
-                    "[dispatch] apply_transmog slot={} itemId={:#06x} "
-                    "skipped (fake matches intact real)",
-                    i, m.targetItemId);
-                lastIds[i] = m.targetItemId;
-                continue;
-            }
-
             // Decide: direct apply or carrier-assisted apply.
             const auto tmSlot = static_cast<TransmogSlot>(i);
             const auto targetId = m.targetItemId;
-            const bool useCarrier = needs_carrier(targetId);
+            const auto &activeChar =
+                PresetManager::instance().active_character();
+            const bool useCarrier = needs_carrier(targetId, activeChar);
             const uint16_t carrierId =
-                useCarrier ? default_carrier_for_slot(tmSlot) : 0;
+                useCarrier
+                    ? default_carrier_for_slot(tmSlot, activeChar)
+                    : 0;
 
             if (useCarrier && carrierId != 0)
             {
@@ -1032,7 +1114,7 @@ namespace Transmog
         // previously controlled by us (Phase B tore down the real
         // item). Restore the real item so it reappears.
         // "Active + none" (checkbox ticked, dropdown=none) means
-        // "show empty" — do NOT restore.
+        // "show empty" -- do NOT restore.
         for (std::size_t i = 0; i < k_slotCount; ++i)
         {
             const auto &m = mappings[i];
@@ -1041,7 +1123,7 @@ namespace Transmog
                 const std::uint16_t realId = lookup_real_id(i);
                 if (realId != 0)
                 {
-                    logger.info("[dispatch] slot={} unticked — "
+                    logger.info("[dispatch] slot={} unticked -- "
                                 "restoring real item {:#06x}",
                                 slot_name(static_cast<TransmogSlot>(i)),
                                 realId);
@@ -1055,7 +1137,7 @@ namespace Transmog
                     // left a scene-graph mesh entry. Tear it down so
                     // the visual actually disappears. The old real ID
                     // is still in last_applied_real_ids (not yet
-                    // overwritten — moved to end of function).
+                    // overwritten -- moved to end of function).
                     for (std::size_t k = 0; k < k_tearDownCount; ++k)
                     {
                         if (static_cast<std::size_t>(
@@ -1067,7 +1149,7 @@ namespace Transmog
                         {
                             logger.info(
                                 "[dispatch] slot={} unticked + "
-                                "unequipped — tearing down restored "
+                                "unequipped -- tearing down restored "
                                 "mesh {:#06x}",
                                 slot_name(static_cast<TransmogSlot>(i)),
                                 oldReal);
@@ -1109,14 +1191,14 @@ namespace Transmog
             const auto oldReal = last_applied_real_ids()[k];
             if (oldReal == 0)
                 continue;
-            logger.info("[dispatch] slot={} cleanup — tearing down "
+            logger.info("[dispatch] slot={} cleanup -- tearing down "
                         "stale restore mesh {:#06x}",
                         slot_name(td.slot), oldReal);
             RealPartTearDown::tear_down_by_item_id(
                 reinterpret_cast<void *>(a1), oldReal, td.gameTag);
         }
 
-        // Count was NOT zeroed — unchanged slots' entries are still
+        // Count was NOT zeroed -- unchanged slots' entries are still
         // live with their original subCount. Log the final state for
         // diagnostics.
         __try
@@ -1184,7 +1266,8 @@ namespace Transmog
         auto &logger = DMK::Logger::get_instance();
         auto &lastIds = last_applied_ids();
 
-        if (world_system_ptr().load(std::memory_order_acquire))
+        // Fallback only -- see apply_single_slot_transmog comment.
+        if (a1 < 0x10000 && world_system_ptr().load(std::memory_order_acquire))
         {
             auto fresh = resolve_player_component();
             if (fresh > 0x10000)
