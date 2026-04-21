@@ -13,7 +13,13 @@ namespace EquipHide
     static uintptr_t s_prevVisCtrls[k_maxProtagonists]{};
     static int s_prevCount = 0;
 
-    /** @brief Traverse body -> vis_ctrl pointer chain. Caller MUST be SEH-protected. */
+    /** @brief Traverse body -> vis_ctrl pointer chain. Caller MUST be SEH-protected.
+     *  @details Trace-logs only when a (body -> vc) mapping is new or has
+     *           changed since the last walk; successful walks with a
+     *           previously-seen mapping are silent. The resolver fires
+     *           hundreds of times per second and a full trace on every call
+     *           floods the log. Chain-broken paths always log since those
+     *           indicate real state transitions worth seeing. */
     static uintptr_t body_to_vis_ctrl(uintptr_t body) noexcept
     {
         if (!body)
@@ -34,6 +40,21 @@ namespace EquipHide
             return 0;
         }
         auto vc = read_ptr_unsafe(sub, 0xE8);
+
+        // Dedupe on (body, vc): only log when this body resolves to a
+        // different vc than last seen. Small fixed LRU sized to the max
+        // protagonist count -- any more is not useful for this resolver.
+        struct Entry { uintptr_t body, vc; };
+        static Entry s_lru[k_maxProtagonists]{};
+        static int s_next = 0;
+        for (auto &e : s_lru)
+        {
+            if (e.body == body && e.vc == vc)
+                return vc;
+        }
+        s_lru[s_next] = {body, vc};
+        s_next = (s_next + 1) % k_maxProtagonists;
+
         DMK::Logger::get_instance().trace(
             "body_to_vis_ctrl: body=0x{:X} inner=0x{:X} sub=0x{:X} vc=0x{:X}",
             body, inner, sub, vc);
@@ -137,7 +158,7 @@ namespace EquipHide
                             ps.armorInjected[j].store(false, std::memory_order_relaxed);
                         needs_direct_write().store(true, std::memory_order_relaxed);
                         DMK::Logger::get_instance().debug(
-                            "Player set changed — scheduling injection + direct write");
+                            "Player set changed -- scheduling injection + direct write");
                     }
                     mtx.unlock();
                 }
@@ -179,11 +200,9 @@ namespace EquipHide
         if (flag_fallback_mode().load(std::memory_order_relaxed))
         {
             /* Actor type byte: *(*(actor+0x88)+1). Value 1 = local player,
-               3-6 = party members. Same mechanism the headgear visibility system uses.
-               v1.03.01 shifted comp from +0x48 to +0x58. */
+               3-6 = party members. Same mechanism the headgear visibility
+               system uses. */
             auto comp = read_ptr_unsafe(a1, 0x58);
-            if (!comp)
-                comp = read_ptr_unsafe(a1, 0x48);
             if (comp)
             {
                 auto actor = read_ptr_unsafe(comp, 0x08);

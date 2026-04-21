@@ -98,7 +98,7 @@ namespace Transmog::PartShowSuppress
             {
                 logger.warning(
                     "[dispatch] slot hash missing: '{}' not found in "
-                    "IndexedStringA — suppression for slot {} disabled",
+                    "IndexedStringA -- suppression for slot {} disabled",
                     k_slotNames[i].name, k_slotNames[i].slot);
                 continue;
             }
@@ -151,7 +151,7 @@ namespace Transmog::PartShowSuppress
         if (partHash != 0 &&
             s_hashSeen[idx].exchange(1, std::memory_order_relaxed) == 0)
         {
-            DMK::Logger::get_instance().info(
+            DMK::Logger::get_instance().trace(
                 "[dispatch] PartAddShow unique hash=0x{:08X} low16=0x{:04X} "
                 "a2={:#04x} enabled={} suppress={}",
                 partHash, idx, static_cast<unsigned>(a2), enabled, suppress);

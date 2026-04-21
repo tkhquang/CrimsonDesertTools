@@ -23,13 +23,23 @@ namespace Transmog
     void apply_transmog_with_carrier(
         __int64 a1, std::uint16_t carrierId, std::uint16_t targetId);
 
-    /// Resolve the default carrier itemId for a given transmog slot.
-    /// Returns 0 if no carrier is needed (item is directly equippable)
-    /// or if the carrier name can't be resolved.
-    std::uint16_t default_carrier_for_slot(TransmogSlot slot);
+    /// Resolve the default carrier itemId for a given transmog slot
+    /// and currently-active character. Each character needs carriers
+    /// from its own equippable pool -- Kliff's plate base items are
+    /// rejected by the engine class-gate on Damiane (and vice versa).
+    /// Returns 0 if the name can't be resolved.
+    std::uint16_t default_carrier_for_slot(
+        TransmogSlot slot, const std::string &charName);
 
-    /// Returns true if the given item needs a carrier (has variant meta
-    /// or is not player-compatible).
+    /// Returns true if the given item needs the carrier-patch path
+    /// when applied on the given character. An item needs carrier
+    /// when either it carries NPC variant metadata, or its equip-
+    /// type at desc+0x42 doesn't match the active character's slot
+    /// class (otherwise the engine rejects it at equip time).
+    bool needs_carrier(std::uint16_t itemId, const std::string &charName);
+
+    /// Legacy overload (assumes Kliff). Kept for call sites that
+    /// predate multi-character support.
     bool needs_carrier(std::uint16_t itemId);
 
     /// Single-slot apply: tears down and re-applies only the given slot.

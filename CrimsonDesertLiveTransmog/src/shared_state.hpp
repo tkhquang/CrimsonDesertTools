@@ -13,11 +13,11 @@ namespace Transmog
     struct ResolvedAddresses
     {
         uintptr_t slotPopulator       = 0;
-        uintptr_t mapLookup            = 0; // IndexedStringA::lookup — used to resolve CD_* slot hashes at runtime
-        uintptr_t subTranslator        = 0; // sub_14076D950 — anchor for iteminfo item-name table scan
-        uintptr_t safeTearDown         = 0; // sub_14075FE60 — scene-graph tear-down used by real_part_tear_down
-        uintptr_t indexedStringLookup  = 0; // sub_1402D75D0 — IndexedStringA short->hash; resolved via ItemNameTable chain walk (50+ template siblings prevent direct AOB)
-        uintptr_t charClassBypass      = 0; // 0x141D5F538 — jz byte in CondPrefab evaluator secondary hash check. Toggle 0x74↔0xEB for NPC item support.
+        uintptr_t mapLookup            = 0; // IndexedStringA::lookup -- used to resolve CD_* slot hashes at runtime
+        uintptr_t subTranslator        = 0; // sub_14076D950 -- anchor for iteminfo item-name table scan
+        uintptr_t safeTearDown         = 0; // sub_14075FE60 -- scene-graph tear-down used by real_part_tear_down
+        uintptr_t indexedStringLookup  = 0; // sub_1402D75D0 -- IndexedStringA short->hash; resolved via ItemNameTable chain walk (50+ template siblings prevent direct AOB)
+        uintptr_t charClassBypass      = 0; // 0x141D5F538 -- jz byte in CondPrefab evaluator secondary hash check. Toggle 0x74↔0xEB for NPC item support.
     };
 
     ResolvedAddresses &resolved_addrs();
@@ -57,7 +57,7 @@ namespace Transmog
     // --- Trampoline typedefs ---
 
     // sub_14076C960: Populates slot visual data + calls VisualEquipChange.
-    // This is the KEY function for transmog — it loads meshes and transitions.
+    // This is the KEY function for transmog -- it loads meshes and transitions.
     using SlotPopulatorFn = __int64(__fastcall *)(__int64 a1, unsigned __int16 *a2_itemData, __int64 a3_swapEntry);
     SlotPopulatorFn &slot_populator_fn();
 
@@ -78,6 +78,14 @@ namespace Transmog
 
     /// Last known player a1 (captured from BatchEquip hook / VEC hook).
     std::atomic<__int64> &player_a1();
+
+    /// Returns the currently-controlled character name ("Kliff",
+    /// "Damiane", "Oongka") by reading the 1-based index byte at
+    /// `*(WS+0x30)+0x30` (CE-verified 2026-04-21 on v1.03.01).
+    /// Returns an empty string if the chain is not yet resolved,
+    /// the byte holds an unknown value, or a memory fault is
+    /// caught. Safe to call from any thread.
+    std::string current_controlled_character_name() noexcept;
 
     /// WorldSystem base pointer (game_base + RVA). Atomic because x64
     /// qword stores are naturally atomic on aligned data but the compiler
@@ -107,7 +115,7 @@ namespace Transmog
     /// debounced apply to one slot only, avoiding full-gear flicker.
     /// Last-writer-wins: if manual_apply (full) and manual_apply_slot
     /// race before the worker wakes, only the latest store takes
-    /// effect. This is acceptable — the user's most recent action wins.
+    /// effect. This is acceptable -- the user's most recent action wins.
     std::atomic<std::size_t> &pending_slot_index();
 
     // --- Hot-path utilities ---

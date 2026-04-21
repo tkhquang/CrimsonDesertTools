@@ -60,6 +60,42 @@ namespace Transmog
     std::atomic<bool> &in_transmog() { return s_inTransmog; }
     std::atomic<bool> &suppress_vec() { return s_suppressVEC; }
     std::atomic<__int64> &player_a1() { return s_playerA1; }
+
+    // SEH-only helper -- kept in its own no-C++-object function so
+    // MSVC __try/__except doesn't collide with std::string unwinding
+    // (C2712) in callers.
+    static std::uint8_t read_controlled_char_idx_seh() noexcept
+    {
+        const auto wsBase =
+            s_worldSystemPtr.load(std::memory_order_acquire);
+        if (!wsBase)
+            return 0;
+        __try
+        {
+            auto ws = *reinterpret_cast<uintptr_t *>(wsBase);
+            if (ws < 0x10000)
+                return 0;
+            auto am = *reinterpret_cast<uintptr_t *>(ws + 0x30);
+            if (am < 0x10000)
+                return 0;
+            return *reinterpret_cast<uint8_t *>(am + 0x30);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return 0;
+        }
+    }
+
+    std::string current_controlled_character_name() noexcept
+    {
+        switch (read_controlled_char_idx_seh())
+        {
+            case 1: return "Kliff";
+            case 2: return "Damiane";
+            case 3: return "Oongka";
+            default: return {};
+        }
+    }
     std::atomic<uintptr_t> &world_system_ptr() { return s_worldSystemPtr; }
     std::array<bool, k_slotCount> &real_damaged() { return s_realDamaged; }
     std::array<std::uint16_t, 5> &last_applied_real_ids() { return s_lastAppliedRealIds; }

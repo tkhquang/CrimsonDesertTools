@@ -324,7 +324,7 @@ namespace Transmog
         auto &logger = DMK::Logger::get_instance();
 
         if (!DMK::Memory::init_cache())
-            logger.warning("Memory cache init failed — pointer reads may be slower");
+            logger.warning("Memory cache init failed -- pointer reads may be slower");
 
         // --- Resolve AOB addresses ---
         //
@@ -342,9 +342,9 @@ namespace Transmog
             "SlotPopulator");
 
         if (!addrs.slotPopulator)
-            logger.warning("SlotPopulator AOB scan failed — transmog will not work");
+            logger.warning("SlotPopulator AOB scan failed -- transmog will not work");
 
-        // MapLookup: IndexedStringA::lookup. Not hooked — RIP anchor for
+        // MapLookup: IndexedStringA::lookup. Not hooked -- RIP anchor for
         // scan_indexed_string_table(). Must be resolved before
         // PartShowSuppress::init_slot_hashes.
         addrs.mapLookup = resolve_address(
@@ -365,14 +365,14 @@ namespace Transmog
             else
             {
                 logger.debug(
-                    "[dispatch] IndexedStringA scan returned empty — "
+                    "[dispatch] IndexedStringA scan returned empty -- "
                     "slot hashes unresolved, PartShowSuppress disabled");
             }
         }
         else
         {
             logger.warning(
-                "MapLookup AOB scan failed — cannot resolve CD_* slot hashes, "
+                "MapLookup AOB scan failed -- cannot resolve CD_* slot hashes, "
                 "PartShowSuppress will be inert this session");
         }
 
@@ -408,14 +408,14 @@ namespace Transmog
             else if (result == BR::Deferred)
             {
                 logger.info(
-                    "[nametable] iteminfo global not initialized yet — "
+                    "[nametable] iteminfo global not initialized yet -- "
                     "starting background scan thread");
                 launch_deferred_nametable_scan();
             }
             else // Fatal
             {
                 logger.warning(
-                    "[nametable] address chain resolution failed — "
+                    "[nametable] address chain resolution failed -- "
                     "item-name table disabled this session");
             }
 
@@ -430,7 +430,7 @@ namespace Transmog
         else
         {
             logger.warning(
-                "SubTranslator AOB scan failed — cannot build item-name table, "
+                "SubTranslator AOB scan failed -- cannot build item-name table, "
                 "presets will fall back to raw itemId only");
         }
 
@@ -442,7 +442,7 @@ namespace Transmog
         if (!addrs.safeTearDown)
         {
             logger.warning(
-                "SafeTearDown AOB scan failed — real_part_tear_down will "
+                "SafeTearDown AOB scan failed -- real_part_tear_down will "
                 "be disabled this session");
         }
 
@@ -458,7 +458,7 @@ namespace Transmog
             {
                 logger.warning(
                     "InitSwapEntry resolved to 0x{:X} but prologue byte "
-                    "looks wrong — rejecting",
+                    "looks wrong -- rejecting",
                     iseAddr);
                 iseAddr = 0;
             }
@@ -471,7 +471,7 @@ namespace Transmog
             else
             {
                 logger.warning(
-                    "InitSwapEntry AOB scan failed — transmog apply will "
+                    "InitSwapEntry AOB scan failed -- transmog apply will "
                     "be disabled this session");
             }
         }
@@ -523,11 +523,6 @@ namespace Transmog
             auto &pm = PresetManager::instance();
             pm.load(presetsPath);
             pm.apply_to_state();
-
-            logger.info("Active character: '{}', preset {}/{}",
-                        pm.active_character(),
-                        pm.preset_count() > 0 ? pm.active_preset_index() + 1 : 0,
-                        pm.preset_count());
         }
 
         // --- Install hooks ---
@@ -547,7 +542,7 @@ namespace Transmog
             {
                 logger.warning(
                     "SlotPopulator resolved to 0x{:X} but prologue byte "
-                    "looks wrong — rejecting, transmog apply disabled",
+                    "looks wrong -- rejecting, transmog apply disabled",
                     addrs.slotPopulator);
                 addrs.slotPopulator = 0;
             }
@@ -564,7 +559,7 @@ namespace Transmog
             {
                 logger.warning(
                     "BatchEquip resolved to 0x{:X} but prologue byte "
-                    "looks wrong — rejecting",
+                    "looks wrong -- rejecting",
                     beAddr);
                 beAddr = 0;
             }
@@ -590,7 +585,7 @@ namespace Transmog
             }
             else
             {
-                logger.warning("BatchEquip AOB scan failed — transmog equip trigger disabled");
+                logger.warning("BatchEquip AOB scan failed -- transmog equip trigger disabled");
             }
         }
 
@@ -602,7 +597,7 @@ namespace Transmog
             {
                 logger.warning(
                     "VEC resolved to 0x{:X} but prologue byte looks "
-                    "wrong — rejecting",
+                    "wrong -- rejecting",
                     vecAddr);
                 vecAddr = 0;
             }
@@ -626,7 +621,29 @@ namespace Transmog
             }
         }
 
-        // PartAddShow (sub_14081DC20) inline hook.
+        // PartAddShow (sub_14081DC20) inline hook -- transition-flash polish.
+        //
+        // Auto-skip if CrimsonDesertEquipHide is loaded in-process.
+        // EH installs its own inline hook on the exact same function
+        // for its gliding-fix. Two inline hooks on one address chain
+        // non-deterministically across game launches (DLL load order
+        // isn't fixed), and one side can end up silently bypassed.
+        // LT's hook is cosmetic polish, EH's is user-visible
+        // functionality -- when both are present, yield to EH.
+        // Dual-name check covers both dev two-DLL and release single-
+        // ASI EH layouts.
+        const bool ehPresent =
+            GetModuleHandleA("CrimsonDesertEquipHide_Logic.dll") != nullptr ||
+            GetModuleHandleA("CrimsonDesertEquipHide.asi") != nullptr ||
+            GetModuleHandleA("CrimsonDesertEquipHide.dll") != nullptr;
+        if (ehPresent)
+        {
+            logger.info("[dispatch] PartAddShow hook skipped -- "
+                        "CrimsonDesertEquipHide detected; yielding to "
+                        "its gliding-fix hook to avoid dual-install "
+                        "ordering issues.");
+        }
+        else
         {
             auto pasAddr = resolve_address(
                 k_partAddShowCandidates,
@@ -637,7 +654,7 @@ namespace Transmog
             {
                 logger.warning(
                     "PartAddShow resolved to 0x{:X} but prologue byte "
-                    "looks wrong — rejecting",
+                    "looks wrong -- rejecting",
                     pasAddr);
                 pasAddr = 0;
             }
@@ -658,13 +675,13 @@ namespace Transmog
                 }
                 else
                 {
-                    logger.warning("PartAddShow hook failed: {} — transition flash suppression disabled",
+                    logger.warning("PartAddShow hook failed: {} -- transition flash suppression disabled",
                                    DetourModKit::Hook::error_to_string(result.error()));
                 }
             }
             else
             {
-                logger.warning("[dispatch] PartAddShow AOB scan failed — transition flash suppression disabled");
+                logger.warning("[dispatch] PartAddShow AOB scan failed -- transition flash suppression disabled");
             }
         }
 
@@ -672,7 +689,7 @@ namespace Transmog
         if (!RealPartTearDown::resolve_helpers())
         {
             logger.warning(
-                "[dispatch] tear_down: helper resolution failed — "
+                "[dispatch] tear_down: helper resolution failed -- "
                 "feature disabled");
         }
 
@@ -691,7 +708,7 @@ namespace Transmog
             }
             else
             {
-                logger.warning("WorldSystem AOB failed — load-time transmog disabled");
+                logger.warning("WorldSystem AOB failed -- load-time transmog disabled");
             }
         }
 
@@ -701,7 +718,7 @@ namespace Transmog
         register_hotkeys();
         DMK::InputManager::get_instance().start();
 
-        logger.info("Transmog initialization complete — SlotPopulator {}",
+        logger.info("Transmog initialization complete -- SlotPopulator {}",
                     slot_populator_fn() ? "READY" : "UNAVAILABLE");
 
         return true;
@@ -715,11 +732,11 @@ namespace Transmog
         // Order is load-bearing: workers first, hooks second.
         //
         // Every worker we spawned calls raw game functions under SEH
-        // (apply_all_transmog → SlotPopulator, debounce worker →
-        // RealPartTearDown → safeTearDown). Joining them BEFORE
-        // DMK_Shutdown removes the MinHook trampolines guarantees no
-        // worker is mid-call into game code that the loader is about
-        // to unmap.
+        // (apply_all_transmog -> SlotPopulator, debounce worker ->
+        // RealPartTearDown -> safeTearDown). Joining them BEFORE
+        // DMK_Shutdown removes the SafetyHook trampolines guarantees
+        // no worker is mid-call into game code that the loader is
+        // about to unmap.
 
         stop_load_detect_thread();
         stop_apply_worker();

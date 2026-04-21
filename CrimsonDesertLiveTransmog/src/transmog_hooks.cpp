@@ -16,6 +16,17 @@ namespace Transmog
 
     bool is_player_actor(__int64 a1) noexcept
     {
+        // Originally this checked `*(typeEntry+1) == 1` (role byte).
+        // CE probing on 1.03.01 showed the byte is character-specific
+        // (Kliff=1, Damiane=4, Oongka=?), not a clean player/NPC flag,
+        // so the equality check silently rejected every companion.
+        //
+        // New filter: pointer chain is readable AND typeEntry+8 is a
+        // non-null pointer. For every party member we sampled, this
+        // value is the same ActorManager pointer; for unrelated NPCs
+        // the pointer differs or the chain faults. Good enough for
+        // the transmog hooks -- misclassification just produces a
+        // harmless no-op apply (no presets exist for unknown chars).
         __try
         {
             auto actor = *reinterpret_cast<uintptr_t *>(a1 + 8);
@@ -24,7 +35,8 @@ namespace Transmog
             auto typeEntry = *reinterpret_cast<uintptr_t *>(actor + 0x88);
             if (typeEntry < 0x10000)
                 return false;
-            return *reinterpret_cast<uint8_t *>(typeEntry + 1) == 1;
+            auto actorMgr = *reinterpret_cast<uintptr_t *>(typeEntry + 8);
+            return actorMgr >= 0x10000;
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
@@ -44,6 +56,23 @@ namespace Transmog
 
     // --- VEC hook (sub_14076D520) ---
 
+    // Returns true iff a1 matches the controlled-character's actor
+    // component (WS → ActorManager+0x30 → UserActor+0x28 → +0xD8).
+    // Early-outs on mismatch prevent LT from re-running its carrier-
+    // apply on every background companion's equip/VEC event -- each
+    // such unintended apply was mutating scene-graph state for the
+    // wrong actor, accumulating dangling pointers and crashing the
+    // game on later traversals (weapon draw, glide, etc.).
+    static bool is_controlled_actor(__int64 a1) noexcept
+    {
+        if (a1 < 0x10000)
+            return false;
+        const auto controlled = resolve_player_component();
+        if (!controlled)
+            return true; // can't resolve → don't filter
+        return a1 == controlled;
+    }
+
     __int64 __fastcall on_vec(__int64 a1, __int16 slotId, __int16 itemId, __int64 a4)
     {
         // Recursion guard + suppress during clear+apply cycle.
@@ -57,6 +86,12 @@ namespace Transmog
             return ret;
 
         if (flag_player_only().load(std::memory_order_relaxed) && !is_player_actor(a1))
+            return ret;
+
+        // Only schedule apply for the currently-controlled character.
+        // Background companion equip events route through VEC with
+        // their own a1 and must not drive LT's dispatch.
+        if (!is_controlled_actor(a1))
             return ret;
 
         // Skip non-armor slot changes (weapons, rings, etc.). We still
@@ -81,7 +116,8 @@ namespace Transmog
         uint32_t *ret = s_origBatchEquip(a1, a2, a3, a4);
 
         if (flag_enabled().load(std::memory_order_relaxed) &&
-            (!flag_player_only().load(std::memory_order_relaxed) || is_player_actor(a1)))
+            (!flag_player_only().load(std::memory_order_relaxed) || is_player_actor(a1)) &&
+            is_controlled_actor(a1))
         {
             // A save-load or zone transition routes a different a1
             // through this path. Every cached "damaged" flag and

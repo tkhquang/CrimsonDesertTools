@@ -21,7 +21,7 @@ namespace Transmog
     // --- Deferred item-name catalog scan ---
     //
     // The game populates the iteminfo global (`qword_145CEF370`) some
-    // time after our DLL init runs — exactly when depends on world load
+    // time after our DLL init runs -- exactly when depends on world load
     // order, so we can't reliably build the catalog in init(). Mirror
     // EquipHide's pattern: a single background thread that sleeps an
     // initial grace period, then retries `ItemNameTable::build` until
@@ -46,7 +46,7 @@ namespace Transmog
 
         using BR = ItemNameTable::BuildResult;
 
-        // Initial grace period — lets the game finish loading its
+        // Initial grace period -- lets the game finish loading its
         // iteminfo container before we start polling.
         for (int slept = 0; slept < k_nametableInitialDelayMs; slept += 250)
         {
@@ -96,7 +96,7 @@ namespace Transmog
             if (result == BR::Fatal)
             {
                 logger.error(
-                    "[nametable] deferred scan hit fatal chain error — "
+                    "[nametable] deferred scan hit fatal chain error -- "
                     "item catalog unavailable, mod disabled");
                 flag_enabled().store(false, std::memory_order_release);
                 return;
@@ -144,23 +144,43 @@ namespace Transmog
         __try
         {
             auto ws = *reinterpret_cast<uintptr_t *>(wsBase);
-            if (ws < 0x10000) return 0;
+            if (ws < 0x10000)
+                return 0;
             auto am = *reinterpret_cast<uintptr_t *>(ws + 0x30);
-            if (am < 0x10000) return 0;
+            if (am < 0x10000)
+                return 0;
             auto user = *reinterpret_cast<uintptr_t *>(am + 0x28);
-            if (user < 0x10000) return 0;
-            auto actor = *reinterpret_cast<uintptr_t *>(user + 0xD0);
-            if (actor < 0x10000) return 0;
+            if (user < 0x10000)
+                return 0;
+            // CE-verified 2026-04-21: `user+0xD8` holds the currently-
+            // controlled character's ClientChildOnlyInGameActor. It
+            // falls back to Kliff's actor when Kliff is the active
+            // character (Kliff's +0xD0 and +0xD8 point to the same
+            // actor), and switches to Damiane/Oongka's actor when one
+            // of them is controlled. Using +0xD0 instead (legacy
+            // offset) would always return Kliff's actor regardless of
+            // who is controlled, which is why the apply pipeline
+            // previously landed all companion presets on Kliff.
+            auto actor = *reinterpret_cast<uintptr_t *>(user + 0xD8);
+            if (actor < 0x10000)
+                return 0;
 
-            // Verify it's the player via type byte.
+            // Verify the chain is walkable -- typeEntry pointer has to
+            // be a readable heap address. The old check required
+            // `typeByte == 1` (Kliff-specific); CE probing showed
+            // Damiane's actor carries typeByte=4 and Oongka's has a
+            // different value again, so gating on that byte silently
+            // rejected companions. Pointer validity is enough.
             auto te = *reinterpret_cast<uintptr_t *>(actor + 0x88);
-            if (te < 0x10000 || *reinterpret_cast<uint8_t *>(te + 1) != 1)
+            if (te < 0x10000)
                 return 0;
 
             auto comp104 = *reinterpret_cast<uintptr_t *>(actor + 104);
-            if (comp104 < 0x10000) return 0;
+            if (comp104 < 0x10000)
+                return 0;
             auto component = *reinterpret_cast<uintptr_t *>(comp104 + 56);
-            if (component < 0x10000) return 0;
+            if (component < 0x10000)
+                return 0;
 
             return static_cast<__int64>(component);
         }
@@ -190,6 +210,33 @@ namespace Transmog
     static std::thread s_applyWorker;
     static std::atomic<bool> s_applyWorkerStarted{false};
 
+    // Apply ALWAYS targets the currently-controlled character; this
+    // helper re-reads the live char via the WS idx byte and, when
+    // PresetManager has a different active character cached, switches
+    // to the live one and rebuilds slot_mappings from its preset.
+    // No __try inside, so std::string usage is fine. Called from
+    // run_debounced_apply (which cannot mix __try with C++ objects).
+    static void sync_active_char_to_live() noexcept
+    {
+        const std::string live = current_controlled_character_name();
+        if (live.empty())
+            return;
+        auto &pm = PresetManager::instance();
+        if (live == pm.active_character())
+            return;
+        pm.set_active_character(live);
+        for (auto &m : slot_mappings())
+        {
+            m.active = false;
+            m.targetItemId = 0;
+        }
+        pm.apply_to_state();
+        last_applied_ids().fill(0);
+        real_damaged().fill(false);
+        last_applied_real_ids().fill(0);
+        last_applied_carrier_ids().fill(0);
+    }
+
     // One apply/clear pass. Pulled out of the worker body so the SEH
     // frame does not share scope with the condition-variable unique_lock
     // (MSVC C2712 forbids __try with objects requiring unwinding).
@@ -202,16 +249,56 @@ namespace Transmog
         const bool do_clear =
             clear_pending().exchange(false, std::memory_order_acq_rel);
 
-        // Re-resolve the player pointer from the WorldSystem chain.
-        // The captured a1 from the triggering hook is not trusted
-        // here — by the time the debounce fires the game may have
-        // reloaded the world and the old pointer points into freed
-        // memory. resolve_player_component returns 0 if the chain
-        // is partially populated (pre-world, loading screen) and
-        // we silently drop the apply in that case.
-        const __int64 a1 = resolve_player_component();
+        // Prefer the hook-captured a1 from player_a1() -- it identifies
+        // the character whose equip event triggered this apply. The
+        // WorldSystem chain resolve_player_component() only ever
+        // returns Kliff's component regardless of currently-controlled
+        // character (verified via CE probes 2026-04-21), so using it
+        // unconditionally applied every companion's preset to Kliff.
+        //
+        // Fall back to resolve_player_component() only when player_a1
+        // is empty or unreadable (post-reload / loading screen). The
+        // original concern about stale pointers after world reload is
+        // addressed by a SEH-guarded actor deref below -- a freed
+        // wrapper faults and we drop the apply, same net behaviour.
+        //
+        // Apply ALWAYS targets the currently-controlled character.
+        // The UI's "active character" is just a view into the JSON
+        // preset list -- a user could pick Oongka in the overlay
+        // while controlling Damiane, but we still want Damiane to
+        // end up wearing Damiane's preset. The helper below syncs
+        // PresetManager + slot_mappings to the live character.
+        // Lives outside this __try-containing function so
+        // std::string destructors don't trip C2712.
+        sync_active_char_to_live();
+        __int64 a1 = player_a1().load(std::memory_order_acquire);
         if (a1 <= 0x10000)
-            return;
+        {
+            a1 = resolve_player_component();
+            if (a1 <= 0x10000)
+                return;
+        }
+
+        // Verify the wrapper still points to a live actor. If the
+        // world reloaded after the last hook capture, *(a1+8) may
+        // fault or yield garbage -- fall back to the WS chain in
+        // that case.
+        __try
+        {
+            const auto actor = *reinterpret_cast<uintptr_t *>(a1 + 8);
+            if (actor < 0x10000)
+            {
+                a1 = resolve_player_component();
+                if (a1 <= 0x10000)
+                    return;
+            }
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            a1 = resolve_player_component();
+            if (a1 <= 0x10000)
+                return;
+        }
 
         // Consume the single-slot index. k_slotCount means "all slots".
         const auto slotIdx =
@@ -256,10 +343,9 @@ namespace Transmog
         std::unique_lock<std::mutex> lk(s_applyCvMtx);
         for (;;)
         {
-            s_applyCv.wait(lk, [] {
-                return shutdown_requested().load(std::memory_order_acquire) ||
-                       s_applyPending.load(std::memory_order_acquire);
-            });
+            s_applyCv.wait(lk, []
+                           { return shutdown_requested().load(std::memory_order_acquire) ||
+                                    s_applyPending.load(std::memory_order_acquire); });
             if (shutdown_requested().load(std::memory_order_acquire))
                 return;
 
@@ -275,12 +361,11 @@ namespace Transmog
 
                 const auto waitFor =
                     std::chrono::milliseconds(deadline - now);
-                s_applyCv.wait_for(lk, waitFor, [&deadline] {
-                    return shutdown_requested().load(
-                               std::memory_order_acquire) ||
-                           s_applyDeadlineTick.load(
-                               std::memory_order_acquire) != deadline;
-                });
+                s_applyCv.wait_for(lk, waitFor, [&deadline]
+                                   { return shutdown_requested().load(
+                                                std::memory_order_acquire) ||
+                                            s_applyDeadlineTick.load(
+                                                std::memory_order_acquire) != deadline; });
                 if (shutdown_requested().load(std::memory_order_acquire))
                     return;
             }
@@ -352,6 +437,7 @@ namespace Transmog
     {
         auto &logger = DMK::Logger::get_instance();
         __int64 prevComp = 0;
+        std::string prevCharName;
 
         while (!shutdown_requested().load(std::memory_order_relaxed))
         {
@@ -359,11 +445,69 @@ namespace Transmog
             if (shutdown_requested().load(std::memory_order_relaxed))
                 return 0;
 
+            // --- Character-swap auto-detect ---
+            //
+            // Reads the controlled-character index byte every tick;
+            // when it changes, switches the UI preset list to the new
+            // character and schedules an apply. The apply path
+            // re-walks the WS chain through `user+0xD8` so it always
+            // resolves the correct per-character wrapper -- no cache
+            // or BatchEquip event required.
+            {
+                const auto liveName = current_controlled_character_name();
+                auto &pm = PresetManager::instance();
+                if (!liveName.empty() && liveName != prevCharName)
+                {
+                    const std::string oldName = prevCharName.empty()
+                                                    ? pm.active_character()
+                                                    : prevCharName;
+                    prevCharName = liveName;
+
+                    if (liveName != pm.active_character())
+                    {
+                        pm.set_active_character(liveName);
+                        for (auto &m : slot_mappings())
+                        {
+                            m.active = false;
+                            m.targetItemId = 0;
+                        }
+                        pm.apply_to_state();
+                        {
+                            std::lock_guard<std::mutex> lk(s_applyCvMtx);
+                            last_applied_ids().fill(0);
+                            real_damaged().fill(false);
+                            last_applied_real_ids().fill(0);
+                            last_applied_carrier_ids().fill(0);
+                        }
+                        logger.info("Char swap detected: {} -> {}",
+                                    oldName, liveName);
+                        if (flag_enabled().load(std::memory_order_relaxed))
+                            schedule_transmog_ms(200);
+                        pm.save();
+                    }
+                }
+            }
+
             auto comp = resolve_player_component();
 
             // Detect change: new component appeared or address changed.
             if (comp > 0x10000 && comp != prevComp)
             {
+                // Safety gate: don't auto-apply until the controlled-
+                // character idx byte is readable (world fully loaded).
+                // run_debounced_apply will sync PresetManager to the
+                // live char itself, but running the retry loop with
+                // an unresolved live char is pointless and noisy.
+                const std::string liveChar =
+                    current_controlled_character_name();
+                if (liveChar.empty())
+                {
+                    logger.trace(
+                        "Load detect: holding auto-apply -- controlled "
+                        "char unresolved (waiting for world)");
+                    continue; // Don't advance prevComp; retry next tick.
+                }
+
                 logger.info("Load detect: player component changed ({:#x} -> {:#x})",
                             static_cast<uint64_t>(prevComp),
                             static_cast<uint64_t>(comp));
@@ -372,7 +516,7 @@ namespace Transmog
 
                 // Reset cached apply state so the early-out in
                 // apply_all_transmog doesn't suppress the re-apply.
-                // The scene graph is fresh after reload — old fake
+                // The scene graph is fresh after reload -- old fake
                 // meshes are gone even though the IDs haven't changed.
                 //
                 // Held under s_applyCvMtx to prevent racing with an
@@ -390,7 +534,7 @@ namespace Transmog
                     continue;
 
                 // Retry through the debounce worker. The game's visual
-                // state isn't ready immediately after load detect — the
+                // state isn't ready immediately after load detect -- the
                 // first attempt often faults because the PartDef array
                 // and scene graph are still being populated. We retry
                 // with exponential backoff up to ~90s total, exiting
@@ -406,15 +550,15 @@ namespace Transmog
                      ++attempt)
                 {
                     const int delayMs =
-                        (attempt < 2) ? 2000 :
-                        (attempt < 3) ? 3000 :
-                        (attempt < 4) ? 4000 : 5000;
+                        (attempt < 2) ? 2000 : (attempt < 3) ? 3000
+                                           : (attempt < 4)   ? 4000
+                                                             : 5000;
                     sleep_interruptible(delayMs);
                     if (shutdown_requested().load(std::memory_order_relaxed))
                         break;
                     schedule_transmog_ms(0);
                     logger.debug("Load detect: scheduled apply (attempt {})",
-                                attempt + 1);
+                                 attempt + 1);
 
                     // Give the worker time to finish, then check result.
                     sleep_interruptible(500);

@@ -10,6 +10,22 @@
 namespace EquipHide
 {
     static PostfixEvalFn s_originalPostfixEval = nullptr;
+
+    // Single-slot cache of the player's PostfixEval context. A wider
+    // set-based cache (per-protagonist slots) was attempted and
+    // crashed at load -- the game's PostfixEval also fires for NPC
+    // contexts with populated item arrays, and the override code
+    // writes into those items' +0x70 bitmasks. NPC item structs have
+    // different layouts, so the priority-bit write corrupts game
+    // state and crashes on later traversal.
+    //
+    // Current design: single slot, first populated call wins. In
+    // practice this is the character you load in as (typically Kliff).
+    // Swapping to Damiane/Oongka leaves them bald when helm/mask is
+    // hidden. A proper fix requires validating each cached context
+    // belongs to a player character -- e.g. reading an identity byte
+    // off the context struct -- before accepting it into the cache.
+    // See memory note `project_baldfix_multichar_deferred`.
     static std::atomic<uintptr_t> s_cachedContext{0};
 
     void set_postfix_eval_trampoline(PostfixEvalFn original)
@@ -60,7 +76,7 @@ namespace EquipHide
 
     /* Build a bitmask of hidden head-covering categories for per-item
        filtering.  Only items belonging to a hidden category get the
-       priority override — items for shown categories keep their original
+       priority override -- items for shown categories keep their original
        bitmask so PostfixEval still hides hair/beard under them. */
     static CategoryMask hidden_headgear_mask() noexcept
     {
@@ -73,7 +89,7 @@ namespace EquipHide
 
     /* Temporarily set bit 19 on items whose category is hidden, call
        the original PostfixEval, then restore.  Only items belonging to
-       a hidden headgear category are overridden — e.g. hiding Mask only
+       a hidden headgear category are overridden -- e.g. hiding Mask only
        overrides Mask items (beard stays visible) while Helm items keep
        their bitmask (hair hidden under helmet as normal). */
     static __int64 eval_with_priority_override(
@@ -152,10 +168,8 @@ namespace EquipHide
                     }
                 }
 
-                /* Only override for the player context + hair-hiding rules
-                   + any head-covering gear hidden.  Per-item category
-                   filtering ensures only items for hidden categories are
-                   overridden.  NPC contexts have different addresses. */
+                /* Only override for the cached player context + hair-hiding
+                   rules + any head-covering gear hidden. */
                 if (ctx == s_cachedContext.load(std::memory_order_relaxed) &&
                     is_hair_hiding_rule(ruleObj) &&
                     (is_category_hidden(Category::Helm) ||

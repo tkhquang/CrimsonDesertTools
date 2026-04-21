@@ -114,7 +114,7 @@ namespace EquipHide
                 auto bucketKey = compute_bucket_key(hash);
                 if (bucketKey == 0)
                 {
-                    logger.trace("  0x{:X} — skipped (no bucket key)", hash);
+                    logger.trace("  0x{:X} -- skipped (no bucket key)", hash);
                     ++skipped_key;
                     continue;
                 }
@@ -142,7 +142,7 @@ namespace EquipHide
 
                 if (!outExisted)
                 {
-                    logger.debug("  0x{:X} — INJECTED new entry", hash);
+                    logger.debug("  0x{:X} -- INJECTED new entry", hash);
                     ++injected;
                 }
             }
@@ -209,14 +209,11 @@ namespace EquipHide
             /* Per-player SEH so one bad pointer does not skip the rest. */
             __try
             {
-                // v1.03.01 shifted comp from +0x48 to +0x58.
                 auto comp = read_ptr_unsafe(vc, 0x58);
                 if (!comp)
-                    comp = read_ptr_unsafe(vc, 0x48);
-                if (!comp)
                 {
-                    logger.trace("ArmorInject [{}]: vc=0x{:X} comp=NULL "
-                                 "(+0x58 and +0x48 both null)", i, vc);
+                    logger.trace("ArmorInject [{}]: vc=0x{:X} comp=NULL (+0x58)",
+                                 i, vc);
                     continue;
                 }
                 auto descNode = read_ptr_unsafe(comp, 0x218);

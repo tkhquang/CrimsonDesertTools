@@ -24,7 +24,7 @@ namespace Transmog
      *
      * Resolution chain (verified against v1.02.00 via IDA + CE):
      *
-     *   1. AOB-scan `sub_14076D950` (SlotPopulator translator — unique 1-hit).
+     *   1. AOB-scan `sub_14076D950` (SlotPopulator translator -- unique 1-hit).
      *   2. Bounded AOB scan of the first 0x80 bytes of sub_14076D950 for a
      *      unique 14-byte anchor preceding `E8 disp32` -> `sub_141D45270`
      *      (item descriptor initializer). Offset NOT hardcoded.
@@ -58,11 +58,11 @@ namespace Transmog
         {
             Ok,       // Catalog walked successfully, table populated.
             Deferred, // Address chain resolved but the iteminfo
-                      // global is still null — retry later on a
+                      // global is still null -- retry later on a
                       // background thread.
             Fatal,    // Address resolution failed (bounded AOB
                       // anchor missed, no relative call found, etc).
-                      // Do not retry — address chain is broken.
+                      // Do not retry -- address chain is broken.
         };
 
         /**
@@ -101,7 +101,7 @@ namespace Transmog
          * linked list threaded via `desc+0x3A0`. Across the 14 labeled
          * armor samples we tested live, flagged items all failed to
          * render via runtime transmog on the player. The exact semantic
-         * meaning of the meta struct is not fully mapped — users see
+         * meaning of the meta struct is not fully mapped -- users see
          * these as "damaged" in-game but the catalog-wide population
          * (~2399/6024 items) includes non-armor readables too, so the
          * label is intentionally mechanism-neutral. The overlay treats
@@ -109,7 +109,7 @@ namespace Transmog
          *
          * Detector: the sentinel pointer is resolved STATISTICALLY at
          * build() time as the mode of `*(desc+0x3A0)` across all valid
-         * descriptors (~60% share it on v1.02.00). No hardcoded RVA —
+         * descriptors (~60% share it on v1.02.00). No hardcoded RVA --
          * the detector self-heals across future .data shuffles. Returns
          * false for unknown ids or when the catalog isn't yet built.
          */
@@ -122,7 +122,7 @@ namespace Transmog
          * the descriptor rule list at `+0x248` has a classifier-hash
          * array containing a known "player body-type" token. Items whose
          * rules use only non-player classifiers (horse/mount/pet tack,
-         * wagon gear) are flagged unsafe — equipping them on the player
+         * wagon gear) are flagged unsafe -- equipping them on the player
          * crashes the mesh binder downstream.
          *
          * Unknown ids and items with no rules default to `true`: the
@@ -198,47 +198,78 @@ namespace Transmog
          * Returned by const reference so the overlay can hold onto it
          * without copying the 6000+ entries per frame.
          *
-         * `category` is the auto-detected transmog slot (see
-         * classify_slot below), or `TransmogSlot::Count` if the item
-         * doesn't match any known armor-slot suffix (weapon, consumable,
-         * recipe, quest item, etc).
+         * `category` is the transmog slot derived from the canonical
+         * item-type code at `desc+0x44` (see `category_of` below), or
+         * `TransmogSlot::Count` if the item is not a transmog-eligible
+         * armor slot (weapon, shield, horse armor, quest item, etc).
          */
+        /// Body-type classification derived from an item's rule
+        /// classifier tokens (CE-verified 2026-04-21). Drives the
+        /// picker's per-character visibility: an item rendered on the
+        /// wrong body produces broken meshes, so the filter hides
+        /// opposite-body items by default.
+        ///
+        ///   Generic:     no classifier tokens at all (rule-less items)
+        ///   Male:        has male tokens   {0x0018, 0x0058, 0x02E3}
+        ///   Female:      has female tokens {0x0072, 0x0382, 0x0300}
+        ///   Both:        rare -- has both male and female tokens
+        ///   Ambiguous:   humanoid-range tokens only, but not in the
+        ///                male or female body sets (e.g. NPC-specific
+        ///                variants like `0x012F`-only items --
+        ///                Antumbra/Badran/Luka gloves). Picker shows
+        ///                with an amber badge because render fidelity
+        ///                is inconsistent -- some work, some break.
+        ///   NonHumanoid: has any token >= 0x1000 (mount/pet/wagon/
+        ///                dragon armors). Hidden from all human-
+        ///                character pickers.
+        enum class BodyKind : std::uint8_t
+        {
+            Generic = 0,
+            Male = 1,
+            Female = 2,
+            Both = 3,
+            NonHumanoid = 4,
+            Ambiguous = 5,
+        };
+
         struct Entry
         {
             uint16_t id;
             TransmogSlot category;
             bool hasVariantMeta;
             bool isPlayerCompatible;
+            /// Raw equip-type u16 from desc+0x42. Informational only;
+            /// the primary compatibility signal is `bodyKind`.
+            uint16_t equipType;
+            BodyKind bodyKind;
             std::string name;
             std::string displayName; // human-readable name from display_names.json
         };
         const std::vector<Entry> &sorted_entries() const;
 
+        /// Raw equip-type u16 for a specific item. Returns 0 if unknown
+        /// (catalog not ready or item never seen).
+        std::uint16_t equip_type_of(std::uint16_t itemId) const noexcept;
+
+        /// Map character name -> body kind. Returns `BodyKind::Generic`
+        /// for unknown names so future characters produce a wide-open
+        /// picker instead of an empty one.
+        static BodyKind body_kind_for_character(
+            const std::string &charName) noexcept;
+
         /**
-         * @brief Classify an item name into a transmog slot by suffix.
+         * @brief Look up the transmog slot for an item id.
          *
-         * Rejects known non-equipment prefixes (`CraftingRecipe_`,
-         * `Recipe_`, `Book_`, `Item_Skill_`) first — these items
-         * sometimes carry armor-slot suffixes but are recipes/books,
-         * not equippable armor (CE-verified: all have ruleCount=0).
+         * Driven by the canonical item-type code at `desc+0x44` captured
+         * during the catalog build (CE-verified on v1.03.01):
          *
-         * Then strips trailing noise (`_Upgrade\\d*`, roman numerals,
-         * `_\\d+`, size tags) and case-insensitively matches the final
-         * underscore-delimited token:
+         *   0x04 -> Helm    0x05 -> Chest    0x06 -> Gloves
+         *   0x07 -> Boots   0x45 -> Cloak
          *
-         *   `_Helm`                 -> Helm
-         *   `_Armor`, `_Cloth`      -> Chest
-         *   `_Cloak`                -> Cloak
-         *   `_Gloves`               -> Gloves
-         *   `_Boots`                -> Boots
-         *
-         * Any other tail returns `TransmogSlot::Count` (unclassified).
-         * CE-verified against the full 6024-entry v1.02.00 catalog:
-         * Helm=367, Armor=984, Cloth=7, Cloak=111, Gloves=352, Boots=339.
-         * (Includes 4 lowercase `_cloak` items and 12 recipe false
-         * positives now correctly excluded.)
+         * Every other code (shields 0x20, horse 0x53, quest 0xFFFF, ...)
+         * or an unknown id returns `TransmogSlot::Count`.
          */
-        static TransmogSlot classify_slot(const std::string &name) noexcept;
+        TransmogSlot category_of(uint16_t itemId) const noexcept;
 
         /// Dump the full catalog to a TSV file next to the game exe.
         /// Columns: ItemID, Slot, Variant, PlayerSafe, Name.
@@ -274,6 +305,9 @@ namespace Transmog
         std::unordered_map<std::string, uint16_t> m_nameToId;
         std::unordered_map<uint16_t, uint8_t> m_variantFlag;
         std::unordered_map<uint16_t, uint8_t> m_playerFlag;
+        std::unordered_map<uint16_t, uint16_t> m_equipType;
+        std::unordered_map<uint16_t, uint8_t> m_bodyBits;
+        std::unordered_map<uint16_t, uint16_t> m_typeCode; // desc+0x44 canonical item-type code
         std::unordered_map<std::string, std::string> m_displayNames; // lowercase internal -> display
         mutable std::vector<Entry> m_sortedCache;
 
