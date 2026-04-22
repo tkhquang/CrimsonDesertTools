@@ -212,7 +212,8 @@ Common issues:
 - **Toggle doesn't work** -- Check log file for AOB pattern errors
 - **Game crashes** -- Check log file for errors; try updating to the latest version
 
-**Important: removing or disabling ASI mods.** Ultimate ASI Loader scans subdirectories recursively. Moving an `.asi` file into a subfolder (e.g. `plugins/backup/`) does **not** prevent it from loading. To fully disable an ASI mod, move it **outside the game's root directory entirely**, or rename the file extension (e.g. `.asi.bak`).
+> [!IMPORTANT]
+> **Removing or disabling ASI mods.** Ultimate ASI Loader scans subdirectories recursively. Moving an `.asi` file into a subfolder (e.g. `plugins/backup/`) does **not** prevent it from loading. To fully disable an ASI mod, move it **outside the game's root directory entirely**, or rename the file extension (e.g. `.asi.bak`).
 
 > **Still stuck?** [Open a GitHub issue](https://github.com/tkhquang/CrimsonDesertTools/issues/new?assignees=&labels=bug&template=bug_report.yaml) and include your INI config, log output, and game version.
 

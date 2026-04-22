@@ -3,16 +3,32 @@
 [size=5]Description[/size]
 This mod allows you to hide equipped gear visually in Crimson Desert using customizable hotkeys. Toggle visibility per category for weapons, shields, bows, armor, tools, and lanterns. Perfect for cleaner screenshots, aesthetic character builds, or simply enjoying the world without gear clutter.
 
+[line]
+
+[size=5]Heads Up: Built-in Options Added in Recent Updates[/size]
+The game has been adding native visibility options that cover some of what this mod does.
+
+[b]Since v1.02.00[/b] - [b]Headgear Visibility[/b] under [b]Settings > Language & Gameplay[/b]:
+[list]
+[*] Always Show / Show in Combat / Hide in Cutscenes / Always Hide
+[/list]
+
+[b]Since v1.03.00[/b] - [b]Weapon Display[/b] under [b]Settings > Others > Language & Gameplay[/b]:
+[list]
+[*] [b]Display Melee Weapons:[/b] All / Selected Only
+[*] [b]Display Ranged Weapons:[/b] Always / Only When Used
+[/list]
+
+If the built-in options cover your needs, you no longer need this mod for those features.
+
+[line]
+
 [size=5]Key Features[/size]
 [list]
-[*]Toggle, show, or hide equipped gear per category with customizable hotkeys[/*]
-[*][b]20 built-in categories[/b] covering weapons, shields, bows, armor pieces, accessories, tools, and lanterns[/*]
-[*]Global show-all / hide-all hotkeys to control every category at once[/*]
-[*][b]User Presets[/b]: 10 custom part groups with independent toggle hotkeys[/*]
-[*]Fully configurable via INI with per-category settings[/*]
-[*][b]IndependentToggle[/b] mode: categories sharing a hotkey flip their own state individually, preserving mixed visible/hidden configurations[/*]
-[*]Open-source with full transparency[/*]
+[*]Toggle, show, or hide equipped gear per category with customizable hotkeys[*][b]20 built-in categories[/b] covering weapons, shields, bows, armor pieces, accessories, tools, and lanterns[*]Global show-all / hide-all hotkeys to control every category at once[*][b]User Presets[/b]: 10 custom part groups with independent toggle hotkeys[*]Fully configurable via INI with per-category settings[*][b]IndependentToggle[/b] mode: categories sharing a hotkey flip their own state individually, preserving mixed visible/hidden configurations[*]Open-source with full transparency
 [/list]
+
+[line]
 
 [size=5]Requirements[/size]
 [list]
@@ -20,15 +36,15 @@ This mod allows you to hide equipped gear visually in Crimson Desert using custo
 [*] ASI Loader (e.g. [url=https://github.com/ThirteenAG/Ultimate-ASI-Loader/releases]Ultimate ASI Loader[/url])
 [/list]
 
-[color=red][size=5][b]DO NOT INSTALL VIA MOD MANAGERS[/b][/size][/color]
+[line]
 
-[color=red][b]This mod is manual-install only. Mod managers are NOT supported.[/b][/color]
+[color=red][b]DO NOT INSTALL VIA MOD MANAGERS.[/b][/color] You can if you want, but [color=red][b]don't file a bug report here[/b][/color] if things don't work.
 
 Mod managers often stage [b].asi[/b] files into their own subfolders. Ultimate ASI Loader scans subdirectories recursively, so the [b].asi[/b] keeps loading even after the manager reports the mod as "disabled" or "uninstalled". Common symptom: gear stays hidden after you think the mod is gone.
 
 [b]Install manually[/b] by following the Installation steps below. [b]To uninstall,[/b] delete [b]CrimsonDesertEquipHide.asi[/b] and [b]CrimsonDesertEquipHide.ini[/b] directly from [b]bin64[/b] (not via the manager). If a manager moved your files into a subfolder like [b]bin64/plugins/[/b] or [b]bin64/backup/[/b], delete them from that subfolder too.
 
-[color=red][b]Issues reported for mod-manager installs will not be investigated. Reproduce on a clean manual install first.[/b][/color]
+[line]
 
 [size=5]Installation[/size]
 
@@ -85,6 +101,8 @@ If you use [url=https://github.com/cdozdil/OptiScaler]OptiScaler[/url] for frame
 
 This applies to any ASI mod, not just this one. If you have other [b].asi[/b] mods (e.g. CDSprintHold), move them into the [b]plugins[/b] folder as well.
 
+[line]
+
 [size=5]Configuration[/size]
 The mod can be configured by editing the [b]CrimsonDesertEquipHide.ini[/b] file:
 [code]
@@ -136,6 +154,8 @@ DefaultHidden = false
 Parts =
 [/code]
 
+[line]
+
 [size=5]Hotkey Types[/size]
 Each category supports three independent hotkey bindings:
 [list]
@@ -150,6 +170,8 @@ Global overrides in [b][General][/b]:
 [*] [b]HideAllHotkey[/b] - forces ALL categories hidden
 [/list]
 
+[line]
+
 [size=5]Hotkey Format[/size]
 [list]
 [*] Named keys: V, F3, Numpad1, Mouse4, Gamepad_A, etc.
@@ -159,6 +181,8 @@ Global overrides in [b][General][/b]:
 [/list]
 
 See the full list at the [url=https://github.com/tkhquang/DetourModKit?tab=readme-ov-file#supported-input-names]Supported Input Names[/url] reference.
+
+[line]
 
 [size=5]Using with Controllers[/size]
 DetourModKit supports gamepad input natively via the [b]XInput[/b] API. Use gamepad button names directly in the INI file:
@@ -175,6 +199,8 @@ ToggleHotkey = V,Gamepad_LB+Gamepad_Y
 [/code]
 
 [b]XInput only:[/b] Xbox controllers work natively. For PS4/PS5/Switch controllers, use an XInput translation layer (e.g. DS4Windows, DualSenseX, BetterJoy) or Steam Input to present your controller as XInput. See [url=https://github.com/tkhquang/DetourModKit?tab=readme-ov-file#gamepad-compatibility]Gamepad Compatibility[/url] for details.
+
+[line]
 
 [size=5]Per-Character Parts Overrides[/size]
 Each category's [b]Parts[/b] list can be overridden per protagonist by adding a section named [b][CategoryName:CharacterName][/b]. Supported names: [b]Kliff[/b], [b]Damiane[/b], [b]Oongka[/b]. Only the [b]Parts[/b] key is per-character; [b]Enabled[/b], [b]DefaultHidden[/b], and hotkeys remain global to the base section.
@@ -215,6 +241,8 @@ Parts = CD_MainWeapon_Sword_R, CD_MainWeapon_Sword_L, ..., CD_MainWeapon_Axe_R, 
 
 The active character is detected by walking the live WorldSystem pointer chain to the currently-controlled actor and decoding its built-in identity fields. Switching between protagonists automatically swaps the effective Parts list on the next tick.
 
+[line]
+
 [size=5]Compatibility with Replacer Mods[/size]
 Set [b]ForceShow = true[/b] if you use mods that alter the default visibility of equipment via PAZ patching (e.g. character replacers like "Playing Kliff as Damiane", armor replacers, transmog mods). ForceShow overrides their changes so toggling equipment back to visible still works:
 
@@ -224,6 +252,8 @@ ForceShow = true
 [/code]
 
 Safe to leave [b]false[/b] if you are not using such mods.
+
+[line]
 
 [size=5]User Presets[/size]
 The INI file includes three [b]UserPreset[/b] sections (UserPreset1, UserPreset2, UserPreset3) that let you create custom part groups with independent visibility control.
@@ -246,6 +276,8 @@ Parts = CD_Helm, CD_Cloak, CD_Shoulder
 
 In this example, pressing [b]V[/b] would still toggle Shields and Masks, but Helm would only respond to [b]F5[/b] because UserPreset1 owns it.
 
+[line]
+
 [size=5]Known Issues[/size]
 
 [list]
@@ -258,6 +290,8 @@ In this example, pressing [b]V[/b] would still toggle Shields and Masks, but Hel
 [*] Only tested with the Steam version.
 [/list]
 
+[line]
+
 [size=5]Troubleshooting[/size]
 If you encounter issues:
 [list]
@@ -266,7 +300,9 @@ If you encounter issues:
 [*] For memory pattern errors, the mod needs an update for the current game version
 [/list]
 
-[b]Important: removing or disabling ASI mods.[/b] Ultimate ASI Loader scans subdirectories recursively. Moving an [b].asi[/b] file into a subfolder (e.g. [b]plugins/backup/[/b]) does [b]not[/b] prevent it from loading. To fully disable an ASI mod, move it [b]outside the game's root directory entirely[/b], or rename the file extension (e.g. [b].asi.bak[/b]).
+[color=#ff6600][b]Important: removing or disabling ASI mods.[/b][/color] Ultimate ASI Loader scans subdirectories recursively. Moving an [b].asi[/b] file into a subfolder (e.g. [b]plugins/backup/[/b]) does [b]not[/b] prevent it from loading. To fully disable an ASI mod, move it [b]outside the game's root directory entirely[/b], or rename the file extension (e.g. [b].asi.bak[/b]).
+
+[line]
 
 [size=5]Credits & Source Code[/size]
 Built with [url=https://github.com/tkhquang/DetourModKit]DetourModKit[/url] for core functionality.

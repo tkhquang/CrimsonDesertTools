@@ -39,15 +39,11 @@ Change the visual appearance of your equipped armor [b]in real time[/b] without 
 
 [line]
 
-[color=red][size=5][b]DO NOT INSTALL VIA MOD MANAGERS[/b][/size][/color]
-
-[color=red][b]This mod is manual-install only. Mod managers are NOT supported.[/b][/color]
+[color=red][b]DO NOT INSTALL VIA MOD MANAGERS.[/b][/color] You can if you want, but [color=red][b]don't file a bug report here[/b][/color] if things don't work.
 
 Mod managers often stage [b].asi[/b] files into their own subfolders. Ultimate ASI Loader scans subdirectories recursively, so the [b].asi[/b] keeps loading even after the manager reports the mod as "disabled" or "uninstalled". Common symptom: transmog still applies after you think the mod is gone.
 
 [b]Install manually[/b] by following the Installation steps below. [b]To uninstall,[/b] delete [b]CrimsonDesertLiveTransmog.asi[/b] and [b]CrimsonDesertLiveTransmog.ini[/b] directly from [b]bin64[/b] (not via the manager). If a manager moved your files into a subfolder like [b]bin64/plugins/[/b] or [b]bin64/backup/[/b], delete them from that subfolder too.
-
-[color=red][b]Issues reported for mod-manager installs will not be investigated. Reproduce on a clean manual install first.[/b][/color]
 
 [line]
 
