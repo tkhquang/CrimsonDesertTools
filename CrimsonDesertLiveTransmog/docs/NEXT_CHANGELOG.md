@@ -1,8 +1,5 @@
-## Load-Time Auto-Apply Robustness
+## [Title for next release]
 
-- Character-swap auto-detect now uses a 1 second settle window so the engine's load-time party rotation (Kliff -> Oongka -> Damiane) collapses into a single transition instead of three back-to-back applies
-- Load-detect retry loop now runs a cheap actor-readiness probe before each scheduled apply, suppressing the noisy SEH-faulted log spam previously produced when the engine parked the player wrapper on a placeholder during long world loads
-- Load-detect retry loop now aborts mid-budget if the engine swaps the player wrapper beneath it (placeholder -> real actor), handing off to the outer loop instead of burning the remainder of a ~95 second retry budget against a dead pointer
-- Cuts the visible-mismatch window after a slow load from up to ~95 seconds down to ~3-7 seconds on affected systems
-- Fixed: switching characters could apply the previous character's preset onto the new actor when the controlled-char resolver's last-known-good cache had not yet caught up to the swap (e.g. swapping to Damiane on a save with no Oongka could briefly render Oongka's transmog). The cache is now invalidated on every player-component change, not only on save load
-- Fixed: auto-apply could fail entirely on saves whose Kliff actor was constructed with different metadata (e.g. a chapter where Kliff reads as `(party_class=3, char_kind=3)` instead of the previously-verified `(4, 3)`). The controlled-character resolver now identifies Kliff via the structural invariant `*(user+0xD0) == *(user+0xD8)` and the two companions via the slot-index byte at `actor+0x60` (Damiane = primary slot + 1, Oongka = primary slot + 2), making detection robust across saves regardless of party composition
+- New feature
+- Bug fix
+- Improvement
