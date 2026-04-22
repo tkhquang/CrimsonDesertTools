@@ -182,4 +182,67 @@ namespace EquipHide
          ResolveMode::Direct, -0x6F, 0},
     };
 
+    /**
+     * @brief Return-address landmark inside `createPrefabFromPartPrefab`
+     *        (engine-registered profiling label for sub_14261B6C0).
+     *
+     * That function instantiates a renderable prefab from a PartPrefab,
+     * then tail-calls sub_1402E1430(v107) -- inside which the rule-eval
+     * pipeline reaches PostfixEval on the freshly-built instance. The
+     * return address on the byte right after that inner call is the
+     * landmark (match+12, the first byte of the post-call `mov rbx,
+     * [rsp+0x4A0]` epilogue load).
+     *
+     * Player PostfixEval invocations come from the equipment-visibility
+     * update loop elsewhere in the binary and never include this return
+     * address on their stack. bald_fix uses stack presence of this
+     * landmark to reject prefab-instantiation-path calls without caching
+     * ctx pointers or depending on frequency heuristics.
+     *
+     * Instruction window (all three candidates land on the first byte of
+     * the `lea rcx, [rbp+0x210]`; consumer adds +12 to reach the
+     * landmark):
+     *
+     *   48 8D 8D 10 02 00 00        lea rcx, [rbp+0x210]
+     *   E8 ?? ?? ?? ??              call sub_1402E1430
+     *   48 8B 9C 24 A0 04 00 00     mov rbx, [rsp+0x4A0]   ; landmark
+     *   48 81 C4 60 04 00 00        add rsp, 0x460
+     *   41 5F 41 5E 41 5D 41 5C
+     *   5F 5E 5D C3                 pop r15..rbp ; ret
+     *
+     * The `mov rbx, [rsp+0x4A0]` stack-disp is the uniqueness anchor
+     * (wildcarding it drops the scan from one hit to 10+). Every other
+     * immediate is a compiler-movable constant and is wildcarded in P2
+     * and P3 to tolerate stack-frame shifts across builds.
+     */
+    inline constexpr AddrCandidate k_npcPfeReturnAddrCandidates[] = {
+        // P1 -- tight. Both frame offsets retained as literals for the
+        // strictest match on the current build. First to fail if either
+        // the `lea` frame disp or the `mov rbx` stack disp shifts.
+        {"NpcPfeReturnAddr_P1_PostCallLandmark",
+         "48 8D 8D 10 02 00 00 E8 ?? ?? ?? ?? 48 8B 9C 24 A0 04 00 00",
+         ResolveMode::Direct, 0, 0},
+
+        // P2 -- wildcards the `lea` frame disp so a future build that
+        // adds or removes locals (shifting the `[rbp+var_180]` offset)
+        // still matches, and extends forward through the stack-teardown
+        // `add rsp, <imm>` whose immediate is also wildcarded. Keeps the
+        // landmark `A0 04 00 00` as a literal for uniqueness.
+        {"NpcPfeReturnAddr_P2_LandmarkEpilogue",
+         "48 8D 8D ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 8B 9C 24 A0 04 00 00 "
+         "48 81 C4 ?? ?? ?? ??",
+         ResolveMode::Direct, 0, 0},
+
+        // P3 -- P2 extended through the non-volatile-register pop chain
+        // and terminating `ret`. The `41 5F 41 5E 41 5D 41 5C 5F 5E 5D
+        // C3` suffix ties the pattern to this specific callee-saved-set
+        // (r12..r15 + rdi + rsi + rbp). Most resilient to frame-layout
+        // shifts but will break if the compiler changes which registers
+        // the function spills.
+        {"NpcPfeReturnAddr_P3_WiderEpilogueChain",
+         "48 8D 8D ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 8B 9C 24 A0 04 00 00 "
+         "48 81 C4 ?? ?? ?? ?? 41 5F 41 5E 41 5D 41 5C 5F 5E 5D C3",
+         ResolveMode::Direct, 0, 0},
+    };
+
 } // namespace EquipHide

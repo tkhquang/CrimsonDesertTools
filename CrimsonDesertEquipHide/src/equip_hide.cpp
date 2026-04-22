@@ -13,6 +13,8 @@
 #include "shared_state.hpp"
 #include "visibility_write.hpp"
 
+#include <cdcore/controlled_char.hpp>
+
 #include <DetourModKit.hpp>
 
 #include <Windows.h>
@@ -96,6 +98,20 @@ namespace EquipHide
 
             DMK::Config::register_string(section, "Parts", section + " Parts", [cat](const std::string &val)
                                          { register_parts(cat, val); }, default_parts_string(cat));
+
+            /* Per-character Parts overrides: [Section:Kliff], [Section:Damiane],
+               [Section:Oongka]. Empty value (section missing) inherits from base. */
+            for (std::size_t charIdx = 0; charIdx < kCharIdxCount; ++charIdx)
+            {
+                const std::string charName{character_name_for_idx(charIdx)};
+                const std::string charSection = section + ":" + charName;
+                const std::string logLabel = section + " Parts (" + charName + ")";
+                DMK::Config::register_string(
+                    charSection, "Parts", logLabel,
+                    [cat, charIdx](const std::string &val)
+                    { set_per_char_parts(cat, charIdx, val); },
+                    "");
+            }
         }
 
         DMK::Config::load(INI_FILE);
@@ -309,6 +325,14 @@ namespace EquipHide
             k_worldSystemCandidates, std::size(k_worldSystemCandidates),
             "WorldSystem");
 
+        // Publish the WorldSystem holder to the Core controlled-character
+        // resolver. Core walks WorldSystem -> ActorManager -> UserActor ->
+        // controlled_actor(+0xD8) -> identity u32s at +0xDC and +0xEC.
+        // Idempotent across consumers: when CrimsonDesertLiveTransmog is
+        // loaded alongside, both publish the same address and the later
+        // writer wins (the intended behaviour after a re-resolve).
+        CDCore::set_world_system_holder(addrs.worldSystem);
+
         addrs.childActorVtbl = resolve_address(
             k_childActorVtblCandidates, std::size(k_childActorVtblCandidates),
             "ChildActorVtbl");
@@ -446,15 +470,28 @@ namespace EquipHide
 
         // Prevents baldness when hiding helmets/cloaks.  The hook temporarily
         // sets bit 19 in item+0x70 bitmasks per-call so PostfixEval sees
-        // inactive priority and hair-hiding rules don't match.  Player
-        // context is cached on first populated call; NPC contexts never match.
+        // inactive priority and hair-hiding rules don't match.  Player vs
+        // NPC invocations are distinguished by a call-graph landmark: NPC
+        // PostfixEval calls always traverse a specific caller whose return
+        // address we resolve via AOB (npcPfeReturnAddr); the hook scans
+        // its own stack window for that landmark and rejects NPC calls.
         if (flag_bald_fix().load(std::memory_order_relaxed))
         {
             auto postfixEvalAddr = resolve_address(
                 k_postfixEvalCandidates, std::size(k_postfixEvalCandidates),
                 "PostfixEval");
 
-            if (postfixEvalAddr)
+            auto npcPfeLandmark = resolve_address(
+                k_npcPfeReturnAddrCandidates,
+                std::size(k_npcPfeReturnAddrCandidates),
+                "NpcPfeReturnAddr");
+            // Landmark sits 12 bytes past the match start (first byte of the
+            // `mov rbx, [rsp+4A0]` right after the call), which is the real
+            // return address on an NPC stack frame.
+            if (npcPfeLandmark)
+                addrs.npcPfeReturnAddr = npcPfeLandmark + 12;
+
+            if (postfixEvalAddr && addrs.npcPfeReturnAddr)
             {
                 PostfixEvalFn trampoline = nullptr;
                 auto result = hookMgr.create_inline_hook(
@@ -465,16 +502,22 @@ namespace EquipHide
                 if (result.has_value())
                 {
                     set_postfix_eval_trampoline(trampoline);
-                    logger.info("PostfixEval inline hook installed at 0x{:X} -- bald fix active",
-                                postfixEvalAddr);
+                    logger.info("PostfixEval inline hook installed at 0x{:X}, "
+                                "npc-caller landmark 0x{:X} -- bald fix active",
+                                postfixEvalAddr, addrs.npcPfeReturnAddr);
                 }
                 else
                     logger.warning("PostfixEval hook failed: {} -- bald fix disabled",
                                    DetourModKit::Hook::error_to_string(result.error()));
             }
-            else
+            else if (!postfixEvalAddr)
             {
                 logger.warning("PostfixEval AOB scan failed -- bald fix disabled");
+            }
+            else
+            {
+                logger.warning("NpcPfeReturnAddr AOB scan failed -- bald fix disabled "
+                               "(refusing to run without the call-graph filter)");
             }
         }
         else

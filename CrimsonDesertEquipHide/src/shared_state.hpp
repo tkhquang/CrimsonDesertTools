@@ -20,6 +20,22 @@ namespace EquipHide
         uintptr_t mapLookup = 0;
         uintptr_t mapInsert = 0;
         uintptr_t indexedStringGlobal = 0;
+        /**
+         * @brief Return-address landmark inside createPrefabFromPartPrefab
+         *        (sub_14261B6C0), on the instruction right after its
+         *        inner `call sub_1402E1430` (through which PostfixEval
+         *        runs for newly-instantiated prefabs).
+         *
+         * CE captures across Kliff (194 hits) and Oongka (173 hits)
+         * sessions on 2026-04-22: every PostfixEval hit that came from
+         * prefab instantiation (NPC creation events at load) had this
+         * return address on its stack; no player-side hit (196/196 for
+         * the two active-protagonist contexts) did. BaldFix uses this
+         * stack-presence check as a deterministic call-graph filter --
+         * no ctx caching, no frequency heuristics. Resolved via an AOB
+         * anchor at mod init.
+         */
+        uintptr_t npcPfeReturnAddr = 0;
     };
 
     ResolvedAddresses &resolved_addrs();
@@ -68,7 +84,7 @@ namespace EquipHide
             .count();
     }
 
-    /** @brief Unsafe pointer read — use ONLY inside SEH-protected hot paths. */
+    /** @brief Unsafe pointer read -- use ONLY inside SEH-protected hot paths. */
     inline uintptr_t read_ptr_unsafe(uintptr_t base, ptrdiff_t off) noexcept
     {
         auto addr = *reinterpret_cast<const uintptr_t *>(base + off);
