@@ -11,7 +11,7 @@ Project knowledge base for mod runtime internals. Each entry is a long-lived ref
 | Document | Role |
 |----------|------|
 | [live-transmog-architecture.md](live-transmog-architecture.md) | Runtime pipeline: hook points, apply state machine, memory write surface, event-driven transitions. Cross-references `CrimsonDesertLiveTransmog/src/` files. |
-| [live-transmog-source-of-truth.md](live-transmog-source-of-truth.md) | Byte-level reference: WS chain offsets, carrier descriptor layout, hook RVAs, `charClassBypass` site, IDA verification log. |
+| [live-transmog-source-of-truth.md](live-transmog-source-of-truth.md) | Byte-level reference: WS chain offsets, carrier descriptor layout, hook RVAs, `charClassBypass` site, IDA verification log. §1.3 also covers the `CDCore::current_controlled_character()` resolver shared with EquipHide (chain walk, `+0xDC`/`+0xEC` identity layout, LKG cache, save-load invalidation contract). |
 
 ## CrimsonDesertEquipHide
 

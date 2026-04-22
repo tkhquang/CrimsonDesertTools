@@ -220,10 +220,6 @@ If you encounter issues:
 
 [size=5]Credits & Source Code[/size]
 
-[b]Author:[/b] tkhquang ([url=https://github.com/tkhquang]GitHub[/url] / [url=https://next.nexusmods.com/profile/tkhquang]Nexus[/url])
-[b]Source:[/b] [url=https://github.com/tkhquang/CrimsonDesertTools]github.com/tkhquang/CrimsonDesertTools[/url]
-[b]Report issues:[/b] [url=https://github.com/tkhquang/CrimsonDesertTools/issues]GitHub Issues[/url] or the Bugs tab on this Nexus page
-
 Built with [url=https://github.com/tkhquang/DetourModKit]DetourModKit[/url] for core functionality (AOB scanning, hook management, logging, input).
 
 [b]Third-party libraries:[/b]
