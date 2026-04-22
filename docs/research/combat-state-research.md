@@ -160,7 +160,7 @@ C7 45 ?? 03 00 00 00   mov dword [rbp+disp8], 3    ; cap_1 = 3 (second sentinel)
 0F 84                  jz (rel32 opcode prefix)    ; near jz whose rel32 is the next 4 bytes
 ```
 
-Two adjacent 7-byte `C7 45 ?? 03 00 00 00` instructions within a 22-byte span are already unusual; the third literal `84 D2 0F 84` that follows is the textbook "test a single boolean arg, branch via near-jz" idiom. A sibling function at `0x140CE9550` uses the same two-sentinel layout but does not follow it with `0F 84`, so the trailing opcode prefix is what makes this candidate unique in the v1.03.01 module.
+Two adjacent 7-byte `C7 45 ?? 03 00 00 00` instructions within a 22-byte span are already unusual; the third literal `84 D2 0F 84` that follows is the textbook "test a single boolean arg, branch via near-jz" idiom. A sibling function at `0x140CE9530` uses the same two-sentinel layout but does not follow it with `0F 84`, so the trailing opcode prefix is what makes this candidate unique in the v1.03.01 module.
 
 Important: the rel32 bytes of the `jz` are intentionally not part of the pattern. They change every build because the distance to the remove-path branch body depends on the size of the add-path body above it; leaving them off the pattern keeps it patch-robust without losing uniqueness.
 
