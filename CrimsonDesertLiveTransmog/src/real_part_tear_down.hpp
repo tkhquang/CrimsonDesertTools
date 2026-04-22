@@ -47,4 +47,35 @@ namespace Transmog::RealPartTearDown
     // True iff resolve_helpers() succeeded. Used by callers to gate the
     // feature without re-checking individual function pointers.
     bool is_ready() noexcept;
+
+    /** @brief Cheap read-only probe for "is this actor ready to receive
+     *         tear_down/apply".
+     *  @details Walks the same container chain that `tear_down_real_part`
+     *           dereferences, but issues no engine calls and writes
+     *           nothing -- just verifies that `*(a1+0x78) -> container`,
+     *           `container+0x08 -> arrayBase`, and `container+0x10 ->
+     *           count` all read cleanly under SEH and that `count` is in
+     *           a plausible range (`[1, k_maxPlausibleEntries]`).
+     *
+     *           Designed for the load-detect retry loop. During world
+     *           load the engine briefly parks `user+0xD8` on a placeholder
+     *           wrapper whose actor part-registry is not yet wired; on
+     *           low-end PCs that placeholder can persist for 90+ seconds.
+     *           Calling `apply_all_transmog` against a placeholder
+     *           consistently SEH-faults inside engine calls and produces
+     *           dozens of log lines per attempt. Probing readiness first
+     *           lets the retry loop skip those attempts at microsecond
+     *           cost without shrinking the overall retry budget.
+     *
+     *           A real actor's container has a non-empty entry array
+     *           (the protagonist always has at least one equipped slot in
+     *           practice; a hypothetical naked save would be filtered
+     *           briefly until the engine swaps the wrapper). A placeholder
+     *           either faults on container deref or returns sentinel
+     *           garbage that fails the count sanity check.
+     *
+     *  @param a1 Player wrapper pointer (`*(actor+0x68)+0x38` shape, the
+     *            same value the apply pipeline accepts as `a1`).
+     *  @returns true if the chain reads cleanly and count is plausible. */
+    bool is_actor_apply_ready(void *a1) noexcept;
 }

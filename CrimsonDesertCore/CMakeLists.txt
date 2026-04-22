@@ -34,6 +34,7 @@ endif()
 
 add_library(CrimsonDesertCore STATIC
     src/aob_resolver.cpp
+    src/controlled_char.cpp
     src/indexed_string_table.cpp
     src/dev_helpers.cpp
 )

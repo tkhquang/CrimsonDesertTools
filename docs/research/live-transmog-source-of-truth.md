@@ -39,13 +39,125 @@ WS holder          : 0x145D2AEE8           (scanned via AOB at init)
 
 `user+0xD8` falls back to Kliff's actor when Kliff is the active character (so `+0xD0` and `+0xD8` coincide). Reading `+0xD8` unconditionally is therefore safe for all three playable characters.
 
-### 1.3 Character index byte
+### 1.3 Controlled-character resolver (`CDCore`)
 
-```
-ActorManager +0x30 (first byte, u8)  :  1 = Kliff, 2 = Damiane, 3 = Oongka
+Authoritative reference for the resolver implemented in `CrimsonDesertCore/src/controlled_char.cpp`. The resolver answers a single question: *"which of the three playable protagonists is the user currently controlling?"* It returns one of `Kliff`, `Damiane`, `Oongka`, or `Unknown`. Two consumer mods (`CrimsonDesertLiveTransmog`, `CrimsonDesertEquipHide`) drive per-character behaviour off the result.
+
+#### 1.3.1 Chain walk
+
+The resolver walks five pointer dereferences plus two byte reads on every query. No caching of intermediate pointers; the chain is cheap and any heap pointer in it can be invalidated by a save load or character swap, so re-walking is the only correctness-preserving strategy.
+
+```text
+WorldSystem holder static    : 0x145D2AEE8         (= CrimsonDesert.exe + 0x05D2AEE8)
+  +0x00 (qword)              -> WorldSystem instance        [session heap]
+    +0x30 (qword)            -> ActorManager singleton
+      +0x28 (qword)          -> UserActor singleton (ClientUserActor)
+        +0xD0 (qword)        -> primary actor slot           [always Kliff]
+        +0xD8 (qword)        -> controlled client actor      [rotates on swap]
+          +0x60 (u8)         -> per-actor slot-index byte    [allocation order]
 ```
 
-This byte is the single cheapest signal for "who is controlled right now". The mod reads it in `read_controlled_char_idx_seh()` (`shared_state.cpp`) and polls it once per second in `load_detect_thread_fn` (`transmog_worker.cpp`).
+Notes on each step:
+
+* **`0x145D2AEE8`** is the WorldSystem holder static slot. Its qword contents are session-dependent (allocated during world load). The consumer mods AOB-scan for this address and hand it to Core via `set_world_system_holder()`; Core does not scan for it itself.
+* **`ws + 0x30`** is the ActorManager singleton. Reallocated on every save load.
+* **`am + 0x28`** is the UserActor singleton (RTTI class `.?AVClientUserActor@pa@@`). The pointer at this slot is stable for the lifetime of a save: in-session character swaps do NOT rewrite it. Save loads do reallocate it; consumers use the change of this pointer as the trigger for cache invalidation.
+* **`user + 0xD0`** is the "primary" actor slot. Always points at Kliff's actor in the current story progression, regardless of which character is currently controlled. This is a structural invariant that the decode below relies on.
+* **`user + 0xD8`** is the currently-controlled client actor (RTTI class `.?AVClientChildOnlyInGameActor@pa@@`). Coincides with `user + 0xD0` when Kliff is controlled, and rotates to a Damiane or Oongka slot when one of them is controlled.
+
+Every intermediate pointer is rejected if it falls below the 64 KiB guard region (`k_minValidPtr = 0x10000`). The whole walk runs inside a single `__try` block; any access fault returns an invalid probe which the caller treats as "no live identity, fall back to cache".
+
+#### 1.3.2 Decode rules (verified 2026-04-22)
+
+**Rule 1 -- Kliff via structural invariant.** When `*(user + 0xD0) == *(user + 0xD8)` the primary slot coincides with the controlled slot, which only happens when Kliff is controlled. This is a pure pointer comparison with no dependence on numeric fields that could shift across saves or patches. Verified across three distinct saves controlling Kliff.
+
+**Rule 2 -- companions via slot-index diff.** When the two slots differ, a companion is controlled. The byte at `actor + 0x60` is a per-actor slot index assigned at allocation time in a fixed character order (Kliff, then Damiane, then Oongka). The absolute value varies per save because the slot-index pool is shared with other actors, but within any given save the diff between the controlled slot and the primary slot uniquely identifies the companion:
+
+| Companion diff | Character |
+|----------------|-----------|
+| `+1`           | Damiane   |
+| `+2`           | Oongka    |
+| anything else  | Unknown   |
+
+#### 1.3.3 Verified observations (v1.03.01)
+
+| Save shape       | Kliff `+0x60` | Damiane `+0x60` | Oongka `+0x60` |
+|------------------|---------------|-----------------|----------------|
+| Kliff + Damiane  | `1`           | `2`             | (absent)       |
+| 3 protagonists   | `6`           | `7`             | `8`            |
+
+The `+0x60` byte stays stable when a character is backgrounded -- verified by reading it on Oongka after the user swapped away from him; the value remained `8` across the swap. So the decode produces the same result regardless of which character is currently controlled, as long as the primary slot stays Kliff.
+
+#### 1.3.4 What was tried and rejected
+
+The previous resolver attempted to identify characters via a packed `(party_class << 32) | char_kind` key reading the u32s at `actor + 0xDC` and `+0xEC`. That approach was disproved on 2026-04-22:
+
+* `(party_class, char_kind)` shifts with party composition. The same Damiane reads `(4, 2)` in a 3-party save and `(3, 2)` in a save without Oongka.
+* Damiane and Oongka in the **same** 3-party save BOTH read `(3, 2)`, so the key is structurally ambiguous.
+* `char_kind = 3` did consistently identify Kliff across all four observations, but the structural `D0 == D8` check is more robust and was preferred to avoid depending on a numeric value that may also drift on a future patch.
+
+The qwords at `actor + 0xD8` and `actor + 0xE8` carry control-state in their LOW u32s (controlled vs backgrounded) and the rejected identity bits in their HIGH u32s. They are documented here so a future RE pass does not re-test them.
+
+#### 1.3.5 Known assumption
+
+The decode assumes the engine's character allocation order is always `Kliff, Damiane, Oongka`. A save containing only Kliff + Oongka (no Damiane) would allocate Oongka at `Kliff + 1` and would be decoded as Damiane. No such save has been observed in the current game content; if one arises, the consumer mod's overlay allows manual override and the misdetection is a UX hiccup, not a correctness failure.
+
+#### 1.3.6 Last-known-good cache
+
+The resolver keeps one atomic `s_lastGoodKey` that holds the most recent identity key matching one of the three known values. Each query:
+
+1. Walks the chain (SEH-isolated).
+2. If the resulting key is one of `{Kliff, Damiane, Oongka}`, refresh `s_lastGoodKey` with it and use it as the effective key.
+3. Otherwise (zero from a faulted walk, torn read mid-swap, unknown future value) ignore the live key and use whatever is currently in `s_lastGoodKey`. The cache may itself be empty (zero), in which case the resolver returns `Unknown`.
+
+The cache exists to absorb torn reads at the moment the engine is rewriting `user + 0xD8` during a swap. Without it, a query that landed mid-rewrite would briefly resolve to `Unknown` and any consumer holding state per-character (preset selection, parts override) would flap.
+
+`invalidate_controlled_character()` zeroes the cache. Consumers MUST call it on save-load transitions:
+
+* **Trigger:** the UserActor pointer at `am + 0x28` changes value.
+* **Why:** the previous save's identity key may still reflect the old character whose actor lived in heap that has just been freed and reallocated.
+* **Why not on character swap:** the UserActor pointer does not change on swaps; only `user + 0xD8` rotates. Invalidating on swap would wipe a cache the resolver could have re-populated within the same query.
+
+Both `transmog_worker.cpp` (LiveTransmog load-detect thread) and `player_detection.cpp` (EquipHide background tick) implement this trigger. The first-boot path is gated by a `prevUser != 0` check so the very first tick after world load does not invalidate a cache the resolver may have just populated.
+
+#### 1.3.7 Consumer init contract
+
+The Core resolver does not own its own AOB scan. Consumers AOB-scan for the WorldSystem holder (each mod has a `WorldSystem` AOB candidate set in its own `aob_resolver.hpp`) and publish the resolved address via:
+
+```cpp
+CDCore::set_world_system_holder(addrs.worldSystem);
+```
+
+Both consumers can publish the same address; later writers win, which is the intended behaviour after a re-resolve. Until at least one consumer has called `set_world_system_holder()` with a non-zero address, every resolver query short-circuits to `Unknown`.
+
+The first call also emits a single info log line:
+
+```text
+ControlledChar: WorldSystem holder published at 0x145D2AEE8
+```
+
+A separate one-shot diagnostic logs each unique probe signature (the `(primary_slot, controlled_slot)` pair) the resolver observes:
+
+```text
+ControlledChar: probe primary_slot=6 controlled_slot=8 diff=2 -> Oongka
+```
+
+The trailing name is the decoded character (`Kliff` / `Damiane` / `Oongka` / `Unknown`). This is the only signal that the resolver is wired up correctly on a future patch; the four-slot seen-set covers the three expected diff combinations plus one transient anomaly without log spam.
+
+#### 1.3.8 Reproducing the verification
+
+To re-verify against a future game patch:
+
+1. Attach Cheat Engine to `CrimsonDesert.exe` after a save is loaded with Kliff controlled.
+2. Read the qword at the WorldSystem holder static (the consumer's AOB-scanned address; `0x145D2AEE8` on v1.03.01) -- this yields the WorldSystem instance pointer.
+3. Walk `+0x30 -> +0x28` to land on the UserActor singleton.
+4. Read the qwords at `user + 0xD0` (primary) and `user + 0xD8` (controlled). They MUST be equal -- this is the structural Kliff invariant. RTTI on the resolved actor must be `pa::ClientChildOnlyInGameActor`.
+5. Read the byte at `controlled_actor + 0x60`. Record the value -- call it `K` (Kliff's slot index for this save).
+6. Swap to a companion via the in-game character picker. Re-walk the chain. `user + 0xD0` MUST still hold Kliff's actor pointer; `user + 0xD8` MUST now hold a different pointer. The byte at the new controlled actor's `+0x60` MUST equal `K + 1` for Damiane or `K + 2` for Oongka.
+7. Background the companion and re-walk. The byte at `+0x60` on the now-backgrounded companion MUST stay at the same value (slot index is allocation-time and survives control-state changes).
+8. Repeat for the third protagonist if available. The diff from `K` MUST be the documented value (1 or 2).
+
+If steps 4-7 still hold on a new patch, the resolver requires no changes. If they break, the structural invariant has shifted (most likely candidates: the engine moved the primary slot off `+0xD0`, or the slot-index byte moved off `+0x60`). In either case the offsets in `controlled_char.cpp` need updating, but the algorithm shape (`D0 == D8` for Kliff plus slot-diff for companions) does not.
 
 ### 1.4 How the mod resolves `a1` at apply time
 
@@ -88,6 +200,8 @@ Every armor's rule list (`desc+0x248`, stride `0x38`, count at `desc+0x250`) con
 Any token `>= 0x1000` is classified by the mod as **non-humanoid** (`k_nonHumanoidTokenThreshold` in `item_name_table.cpp`). Humanoid tokens observed so far all fit below `0x0400`.
 
 ### 2.2 Role byte -- NOT a reliable identifier
+
+The `typeEntry+1` byte is role-based (controlled vs backgrounded), not character-based. Companion actors share the same typeEntry pool slot when controlled, so multiple characters decode to the same byte value and cannot be distinguished here. Identity decoding belongs to the resolver documented in §1.3, which compares the primary and controlled actor pointers at `user+0xD0` and `user+0xD8` for the Kliff case and uses the allocation-order slot-index byte at `actor+0x60` to disambiguate companions.
 
 `*(actor+0x88)+1` is **not** a player/NPC flag despite older code treating it as one. Observed values:
 
@@ -279,11 +393,67 @@ Color tiers on rows:
 
 Implemented in `transmog_worker.cpp :: load_detect_thread_fn`.
 
-1. Poll `read_controlled_char_idx_seh()` once per second.
-2. On change between known characters, call `pm.set_active_character(live)`, wipe `slot_mappings`, run `apply_to_state()` so `slot_mappings` reflects the live character's active preset, reset drop-detection state, save.
-3. Schedule a transmog apply if the mod is enabled.
+1. Poll `CDCore::current_controlled_character_name()` once per second (resolver internals in §1.3).
+2. Apply a **settle window** (`k_charSwapSettleMs = 1000`): a candidate identity must remain stable across at least one full second of polling before the swap commits. The first tick that observes a new candidate records `(pendingCharName, pendingFirstSeenTick)`; subsequent ticks confirm the candidate, and the swap fires when `GetTickCount64() - pendingFirstSeenTick >= 1000`. A back-and-forth (A -> B -> A) within the window cancels the pending candidate, so phantom commits do not leak through.
+3. On confirmed change between known characters, call `pm.set_active_character(live)`, wipe `slot_mappings`, run `apply_to_state()` so `slot_mappings` reflects the live character's active preset, reset drop-detection state, save.
+4. Schedule a transmog apply if the mod is enabled.
+
+The settle window exists because the engine rotates `user+0xD8` through party members during world-load wiring (observed sequence on a Damiane save: Kliff -> Oongka -> Damiane over ~30 seconds). Each rotation is a real engine state, but only the final identity is the user's intended controlled character; firing the swap on each transition would commit the wrong preset and incur ~3x wasted apply work plus a brief visual flicker. 1s is chosen to coalesce sub-second torn reads at the cost of an equal amount of latency on real user-initiated swaps. Multi-second engine wiring sequences (like the load-time rotation above) are not coalesced -- the user will still see one transmog apply per stable identity -- but the immediately-after-load Kliff->random-companion->target-companion churn that arises when the engine briefly parks on the primary slot before rotating is suppressed.
+
+A separate save-load detector observes the `am+0x28` UserActor pointer; when it changes the worker calls `CDCore::invalidate_controlled_character()` so the resolver's last-known-good cache does not return the previous save's character against freshly-reallocated heap. The settle-window state (`pendingCharName`, `pendingFirstSeenTick`) is also cleared on this transition so a stale candidate from the previous save cannot commit against the new world.
+
+The same `CDCore::invalidate_controlled_character()` is called when `player_component` changes (not just on UserActor change). A character swap rotates `user+0xD8` to a different `ClientChildOnlyInGameActor` without touching the UserActor singleton; the LKG identity from the previous controlled actor is no longer applicable to the new wrapper. Without this second invalidation point the resolver's torn-read absorption returns the prior character's name on any chain walk that lands on the new wrapper before its `+0x60` slot-index byte has been written, and the load-detect retry path commits the prior character's preset onto the new actor. Cost: at most one outer-loop tick (~1 second) of additional latency on swaps where the chain walk transiently returns Unknown right after the rotation; the safety-gate defers until the chain lands on a known identity.
 
 `run_debounced_apply` additionally calls `sync_active_char_to_live()` at the start of every apply pass so that even UI-driven applies (preset clicks, character picker) target the correct character regardless of what `pm.active_character()` was momentarily set to by the UI.
+
+### 6.1 Actor-readiness probe (placeholder-wrapper filter)
+
+When `Load detect: player component changed` fires, the load-detect retry loop schedules up to 20 attempts (backoff 2s, 2s, 3s, 4s, then 5s × 16 -> ~95s total). The 20-attempt budget exists because **on low-end PCs the engine takes 60+ seconds to fully wire the controlled actor's part-registry after a save load**, and a shorter budget would give up before legitimate slow loads complete.
+
+The cost of that budget on machines where the engine parks `user+0xD8` on a *placeholder* wrapper for the entire load was ~5 SEH-faulted `tear_down` log lines plus an apply fault per attempt -- ~100 noisy faults until the engine swaps the wrapper to the real actor. Mitigation: a cheap actor-readiness probe in front of each scheduled apply.
+
+**Probe** (`RealPartTearDown::is_actor_apply_ready`):
+
+```text
+SEH-guarded read-only chain on a1 (the player wrapper):
+  *(a1 + 0x78) -> container         (must be >= 0x10000)
+    +0x08 -> arrayBase              (must be >= 0x10000)
+    +0x10 -> count (u32)            (must be in [1, 0x1000])
+```
+
+The chain mirrors the preamble of `tear_down_real_part` exactly. On a placeholder wrapper the `*(a1+0x78)` read SEH-faults (the placeholder's container slot is unallocated). On a real actor the chain reads cleanly and `count` is the live PartDef entry count (14 in a representative reproduction; the protagonist always has at least one equipped slot once wiring completes).
+
+**Wiring in the retry loop:**
+
+* Attempt 0 always invokes the apply path (so a fast-load case where the actor was already wired at the moment load-detect fired still applies immediately, with no probe-only delay).
+* Attempts 1+ run the probe first. If the probe returns false, log one `Load detect: actor not ready -- deferring apply (attempt N)` line, increment a `notReadyStreak` counter, and continue. Subsequent failed probes within the same streak are silent (no log spam).
+* On the first probe that passes after a streak, log `Load detect: actor became ready after N deferred attempts`, reset the streak, and proceed to schedule a real apply.
+
+**Result:** on a slow load where the engine holds the placeholder for 90+ seconds, the log shows two debug lines (defer + recovery) instead of ~100 SEH-fault traces, and the eventual apply still fires on the first attempt after the engine swaps the wrapper. The 20-attempt budget itself is unchanged so legitimate slow-but-in-place wiring is still tolerated.
+
+**Why `count >= 1` is safe even for a naked character:** `count` is the slot-entry count (helm/chest/cloak/gloves/boots/weapons/accessories/...), NOT the equipped-item count. Empty slots persist as `primary == 0xFFFF` sentinels and are skipped *inside* the iteration loop, not by lowering `count`. A naked save still reports a full slot count (the representative reproduction shows `count = 14` even for slots that turned out empty during the walk). `count == 0` with a readable container only occurs during the brief window where the container struct is allocated but its slot entries have not yet been initialised -- which is exactly the placeholder/mid-wiring state we want to filter out.
+
+### 6.2 Mid-retry wrapper-change abort
+
+The retry loop also re-resolves the player component at the top of every attempt and aborts the current budget when the wrapper has been swapped beneath us:
+
+```cpp
+const auto curComp = resolve_player_component();
+if (curComp > 0x10000 && curComp != comp)
+{
+    logger.info("Load detect: wrapper changed mid-retry "
+                "({:#x} -> {:#x}), aborting current budget",
+                comp, curComp);
+    wrapperChanged = true;
+    break;
+}
+```
+
+The engine sometimes parks `user+0xD8` on a *placeholder* wrapper for 60+ seconds before deallocating it and allocating the real character actor at a different address. Without this check the inner retry loop would burn its full ~95s budget against the dead placeholder, then return to the outer load-detect tick which would only then notice the new wrapper and start a *second* full retry budget. Net delay until the real wrapper got a transmog apply: 95s + (1s outer-loop tick) + (2s first-attempt delay) = ~98s of visible-mismatch render.
+
+With the abort the inner loop bails within at most one attempt's delay (2-5s) of the swap. The outer loop's next 1s tick observes `comp != prevComp`, advances `prevComp` and starts a fresh 20-attempt budget against the real wrapper -- which typically succeeds on attempt 1 because the freshly-allocated real actor is already wired by the time the engine swaps to it. End-to-end visible-mismatch window collapses from ~95s to ~3-7s.
+
+The "auto-apply failed after N attempts" warning is suppressed when the inner loop exits via `wrapperChanged = true`: that exit is a planned hand-off to the outer loop, not a failure.
 
 ---
 

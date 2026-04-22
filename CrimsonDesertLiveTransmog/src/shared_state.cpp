@@ -1,5 +1,7 @@
 #include "shared_state.hpp"
 
+#include <cdcore/controlled_char.hpp>
+
 #include <DetourModKit.hpp>
 
 #include <Windows.h>
@@ -61,40 +63,15 @@ namespace Transmog
     std::atomic<bool> &suppress_vec() { return s_suppressVEC; }
     std::atomic<__int64> &player_a1() { return s_playerA1; }
 
-    // SEH-only helper -- kept in its own no-C++-object function so
-    // MSVC __try/__except doesn't collide with std::string unwinding
-    // (C2712) in callers.
-    static std::uint8_t read_controlled_char_idx_seh() noexcept
-    {
-        const auto wsBase =
-            s_worldSystemPtr.load(std::memory_order_acquire);
-        if (!wsBase)
-            return 0;
-        __try
-        {
-            auto ws = *reinterpret_cast<uintptr_t *>(wsBase);
-            if (ws < 0x10000)
-                return 0;
-            auto am = *reinterpret_cast<uintptr_t *>(ws + 0x30);
-            if (am < 0x10000)
-                return 0;
-            return *reinterpret_cast<uint8_t *>(am + 0x30);
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER)
-        {
-            return 0;
-        }
-    }
-
     std::string current_controlled_character_name() noexcept
     {
-        switch (read_controlled_char_idx_seh())
-        {
-            case 1: return "Kliff";
-            case 2: return "Damiane";
-            case 3: return "Oongka";
-            default: return {};
-        }
+        // Delegates to the shared Core resolver, which walks the live
+        // WorldSystem chain to the controlled actor and decodes its
+        // identity u32s. Returns an empty string when the WorldSystem
+        // holder has not been published yet or the chain walk yields
+        // an unknown key with no cached fallback.
+        const auto name = CDCore::current_controlled_character_name();
+        return std::string(name);
     }
     std::atomic<uintptr_t> &world_system_ptr() { return s_worldSystemPtr; }
     std::array<bool, k_slotCount> &real_damaged() { return s_realDamaged; }

@@ -14,6 +14,8 @@
 #include "transmog_map.hpp"
 #include "transmog_worker.hpp"
 
+#include <cdcore/controlled_char.hpp>
+
 #include <DetourModKit.hpp>
 
 #include <Windows.h>
@@ -695,7 +697,11 @@ namespace Transmog
 
         // --- Input ---
 
-        // Resolve WorldSystem pointer for player detection on load.
+        // Resolve WorldSystem pointer for player detection on load and
+        // publish the same address to the Core controlled-character
+        // resolver. Core walks WorldSystem -> ActorManager -> UserActor ->
+        // controlled_actor(+0xD8) -> identity u32s at +0xDC and +0xEC;
+        // unresolved holder degrades to Unknown without crashing.
         {
             auto wsAddr = resolve_address(
                 k_worldSystemCandidates,
@@ -705,10 +711,13 @@ namespace Transmog
             {
                 world_system_ptr().store(wsAddr, std::memory_order_release);
                 logger.info("WorldSystem pointer at 0x{:X}", wsAddr);
+                CDCore::set_world_system_holder(wsAddr);
             }
             else
             {
-                logger.warning("WorldSystem AOB failed -- load-time transmog disabled");
+                logger.warning(
+                    "WorldSystem AOB failed -- load-time transmog and "
+                    "per-character presets disabled");
             }
         }
 

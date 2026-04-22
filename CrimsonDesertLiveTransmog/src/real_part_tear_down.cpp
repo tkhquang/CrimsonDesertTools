@@ -17,11 +17,11 @@ namespace Transmog::RealPartTearDown
         // Helper function pointer types. Addresses come from
         // Transmog::resolved_addrs() (populated elsewhere in init()):
         //
-        // sub_14075FE60 — Safe scene-graph tear-down.
+        // sub_14075FE60 -- Safe scene-graph tear-down.
         //   Calls sub_1425EBAE0 internally. Does NOT mutate the
         //   authoritative equip table at *(a1+0x78).
         //
-        // sub_1402D75D0 — IndexedStringA short->hash lookup. Takes the
+        // sub_1402D75D0 -- IndexedStringA short->hash lookup. Takes the
         //   address of a uint16_t slot id; returns a pointer whose
         //   first DWORD is the descriptor hash used by the rest of the
         //   equip pipeline.
@@ -117,6 +117,54 @@ namespace Transmog::RealPartTearDown
     bool is_ready() noexcept
     {
         return g_ready.load(std::memory_order_acquire);
+    }
+
+    bool is_actor_apply_ready(void *a1Raw) noexcept
+    {
+        const auto a1 = reinterpret_cast<std::uintptr_t>(a1Raw);
+        if (a1 < 0x10000)
+            return false;
+
+        // Mirrors the preamble of `tear_down_real_part` exactly. Layout
+        // constants are file-scope (not exported), so the probe lives in
+        // this TU and is exposed via the namespace function only. SEH-
+        // wrapped because the placeholder wrapper that the engine parks
+        // user+0xD8 on during world load faults at the container deref --
+        // that fault is the primary signal we are filtering on.
+        __try
+        {
+            const auto container =
+                *reinterpret_cast<volatile std::uintptr_t *>(
+                    a1 + k_containerPtrOffset);
+            if (container < 0x10000)
+                return false;
+
+            const auto arrayBase =
+                *reinterpret_cast<volatile std::uintptr_t *>(
+                    container + k_containerArrayBaseOffset);
+            if (arrayBase < 0x10000)
+                return false;
+
+            const auto count =
+                *reinterpret_cast<volatile std::uint32_t *>(
+                    container + k_containerCountOffset);
+
+            // count is the slot-entry count, not the equipped-item count
+            // (the iteration in tear_down_real_part visits all indices
+            // 0..count and skips empty slots via primary==0xFFFF and
+            // gate==0 inside the loop). A naked character still reports
+            // a full slot count -- empty slots persist as 0xFFFF
+            // sentinels. Therefore count==0 with a readable container
+            // signals an actor whose container struct is allocated but
+            // whose slot entries are not yet populated -- placeholder or
+            // mid-wiring. The upper bound rejects torn reads that would
+            // otherwise pass the lower bound by accident.
+            return count >= 1 && count <= k_maxPlausibleEntries;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return false;
+        }
     }
 
     bool resolve_helpers() noexcept
@@ -224,7 +272,7 @@ namespace Transmog::RealPartTearDown
         {
             logger.warning(
                 "[dispatch] tear_down: slot tag {:#06x} outside plausible "
-                "range [{:#x}..{:#x}] — rejecting",
+                "range [{:#x}..{:#x}] -- rejecting",
                 gameSlotTag, k_minPlausibleSlotTag, k_maxPlausibleSlotTag);
             return false;
         }
@@ -252,13 +300,13 @@ namespace Transmog::RealPartTearDown
             {
                 logger.warning(
                     "[dispatch] tear_down: container sanity failed "
-                    "(arrayBase=0x{:X} count={}) — layout may have shifted",
+                    "(arrayBase=0x{:X} count={}) -- layout may have shifted",
                     static_cast<std::uint64_t>(arrayBase), count);
                 return false;
             }
 
             // First-entry sanity log, once per session. Warns loudly if
-            // the gate qword is zero — that would mean the struct
+            // the gate qword is zero -- that would mean the struct
             // reshaped and every subsequent walk is reading garbage.
             bool expected = false;
             if (g_loggedFirstEntry.compare_exchange_strong(
@@ -286,7 +334,7 @@ namespace Transmog::RealPartTearDown
                 if (g0 == 0)
                 {
                     logger.warning(
-                        "[dispatch] tear_down: first-entry gate is zero — "
+                        "[dispatch] tear_down: first-entry gate is zero -- "
                         "PartDef struct layout may have shifted, all "
                         "subsequent walks are suspect");
                 }
@@ -338,7 +386,7 @@ namespace Transmog::RealPartTearDown
                 itemWord = *reinterpret_cast<volatile std::uint16_t *>(
                     foundEntry + k_entryPrimaryWordOffset);
 
-            // Copy to a stable local — the lookup fn takes the ADDRESS of a
+            // Copy to a stable local -- the lookup fn takes the ADDRESS of a
             // short and may dereference it multiple times.
             std::uint16_t localWord = itemWord;
             void *hashPtr = lookupFn(&localWord);
