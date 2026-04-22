@@ -21,6 +21,11 @@
 - SEH-protected hook callback to prevent crashes if mod is outdated
 - Fully customizable settings via INI configuration
 
+## Requirements
+
+- Crimson Desert (PC, Steam)
+- ASI Loader (e.g. [Ultimate ASI Loader](https://github.com/ThirteenAG/Ultimate-ASI-Loader/releases))
+
 ## Installation
 
 ### Step 1: Install an ASI Loader
@@ -203,9 +208,11 @@ If you encounter issues:
 
 Common issues:
 
-- **Mod doesn't load** – Ensure the files are in the correct location and ASI Loader is installed
-- **Toggle doesn't work** – Check log file for AOB pattern errors
-- **Game crashes** – Check log file for errors; try updating to the latest version
+- **Mod doesn't load** -- Ensure the files are in the correct location and ASI Loader is installed
+- **Toggle doesn't work** -- Check log file for AOB pattern errors
+- **Game crashes** -- Check log file for errors; try updating to the latest version
+
+**Important: removing or disabling ASI mods.** Ultimate ASI Loader scans subdirectories recursively. Moving an `.asi` file into a subfolder (e.g. `plugins/backup/`) does **not** prevent it from loading. To fully disable an ASI mod, move it **outside the game's root directory entirely**, or rename the file extension (e.g. `.asi.bak`).
 
 > **Still stuck?** [Open a GitHub issue](https://github.com/tkhquang/CrimsonDesertTools/issues/new?assignees=&labels=bug&template=bug_report.yaml) and include your INI config, log output, and game version.
 
@@ -229,6 +236,47 @@ Parts = CD_Helm, CD_Cloak, CD_Shoulder
 ```
 
 In this example, pressing `V` would still toggle Shields and Masks, but Helm would only respond to `F5` because UserPreset1 owns it.
+
+## Per-Character Parts Overrides
+
+Each category's `Parts` list can be overridden per protagonist by adding a section named `[CategoryName:CharacterName]`. Supported names: `Kliff`, `Damiane`, `Oongka`. Only the `Parts` key is per-character; `Enabled`, `DefaultHidden`, and hotkeys remain global.
+
+Three ways to set a per-character `Parts` value:
+
+| Value | Effect |
+| ----- | ------ |
+| section absent, or `Parts =` (empty) | Inherits the base `[CategoryName]` list |
+| `Parts = CD_Xxx, CD_Yyy, ...` | Uses this explicit list when that character is controlled |
+| `Parts = NONE` | Disables the category for that character (nothing hidden even when the base is enabled) |
+
+### Example: keep the lantern visible on Damiane
+
+```ini
+[Lanterns]
+Enabled = true
+ToggleHotkey = L
+DefaultHidden = true
+Parts = CD_Lantern, CD_Lantern_Ring
+
+[Lanterns:Damiane]
+Parts = NONE
+```
+
+`V`/`L` still toggles the lantern for Kliff and Oongka, but Damiane's lantern is never hidden.
+
+### Example: different weapon sets per character
+
+Kliff has no sheath mesh for 1H axes or maces, but Damiane does:
+
+```ini
+[OneHandWeapons]
+Parts = CD_MainWeapon_Sword_R, CD_MainWeapon_Sword_L, ...
+
+[OneHandWeapons:Damiane]
+Parts = CD_MainWeapon_Sword_R, CD_MainWeapon_Sword_L, ..., CD_MainWeapon_Axe_R, CD_MainWeapon_Axe_L, CD_MainWeapon_Mace_R, CD_MainWeapon_Mace_L
+```
+
+The active character is detected by walking the live WorldSystem pointer chain to the currently-controlled actor and decoding its built-in identity fields. Switching between protagonists automatically swaps the effective Parts list on the next tick.
 
 ## Compatibility with Replacer Mods
 
@@ -261,8 +309,8 @@ See [CHANGELOG.md](CHANGELOG.md) for a detailed history of updates.
 
 This mod requires:
 
-- [Ultimate ASI Loader](https://github.com/ThirteenAG/Ultimate-ASI-Loader) by [**ThirteenAG**](https://github.com/ThirteenAG) – `winmm.dll` recommended (see [Installation](#installation) for alternatives)
-- [DetourModKit](https://github.com/tkhquang/DetourModKit) – A lightweight C++ toolkit for game modding
+- [Ultimate ASI Loader](https://github.com/ThirteenAG/Ultimate-ASI-Loader) by [**ThirteenAG**](https://github.com/ThirteenAG) -- `winmm.dll` recommended (see [Installation](#installation) for alternatives)
+- [DetourModKit](https://github.com/tkhquang/DetourModKit) -- A lightweight C++ toolkit for game modding
 
 ## Building from Source
 
@@ -296,10 +344,10 @@ The loader (`CrimsonDesertEquipHide.asi`) and logic DLL (`CrimsonDesertEquipHide
 
 ## Credits
 
-- [ThirteenAG](https://github.com/ThirteenAG) – for the Ultimate ASI Loader
-- [cursey](https://github.com/cursey) – for SafetyHook
-- [Brodie Thiesfield](https://github.com/brofield) – for SimpleIni
-- Pearl Abyss – for Crimson Desert
+- [ThirteenAG](https://github.com/ThirteenAG) -- for the Ultimate ASI Loader
+- [cursey](https://github.com/cursey) -- for SafetyHook
+- [Brodie Thiesfield](https://github.com/brofield) -- for SimpleIni
+- Pearl Abyss -- for Crimson Desert
 
 ## License
 

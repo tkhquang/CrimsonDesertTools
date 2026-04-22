@@ -17,7 +17,18 @@ This mod allows you to hide equipped gear visually in Crimson Desert using custo
 [size=5]Requirements[/size]
 [list]
 [*] Crimson Desert (Steam version)
+[*] ASI Loader (e.g. [url=https://github.com/ThirteenAG/Ultimate-ASI-Loader/releases]Ultimate ASI Loader[/url])
 [/list]
+
+[color=red][size=5][b]DO NOT INSTALL VIA MOD MANAGERS[/b][/size][/color]
+
+[color=red][b]This mod is manual-install only. Mod managers are NOT supported.[/b][/color]
+
+Mod managers often stage [b].asi[/b] files into their own subfolders. Ultimate ASI Loader scans subdirectories recursively, so the [b].asi[/b] keeps loading even after the manager reports the mod as "disabled" or "uninstalled". Common symptom: gear stays hidden after you think the mod is gone.
+
+[b]Install manually[/b] by following the Installation steps below. [b]To uninstall,[/b] delete [b]CrimsonDesertEquipHide.asi[/b] and [b]CrimsonDesertEquipHide.ini[/b] directly from [b]bin64[/b] (not via the manager). If a manager moved your files into a subfolder like [b]bin64/plugins/[/b] or [b]bin64/backup/[/b], delete them from that subfolder too.
+
+[color=red][b]Issues reported for mod-manager installs will not be investigated. Reproduce on a clean manual install first.[/b][/color]
 
 [size=5]Installation[/size]
 
@@ -32,6 +43,8 @@ Download the [b]x64[/b] build of [url=https://github.com/ThirteenAG/Ultimate-ASI
 [/list]
 
 [b]How to verify:[/b] After completing Step 2, launch the game once. If no [b]CrimsonDesertEquipHide.log[/b] file appears in [b]bin64[/b], the ASI Loader is not loading. Try renaming the DLL to one of the other variants listed above.
+
+[b]Note:[/b] If you are using a newer version of Ultimate ASI Loader and the log file is not generated, try the [b]win64[/b] (x64) build from [url=https://github.com/ThirteenAG/Ultimate-ASI-Loader/releases/tag/v9.1.0]v9.1.0[/url] instead.
 
 [size=4]Step 2: Install the mod[/size]
 1. Download the latest release from the files section
@@ -163,6 +176,45 @@ ToggleHotkey = V,Gamepad_LB+Gamepad_Y
 
 [b]XInput only:[/b] Xbox controllers work natively. For PS4/PS5/Switch controllers, use an XInput translation layer (e.g. DS4Windows, DualSenseX, BetterJoy) or Steam Input to present your controller as XInput. See [url=https://github.com/tkhquang/DetourModKit?tab=readme-ov-file#gamepad-compatibility]Gamepad Compatibility[/url] for details.
 
+[size=5]Per-Character Parts Overrides[/size]
+Each category's [b]Parts[/b] list can be overridden per protagonist by adding a section named [b][CategoryName:CharacterName][/b]. Supported names: [b]Kliff[/b], [b]Damiane[/b], [b]Oongka[/b]. Only the [b]Parts[/b] key is per-character; [b]Enabled[/b], [b]DefaultHidden[/b], and hotkeys remain global to the base section.
+
+Three ways to set a per-character [b]Parts[/b] value:
+[list]
+[*] Section absent, or [b]Parts =[/b] (empty) - inherits the base [b][CategoryName][/b] list
+[*] [b]Parts = CD_Xxx, CD_Yyy, ...[/b] - uses this explicit list when that character is controlled
+[*] [b]Parts = NONE[/b] - disables the category for that character (nothing hidden even when the base is enabled)
+[/list]
+
+[b]Example: keep the lantern visible on Damiane[/b]
+
+[code]
+[Lanterns]
+Enabled = true
+ToggleHotkey = L
+DefaultHidden = true
+Parts = CD_Lantern, CD_Lantern_Ring
+
+[Lanterns:Damiane]
+Parts = NONE
+[/code]
+
+The lantern hotkey still works for Kliff and Oongka, but Damiane's lantern is never hidden.
+
+[b]Example: different weapon sets per character[/b]
+
+Kliff has no sheath mesh for 1H axes or maces, but Damiane does:
+
+[code]
+[OneHandWeapons]
+Parts = CD_MainWeapon_Sword_R, CD_MainWeapon_Sword_L, ...
+
+[OneHandWeapons:Damiane]
+Parts = CD_MainWeapon_Sword_R, CD_MainWeapon_Sword_L, ..., CD_MainWeapon_Axe_R, CD_MainWeapon_Axe_L, CD_MainWeapon_Mace_R, CD_MainWeapon_Mace_L
+[/code]
+
+The active character is detected by walking the live WorldSystem pointer chain to the currently-controlled actor and decoding its built-in identity fields. Switching between protagonists automatically swaps the effective Parts list on the next tick.
+
 [size=5]Compatibility with Replacer Mods[/size]
 Set [b]ForceShow = true[/b] if you use mods that alter the default visibility of equipment via PAZ patching (e.g. character replacers like "Playing Kliff as Damiane", armor replacers, transmog mods). ForceShow overrides their changes so toggling equipment back to visible still works:
 
@@ -213,6 +265,8 @@ If you encounter issues:
 [*] Check the log file in your game directory ([b]CrimsonDesertEquipHide.log[/b])
 [*] For memory pattern errors, the mod needs an update for the current game version
 [/list]
+
+[b]Important: removing or disabling ASI mods.[/b] Ultimate ASI Loader scans subdirectories recursively. Moving an [b].asi[/b] file into a subfolder (e.g. [b]plugins/backup/[/b]) does [b]not[/b] prevent it from loading. To fully disable an ASI mod, move it [b]outside the game's root directory entirely[/b], or rename the file extension (e.g. [b].asi.bak[/b]).
 
 [size=5]Credits & Source Code[/size]
 Built with [url=https://github.com/tkhquang/DetourModKit]DetourModKit[/url] for core functionality.

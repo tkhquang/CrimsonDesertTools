@@ -4,6 +4,8 @@
 #include <array>
 #include <cstdint>
 #include <limits>
+#include <mutex>
+#include <string_view>
 #include <vector>
 
 namespace EquipHide
@@ -155,7 +157,7 @@ namespace EquipHide
         // Legs (armor)
         {"CD_Lowerbody",                 Category::Legs},
         {"CD_Lowerbody_Acc",             Category::Legs},
-        {"CD_Underwear",                 Category::Legs},
+        {"CD_Underwear",                 Category::Underwear},
         // Gloves (armor)
         {"CD_Hand",                      Category::Gloves},
         {"CD_Hand_Acc",                  Category::Gloves},
@@ -217,6 +219,51 @@ namespace EquipHide
     /* Written during init (config load) before hooks; read by rebuild_part_lookup()
        on the background scan thread. Hook installation provides happens-before. */
     static std::string s_categoryParts[CATEGORY_COUNT];
+
+    /* Per-character Parts overrides. Empty = inherit from s_categoryParts[cat].
+       Written during config load and never thereafter, so no synchronisation needed
+       beyond the existing s_rebuildMutex guard on rebuild_part_lookup. */
+    static std::string s_categoryPartsPerChar[CATEGORY_COUNT][kCharIdxCount];
+
+    /* Active character index. -1 = use base Parts only (pre-resolution / unknown). */
+    static std::atomic<int> s_activeChar{-1};
+
+    /* Serialises rebuild_part_lookup(): the deferred IndexedStringA scan thread and
+       the player-detection char-swap poll can both trigger rebuilds concurrently. */
+    static std::mutex s_rebuildMutex;
+
+    std::string_view character_name_for_idx(std::size_t idx) noexcept
+    {
+        constexpr std::string_view names[] = {"Kliff", "Damiane", "Oongka"};
+        static_assert(std::size(names) == kCharIdxCount,
+                      "names[] must match kCharIdxCount");
+        return (idx < kCharIdxCount) ? names[idx] : std::string_view{};
+    }
+
+    void set_per_char_parts(Category cat, std::size_t charIdx, std::string partsStr)
+    {
+        if (charIdx >= kCharIdxCount)
+            return;
+        s_categoryPartsPerChar[static_cast<std::size_t>(cat)][charIdx] = std::move(partsStr);
+    }
+
+    int get_active_character() noexcept
+    {
+        return s_activeChar.load(std::memory_order_acquire);
+    }
+
+    /** @brief Pick effective Parts for a category, honouring the active per-char override. */
+    static const std::string& effective_parts_for_category(std::size_t catIdx) noexcept
+    {
+        const int active = s_activeChar.load(std::memory_order_acquire);
+        if (active >= 0 && active < static_cast<int>(kCharIdxCount))
+        {
+            const auto& override_parts = s_categoryPartsPerChar[catIdx][active];
+            if (!override_parts.empty())
+                return override_parts;
+        }
+        return s_categoryParts[catIdx];
+    }
 
     void set_runtime_hashes(std::unordered_map<std::string, uint32_t>&& nameToHash)
     {
@@ -338,9 +385,10 @@ namespace EquipHide
     static constexpr std::size_t k_bitsetWords = 1024;
     static std::array<uint64_t, k_bitsetWords> s_classifyBitsets[2]{};
 
-    void register_parts(Category cat, const std::string& partsStr)
+    void register_parts(Category cat, const std::string& partsStr, bool storeBase)
     {
-        s_categoryParts[static_cast<std::size_t>(cat)] = partsStr;
+        if (storeBase)
+            s_categoryParts[static_cast<std::size_t>(cat)] = partsStr;
 
         auto& logger = DMK::Logger::get_instance();
         auto& writeMap = s_partMaps[1 - s_activeMap.load(std::memory_order_relaxed)];
@@ -364,9 +412,31 @@ namespace EquipHide
             return;
         }
 
+        /* NONE sentinel -- case-insensitive, trimmed -- explicitly disables the
+           category (commonly used in per-character overrides like
+           [Lanterns:Damiane] Parts = NONE). Silent return, no warning. */
+        {
+            auto first = partsStr.find_first_not_of(" \t,");
+            auto last  = partsStr.find_last_not_of(" \t,");
+            if (first != std::string::npos && last != std::string::npos &&
+                (last - first + 1) == 4)
+            {
+                auto ch = [&](std::size_t i) {
+                    char c = partsStr[first + i];
+                    return (c >= 'A' && c <= 'Z') ? static_cast<char>(c + 32) : c;
+                };
+                if (ch(0) == 'n' && ch(1) == 'o' && ch(2) == 'n' && ch(3) == 'e')
+                {
+                    logger.debug("{}: NONE (category explicitly disabled for this scope)",
+                                 category_section(cat));
+                    return;
+                }
+            }
+        }
+
         const auto& nameMap = name_to_hash_map();
 
-        // No runtime hashes yet — store names for deferred resolution only.
+        // No runtime hashes yet -- store names for deferred resolution only.
         // rebuild_part_lookup() will re-resolve after the scan completes.
         if (nameMap.empty())
             return;
@@ -540,16 +610,37 @@ namespace EquipHide
 
     void rebuild_part_lookup()
     {
+        std::lock_guard<std::mutex> lock(s_rebuildMutex);
         invalidate_name_to_hash_map();
         s_partMaps[1 - s_activeMap.load(std::memory_order_relaxed)].clear();
 
         for (std::size_t i = 0; i < CATEGORY_COUNT; ++i)
         {
-            if (!s_categoryParts[i].empty())
-                register_parts(static_cast<Category>(i), s_categoryParts[i]);
+            const auto& parts = effective_parts_for_category(i);
+            if (!parts.empty())
+                register_parts(static_cast<Category>(i), parts, /*storeBase=*/false);
         }
 
         build_part_lookup();
+    }
+
+    void set_active_character(int newIdx)
+    {
+        const int clamped =
+            (newIdx < -1 || newIdx >= static_cast<int>(kCharIdxCount)) ? -1 : newIdx;
+        const int prev = s_activeChar.exchange(clamped, std::memory_order_acq_rel);
+        if (prev == clamped)
+            return;
+
+        auto& logger = DMK::Logger::get_instance();
+        if (clamped >= 0)
+            logger.info("Active character -> {} (idx={})",
+                        character_name_for_idx(static_cast<std::size_t>(clamped)),
+                        clamped);
+        else
+            logger.info("Active character -> (base, no override)");
+
+        rebuild_part_lookup();
     }
 
     CategoryMask classify_part(uint32_t hash)

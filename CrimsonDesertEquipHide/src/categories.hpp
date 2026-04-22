@@ -30,6 +30,7 @@ namespace EquipHide
         Helm,
         Chest,
         Legs,
+        Underwear,
         Gloves,
         Boots,
         Cloak,
@@ -61,7 +62,7 @@ namespace EquipHide
         constexpr std::string_view names[] = {
             "OneHandWeapons", "TwoHandWeapons", "Shields", "Bows",
             "SpecialWeapons", "Tools", "Lanterns",
-            "Helm", "Chest", "Legs", "Gloves", "Boots",
+            "Helm", "Chest", "Legs", "Underwear", "Gloves", "Boots",
             "Cloak", "Shoulder", "Mask", "Glasses",
             "Earrings", "Rings", "Necklace", "Bags",
             "UserPreset1", "UserPreset2", "UserPreset3",
@@ -100,6 +101,7 @@ namespace EquipHide
         case Category::Helm:
         case Category::Chest:
         case Category::Legs:
+        case Category::Underwear:
         case Category::Gloves:
         case Category::Boots:
         case Category::Cloak:
@@ -166,11 +168,34 @@ namespace EquipHide
 
     // --- Part classification ---
 
-    /** @brief Parse a "Parts" string and register all contained IDs for the given category. */
-    void register_parts(Category cat, const std::string &partsStr);
+    /** @brief Parse a "Parts" string and register all contained IDs for the given category.
+     *  @param storeBase If true (default), also caches partsStr as the base Parts for
+     *                   subsequent rebuilds. Set false when applying a per-character
+     *                   override so the base Parts string is preserved. */
+    void register_parts(Category cat, const std::string &partsStr, bool storeBase = true);
 
     /** @brief Finalize the lookup map and compute hash range bounds. Call after all register_parts(). */
     void build_part_lookup();
+
+    // --- Per-character Parts overrides ---
+
+    /** @brief Number of supported protagonist identities for per-char overrides. */
+    inline constexpr std::size_t kCharIdxCount = 3;
+
+    /** @brief Returns human-readable name for a character index (0=Kliff, 1=Damiane, 2=Oongka).
+     *  @return Non-empty string_view for valid indices, empty view otherwise. */
+    std::string_view character_name_for_idx(std::size_t idx) noexcept;
+
+    /** @brief Store a per-character Parts override. Empty = inherit from the base [Section].
+     *  @note Does not rebuild; takes effect on the next set_active_character() or rebuild call. */
+    void set_per_char_parts(Category cat, std::size_t charIdx, std::string partsStr);
+
+    /** @brief Update the active character index. Triggers rebuild_part_lookup() on change.
+     *  @param charIdx 0..kCharIdxCount-1 for Kliff/Damiane/Oongka, or -1 to use only base Parts. */
+    void set_active_character(int charIdx);
+
+    /** @brief Returns the currently active character index, or -1 if using base only. */
+    int get_active_character() noexcept;
 
     /**
      * @brief Re-resolve part names against current runtime hashes and rebuild the lookup map.
@@ -179,7 +204,7 @@ namespace EquipHide
      */
     void rebuild_part_lookup();
 
-    /** @brief Category bitmask type — one bit per category (supports up to 32). */
+    /** @brief Category bitmask type -- one bit per category (supports up to 32). */
     using CategoryMask = uint32_t;
 
     /** @brief Returns a bitmask with only the given category's bit set. */
