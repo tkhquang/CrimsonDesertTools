@@ -2,6 +2,15 @@
 
 All notable changes to the CrimsonDesertLiveTransmog mod will be documented in this file.
 
+## [0.6.2] - Crimson Desert 1.04.00 Support
+
+- Restored full functionality on game version 1.04.00. Transmog apply, real-armor teardown, the picker filter, and the PlayerSafe check all work again after the patch
+- Display name coverage is now complete: the picker shows a friendly name for every 1.04.00 item (was missing ~300 names after the patch)
+- Append now creates a blank preset with every slot set to hide (ticked + none) and applies it immediately, instead of copying your current outfit
+- New Copy button duplicates the currently-visible picker rows into a new preset so you can fork without overwriting
+- Unsaved picker edits now show an orange `[UNSAVED -- click Save]` banner at the top of the overlay and tint the Save button orange with a `*` marker
+- Developer hot-reload is more resilient: reloading a rebuilt logic DLL no longer leaves stale hooks behind
+
 ## [0.6.1] - Load-Time Auto-Apply Robustness
 
 - Character-swap auto-detect now uses a 1 second settle window so the engine's load-time party rotation (Kliff -> Oongka -> Damiane) collapses into a single transition instead of three back-to-back applies
@@ -68,6 +77,7 @@ All notable changes to the CrimsonDesertLiveTransmog mod will be documented in t
 - Modular code split: `transmog_apply` (apply/clear logic), `transmog_hooks` (VEC/BatchEquip callbacks), `transmog_worker` (debounce/load-detect/nametable threads), `shared_state` (cross-TU atomics)
 - Docs clarify ReShade is required for GUI; without it, users edit JSON manually via Capture hotkey
 
+[0.6.2]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.6.2
 [0.6.1]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.6.1
 [0.6.0]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.6.0
 [0.5.0]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.5.0
