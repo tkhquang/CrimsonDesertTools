@@ -714,6 +714,7 @@ namespace Transmog
                 s_lastApplyOk.store(false, std::memory_order_release);
 
                 int notReadyStreak = 0;
+                int catalogWaitStreak = 0;
                 bool wrapperChanged = false;
 
                 for (int attempt = 0; attempt < k_maxAutoApplyAttempts;
@@ -751,6 +752,38 @@ namespace Transmog
                             wrapperChanged = true;
                             break;
                         }
+                    }
+
+                    // Gate on item-catalog readiness. On hot reload the
+                    // game is already mid-session with real equipment
+                    // populated, so the "real armor changed" branch in
+                    // apply_all_transmog would fire tear_down before the
+                    // preset has any resolved item IDs (names still
+                    // pending background-thread catalog build). That
+                    // strips the character and leaves slots in a state
+                    // where the deferred post-resolve re-apply crashes.
+                    // Hold the retry budget here until the catalog
+                    // publishes; the attempt counter does not advance
+                    // during the wait so a slow catalog build does not
+                    // exhaust attempts. The outer wrapper-change check
+                    // above still runs each tick.
+                    if (!ItemNameTable::instance().ready())
+                    {
+                        if (catalogWaitStreak == 0)
+                            logger.debug(
+                                "Load detect: catalog not ready -- "
+                                "holding auto-apply (attempt {})",
+                                attempt + 1);
+                        ++catalogWaitStreak;
+                        --attempt; // do not consume an attempt slot
+                        continue;
+                    }
+                    if (catalogWaitStreak > 0)
+                    {
+                        logger.debug(
+                            "Load detect: catalog became ready after "
+                            "{} deferred ticks", catalogWaitStreak);
+                        catalogWaitStreak = 0;
                     }
 
                     if (attempt > 0 &&

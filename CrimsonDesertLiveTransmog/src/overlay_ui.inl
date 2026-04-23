@@ -186,10 +186,12 @@ static bool name_contains_ci(const std::string &hay, const char *needle) noexcep
     //
     // Exact: only show items whose auto-detected category matches
     //        this slot (helm-suffixed items for the helm slot, etc.)
-    // Hide variants: hide items with variant metadata at desc+0x3A0;
-    //        all tested samples in that bucket failed to render via
-    //        runtime transmog, so hiding them by default keeps the
-    //        picker free of non-functional items.
+    // Hide variants: hide items flagged by has_variant_meta() (see
+    //        item_name_table.cpp::k_descVariantMetaOffset for the
+    //        per-version descriptor offset); all tested samples in
+    //        that bucket failed to render via runtime transmog, so
+    //        hiding them by default keeps the picker free of
+    //        non-functional items.
     ImGui::Checkbox("Exact", &ui.exactFilter);
     ImGui::SameLine();
     ImGui::Checkbox("Safe only", &ui.hideIncompatible);
@@ -609,6 +611,27 @@ static int s_renameIndex = -1;
     return false;
 }
 
+// Returns true when slot_mappings differs from the active preset's
+// persisted slots -- i.e. the user edited rows in the overlay but has
+// not committed the change back into the JSON preset via Save. Used to
+// tint the Save button so unsaved work is visible.
+[[nodiscard]] static bool has_pending_save() noexcept
+{
+    const auto *p = Transmog::PresetManager::instance().active_preset();
+    if (!p)
+        return false;
+
+    const auto &mappings = Transmog::slot_mappings();
+    for (std::size_t i = 0; i < Transmog::k_slotCount; ++i)
+    {
+        if (mappings[i].active != p->slots[i].active)
+            return true;
+        if (mappings[i].targetItemId != p->slots[i].itemId)
+            return true;
+    }
+    return false;
+}
+
 // --- draw_overlay_content ---
 // All ImGui widget calls for the transmog UI.  Called by both the
 // ReShade tab callback and the standalone window wrapper.
@@ -623,6 +646,7 @@ static void draw_overlay_content()
     // badge and yellow button tint to reduce visual noise.
     const bool pending =
         !s_autoApply && has_pending_changes();
+    const bool pendingSave = has_pending_save();
 
     // --- Header ---
 
@@ -635,6 +659,13 @@ static void draw_overlay_content()
         ImGui::SameLine();
         ui_text_colored(ImVec4(1.0f, 0.85f, 0.2f, 1.0f),
                         "  [PENDING -- click Apply All]");
+    }
+
+    if (pendingSave)
+    {
+        ImGui::SameLine();
+        ui_text_colored(ImVec4(1.0f, 0.55f, 0.25f, 1.0f),
+                        "  [UNSAVED -- click Save]");
     }
 
     ImGui::Separator();
@@ -862,31 +893,27 @@ static void draw_overlay_content()
 
         if (ImGui::Button("Append"))
         {
-            capture_outfit();
             pm.append_from_state();
             manual_apply();
         }
         if (ImGui::IsItemHovered())
-            ui_tooltip("Capture your currently-worn real armor as a "
-                       "new preset, then apply it.");
+            ui_tooltip("Append a new preset with every slot ticked + "
+                       "none (hides all armor), then apply it.");
 
         ImGui::SameLine();
 
-        // Copy: like Append but skips capture_outfit -- forks the
-        // current slot-mapping state (loaded from the active preset +
-        // any edits you made in the rows) into a brand-new preset.
-        // Useful for duplicating an existing preset and tweaking the
-        // fork without overwriting the source.
+        // Copy forks the current slot rows (from the active preset + any
+        // edits) into a brand-new preset so the user can tweak without
+        // overwriting the source.
         if (ImGui::Button("Copy"))
         {
-            pm.append_from_state();
+            pm.duplicate_current();
             manual_apply();
         }
         if (ImGui::IsItemHovered())
             ui_tooltip("Duplicate the current slot rows into a new "
-                       "preset (without re-capturing real armor), "
-                       "then apply it. Use after selecting a preset "
-                       "and tweaking the rows to fork it.");
+                       "preset, then apply it. Use after selecting a "
+                       "preset and tweaking the rows to fork it.");
 
         ImGui::SameLine();
 
@@ -1142,11 +1169,28 @@ static void draw_overlay_content()
 
     ImGui::SameLine();
 
-    if (ImGui::Button("Save"))
+    if (pendingSave)
+    {
+        ImGui::PushStyleColor(ImGuiCol_Button,
+                              ImVec4(0.80f, 0.40f, 0.15f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered,
+                              ImVec4(0.95f, 0.52f, 0.20f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive,
+                              ImVec4(1.00f, 0.60f, 0.25f, 1.0f));
+    }
+    if (ImGui::Button(pendingSave ? "Save *" : "Save"))
     {
         pm.replace_current_from_state();
         pm.save();
     }
+    if (pendingSave)
+        ImGui::PopStyleColor(3);
+    if (ImGui::IsItemHovered())
+        ui_tooltip(pendingSave
+                       ? "Commit current slot rows into the active "
+                         "preset (unsaved edits pending)."
+                       : "Commit current slot rows into the active "
+                         "preset.");
 
     ImGui::EndDisabled();
 

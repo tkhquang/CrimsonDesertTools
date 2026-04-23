@@ -120,8 +120,7 @@ namespace CDCore
             cfg.tableScanMin, cfg.tableScanMax);
 
         const auto t0 = std::chrono::steady_clock::now();
-        std::uint32_t primaryEntries = 0;
-        std::uint32_t probeHits = 0;
+        std::uint32_t entries = 0;
         char buf[k_maxStringLen + 1];
 
         for (std::uint32_t hash = cfg.tableScanMin;
@@ -135,44 +134,7 @@ namespace CDCore
                 continue;
 
             nameToHash[std::string(buf, len)] = hash;
-            ++primaryEntries;
-        }
-
-        // Optional wide-scan fallback for entries that fell outside the
-        // primary bucket range. Skips the primary range to avoid
-        // redundant work.
-        if (cfg.getUnresolved && cfg.wideScanMax > 0)
-        {
-            auto unresolved = cfg.getUnresolved(nameToHash);
-            for (std::uint32_t h = 1;
-                 h < cfg.wideScanMax && !unresolved.empty(); ++h)
-            {
-                if (h >= cfg.tableScanMin && h <= cfg.tableScanMax)
-                    continue;
-
-                const auto len = read_table_entry(
-                    tableArray, h, buf, sizeof(buf));
-                if (len == 0 || len >= k_maxStringLen)
-                    continue;
-                if (!matches_prefix(buf, len, cfg.prefix))
-                    continue;
-
-                for (auto it = unresolved.begin();
-                     it != unresolved.end(); ++it)
-                {
-                    if (len == it->size() &&
-                        std::memcmp(buf, it->c_str(), len) == 0)
-                    {
-                        nameToHash[*it] = h;
-                        ++probeHits;
-                        logger.trace(
-                            "{}: wide-scan {} found at 0x{:X}",
-                            cfg.logLabel, *it, h);
-                        unresolved.erase(it);
-                        break;
-                    }
-                }
-            }
+            ++entries;
         }
 
         const auto t1 = std::chrono::steady_clock::now();
@@ -180,33 +142,22 @@ namespace CDCore
             std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0)
                 .count();
 
-        const auto totalEntries = primaryEntries + probeHits;
-        if (totalEntries == 0)
+        if (entries == 0)
         {
             logger.warning(
                 "{}: 0 entries matching prefix '{}' found in range "
-                "0x{:X}..0x{:X} (expected ~{} on v1.02.00) -- hash bucket "
-                "layout may have shifted, deferring feature",
+                "0x{:X}..0x{:X} -- table not yet populated or prefix "
+                "missing from this build; deferring feature",
                 cfg.logLabel, cfg.prefix ? cfg.prefix : "",
-                cfg.tableScanMin, cfg.tableScanMax, cfg.expectedEntries);
-        }
-        else if (probeHits > 0)
-        {
-            logger.info(
-                "{}: {} entries ({} primary, {} wide-probe) for prefix "
-                "'{}' in {}ms",
-                cfg.logLabel, totalEntries, primaryEntries, probeHits,
-                cfg.prefix ? cfg.prefix : "", ms);
+                cfg.tableScanMin, cfg.tableScanMax);
         }
         else
         {
             logger.info(
                 "{}: {} entries for prefix '{}' in range 0x{:X}..0x{:X} "
-                "(expected ~{}) in {}ms",
-                cfg.logLabel, totalEntries,
-                cfg.prefix ? cfg.prefix : "",
-                cfg.tableScanMin, cfg.tableScanMax,
-                cfg.expectedEntries, ms);
+                "in {}ms",
+                cfg.logLabel, entries, cfg.prefix ? cfg.prefix : "",
+                cfg.tableScanMin, cfg.tableScanMax, ms);
         }
 
         return nameToHash;

@@ -54,20 +54,33 @@ namespace Transmog::RealPartTearDown
         // we touch anything dangerous.
         //
         // a1 (SlotPopulator descriptor context) layout:
-        //   +0x78 QWORD pointer to the PartDef/auth-table container.
+        //   +0x78 QWORD pointer to the PartDef/auth-table container on
+        //               v1.03.01; shifted to +0x88 on v1.04.00 as the
+        //               component struct gained 0x10 bytes of new
+        //               fields in front of this slot.
         //
-        // container layout:
+        // container layout (unchanged across v1.03.01 / v1.04.00):
         //   +0x00 QWORD header (unused by this module)
         //   +0x08 QWORD base address of stride-0xC8 entry array
         //   +0x10 DWORD live entry count
         //   +0x14 DWORD capacity
         //
-        // entry layout (stride 0xC8 / 200 bytes):
+        // entry layout (stride 0xC8 / 200 bytes, unchanged):
         //   +0x08 WORD  primary item word (0xFFFF == empty slot)
         //   +0x10 QWORD gate (must be non-zero for live entries)
-        //   +0x88 WORD  alt item word (0xFFFF → fall back to +0x08)
+        //   +0x88 WORD  alt item word (0xFFFF -> fall back to +0x08)
         //   +0xC0 WORD  slot tag (search key; helm=0x0003 .. boot=0x0010)
-        constexpr std::uintptr_t k_containerPtrOffset      = 0x78;
+        //
+        // v1.04.00 entry-layout confirmation: the ADD path in the game's
+        // auth-table helper (sub_14EF6B830) executes
+        //     add rbx, [r12+08]        ; rbx = array + offset
+        //     mov [rbx+0xC0], ax        ; slot tag write
+        //     inc [r12+0x10]            ; count++
+        // captured live under a data-write breakpoint on the count
+        // field during a helm unequip. Confirms stride 0xC8 (rbx pre-add
+        // was 0xAF0 = 14 * 0xC8 for the 14 live entries observed) and
+        // slot-tag offset 0xC0.
+        constexpr std::uintptr_t k_containerPtrOffset      = 0x88;
         constexpr std::uintptr_t k_containerArrayBaseOffset = 0x08;
         constexpr std::uintptr_t k_containerCountOffset    = 0x10;
         constexpr std::uintptr_t k_entryStride             = 0xC8;

@@ -323,10 +323,37 @@ namespace Transmog
         auto &cp = ensure_character(m_activeCharacter);
         int idx = static_cast<int>(cp.presets.size());
         std::string name = "Preset " + std::to_string(idx);
+        Preset blank;
+        blank.name = name;
+        for (auto &s : blank.slots)
+        {
+            s.active = true;
+            s.itemId = 0;
+            s.itemName.clear();
+        }
+        cp.presets.push_back(std::move(blank));
+        cp.activePreset = idx;
+
+        apply_to_state();
+
+        DMK::Logger::get_instance().info(
+            "Preset appended: '{}' (index {}, all slots ticked + none)",
+            name, idx);
+        save();
+    }
+
+    void PresetManager::duplicate_current()
+    {
+        auto &cp = ensure_character(m_activeCharacter);
+        int idx = static_cast<int>(cp.presets.size());
+        std::string name = "Preset " + std::to_string(idx);
         cp.presets.push_back(capture_from_state(name));
         cp.activePreset = idx;
 
-        DMK::Logger::get_instance().info("Preset appended: '{}' (index {})", name, idx);
+        apply_to_state();
+
+        DMK::Logger::get_instance().info(
+            "Preset duplicated: '{}' (index {})", name, idx);
         save();
     }
 
@@ -335,7 +362,14 @@ namespace Transmog
         auto *p = active_preset_mut();
         if (!p)
         {
-            append_from_state();
+            auto &cp = ensure_character(m_activeCharacter);
+            int idx = static_cast<int>(cp.presets.size());
+            std::string name = "Preset " + std::to_string(idx);
+            cp.presets.push_back(capture_from_state(name));
+            cp.activePreset = idx;
+
+            DMK::Logger::get_instance().info("Preset replaced: '{}' (index {})", name, idx);
+            save();
             return;
         }
 

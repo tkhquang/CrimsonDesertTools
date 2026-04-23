@@ -133,7 +133,7 @@ namespace Transmog
                 []()
                 {
                     // Clear also flips flag_enabled to false so a subsequent
-                    // Toggle sees cleared == disabled — avoids 2-press bug.
+                    // Toggle sees cleared == disabled -- avoids 2-press bug.
                     DMK::Logger::get_instance().info(
                         "Clear hotkey pressed -- disabling transmog");
                     flag_enabled().store(false, std::memory_order_relaxed);
@@ -162,10 +162,7 @@ namespace Transmog
                 s_presetAppendCombos,
                 []()
                 {
-                    // Capture real gear first so append snapshots the actual
-                    // loadout, not the previously-active preset's mappings.
                     DMK::Logger::get_instance().info("Preset append hotkey pressed");
-                    Transmog::capture_outfit();
                     PresetManager::instance().append_from_state();
                     Transmog::manual_apply();
                 });

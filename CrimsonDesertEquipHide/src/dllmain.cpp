@@ -31,7 +31,22 @@ static DWORD WINAPI lifecycle_thread(LPVOID /*param*/)
     EquipHide::Version::logVersionInfo();
 
     std::wstring runtimeDirW = DMK::Filesystem::get_runtime_directory();
-    std::string runtimeDir(runtimeDirW.begin(), runtimeDirW.end());
+    std::string runtimeDir;
+    if (!runtimeDirW.empty())
+    {
+        int needed = WideCharToMultiByte(
+            CP_UTF8, 0,
+            runtimeDirW.data(), static_cast<int>(runtimeDirW.size()),
+            nullptr, 0, nullptr, nullptr);
+        if (needed > 0)
+        {
+            runtimeDir.resize(static_cast<std::size_t>(needed));
+            WideCharToMultiByte(
+                CP_UTF8, 0,
+                runtimeDirW.data(), static_cast<int>(runtimeDirW.size()),
+                runtimeDir.data(), needed, nullptr, nullptr);
+        }
+    }
     logger.info("DLL loaded, runtime dir: {}", runtimeDir);
 
     if (!CDCore::Dev::acquire_instance_mutex(

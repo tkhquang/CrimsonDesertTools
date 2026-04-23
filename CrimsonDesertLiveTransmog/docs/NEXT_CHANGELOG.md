@@ -1,5 +1,8 @@
-## [Title for next release]
+## Crimson Desert 1.04.00 Support
 
-- New feature
-- Bug fix
-- Improvement
+- Restored full functionality on game version 1.04.00. Transmog apply, real-armor teardown, the picker filter, and the PlayerSafe check all work again after the patch
+- Display name coverage is now complete: the picker shows a friendly name for every 1.04.00 item (was missing ~300 names after the patch)
+- Append now creates a blank preset with every slot set to hide (ticked + none) and applies it immediately, instead of copying your current outfit
+- New Copy button duplicates the currently-visible picker rows into a new preset so you can fork without overwriting
+- Unsaved picker edits now show an orange `[UNSAVED -- click Save]` banner at the top of the overlay and tint the Save button orange with a `*` marker
+- Developer hot-reload is more resilient: reloading a rebuilt logic DLL no longer leaves stale hooks behind
