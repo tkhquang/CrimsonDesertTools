@@ -3,7 +3,7 @@
  * @brief Hot-reload loader stub shared by all CrimsonDesert mod dev builds.
  *
  * Loads the configured logic DLL and polls Numpad 0 to unload/reload it
- * in-place. No DetourModKit dependency — logging via OutputDebugStringA
+ * in-place. No DetourModKit dependency -- logging via OutputDebugStringA
  * only so this stays a thin stub.
  *
  * Parameterized by three macros the consumer's CMakeLists.txt is expected
@@ -82,7 +82,7 @@ static void log_msg(const char *msg)
         OutputDebugStringA(buf);
     else
     {
-        // Truncation fallback — keep the prefix so the message still
+        // Truncation fallback -- keep the prefix so the message still
         // routes to the right filter in DbgView.
         char fallback[128];
         snprintf(fallback, sizeof(fallback),
@@ -219,7 +219,7 @@ static DWORD WINAPI loader_thread(LPVOID param)
         {
             if (!s_reloading.exchange(true, std::memory_order_acq_rel))
             {
-                log_msg("Numpad0 released — reloading logic DLL...");
+                log_msg("Numpad0 released -- reloading logic DLL...");
 
                 unload_logic();
 
@@ -228,7 +228,7 @@ static DWORD WINAPI loader_thread(LPVOID param)
                 copy_from_staging(loaderDir);
 
                 if (!load_logic(dllPath))
-                    log_msg("Reload FAILED — logic DLL not loaded");
+                    log_msg("Reload FAILED -- logic DLL not loaded");
 
                 s_reloading.store(false, std::memory_order_release);
             }

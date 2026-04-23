@@ -11,7 +11,7 @@
 #define VERSION_PATCH 0
 // ========================================================================== //
 
-// Helper macros for stringification — DO NOT MODIFY.
+// Helper macros for stringification -- DO NOT MODIFY.
 #define VERSION_STRINGIFY_IMPL(x) #x
 #define VERSION_STRINGIFY(x) VERSION_STRINGIFY_IMPL(x)
 

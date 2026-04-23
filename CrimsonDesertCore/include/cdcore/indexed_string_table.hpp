@@ -36,7 +36,7 @@ namespace CDCore
         // are skipped). "CD_" matches every Crimson Desert slot part name.
         const char *prefix = "CD_";
 
-        // Primary hash range — entries in this range are always scanned.
+        // Primary hash range -- entries in this range are always scanned.
         std::uint32_t tableScanMin = 0xAC00;
         std::uint32_t tableScanMax = 0xCFFF;
 

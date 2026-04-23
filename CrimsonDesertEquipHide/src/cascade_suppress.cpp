@@ -11,7 +11,7 @@ namespace EquipHide
     static std::atomic<bool> s_equipChangeDetected{false};
 
     // Slot ID for chest armor (confirmed via log: slot=4, item=5208).
-    // Only chest changes need cascade re-sync — other armor slots
+    // Only chest changes need cascade re-sync -- other armor slots
     // (necklace=9, mask=18, etc.) don't affect chest lock state.
     static constexpr uint16_t k_chestSlot = 4;
 
@@ -35,7 +35,7 @@ namespace EquipHide
             slotId == k_chestSlot)
         {
             DMK::Logger::get_instance().debug(
-                "VisualEquipChange: chest slot={} item={} — clearing cascade locks",
+                "VisualEquipChange: chest slot={} item={} -- clearing cascade locks",
                 slotId, itemId);
             s_equipChangeDetected.store(true, std::memory_order_relaxed);
         }
@@ -79,7 +79,7 @@ namespace EquipHide
                     is_category_hidden(Category::Chest))
                 {
                     logger.debug(
-                        "EquipSwap: chest slot detected — signalling re-sync");
+                        "EquipSwap: chest slot detected -- signalling re-sync");
                     s_equipChangeDetected.store(true,
                                                 std::memory_order_relaxed);
                 }

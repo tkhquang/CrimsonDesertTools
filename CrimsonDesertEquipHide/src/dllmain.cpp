@@ -16,7 +16,7 @@ static HANDLE g_lifecycleThread = nullptr;
 
 static DWORD WINAPI lifecycle_thread(LPVOID /*param*/)
 {
-    // Process gate — UAL loads ASIs into every process in the game
+    // Process gate -- UAL loads ASIs into every process in the game
     // directory including crashpad_handler.exe. Bail immediately.
     if (!CDCore::Dev::is_target_process(EquipHide::GAME_PROCESS_NAME))
         return 0;

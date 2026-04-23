@@ -22,7 +22,7 @@ static HANDLE g_instanceMutex = nullptr;
 
 extern "C" __declspec(dllexport) bool Init()
 {
-    // Process gate — UAL loads ASIs into ALL processes in the game
+    // Process gate -- UAL loads ASIs into ALL processes in the game
     // directory, including crashpad_handler.exe. Bail immediately if
     // we're not in the real game.
     if (!CDCore::Dev::is_target_process(EquipHide::GAME_PROCESS_NAME))
@@ -38,7 +38,7 @@ extern "C" __declspec(dllexport) bool Init()
     logger.info("[DEV] Logic DLL Init() called");
     EquipHide::Version::logVersionInfo();
 
-    // Per-PID mutex — prevents duplicate ASI loading within the same
+    // Per-PID mutex -- prevents duplicate ASI loading within the same
     // process (e.g. old production ASI alongside the dev build).
     if (!CDCore::Dev::acquire_instance_mutex(
             EquipHide::INSTANCE_MUTEX_PREFIX, g_instanceMutex))

@@ -182,7 +182,8 @@ namespace EquipHide
                     (steady_ms() - s_equipPending) > 500)
                 {
                     for (int i = 0; i < 0x10000; ++i)
-                        if (s_hideLocked[i] == 1) s_hideLocked[i] = 2;
+                        if (s_hideLocked[i] == 1)
+                            s_hideLocked[i] = 2;
                     s_equipPending = 0;
                 }
             }
@@ -581,6 +582,12 @@ namespace EquipHide
 
         auto &inputMgr = DMK::InputManager::get_instance();
         inputMgr.start();
+
+        // Drives resolve_player_vis_ctrls on a fixed cadence so cold
+        // load and in-session character swaps are detected without
+        // depending on the EquipVisCheck hook's event stream. See
+        // background_threads.cpp for the thread body.
+        launch_resolve_poll();
 
         if (deferred_scan_pending().load(std::memory_order_relaxed))
             logger.info("Hooks installed, part hashes pending (deferred scan active)");
