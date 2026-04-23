@@ -2,6 +2,16 @@
 
 All notable changes to the CrimsonDesertEquipHide mod will be documented in this file.
 
+## [0.6.1] - [Title for next release]
+
+- Compatibility update for Crimson Desert v1.04.00
+- Fix crash on world load: PostfixEval AOB resolved to a mid-instruction address on v1.04.00, causing the trampoline to run a truncated register save and corrupt rbp. Added explicit prologue candidates for both v1.03.01 and v1.04.00 (full-function anchors) and recalibrated the body-only fallback offset
+- Fix per-character Parts overrides on v1.04.00: the actor slot-index byte moved from +0x60 to +0x50 (+0x60 is no longer a discriminator). Companion diff table ({Damiane=1, Oongka=2}) unchanged
+- Add resolver poll thread: drives `resolve_player_vis_ctrls` on a 1s cadence so cold load and in-session character swaps are detected without relying on the EquipVisCheck hook firing
+- Add cold-load safety net in the EquipVisCheck hook: if the body list is still empty when the hook fires, run the resolve pass inline once so DefaultHidden categories apply on first visibility decision
+- Add INFO logs on UserActor swap and in-session controlled-actor swap (makes save-load and swap transitions visible in the log)
+- Known issue: leg/pants flashes during movement while chest is hidden on v1.04.00. `CascadeFix` relies on EquipVisCheck firing at v1.03.01 rates; on v1.04.00 the hook's event set is narrower. Deferred to a future update
+
 ## [0.6.0] - Multi-Character Support
 
 - Shared AOB scanning utilities moved into the new `CrimsonDesertCore` static library. No behavioural change ([#33](https://github.com/tkhquang/CrimsonDesertTools/pull/33))
@@ -182,6 +192,7 @@ All notable changes to the CrimsonDesertEquipHide mod will be documented in this
 - Customizable part lists per category via INI configuration
 - Configurable init delay and log level
 
+[0.6.1]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/equip-hide/v0.6.1
 [0.6.0]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/equip-hide/v0.6.0
 [0.5.2]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/equip-hide/v0.5.2
 [0.5.1]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/equip-hide/v0.5.1
