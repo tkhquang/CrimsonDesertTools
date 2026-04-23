@@ -236,9 +236,13 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); co
   <!-- Load catalog -->
   <div class="load-bar">
     <span class="status" id="catalogStatus">No catalog loaded</span>
-    <label class="file-btn">
-      Load TSV
+    <label class="file-btn" title="Items TSV: ItemID, Slot, Variant, PlayerSafe, Name">
+      Load items TSV
       <input type="file" id="tsvFile" accept=".tsv,.txt,.csv" style="display:none">
+    </label>
+    <label class="file-btn" title="Display-names TSV: InternalName, DisplayName (optional, enables localized search)">
+      Load display names
+      <input type="file" id="displayNamesFile" accept=".tsv,.txt,.csv" style="display:none">
     </label>
     <button id="loadBuiltinBtn">Use built-in (v1.04.00)</button>
   </div>
@@ -397,6 +401,9 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); co
 const SLOTS = ['Helm','Chest','Cloak','Gloves','Boots'];
 const SLOT_MAP = {Helm:0, Chest:1, Cloak:2, Gloves:3, Boots:4};
 let catalog = [];
+// lowercased internal name -> display name. Mirrors ItemNameTable::load_display_names().
+let displayNameMap = {};
+let displayNamesSource = '';
 let characters = {
   Kliff:   {activePreset:0, presets:[], bodyKind:'Auto'},
   Damiane: {activePreset:0, presets:[], bodyKind:'Auto'},
@@ -527,11 +534,17 @@ function renderSlots() {
   const container = document.getElementById('slotRows');
   container.innerHTML = SLOTS.map((name,i) => {
     const s = currentSlots[i];
-    const label = s.itemName ? `${s.itemName}` : '(none)';
+    let label = '(none)';
+    let tooltip = '';
+    if (s.itemName) {
+      const dn = displayNameMap[s.itemName.toLowerCase()];
+      label = dn || s.itemName;
+      tooltip = dn ? s.itemName : '';
+    }
     return `<div class="slot-row">
       <input type="checkbox" ${s.active?'checked':''} onchange="currentSlots[${i}].active=this.checked;updateFooter()">
       <span class="slot-label">${name}</span>
-      <button class="picker-btn" onclick="openPicker(${i})">
+      <button class="picker-btn" title="${esc(tooltip)}" onclick="openPicker(${i})">
         ${esc(label)}
       </button>
     </div>`;
@@ -613,7 +626,10 @@ function renderPicker() {
     const incompatible = !item.playerSafe || nonEquip;
     if (hideIncompat && incompatible) { filtered++; continue; }
     if (hideVariants && item.variant) { filtered++; continue; }
-    if (query && !item.name.toLowerCase().includes(query)) continue;
+    if (query) {
+      const hay = (item.name + ' ' + (item.displayName || '')).toLowerCase();
+      if (!hay.includes(query)) continue;
+    }
     if (shown >= 512) break;
 
     let tag = '';
@@ -621,9 +637,15 @@ function renderPicker() {
     else if (item.variant) tag = '<span class="pe-tag variant">variant</span>';
 
     const sel = currentSlots[pickerSlotIdx]?.itemName === item.name ? ' selected' : '';
+    // Display name is primary; internal name shown dim alongside (as the
+    // overlay does in overlay_ui.inl:465).
+    const primary = item.displayName || item.name;
+    const secondary = item.displayName
+      ? `<span class="pe-id" title="internal name">${esc(item.name)}</span>` : '';
     html += `<div class="picker-entry${sel}" onclick="pickItem('${esc(item.name)}')">
-      <span class="pe-name">${esc(item.name)}</span>
+      <span class="pe-name">${esc(primary)}</span>
       ${tag}
+      ${secondary}
       <span class="pe-id">${item.id}</span>
     </div>`;
     shown++;
@@ -662,10 +684,18 @@ function doSave() {
 document.getElementById('tsvFile').addEventListener('change', e => {
   if (e.target.files.length) loadTSVFile(e.target.files[0]);
 });
+document.getElementById('displayNamesFile').addEventListener('change', e => {
+  if (e.target.files.length) loadDisplayNamesFile(e.target.files[0]);
+});
 
 function loadTSVFile(file) {
   const reader = new FileReader();
   reader.onload = e => parseTSV(e.target.result, file.name);
+  reader.readAsText(file);
+}
+function loadDisplayNamesFile(file) {
+  const reader = new FileReader();
+  reader.onload = e => parseDisplayNamesTSV(e.target.result, file.name);
   reader.readAsText(file);
 }
 
@@ -675,30 +705,66 @@ function parseTSV(text, source) {
   for (let i = 1; i < lines.length; i++) {
     const cols = lines[i].split('\t');
     if (cols.length < 5) continue;
+    const name = cols[4].trim();
     catalog.push({
       id: cols[0].trim(),
       slot: cols[1].trim(),
       variant: cols[2].trim().toLowerCase() === 'yes',
       playerSafe: cols[3].trim().toLowerCase() === 'yes',
-      name: cols[4].trim()
+      name,
+      displayName: displayNameMap[name.toLowerCase()] || ''
     });
   }
-  const el = document.getElementById('catalogStatus');
-  el.textContent = `${catalog.length} items (${source})`;
-  el.classList.add('loaded');
+  updateCatalogStatus(source);
   document.getElementById('catalogHint').style.display = 'none';
   updateFooter();
+}
+
+// Parse the sidecar TSV produced by ItemNameTable::load_display_names().
+// Format: `<internalName>\t<displayName>` -- NO header row.
+function parseDisplayNamesTSV(text, source) {
+  const lines = text.split('\n');
+  displayNameMap = {};
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    const tab = line.indexOf('\t');
+    if (tab < 0) continue;
+    const key = line.slice(0, tab).trim().toLowerCase();
+    const val = line.slice(tab + 1).trim();
+    if (key && val) displayNameMap[key] = val;
+  }
+  displayNamesSource = source;
+  // Reapply to existing catalog (items may have loaded first).
+  for (const item of catalog) {
+    item.displayName = displayNameMap[item.name.toLowerCase()] || '';
+  }
+  updateCatalogStatus();
+  renderSlots();
+}
+
+function updateCatalogStatus(itemsSource) {
+  const el = document.getElementById('catalogStatus');
+  const parts = [];
+  if (catalog.length) parts.push(`${catalog.length} items` + (itemsSource ? ` (${itemsSource})` : ''));
+  const dnCount = Object.keys(displayNameMap).length;
+  if (dnCount) parts.push(`${dnCount} display names` + (displayNamesSource ? ` (${displayNamesSource})` : ''));
+  if (!parts.length) { el.textContent = 'No catalog loaded'; el.classList.remove('loaded'); return; }
+  el.textContent = parts.join(' + ');
+  el.classList.add('loaded');
 }
 
 // Built-in catalog
 document.getElementById('loadBuiltinBtn').addEventListener('click', async () => {
   try {
-    const resp = await fetch('CrimsonDesertLiveTransmog_items_v1.04.00.tsv');
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const text = await resp.text();
-    parseTSV(text, 'built-in v1.04.00');
+    const [itemsResp, dnResp] = await Promise.all([
+      fetch('CrimsonDesertLiveTransmog_items_v1.04.00.tsv'),
+      fetch('CrimsonDesertLiveTransmog_display_names_v1.04.00.tsv'),
+    ]);
+    if (!itemsResp.ok) throw new Error(`items HTTP ${itemsResp.status}`);
+    if (dnResp.ok) parseDisplayNamesTSV(await dnResp.text(), 'built-in v1.04.00');
+    parseTSV(await itemsResp.text(), 'built-in v1.04.00');
   } catch (e) {
-    alert('Failed to load built-in catalog: ' + e.message + '\nUse "Load TSV" instead.');
+    alert('Failed to load built-in catalog: ' + e.message + '\nUse "Load items TSV" instead.');
   }
 });
 
@@ -788,7 +854,10 @@ function renderCatalogTable() {
   const hideUnsafe = document.getElementById('catHideUnsafe').checked;
 
   let items = catalog.filter(item => {
-    if (query && !item.name.toLowerCase().includes(query)) return false;
+    if (query) {
+      const hay = (item.name + ' ' + (item.displayName || '')).toLowerCase();
+      if (!hay.includes(query)) return false;
+    }
     if (slotF && item.slot !== slotF) return false;
     if (hideVar && item.variant) return false;
     if (hideUnsafe && !item.playerSafe) return false;
@@ -805,7 +874,9 @@ function renderCatalogTable() {
     } else if (catSortCol === 'flags') {
       va = (a.variant?1:0) + (a.playerSafe?0:2); vb = (b.variant?1:0) + (b.playerSafe?0:2);
     } else {
-      va = a.name.toLowerCase(); vb = b.name.toLowerCase();
+      // Sort by display name when present, internal otherwise (mirrors overlay sorted_entries()).
+      va = (a.displayName || a.name).toLowerCase();
+      vb = (b.displayName || b.name).toLowerCase();
     }
     if (va < vb) return catSortAsc ? -1 : 1;
     if (va > vb) return catSortAsc ? 1 : -1;
@@ -822,10 +893,13 @@ function renderCatalogTable() {
     if (!item.playerSafe) flags = '<span class="flag-unsafe">unsafe</span>';
     else if (item.variant) flags = '<span class="flag-variant">variant</span>';
     else flags = '<span class="flag-ok">ok</span>';
+    const primary = item.displayName || item.name;
+    const secondary = item.displayName
+      ? `<div style="color:var(--text-dim);font-size:10px;font-family:monospace">${esc(item.name)}</div>` : '';
     return `<tr>
       <td class="col-id">${item.id}</td>
       <td class="col-slot">${item.slot}</td>
-      <td>${esc(item.name)}</td>
+      <td>${esc(primary)}${secondary}</td>
       <td class="col-flags">${flags}</td>
     </tr>`;
   }).join('') + (items.length > maxRows
@@ -860,6 +934,11 @@ parseTSV = function(text, source) {
   _origParseTSV(text, source);
   renderCatalogTable();
 };
+const _origParseDisplayNames = parseDisplayNamesTSV;
+parseDisplayNamesTSV = function(text, source) {
+  _origParseDisplayNames(text, source);
+  renderCatalogTable();
+};
 
 // ---- Utils ----
 function esc(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
@@ -880,13 +959,21 @@ renderSlots();
 renderPresets();
 if (!catalog.length) document.getElementById('catalogHint').style.display = '';
 
-// Auto-load built-in catalog on page load
+// Auto-load built-in catalog + display names on page load
 (async () => {
   try {
-    const resp = await fetch('CrimsonDesertLiveTransmog_items_v1.04.00.tsv');
-    if (!resp.ok) return;
-    const text = await resp.text();
-    if (text.split('\n').length > 2) parseTSV(text, 'v1.04.00');
+    const [itemsResp, dnResp] = await Promise.all([
+      fetch('CrimsonDesertLiveTransmog_items_v1.04.00.tsv'),
+      fetch('CrimsonDesertLiveTransmog_display_names_v1.04.00.tsv'),
+    ]);
+    if (dnResp && dnResp.ok) {
+      const dnText = await dnResp.text();
+      if (dnText.trim()) parseDisplayNamesTSV(dnText, 'v1.04.00');
+    }
+    if (itemsResp && itemsResp.ok) {
+      const text = await itemsResp.text();
+      if (text.split('\n').length > 2) parseTSV(text, 'v1.04.00');
+    }
   } catch (_) {}
 })();
 </script>
