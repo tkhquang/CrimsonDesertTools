@@ -253,17 +253,6 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); co
   <div class="char-row" id="charRow">
     <span style="font-size:11px;color:var(--text-dim)">Character:</span>
   </div>
-  <div class="char-row" id="bodyKindRow">
-    <span style="font-size:11px;color:var(--text-dim)" title="Overlay picker body-type filter. Auto uses the game default (Kliff/Oongka=Male, Damiane=Female). Override for body-swap mods.">Body kind:</span>
-    <select id="bodyKindSelect"
-      style="padding:3px 6px;background:var(--input);border:1px solid var(--border);border-radius:3px;color:var(--text);font-size:11px">
-      <option value="Auto">Auto</option>
-      <option value="Male">Male</option>
-      <option value="Female">Female</option>
-      <option value="Both">Both</option>
-    </select>
-    <span id="bodyKindEffective" style="font-size:11px;color:var(--text-dim)"></span>
-  </div>
 
   <hr class="separator">
 
@@ -405,14 +394,11 @@ let catalog = [];
 let displayNameMap = {};
 let displayNamesSource = '';
 let characters = {
-  Kliff:   {activePreset:0, presets:[], bodyKind:'Auto'},
-  Damiane: {activePreset:0, presets:[], bodyKind:'Auto'},
-  Oongka:  {activePreset:0, presets:[], bodyKind:'Auto'},
+  Kliff:   {activePreset:0, presets:[]},
+  Damiane: {activePreset:0, presets:[]},
+  Oongka:  {activePreset:0, presets:[]},
 };
 let activeChar = 'Kliff';
-// Hardcoded default body kind per character (overlay falls back to this
-// when bodyKind === "Auto"). Mirrors item_name_table.cpp body_kind_for_character().
-const DEFAULT_BODY_KIND = { Kliff:'Male', Damiane:'Female', Oongka:'Male' };
 let currentSlots = SLOTS.map(() => ({active:false, itemName:''}));
 let pickerSlotIdx = -1;
 
@@ -433,25 +419,10 @@ function renderCharButtons() {
     const b = document.createElement('button');
     b.className = 'char-btn' + (name === activeChar ? ' active' : '');
     b.textContent = name;
-    b.onclick = () => { activeChar = name; renderCharButtons(); renderBodyKind(); loadActivePreset(); };
+    b.onclick = () => { activeChar = name; renderCharButtons(); loadActivePreset(); };
     row.appendChild(b);
   }
 }
-
-function renderBodyKind() {
-  const sel = document.getElementById('bodyKindSelect');
-  const bk = characters[activeChar]?.bodyKind || 'Auto';
-  sel.value = bk;
-  const eff = effectiveBodyKind(activeChar);
-  const note = document.getElementById('bodyKindEffective');
-  note.textContent = (bk === 'Auto') ? `(effective: ${eff})` : '';
-}
-
-document.getElementById('bodyKindSelect').addEventListener('change', e => {
-  if (!characters[activeChar]) return;
-  characters[activeChar].bodyKind = normalizeBodyKind(e.target.value);
-  renderBodyKind();
-});
 
 // ---- Preset management ----
 function cp() { return characters[activeChar]; }
@@ -774,7 +745,6 @@ function buildJSON() {
   for (const [name, c] of Object.entries(characters)) {
     out.characters[name] = {
       activePreset: c.activePreset,
-      bodyKind: c.bodyKind || 'Auto',
       presets: c.presets.map(p => ({
         name: p.name,
         slots: p.slots.map(s => ({ active: s.active, itemName: s.itemName || '' }))
@@ -814,7 +784,6 @@ function importJSON(file) {
         for (const [name, c] of Object.entries(root.characters)) {
           characters[name] = {
             activePreset: c.activePreset || 0,
-            bodyKind: normalizeBodyKind(c.bodyKind),
             presets: (c.presets||[]).map(p => ({
               name: p.name || 'Unnamed',
               slots: (p.slots||[]).map(s => ({active:s.active||false, itemName:s.itemName||''}))
@@ -824,11 +793,10 @@ function importJSON(file) {
         }
       }
       ['Kliff','Damiane','Oongka'].forEach(c => {
-        if (!characters[c]) characters[c] = {activePreset:0, presets:[], bodyKind:'Auto'};
+        if (!characters[c]) characters[c] = {activePreset:0, presets:[]};
       });
       activeChar = root.activeCharacter || 'Kliff';
       renderCharButtons();
-      renderBodyKind();
       loadActivePreset();
       alert(`Imported from ${file.name}`);
     } catch(e) { alert('Parse error: ' + e.message); }
@@ -942,19 +910,9 @@ parseDisplayNamesTSV = function(text, source) {
 
 // ---- Utils ----
 function esc(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
-function normalizeBodyKind(v) {
-  const s = (v||'').trim();
-  return ['Auto','Male','Female','Both'].includes(s) ? s : 'Auto';
-}
-function effectiveBodyKind(charName) {
-  const bk = characters[charName]?.bodyKind || 'Auto';
-  if (bk !== 'Auto') return bk;
-  return DEFAULT_BODY_KIND[charName] || 'Both';
-}
 
 // ---- Init ----
 renderCharButtons();
-renderBodyKind();
 renderSlots();
 renderPresets();
 if (!catalog.length) document.getElementById('catalogHint').style.display = '';
