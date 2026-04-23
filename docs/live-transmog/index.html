@@ -240,7 +240,7 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); co
       Load TSV
       <input type="file" id="tsvFile" accept=".tsv,.txt,.csv" style="display:none">
     </label>
-    <button id="loadBuiltinBtn">Use built-in (v1.03.01)</button>
+    <button id="loadBuiltinBtn">Use built-in (v1.04.00)</button>
   </div>
 
   <hr class="separator">
@@ -248,6 +248,17 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); co
   <!-- Character -->
   <div class="char-row" id="charRow">
     <span style="font-size:11px;color:var(--text-dim)">Character:</span>
+  </div>
+  <div class="char-row" id="bodyKindRow">
+    <span style="font-size:11px;color:var(--text-dim)" title="Overlay picker body-type filter. Auto uses the game default (Kliff/Oongka=Male, Damiane=Female). Override for body-swap mods.">Body kind:</span>
+    <select id="bodyKindSelect"
+      style="padding:3px 6px;background:var(--input);border:1px solid var(--border);border-radius:3px;color:var(--text);font-size:11px">
+      <option value="Auto">Auto</option>
+      <option value="Male">Male</option>
+      <option value="Female">Female</option>
+      <option value="Both">Both</option>
+    </select>
+    <span id="bodyKindEffective" style="font-size:11px;color:var(--text-dim)"></span>
   </div>
 
   <hr class="separator">
@@ -371,8 +382,9 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); co
       <h3 id="pickerTitle">Select item</h3>
       <div class="picker-filters">
         <input type="text" id="pickerSearch" placeholder="search by name..." autofocus>
-        <label><input type="checkbox" id="pickerExact" checked> Exact slot</label>
-        <label><input type="checkbox" id="pickerHide" checked> Hide variants</label>
+        <label title="Only show items whose slot matches this row"><input type="checkbox" id="pickerExact" checked> Exact slot</label>
+        <label title="Hide unsafe (NPC-only, non-equipment)"><input type="checkbox" id="pickerHideIncompat" checked> Hide incompatible</label>
+        <label title="Hide NPC-variant carriers (may have issues)"><input type="checkbox" id="pickerHideVariants"> Hide variants</label>
       </div>
     </div>
     <div class="picker-list" id="pickerList"></div>
@@ -385,8 +397,15 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); co
 const SLOTS = ['Helm','Chest','Cloak','Gloves','Boots'];
 const SLOT_MAP = {Helm:0, Chest:1, Cloak:2, Gloves:3, Boots:4};
 let catalog = [];
-let characters = {Kliff:{activePreset:0,presets:[]}, Damiane:{activePreset:0,presets:[]}, Oongka:{activePreset:0,presets:[]}};
+let characters = {
+  Kliff:   {activePreset:0, presets:[], bodyKind:'Auto'},
+  Damiane: {activePreset:0, presets:[], bodyKind:'Auto'},
+  Oongka:  {activePreset:0, presets:[], bodyKind:'Auto'},
+};
 let activeChar = 'Kliff';
+// Hardcoded default body kind per character (overlay falls back to this
+// when bodyKind === "Auto"). Mirrors item_name_table.cpp body_kind_for_character().
+const DEFAULT_BODY_KIND = { Kliff:'Male', Damiane:'Female', Oongka:'Male' };
 let currentSlots = SLOTS.map(() => ({active:false, itemName:''}));
 let pickerSlotIdx = -1;
 
@@ -407,10 +426,25 @@ function renderCharButtons() {
     const b = document.createElement('button');
     b.className = 'char-btn' + (name === activeChar ? ' active' : '');
     b.textContent = name;
-    b.onclick = () => { activeChar = name; renderCharButtons(); loadActivePreset(); };
+    b.onclick = () => { activeChar = name; renderCharButtons(); renderBodyKind(); loadActivePreset(); };
     row.appendChild(b);
   }
 }
+
+function renderBodyKind() {
+  const sel = document.getElementById('bodyKindSelect');
+  const bk = characters[activeChar]?.bodyKind || 'Auto';
+  sel.value = bk;
+  const eff = effectiveBodyKind(activeChar);
+  const note = document.getElementById('bodyKindEffective');
+  note.textContent = (bk === 'Auto') ? `(effective: ${eff})` : '';
+}
+
+document.getElementById('bodyKindSelect').addEventListener('change', e => {
+  if (!characters[activeChar]) return;
+  characters[activeChar].bodyKind = normalizeBodyKind(e.target.value);
+  renderBodyKind();
+});
 
 // ---- Preset management ----
 function cp() { return characters[activeChar]; }
@@ -532,8 +566,10 @@ function openPicker(slotIdx) {
   pickerSlotIdx = slotIdx;
   document.getElementById('pickerTitle').textContent = `Select item - ${SLOTS[slotIdx]}`;
   document.getElementById('pickerSearch').value = '';
+  // Defaults mirror the in-game overlay (overlay_ui.inl SlotUIState).
   document.getElementById('pickerExact').checked = true;
-  document.getElementById('pickerHide').checked = true;
+  document.getElementById('pickerHideIncompat').checked = true;
+  document.getElementById('pickerHideVariants').checked = false;
   document.getElementById('pickerOverlay').classList.add('open');
   renderPicker();
   setTimeout(() => document.getElementById('pickerSearch').focus(), 50);
@@ -551,7 +587,7 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape') closePicker();
 });
 
-['pickerSearch','pickerExact','pickerHide'].forEach(id => {
+['pickerSearch','pickerExact','pickerHideIncompat','pickerHideVariants'].forEach(id => {
   document.getElementById(id).addEventListener(
     id === 'pickerSearch' ? 'input' : 'change', renderPicker);
 });
@@ -560,7 +596,8 @@ function renderPicker() {
   const list = document.getElementById('pickerList');
   const query = document.getElementById('pickerSearch').value.toLowerCase();
   const exact = document.getElementById('pickerExact').checked;
-  const hide = document.getElementById('pickerHide').checked;
+  const hideIncompat = document.getElementById('pickerHideIncompat').checked;
+  const hideVariants = document.getElementById('pickerHideVariants').checked;
   const slotName = SLOTS[pickerSlotIdx];
 
   let html = `<div class="picker-entry" onclick="pickItem('')">
@@ -569,10 +606,13 @@ function renderPicker() {
 
   let shown = 0, filtered = 0;
   for (const item of catalog) {
+    // Exact slot: drop items in other equipment slots. "Other" is
+    // non-equipment -- it's governed by hideIncompatible, not exact.
     if (exact && item.slot !== slotName && item.slot !== 'Other') { filtered++; continue; }
     const nonEquip = (item.slot === 'Other');
-    const unsafe = item.variant || !item.playerSafe || nonEquip;
-    if (hide && unsafe) { filtered++; continue; }
+    const incompatible = !item.playerSafe || nonEquip;
+    if (hideIncompat && incompatible) { filtered++; continue; }
+    if (hideVariants && item.variant) { filtered++; continue; }
     if (query && !item.name.toLowerCase().includes(query)) continue;
     if (shown >= 512) break;
 
@@ -653,10 +693,10 @@ function parseTSV(text, source) {
 // Built-in catalog
 document.getElementById('loadBuiltinBtn').addEventListener('click', async () => {
   try {
-    const resp = await fetch('CrimsonDesertLiveTransmog_items_v1.03.01.tsv');
+    const resp = await fetch('CrimsonDesertLiveTransmog_items_v1.04.00.tsv');
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const text = await resp.text();
-    parseTSV(text, 'built-in v1.03.01');
+    parseTSV(text, 'built-in v1.04.00');
   } catch (e) {
     alert('Failed to load built-in catalog: ' + e.message + '\nUse "Load TSV" instead.');
   }
@@ -664,10 +704,11 @@ document.getElementById('loadBuiltinBtn').addEventListener('click', async () => 
 
 // ---- JSON export ----
 function buildJSON() {
-  const out = { version: 3, activeCharacter: activeChar, characters: {} };
+  const out = { activeCharacter: activeChar, characters: {} };
   for (const [name, c] of Object.entries(characters)) {
     out.characters[name] = {
       activePreset: c.activePreset,
+      bodyKind: c.bodyKind || 'Auto',
       presets: c.presets.map(p => ({
         name: p.name,
         slots: p.slots.map(s => ({ active: s.active, itemName: s.itemName || '' }))
@@ -707,6 +748,7 @@ function importJSON(file) {
         for (const [name, c] of Object.entries(root.characters)) {
           characters[name] = {
             activePreset: c.activePreset || 0,
+            bodyKind: normalizeBodyKind(c.bodyKind),
             presets: (c.presets||[]).map(p => ({
               name: p.name || 'Unnamed',
               slots: (p.slots||[]).map(s => ({active:s.active||false, itemName:s.itemName||''}))
@@ -715,9 +757,12 @@ function importJSON(file) {
           characters[name].presets.forEach(p => { while(p.slots.length<5) p.slots.push({active:false,itemName:''}); });
         }
       }
-      ['Kliff','Damiane','Oongka'].forEach(c => { if (!characters[c]) characters[c] = {activePreset:0,presets:[]}; });
+      ['Kliff','Damiane','Oongka'].forEach(c => {
+        if (!characters[c]) characters[c] = {activePreset:0, presets:[], bodyKind:'Auto'};
+      });
       activeChar = root.activeCharacter || 'Kliff';
       renderCharButtons();
+      renderBodyKind();
       loadActivePreset();
       alert(`Imported from ${file.name}`);
     } catch(e) { alert('Parse error: ' + e.message); }
@@ -818,9 +863,19 @@ parseTSV = function(text, source) {
 
 // ---- Utils ----
 function esc(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+function normalizeBodyKind(v) {
+  const s = (v||'').trim();
+  return ['Auto','Male','Female','Both'].includes(s) ? s : 'Auto';
+}
+function effectiveBodyKind(charName) {
+  const bk = characters[charName]?.bodyKind || 'Auto';
+  if (bk !== 'Auto') return bk;
+  return DEFAULT_BODY_KIND[charName] || 'Both';
+}
 
 // ---- Init ----
 renderCharButtons();
+renderBodyKind();
 renderSlots();
 renderPresets();
 if (!catalog.length) document.getElementById('catalogHint').style.display = '';
@@ -828,10 +883,10 @@ if (!catalog.length) document.getElementById('catalogHint').style.display = '';
 // Auto-load built-in catalog on page load
 (async () => {
   try {
-    const resp = await fetch('CrimsonDesertLiveTransmog_items_v1.03.01.tsv');
+    const resp = await fetch('CrimsonDesertLiveTransmog_items_v1.04.00.tsv');
     if (!resp.ok) return;
     const text = await resp.text();
-    if (text.split('\n').length > 2) parseTSV(text, 'v1.03.01');
+    if (text.split('\n').length > 2) parseTSV(text, 'v1.04.00');
   } catch (_) {}
 })();
 </script>
