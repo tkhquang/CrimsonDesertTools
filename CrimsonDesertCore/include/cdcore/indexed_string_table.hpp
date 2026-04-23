@@ -3,10 +3,8 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <functional>
 #include <string>
 #include <unordered_map>
-#include <vector>
 
 // ---------------------------------------------------------------------------
 // IndexedStringA table scanner.
@@ -19,13 +17,9 @@
 //
 // The scanner locates the `48 8B 05 <disp32>` instruction inside the first
 // 0x40 bytes of mapLookupFunc (patch-proof against compiler shuffles),
-// walks the chain, then enumerates the configured hash range and returns
-// every entry whose string starts with cfg.prefix.
-//
-// Optional wide-scan fallback: if cfg.getUnresolved is set, after the
-// primary range scan the scanner calls it with the partial map and
-// searches the extended range [1, cfg.wideScanMax) for the returned
-// unresolved names (skipping the primary range to avoid redundant work).
+// walks the chain, then enumerates the configured hash range end-to-end
+// in a single pass and returns every entry whose string starts with
+// cfg.prefix.
 // ---------------------------------------------------------------------------
 
 namespace CDCore
@@ -36,27 +30,19 @@ namespace CDCore
         // are skipped). "CD_" matches every Crimson Desert slot part name.
         const char *prefix = "CD_";
 
-        // Primary hash range -- entries in this range are always scanned.
-        std::uint32_t tableScanMin = 0xAC00;
-        std::uint32_t tableScanMax = 0xCFFF;
-
-        // Approximate number of matching entries on v1.02.00. Used only to
-        // colour the end-of-scan log line ("expected ~N entries").
-        std::uint32_t expectedEntries = 600;
+        // Hash range to sweep. The default covers the full observed bucket
+        // space; callers should only narrow it when a specific patch is
+        // known to keep the relevant entries inside a tighter window and
+        // scan cost is a concern. Per-version bucket drift (seen between
+        // v1.02.00, v1.03.01 and v1.04.00) means any narrow default has
+        // to be revisited every major patch; keeping it wide is the
+        // self-healing choice.
+        std::uint32_t tableScanMin = 1;
+        std::uint32_t tableScanMax = 0x1FFFF;
 
         // Offset of the table_array pointer inside the globalPtr struct.
         // Runtime-data layout, resolved by IDA on v1.02.00. No AOB.
         std::ptrdiff_t tableArrayOffset = 0x58;
-
-        // Optional wide-scan fallback. If set AND wideScanMax > 0, the
-        // scanner calls getUnresolved(primaryResults) after the primary
-        // range pass; each returned name is then probed across the
-        // extended range [1, wideScanMax) (skipping the primary range).
-        // Leave unset to disable the fallback.
-        std::uint32_t wideScanMax = 0;
-        std::function<std::vector<std::string>(
-            const std::unordered_map<std::string, std::uint32_t> &)>
-            getUnresolved;
 
         // Label used in log lines. Change it to distinguish per-mod scans
         // in the shared log stream.

@@ -16,6 +16,22 @@
 
 namespace Transmog
 {
+    // SlotPopulator (sub_14076C960) maintains a dispatch cache on the
+    // component at (basePtr, count, cap). The triple shifted 0x20
+    // bytes higher between v1.03.01 and v1.04.00 as the component
+    // gained new fields lower in the struct:
+    //
+    //   v1.03.01 -- basePtr @ +0x1B8, count @ +0x1C0, cap @ +0x1C4
+    //   v1.04.00 -- basePtr @ +0x1D8, count @ +0x1E0, cap @ +0x1E4
+    //
+    // Reading the old offsets on v1.04.00 returns zero for count (the
+    // u32 that lives there is always 0), which makes apply look like
+    // a no-op; writing the old offsets scribbles into adjacent fields
+    // and corrupts the component a slot at a time.
+    constexpr std::ptrdiff_t k_compSlotCacheBasePtrOffset = 0x1D8;
+    constexpr std::ptrdiff_t k_compSlotCacheCountOffset   = 0x1E0;
+    constexpr std::ptrdiff_t k_compSlotCacheCapOffset     = 0x1E4;
+
     void apply_transmog(__int64 a1, uint16_t targetId)
     {
         auto slotPop = slot_populator_fn();
@@ -194,9 +210,20 @@ namespace Transmog
     }
 
     // Descriptor size. Stride between consecutive descriptors observed
-    // in CE: 0x400 (1024). Over-read is fine -- we copy into a private
-    // buffer and only the game's actual reads matter.
-    static constexpr std::size_t k_descBufSize = 0x400;
+    // in CE on the live build:
+    //
+    //   v1.03.01 -- 0x400 (1024)
+    //   v1.04.00 -- 0xA00 (2560)
+    //
+    // The hybrid buffer is memcpy'd from the target descriptor up to
+    // this size; any byte beyond ends up as VirtualAlloc-zero. If
+    // SlotPopulator or its callees read past the copied range they see
+    // zeros instead of the real descriptor data, which faults when the
+    // zero is treated as an embedded pointer, vtable, or index. Keep
+    // this at or above the live stride; over-copy is safe because the
+    // source descriptor is always at least a full stride wide in the
+    // pool allocator.
+    static constexpr std::size_t k_descBufSize = 0xA00;
 
     // Descriptor offsets read by SlotPopulator for character-context
     // matching BEFORE visual/mesh data. Must come from the CARRIER so
@@ -466,9 +493,9 @@ namespace Transmog
         __try
         {
             const auto count =
-                *reinterpret_cast<volatile uint32_t *>(a1 + 0x1C0);
+                *reinterpret_cast<volatile uint32_t *>(a1 + k_compSlotCacheCountOffset);
             const auto base =
-                *reinterpret_cast<volatile uintptr_t *>(a1 + 0x1B8);
+                *reinterpret_cast<volatile uintptr_t *>(a1 + k_compSlotCacheBasePtrOffset);
             if (base > 0x10000)
             {
                 for (uint32_t e = 0; e < count; ++e)
@@ -827,8 +854,10 @@ namespace Transmog
                 lastIds[i] = 0;
         }
 
-        // SlotPopulator (sub_14076C960) maintains a dispatch cache at
-        // a1+0x1B8 (base ptr), a1+0x1C0 (count), a1+0x1C4 (cap). Each
+        // SlotPopulator (sub_14076C960) maintains a dispatch cache on
+        // the component at (basePtr, count, cap). The triple offsets
+        // are defined by the k_compSlotCache* constants at the top of
+        // this file (they shifted between v1.03.01 and v1.04.00). Each
         // entry is 24 bytes:
         //   +0x00 uint16  slotNativeId
         //   +0x08 __int128* subArray (queued ItemInfoBlobs)
@@ -866,9 +895,9 @@ namespace Transmog
         __try
         {
             const auto count =
-                *reinterpret_cast<volatile uint32_t *>(a1 + 0x1C0);
+                *reinterpret_cast<volatile uint32_t *>(a1 + k_compSlotCacheCountOffset);
             const auto base =
-                *reinterpret_cast<volatile uintptr_t *>(a1 + 0x1B8);
+                *reinterpret_cast<volatile uintptr_t *>(a1 + k_compSlotCacheBasePtrOffset);
             if (base > 0x10000)
             {
                 for (uint32_t e = 0; e < count; ++e)
@@ -1097,7 +1126,7 @@ namespace Transmog
             __try
             {
                 postCount =
-                    *reinterpret_cast<volatile uint32_t *>(a1 + 0x1C0);
+                    *reinterpret_cast<volatile uint32_t *>(a1 + k_compSlotCacheCountOffset);
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
@@ -1204,7 +1233,7 @@ namespace Transmog
         __try
         {
             uint32_t liveCount =
-                *reinterpret_cast<volatile uint32_t *>(a1 + 0x1C0);
+                *reinterpret_cast<volatile uint32_t *>(a1 + k_compSlotCacheCountOffset);
             logger.trace("[dispatch] post-apply liveCount={} "
                          "ourWrittenCount={}",
                          liveCount, ourWrittenCount);
@@ -1370,8 +1399,8 @@ namespace Transmog
                 auto entryArray = *reinterpret_cast<uintptr_t *>(entryDesc + 8);
                 auto entryCount = *reinterpret_cast<uint32_t *>(entryDesc + 16);
 
-                auto savedCount = *reinterpret_cast<uint32_t *>(a1 + 0x1C0);
-                *reinterpret_cast<uint32_t *>(a1 + 0x1C0) = 0;
+                auto savedCount = *reinterpret_cast<uint32_t *>(a1 + k_compSlotCacheCountOffset);
+                *reinterpret_cast<uint32_t *>(a1 + k_compSlotCacheCountOffset) = 0;
 
                 for (uint32_t e = 0; e < entryCount && entryArray > 0x10000; ++e)
                 {
@@ -1393,10 +1422,10 @@ namespace Transmog
 
                 // Restore count to the larger of saved and live.
                 uint32_t liveCount =
-                    *reinterpret_cast<volatile uint32_t *>(a1 + 0x1C0);
+                    *reinterpret_cast<volatile uint32_t *>(a1 + k_compSlotCacheCountOffset);
                 uint32_t finalCount =
                     (liveCount > savedCount) ? liveCount : savedCount;
-                *reinterpret_cast<volatile uint32_t *>(a1 + 0x1C0) = finalCount;
+                *reinterpret_cast<volatile uint32_t *>(a1 + k_compSlotCacheCountOffset) = finalCount;
             }
         }
         __except (EXCEPTION_EXECUTE_HANDLER)

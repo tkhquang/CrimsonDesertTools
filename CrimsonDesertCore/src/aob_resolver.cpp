@@ -121,6 +121,14 @@ namespace CDCore
 
         // Blacklist: reject known poison, accept anything else. See
         // header comment for the full rationale and history.
+        //
+        // JMP opcodes (E9/EB/FF 25) are NOT rejected: sibling mods
+        // (EquipHide + LiveTransmog both hook VEC/BatchEquip) legitimately
+        // patch these prologues and the resolver must still succeed so
+        // SafetyHook can layer its trampoline on top of the existing one.
+        // SafetyHook handles pre-hooked targets by decoding the existing
+        // JMP into the new trampoline; refusing here would break the
+        // second mod's init entirely.
         if (b0 == 0x00 || b0 == 0xCC || b0 == 0xC2 || b0 == 0xC3)
             return false;
 

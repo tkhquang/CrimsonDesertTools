@@ -134,7 +134,9 @@ If you run into issues, check the OptiScaler documentation for DLL naming and co
 [*]Use the search box to filter by name -items are auto-categorized to the correct slot
 [*]Select an item -changes stay [b]pending[/b] until you click [b]Apply All[/b]
 [*]Click [b]Apply All[/b] to commit all slot changes at once
-[*]Use [b]Append[/b] in the Presets section to save your current look
+[*]Use [b]Append[/b] in the Presets section to create a fresh preset with every slot ticked and set to (none) -- a hide-all starting point you can fill in from the pickers
+[*]Use [b]Copy[/b] to duplicate the current preset (including any unsaved picker edits) into a new slot you can tweak without touching the source
+[*][b]Save[/b] commits unsaved picker edits back into the active preset. The button turns orange with a [b]*[/b] marker and a [b][UNSAVED -- click Save][/b] banner appears in the header whenever your edits differ from the stored preset
 [*]Use [b]Prev[/b] / [b]Next[/b] to cycle through saved presets
 [*]Press [b]Home[/b] again to close the overlay
 [/list]

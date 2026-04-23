@@ -76,8 +76,16 @@ namespace Transmog
         Preset *active_preset_mut();
         const std::vector<Preset> &presets() const;
 
-        /// Append a new preset from current slot_mappings state.
+        /// Append a fresh preset with every slot ticked + none (hide all).
+        /// Pushes the new state into slot_mappings before returning so the
+        /// caller can manual_apply() immediately.
         void append_from_state();
+
+        /// Append a new preset that snapshots the current slot_mappings
+        /// (active character's picker rows). Unlike append_from_state, this
+        /// preserves the currently-loaded item selections so the user can
+        /// fork-edit an existing preset without overwriting the source.
+        void duplicate_current();
 
         /// Overwrite the active preset with current slot_mappings state.
         void replace_current_from_state();

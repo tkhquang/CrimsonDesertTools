@@ -95,23 +95,28 @@ namespace Transmog
 
         /**
          * @brief True if the item's descriptor has a non-sentinel
-         *        pointer at `+0x3A0` (i.e. a variant metadata struct).
+         *        pointer at the variant-metadata slot (see
+         *        `k_descVariantMetaOffset` in item_name_table.cpp for
+         *        the per-version offset: +0x3A0 on v1.02.00, +0x3C8 on
+         *        v1.04.00).
          *
          * Items with this flag set are members of an engine-internal
-         * linked list threaded via `desc+0x3A0`. Across the 14 labeled
+         * linked list threaded via that slot. Across the 14 labeled
          * armor samples we tested live, flagged items all failed to
          * render via runtime transmog on the player. The exact semantic
          * meaning of the meta struct is not fully mapped -- users see
          * these as "damaged" in-game but the catalog-wide population
-         * (~2399/6024 items) includes non-armor readables too, so the
-         * label is intentionally mechanism-neutral. The overlay treats
-         * this as "may not render" and warns in the picker.
+         * (~2399/6024 items on v1.02.00) includes non-armor readables
+         * too, so the label is intentionally mechanism-neutral. The
+         * overlay treats this as "may not render" and warns in the
+         * picker.
          *
          * Detector: the sentinel pointer is resolved STATISTICALLY at
-         * build() time as the mode of `*(desc+0x3A0)` across all valid
-         * descriptors (~60% share it on v1.02.00). No hardcoded RVA --
-         * the detector self-heals across future .data shuffles. Returns
-         * false for unknown ids or when the catalog isn't yet built.
+         * build() time as the mode of `*(desc+k_descVariantMetaOffset)`
+         * across all valid descriptors (~60% share it on v1.02.00). No
+         * hardcoded RVA, so the detector self-heals across future
+         * .data shuffles. Returns false for unknown ids or when the
+         * catalog isn't yet built.
          */
         bool has_variant_meta(uint16_t itemId) const;
 

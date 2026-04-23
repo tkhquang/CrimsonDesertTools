@@ -24,20 +24,29 @@ namespace Transmog
     static constexpr std::size_t k_maxNameLen = 96;
 
     // Variant-metadata detection (see item_name_table.hpp::has_variant_meta).
-    // Clean base items have `*(desc+0x3A0) == <sentinel>` where <sentinel>
-    // is a shared empty-object pointer (IDA: off_1459D0B38 on v1.02.00 -- an
-    // IRefCounted vtable in the exe's .data section). Non-sentinel values
-    // point to a per-item metadata struct threaded through a catalog-wide
-    // linked list. Members of this list failed to render via runtime
-    // transmog on all tested samples.
+    // Clean base items have `*(desc+<offset>) == <sentinel>` where
+    // <sentinel> is a shared empty-object pointer (IDA: off_1459D0B38 on
+    // v1.02.00 -- an IRefCounted vtable in the exe's .data section).
+    // Non-sentinel values point to a per-item metadata struct threaded
+    // through a catalog-wide linked list; members of this list failed to
+    // render via runtime transmog on all tested samples.
     //
-    // The sentinel's RVA is NOT stable across patches -- any .data reshuffle
-    // moves it. Instead of hardcoding the RVA, we resolve the sentinel
-    // statistically at catalog-build time: scan every valid descriptor's
-    // +0x3A0 qword, the value that appears in the clear majority of items
-    // (historically ~60% on v1.02.00, ~3625/6024) IS the sentinel. This
-    // needs no symbol anchor and self-heals across future game updates.
-    static constexpr std::ptrdiff_t k_descVariantMetaOffset = 0x3A0;
+    // The field offset shifts across major game revisions as the
+    // descriptor struct grows:
+    //
+    //   v1.02.00 -- +0x3A0 (original)
+    //   v1.04.00 -- +0x3C8 (descriptor gained 0x28 bytes of new fields
+    //               between +0x3A0 and +0x3C8; +0x3A0 now carries an
+    //               unrelated `0x1FFFFFFFF` bit-pattern value)
+    //
+    // The sentinel value itself is also unstable (any .data reshuffle
+    // moves it). Rather than hardcoding either the offset or the
+    // sentinel RVA, the builder resolves the sentinel statistically at
+    // catalog-build time: scan every valid descriptor's +0x3C8 qword,
+    // the value that appears in the clear majority of items (~3-5k of
+    // ~6k) IS the sentinel. Self-heals across future game updates as
+    // long as the catalog stays statistically dominated by base items.
+    static constexpr std::ptrdiff_t k_descVariantMetaOffset = 0x3C8;
 
     // --- iteminfo (qword_145CEF370) container layout, v1.02.00 ---
     // Source: IDA sub_1402D75D0 + static analysis. These are runtime data
@@ -178,11 +187,23 @@ namespace Transmog
     // only {0x012F}) are classified as Generic -- the engine accepts
     // them on any humanoid body, so the picker shows them for every
     // character.
+    // Body-type classifier tokens on v1.04.00 (renumbered from v1.03.01
+    // when the engine's class-enum was re-keyed; each token shifted by
+    // +1 or +2). Verified live against the rule-classifier arrays of
+    // WellsKnight_PlateArmor_{Helm, Armor} (known male carriers) and
+    // Demian_Leather_Armor (known female carrier). Structure unchanged
+    // at +0x248/+0x250 (rule list), +0x20/+0x28 (classifier list per
+    // rule), 0x38 rule stride; only the enum values moved.
+    //
+    //   v1.03.01:  male   {0x0018, 0x0058, 0x02E3}
+    //              female {0x0072, 0x0382, 0x0300}
+    //   v1.04.00:  male   {0x0019, 0x0059, 0x02E5}
+    //              female {0x0073, 0x0384, 0x0302}
     static constexpr std::uint16_t k_maleBodyTokens[] = {
-        0x0018, 0x0058, 0x02E3,
+        0x0019, 0x0059, 0x02E5,
     };
     static constexpr std::uint16_t k_femaleBodyTokens[] = {
-        0x0072, 0x0382, 0x0300,
+        0x0073, 0x0384, 0x0302,
     };
     // Body bits are accumulated during the classifier scan:
     //   Male / Female  -- saw a token from the respective body set
@@ -385,11 +406,17 @@ namespace Transmog
     // unmapped as non-equipment.
 
     // Slot mapping for the canonical item-type code at desc+0x44.
-    // Values verified via CE on v1.03.01, 2026-04-21:
-    //   0x04=Helm  0x05=Chest  0x06=Gloves  0x07=Boots  0x45=Cloak
+    // Helm/Chest/Gloves/Boots verified on v1.03.01 (2026-04-21) and
+    // confirmed unchanged on v1.04.00 (2026-04-23). Cloak shifted from
+    // 0x45 -> 0x46 on v1.04.00 (one-code insertion in the engine enum
+    // between Boots and Cloak). Both legacy and current values accepted
+    // so the mapping stays valid across patches that haven't shifted
+    // the earlier slots.
+    //   0x04=Helm  0x05=Chest  0x06=Gloves  0x07=Boots
+    //   0x45/0x46=Cloak
     // Other observed codes (explicitly rejected -- these are not
     // transmog-compatible armor slots):
-    //   0x20=Shield, 0x53=Horse/mount armor, 0xFFFF=Quest/non-equipment,
+    //   0x20=Shield, 0x53/0x54=Horse/mount armor, 0xFFFF=Quest/non-equipment,
     //   plus any other unmapped code.
     static TransmogSlot slot_from_type_code(std::uint16_t code) noexcept
     {
@@ -399,7 +426,8 @@ namespace Transmog
         case 0x05: return TransmogSlot::Chest;
         case 0x06: return TransmogSlot::Gloves;
         case 0x07: return TransmogSlot::Boots;
-        case 0x45: return TransmogSlot::Cloak;
+        case 0x45:
+        case 0x46: return TransmogSlot::Cloak;
         default:   return TransmogSlot::Count;
         }
     }
@@ -707,9 +735,12 @@ namespace Transmog
             const uint16_t equipType =
                 read_u16_safe(descPtr + 0x42, etOk);
 
-            // Item-type code at desc+0x44 (u16). CE-verified 2026-04-21:
-            //   0x04=Helm, 0x05=Chest, 0x06=Gloves, 0x07=Boots, 0x45=Cloak,
-            //   0x20=Shield, 0x53=Horse/mount armor, 0xFFFF=Quest/Non-equipment.
+            // Item-type code at desc+0x44 (u16). CE-verified on
+            // v1.03.01 (2026-04-21) and v1.04.00 (2026-04-23):
+            //   0x04=Helm, 0x05=Chest, 0x06=Gloves, 0x07=Boots,
+            //   0x45/0x46=Cloak (shifted +1 on v1.04.00),
+            //   0x20=Shield, 0x53/0x54=Horse/mount armor,
+            //   0xFFFF=Quest/Non-equipment.
             // This is the canonical game-side classifier for item category;
             // slot derivation no longer depends on parsing the item name.
             bool tcOk = false;
@@ -729,10 +760,11 @@ namespace Transmog
         }
 
         // Pass 2 -- statistically derive the variant-meta sentinel.
-        // The sentinel is the value that appears at desc+0x3A0 in the
-        // clear majority of items (historically ~60% on v1.02.00). Any
-        // other pointer at that slot = per-item variant metadata and
-        // gates out of runtime transmog.
+        // The sentinel is the value that appears at
+        // desc+k_descVariantMetaOffset in the clear majority of items
+        // (historically ~60% on v1.02.00). Any other pointer at that
+        // slot = per-item variant metadata and gates out of runtime
+        // transmog.
         //
         // Tally non-zero metaPtr values; the mode is the sentinel.
         uintptr_t resolvedSentinel = 0;
@@ -781,8 +813,8 @@ namespace Transmog
         for (auto &e : scratch)
         {
             // Item "has variant" (picker shows carrier-color) if either:
-            //   - desc+0x3A0 is non-sentinel (traditional catalog-level
-            //     variant-meta record), OR
+            //   - desc+k_descVariantMetaOffset is non-sentinel
+            //     (traditional catalog-level variant-meta record), OR
             //   - the item has >= 2 body-bearing classifier rules,
             //     i.e. separate male + female identity-gated rules.
             //     Empirically these are dual-body NPC items that need
