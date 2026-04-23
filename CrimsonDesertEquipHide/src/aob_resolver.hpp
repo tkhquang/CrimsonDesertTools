@@ -161,25 +161,79 @@ namespace EquipHide
     };
 
     /**
-     * @brief AOB candidates for sub_1423FDEB0 -- Postfix rule evaluator.
+     * @brief AOB candidates for the Postfix rule evaluator.
      *
      * Virtual function at vtable[4] of objects with vtable 0x144CC8248.
      * Evaluates whether a postfix rule matches currently equipped items.
      * Returns 1 = rule matches (hide hair), 0 = no match (keep hair).
+     *
+     * Prologue shape (0x1A bytes from entry to `sub rsp, XX`):
+     *
+     *   48 89 5C 24 08              mov [rsp+8],  rbx
+     *   48 89 6C 24 10              mov [rsp+10], rbp
+     *   48 89 74 24 18              mov [rsp+18], rsi
+     *   48 89 7C 24 20              mov [rsp+20], rdi
+     *   41 54                       push r12
+     *   41 56                       push r14
+     *   41 57                       push r15
+     *   48 83 EC ??                 sub rsp, XX
+     *
+     * The first 6 body instructions that every candidate shares:
+     *
+     *   4C 8B FA                    mov r15, rdx
+     *   48 8B 5A ??                 mov rbx, [rdx+disp8]
+     *   8B 42 ??                    mov eax, [rdx+disp8]
+     *   48 8D 3C C3                 lea rdi, [rbx+rax*8]
+     *   48 3B DF                    cmp rbx, rdi
+     *   74 ??                       je  rel8                (NOT in signature; rel8 per aob-signatures.md §8)
+     *
+     * Every candidate below lands install on the true function entry
+     * (either via `offsetToHook = 0` or via a negative walk-back equal
+     * to the prologue length). Install addresses in the middle of the
+     * prologue must be avoided: SafetyHook disassembles from the
+     * requested byte and can silently decode a mid-instruction
+     * position as a shorter unrelated instruction. In this function's
+     * prologue, starting one byte into `mov [rsp+10], rbp` decodes as
+     * the REX.W-stripped 32-bit `mov [rsp+10], ebp`, whose truncated
+     * save corrupts rbp on the function's epilogue reload and crashes
+     * the caller.
      */
     inline constexpr AddrCandidate k_postfixEvalCandidates[] = {
-        {"PostfixEval_P1_PrologueAndBody",
-         "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 41 56 41 57 "
+        // P1 -- tight. Full prologue (4 shadow-space saves + 3 pushes +
+        // `sub rsp`) chained into the first 4 body instructions. Most
+        // selective; first to fail if the compiler reshuffles save
+        // order or spills a different non-volatile register set.
+        // `sub rsp` imm8 is wildcarded because it tracks local-variable
+        // size; every other byte is structural for this prologue shape.
+        {"PostfixEval_P1_FullPrologue",
+         "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 48 89 7C 24 20 "
+         "41 54 41 56 41 57 "
          "48 83 EC ?? 4C 8B FA 48 8B 5A ?? 8B 42 ?? 48 8D 3C C3",
          ResolveMode::Direct, 0, 0},
 
-        {"PostfixEval_P2_UniqueBody",
-         "48 83 EC ?? 4C 8B FA 48 8B 5A ?? 8B 42 ?? 48 8D 3C C3 48 3B",
+        // P2 -- medium. Drops the four shadow-space register saves and
+        // anchors on the 3-push sequence + `sub rsp` + body tail.
+        // Survives save-order shifts but stays tied to the specific
+        // r12/r14/r15 callee-spill set. Match lands on the first
+        // byte of `push r12` (function entry + 0x14), so the walk-back
+        // is -0x14.
+        {"PostfixEval_P2_PushesAndBody",
+         "41 54 41 56 41 57 "
+         "48 83 EC ?? 4C 8B FA 48 8B 5A ?? 8B 42 ?? 48 8D 3C C3",
          ResolveMode::Direct, -0x14, 0},
 
-        {"PostfixEval_P3_LoopInit",
-         "45 33 F6 44 89 74 24 ?? C7 44 24 ?? ?? 00 00 00 49 8B 5F ?? 41 8B 47 ??",
-         ResolveMode::Direct, -0x6F, 0},
+        // P3 -- loose. Body-only fallback anchored on the distinctive
+        // `mov rbx, [rdx+disp8] ; mov eax, [rdx+disp8] ; lea rdi,
+        // [rbx+rax*8]` load-pair (the C3 SIB byte encodes rbx+rax*8,
+        // a rare index shape) plus the start of the loop-header
+        // `cmp rbx, rdi`. Pattern terminates at `48 3B` so it does
+        // not include the following `Jcc rel8` (aob-signatures.md
+        // §8 rel8 rule). Walk-back of -0x1A covers the full 0x1A-byte
+        // prologue; survives both prologue save-order and push-set
+        // changes as long as the loop-header body stays put.
+        {"PostfixEval_P3_UniqueBody",
+         "48 83 EC ?? 4C 8B FA 48 8B 5A ?? 8B 42 ?? 48 8D 3C C3 48 3B",
+         ResolveMode::Direct, -0x1A, 0},
     };
 
     /**

@@ -15,7 +15,7 @@ namespace CDCore::Dev
      *        (case-insensitive).
      *
      * Use this as the first step of any DLL Init() to reject injection into
-     * auxiliary processes that live in the game directory — e.g. UAL /
+     * auxiliary processes that live in the game directory -- e.g. UAL /
      * ASILoader fan out the ASI into `crashpad_handler.exe` and launcher
      * stubs, which must no-op.
      *
@@ -30,7 +30,7 @@ namespace CDCore::Dev
      * CreateMutexW. On success, @p outHandle holds the mutex handle and
      * the function returns true. If the mutex already exists (a previous
      * ASI already loaded in this process), the handle is closed and the
-     * function returns false — the caller should bail out of Init().
+     * function returns false -- the caller should bail out of Init().
      *
      * The caller owns the returned handle and must close it in their
      * Shutdown() path.

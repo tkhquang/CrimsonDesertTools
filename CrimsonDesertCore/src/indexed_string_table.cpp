@@ -62,7 +62,7 @@ namespace CDCore
             return nameToHash;
 
         // Locate `48 8B 05 <disp32>` inside the first 0x40 bytes of
-        // mapLookupFunc. Bounded scan — global uniqueness irrelevant.
+        // mapLookupFunc. Bounded scan -- global uniqueness irrelevant.
         const auto funcStart =
             reinterpret_cast<const std::byte *>(mapLookupFunc);
         auto ripAob = DMK::Scanner::parse_aob("48 8B 05 ?? ?? ?? ??");
@@ -107,7 +107,7 @@ namespace CDCore
         if (tableArray < 0x10000)
         {
             logger.warning(
-                "{}: tableArray is null/invalid (0x{:X}) — offset 0x{:X} "
+                "{}: tableArray is null/invalid (0x{:X}) -- offset 0x{:X} "
                 "inside globalPtr may have moved",
                 cfg.logLabel, tableArray,
                 static_cast<std::int64_t>(cfg.tableArrayOffset));
@@ -185,7 +185,7 @@ namespace CDCore
         {
             logger.warning(
                 "{}: 0 entries matching prefix '{}' found in range "
-                "0x{:X}..0x{:X} (expected ~{} on v1.02.00) — hash bucket "
+                "0x{:X}..0x{:X} (expected ~{} on v1.02.00) -- hash bucket "
                 "layout may have shifted, deferring feature",
                 cfg.logLabel, cfg.prefix ? cfg.prefix : "",
                 cfg.tableScanMin, cfg.tableScanMax, cfg.expectedEntries);

@@ -48,30 +48,37 @@ namespace CDCore
         constexpr std::ptrdiff_t k_userToPrimaryActorOffset    = 0xD0;
         constexpr std::ptrdiff_t k_userToControlledActorOffset = 0xD8;
 
-        // Per-actor slot-index byte at actor+0x60. The engine assigns this
-        // byte at actor allocation time in a fixed character order
-        // (Kliff < Damiane < Oongka). The ABSOLUTE value varies across
-        // saves because the slot-index pool is shared with other actors,
-        // but within any given save the companions are always at
-        // (Kliff's value + 1) and (Kliff's value + 2) respectively.
+        // Per-actor slot-index byte on ClientChildOnlyInGameActor.
         //
-        // Observed across two distinct saves on Crimson Desert v1.03.01:
-        //   save with 2 protagonists    Kliff=1, Damiane=2             diff=1
-        //   save with 3 protagonists    Kliff=6, Damiane=7, Oongka=8   diff=1,2
+        // v1.04.00: byte at +0x50 holds the raw engine slot-index
         //
-        // The byte stays stable when a character is backgrounded (verified
-        // by reading a backgrounded Oongka actor after the user swapped
-        // away from him), so the decode works for all in-session lookups
-        // regardless of which character is currently controlled.
+        //   Kliff   +0x50 = 1
+        //   Damiane +0x50 = 2
+        //   Oongka  +0x50 = 3
         //
-        // Assumption: the character allocation order is always
-        // Kliff, Damiane, Oongka. A save with only Kliff and Oongka (no
-        // Damiane) would allocate Oongka at Kliff+1 and would be decoded
-        // as Damiane. This combination has not been observed in-game; if
-        // it arises the user can override the detected character via the
-        // overlay in each consumer mod and the misdetection becomes a
-        // one-time UX hiccup rather than a correctness failure.
-        constexpr std::ptrdiff_t k_actorSlotIndexByteOffset = 0x60;
+        // Each body's +0x50 is stable across frames and distinct per
+        // protagonist; +0x64 carries the same byte redundantly but
+        // +0x50 is qword-aligned.
+        //
+        // v1.03.01 used +0x60 for this role. On v1.04.00 the +0x60 byte
+        // reads 1 for every body and is no longer a discriminator.
+        //
+        // The primaryActor (UA+0xD0) is always Kliff on a Kliff-led
+        // save, so `controlledSlot - primarySlot` yields the companion
+        // diff:
+        //
+        //   Damiane - Kliff = 1
+        //   Oongka  - Kliff = 2
+        //
+        // When Kliff is the controlled character UA+0xD0 == UA+0xD8
+        // and decode_probe short-circuits via the pointer equality
+        // check before the slot diff is evaluated.
+        //
+        // The 1.03.01 fallback caveat (`save with only Kliff + Oongka
+        // decodes Oongka as Damiane`) has not been re-verified on a
+        // 2-protagonist v1.04.00 save; keep the {1, 2} diff table
+        // strict until that re-test lands.
+        constexpr std::ptrdiff_t k_actorSlotIndexByteOffset = 0x50;
         constexpr int k_damianeSlotDiff = 1;
         constexpr int k_oongkaSlotDiff  = 2;
 
@@ -101,9 +108,10 @@ namespace CDCore
         // with garbage state.
         //
         // Reads BOTH user+0xD0 (primary actor, Kliff anchor) and
-        // user+0xD8 (controlled actor) plus the +0x60 slot-index byte on
-        // each actor. The two byte reads cost negligible cache traffic
-        // because the actor was just dereferenced and is already in cache.
+        // user+0xD8 (controlled actor) plus the slot-index byte on each
+        // actor (see k_actorSlotIndexByteOffset). The two byte reads
+        // cost negligible cache traffic because the actor was just
+        // dereferenced and is already in cache.
         ChainProbe walk_chain_seh(std::uintptr_t holder) noexcept
         {
             ChainProbe out{};

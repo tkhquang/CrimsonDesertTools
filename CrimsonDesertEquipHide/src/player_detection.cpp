@@ -113,6 +113,11 @@ namespace EquipHide
             {
                 if (s_prevUser != 0)
                 {
+                    DMK::Logger::get_instance().info(
+                        "Load detect: UserActor swapped "
+                        "(0x{:X} -> 0x{:X}); invalidating controlled-"
+                        "char cache for save-load transition",
+                        s_prevUser, user);
                     CDCore::invalidate_controlled_character();
                 }
                 s_prevUser = user;
@@ -149,6 +154,11 @@ namespace EquipHide
             {
                 if (s_prevControlledActor != 0)
                 {
+                    DMK::Logger::get_instance().info(
+                        "Char swap detected: controlled actor "
+                        "(0x{:X} -> 0x{:X}); invalidating controlled-"
+                        "char cache for in-session swap",
+                        s_prevControlledActor, controlledActor);
                     CDCore::invalidate_controlled_character();
                 }
                 s_prevControlledActor = controlledActor;

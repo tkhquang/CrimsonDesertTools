@@ -12,7 +12,7 @@
 //
 // Each mod defines its own candidate tables (AddrCandidate / AobCandidate
 // arrays) and passes them to resolve_address() / scan_for_hook_target().
-// The helpers here own only the framework — parse, scan, RIP-resolve.
+// The helpers here own only the framework -- parse, scan, RIP-resolve.
 // ---------------------------------------------------------------------------
 
 namespace CDCore
@@ -78,9 +78,9 @@ namespace CDCore
      * rejections.
      *
      * Rejected bytes (treated as scan-corruption signals):
-     *   0x00       — uninitialized memory / zero-fill BSS / NULL page
-     *   0xCC       — int3 breakpoint / alignment pad / debugger trap
-     *   0xC2/0xC3  — bare `ret` (bare-ret stub, not a callable body)
+     *   0x00       -- uninitialized memory / zero-fill BSS / NULL page
+     *   0xCC       -- int3 breakpoint / alignment pad / debugger trap
+     *   0xC2/0xC3  -- bare `ret` (bare-ret stub, not a callable body)
      *
      * Accepted: every other legal x86-64 first-instruction byte
      * (REX prefixes 0x40-0x4F, push/pop 0x50-0x5F, mov/lea/sub/xor/
