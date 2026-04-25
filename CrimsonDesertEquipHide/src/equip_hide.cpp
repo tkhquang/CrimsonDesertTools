@@ -318,7 +318,47 @@ namespace EquipHide
         if (!check_player_filter(a1))
             return;
 
-        if (is_any_category_hidden(mask))
+        // Per-character override resolution. The cascade and chest-lock
+        // paths above gate engine-wide state and intentionally use the
+        // GLOBAL classify_part / is_any_category_hidden masks; this block
+        // keeps the actual vis=2 write per-character so an INI override
+        // that excludes a hash for one protagonist does not get hidden
+        // by the mid-hook on that protagonist's frames.
+        //
+        // The vis-ctrl scan is O(n) where n is at most k_maxProtagonists
+        // (3 after the phantom-filter ship), so the added cost is a
+        // handful of relaxed atomic loads + one extra flat-table lookup
+        // per call. Relaxed ordering is sufficient: the resolve poll
+        // thread publishes consistent (visCtrls[i], visCharIdx[i])
+        // pairs on each pass, and a torn read produces at worst one
+        // stale per-char idx for a single frame, well within the
+        // existing swap-detect timing tolerance.
+        int charIdx = -1;
+        {
+            auto &ps = player_state();
+            const auto vcCount = ps.count.load(std::memory_order_relaxed);
+            for (int i = 0; i < vcCount; ++i)
+            {
+                if (ps.visCtrls[i].load(std::memory_order_relaxed) == a1)
+                {
+                    charIdx = ps.visCharIdx[i].load(std::memory_order_relaxed);
+                    break;
+                }
+            }
+        }
+
+        // Refine the hide decision against the per-character part map.
+        // charIdx == -1 (untracked actor) preserves legacy behaviour by
+        // falling back to the global mask computed earlier.
+        CategoryMask charMask = mask;
+        if (charIdx >= 0 && charIdx < static_cast<int>(kCharIdxCount))
+        {
+            charMask = classify_part_for(partHash, charIdx);
+            if (charMask == 0)
+                return; // hash excluded from this character's effective Parts
+        }
+
+        if (is_any_category_hidden_for(charMask, charIdx))
         {
             auto *visPtr = reinterpret_cast<uint8_t *>(partInOut + 0x1C);
             *visPtr = 2;
@@ -422,30 +462,54 @@ namespace EquipHide
             logger.info("Player identification: global pointer chain");
         }
 
-        if (addrs.mapLookup)
-        {
-            auto runtimeHashes = scan_indexed_string_table(addrs.mapLookup);
-            if (!runtimeHashes.empty())
-            {
-                logger.info("IndexedStringA scan: {} entries resolved at init",
-                            runtimeHashes.size());
-                set_runtime_hashes(std::move(runtimeHashes));
-            }
-            else
-            {
-                logger.info("IndexedStringA table not ready at init, "
-                            "starting deferred scan thread");
-                deferred_scan_pending().store(true, std::memory_order_relaxed);
-                launch_deferred_scan();
-            }
-        }
-        else
+        if (!addrs.mapLookup)
         {
             logger.warning("MapLookup not resolved, cannot scan IndexedStringA table");
         }
 
         load_config();
         original_vis_map().reserve(get_part_map().size());
+
+        // Initial IndexedStringA scan + deferred-launch decision.
+        // Mirrors LiveTransmog's transmog_worker pattern: commit the sync
+        // attempt so the mod is immediately functional, then launch the
+        // deferred worker unless the table is already fully resolved on
+        // the first try. Convergence in the worker is stability-based
+        // (LT's structural-ready analog), not a coverage percentage.
+        if (addrs.mapLookup)
+        {
+            auto runtimeHashes = scan_indexed_string_table(addrs.mapLookup);
+            const auto initialResolved = runtimeHashes.size();
+            const auto totalExpected = total_part_count();
+
+            if (initialResolved > 0)
+                set_runtime_hashes(std::move(runtimeHashes));
+
+            const bool fullyResolved = totalExpected > 0 &&
+                                       initialResolved == totalExpected;
+            if (!fullyResolved)
+            {
+                logger.info(
+                    "IndexedStringA scan: {}/{} entries at init, "
+                    "starting deferred scan thread (stability-check mode)",
+                    initialResolved, totalExpected);
+                deferred_scan_pending().store(true, std::memory_order_relaxed);
+                launch_deferred_scan();
+            }
+            else
+            {
+                logger.info(
+                    "IndexedStringA scan: {}/{} entries at init "
+                    "(fully resolved, no deferred retry)",
+                    initialResolved, totalExpected);
+            }
+
+            // Rebuild the part lookup against whatever subset got committed
+            // so the active map reflects the partial-or-full hash set.
+            // The deferred worker will rebuild again when it converges.
+            if (initialResolved > 0)
+                rebuild_part_lookup();
+        }
 
         // Mid-body scan with the shared cascade resolver. The
         // prologue-fallback variant survives dev hot-reload: when a
@@ -649,22 +713,38 @@ namespace EquipHide
 
     void shutdown()
     {
-        DMK::Logger::get_instance().info("{} shutting down...", MOD_NAME);
+        auto &logger = DMK::Logger::get_instance();
+        logger.info("{} shutting down...", MOD_NAME);
 
+        // Per-step bracket logs around each blocking call let any
+        // future shutdown stall be pinpointed to the exact step
+        // (worker join, vis-byte cleanup, DMK teardown, etc.). The
+        // teardown path crosses several mutexes and the SafetyHook
+        // trampoline drain window, so a silent hang would otherwise
+        // be undiagnosable from the user's log alone. Logger::flush()
+        // between steps drains the async queue so a hang inside a
+        // step still surfaces every line the prior step emitted.
+        logger.info("{} shutdown: step 1 disable_auto_reload", MOD_NAME);
         // Disable the INI watcher up front so an in-flight save event
         // cannot fire setters while we are tearing state down.
         DMK::Config::disable_auto_reload();
+        logger.flush();
 
+        logger.info("{} shutdown: step 2 signal stop", MOD_NAME);
         shutdown_requested().store(true, std::memory_order_relaxed);
         lazy_probe_pending().store(false, std::memory_order_relaxed);
+        logger.flush();
 
+        logger.info("{} shutdown: step 3 join workers", MOD_NAME);
         // Drain workers before the DMK teardown removes the hooks they
         // call into. shutdown_requested is the cooperative stop signal
         // each StoppableWorker body polls; joining them first guarantees
         // no worker is mid-call into a SafetyHook trampoline when the
         // trampoline pages are unmapped.
         join_background_threads();
+        logger.flush();
 
+        logger.info("{} shutdown: step 4 cleanup vis bytes", MOD_NAME);
         // Restore visibility bytes while the hooks are still installed
         // and the game's part registry is reachable. The vis-byte
         // cleanup walks per-actor arrays and writes back the original
@@ -672,7 +752,9 @@ namespace EquipHide
         // would race the loader unmapping the Logic-DLL pages backing
         // the cleanup function itself.
         cleanup_vis_bytes();
+        logger.flush();
 
+        logger.info("{} shutdown: step 5 DMK_Shutdown", MOD_NAME);
         // Full DMK teardown: removes every managed hook (EquipVisCheck,
         // PartAddShow, PostfixEval, VisualEquipChange, VisualEquipSwap),
         // stops and clears the InputManager poller along with its
@@ -683,8 +765,12 @@ namespace EquipHide
         // if the snapshot is null, defending the brief drain window
         // between hook removal and DLL unmap.
         DMK_Shutdown();
+        logger.flush();
 
+        logger.info("{} shutdown: step 6 clear hotkey guards", MOD_NAME);
         clear_hotkey_guards();
+        logger.info("{} shutdown complete", MOD_NAME);
+        logger.flush();
     }
 
 } // namespace EquipHide

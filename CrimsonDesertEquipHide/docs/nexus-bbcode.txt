@@ -239,7 +239,7 @@ Parts = CD_MainWeapon_Sword_R, CD_MainWeapon_Sword_L, ...
 Parts = CD_MainWeapon_Sword_R, CD_MainWeapon_Sword_L, ..., CD_MainWeapon_Axe_R, CD_MainWeapon_Axe_L, CD_MainWeapon_Mace_R, CD_MainWeapon_Mace_L
 [/code]
 
-The active character is detected by walking the live WorldSystem pointer chain to the currently-controlled actor and decoding its built-in identity fields. Switching between protagonists automatically swaps the effective Parts list on the next tick.
+The active character is detected by walking the live WorldSystem pointer chain to the currently-controlled actor and decoding its built-in identity fields. Each party member visible on screen tracks its own per-character Parts list independently, so hiding armor on Damiane and then swapping back to Kliff keeps Damiane's armor hidden while Kliff renders under his own configuration. The previously-controlled character's hide state is preserved across swaps until you toggle it off explicitly.
 
 [line]
 

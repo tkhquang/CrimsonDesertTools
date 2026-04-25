@@ -40,10 +40,21 @@ namespace EquipHide
 
     ResolvedAddresses &resolved_addrs();
 
-    /** @brief Per-protagonist vis_ctrl pointers and injection state. */
+    /** @brief Per-protagonist vis_ctrl pointers and injection state.
+     *  @details visCharIdx is parallel to visCtrls: visCharIdx[i] holds
+     *           the 0-based protagonist index (0=Kliff, 1=Damiane,
+     *           2=Oongka) that visCtrls[i] belongs to, or -1 when the
+     *           identity could not be resolved (NPC follower, unknown
+     *           protagonist, or transient torn read just after a swap).
+     *           Entries with idx == -1 fall back to the active-character
+     *           hide-mask in the per-character hide write so old single-
+     *           character behaviour is preserved for unidentified slots.
+     *           Stored as int32 atomics because std::atomic<signed char>
+     *           is not guaranteed lock-free on x64. */
     struct PlayerState
     {
         std::atomic<uintptr_t> visCtrls[k_maxProtagonists]{};
+        std::atomic<int> visCharIdx[k_maxProtagonists]{};
         std::atomic<int> count{0};
         std::atomic<uintptr_t> primaryVisCtrl{0};
         std::atomic<bool> armorInjected[k_maxProtagonists]{};
@@ -54,8 +65,48 @@ namespace EquipHide
     /** @brief Mutex guarding direct vis-byte writes and original-value map. */
     std::mutex &vis_write_mutex();
 
-    /** @brief Map of vis-byte addresses to their original values before modification. */
-    std::unordered_map<uintptr_t, uint8_t> &original_vis_map();
+    /**
+     * @brief Composite key for the per-(visCtrl, address) original-value map.
+     * @details Keying purely on the vis-byte address makes character-swap
+     *          invalidation lossy: two protagonists sharing the same part
+     *          name resolve to two distinct vis-byte addresses, but
+     *          orphan-restoring "every entry whose hash is not in the
+     *          active map" would also revert the previously-active
+     *          character's vis bytes back to visible because that
+     *          character's vis ctrl no longer ticks through
+     *          apply_direct_vis_write. Including visCtrl in the key
+     *          scopes restore decisions to the matching vis ctrl and
+     *          leaves the inactive character's hide state in place.
+     */
+    struct VisKey
+    {
+        uintptr_t visCtrl;
+        uintptr_t addr;
+
+        bool operator==(const VisKey &other) const noexcept
+        {
+            return visCtrl == other.visCtrl && addr == other.addr;
+        }
+    };
+
+    /** @brief Hash for VisKey -- xor mix of the two pointer fields. */
+    struct VisKeyHash
+    {
+        std::size_t operator()(const VisKey &k) const noexcept
+        {
+            // The two fields are unrelated heap addresses on x64; xor
+            // mix is sufficient because the std lib hashes each field
+            // through a strong integer hash before composition is even
+            // observable. Rotate one half so two pointers that happen
+            // to alias do not collapse to zero.
+            const auto a = std::hash<uintptr_t>{}(k.visCtrl);
+            const auto b = std::hash<uintptr_t>{}(k.addr);
+            return a ^ (b + 0x9e3779b97f4a7c15ULL + (a << 6) + (a >> 2));
+        }
+    };
+
+    /** @brief Map of (vis_ctrl, vis-byte address) pairs to their original values. */
+    std::unordered_map<VisKey, uint8_t, VisKeyHash> &original_vis_map();
 
     /** @brief Flag set when vis-byte writes need to be flushed. */
     std::atomic<bool> &needs_direct_write();
@@ -89,6 +140,19 @@ namespace EquipHide
     {
         auto addr = *reinterpret_cast<const uintptr_t *>(base + off);
         return (addr > 0x10000) ? addr : 0;
+    }
+
+    /** @brief Unsafe raw u64 read -- use ONLY inside SEH-protected hot paths.
+     *  @details Companion to `read_ptr_unsafe` for fields that hold packed
+     *           non-pointer data such as the AM body-pool count/cap pair at
+     *           AM+0xF8 (low u32 = count, high u32 = cap). The
+     *           pointer-validity rejection in `read_ptr_unsafe` would zero
+     *           the entire qword for any value below 0x10000, which is
+     *           wrong for a packed integer field whose low half routinely
+     *           lives in that range. Returns the raw value verbatim. */
+    inline uint64_t read_qword_unsafe(uintptr_t base, ptrdiff_t off) noexcept
+    {
+        return *reinterpret_cast<const uint64_t *>(base + off);
     }
 
     /** @brief Returns true if the part at the given hash pointer is hidden by any category. */

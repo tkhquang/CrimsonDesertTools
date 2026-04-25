@@ -153,7 +153,11 @@ namespace CDCore
         }
         else
         {
-            logger.info(
+            // Per-scan summary stays at TRACE so the deferred-scan poll
+            // path (called every 2s until table stability) does not flood
+            // the INFO stream. Call sites that want a one-shot INFO line
+            // emit their own at init-time decision points.
+            logger.trace(
                 "{}: {} entries for prefix '{}' in range 0x{:X}..0x{:X} "
                 "in {}ms",
                 cfg.logLabel, entries, cfg.prefix ? cfg.prefix : "",
