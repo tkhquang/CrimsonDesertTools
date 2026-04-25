@@ -2,6 +2,15 @@
 
 All notable changes to the CrimsonDesertLiveTransmog mod will be documented in this file.
 
+## [0.6.3] - DetourModKit 3.2.3 refresh
+
+- Faster, lighter mod startup and shutdown.
+- INI hotkey changes now apply on save without relaunching the game.
+- Set a hotkey to empty or `NONE` to leave it unbound, no warning.
+- New `[General] AutoReloadConfig` toggle (on by default) for live INI reloads.
+- Item picker no longer cuts off long lists. Every matching item shows up,
+  including the full Chest catalog past the letter K.
+
 ## [0.6.2] - Crimson Desert 1.04.00 Support
 
 - Restored full functionality on game version 1.04.00. Transmog apply, real-armor teardown, the picker filter, and the PlayerSafe check all work again after the patch
@@ -77,6 +86,7 @@ All notable changes to the CrimsonDesertLiveTransmog mod will be documented in t
 - Modular code split: `transmog_apply` (apply/clear logic), `transmog_hooks` (VEC/BatchEquip callbacks), `transmog_worker` (debounce/load-detect/nametable threads), `shared_state` (cross-TU atomics)
 - Docs clarify ReShade is required for GUI; without it, users edit JSON manually via Capture hotkey
 
+[0.6.3]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.6.3
 [0.6.2]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.6.2
 [0.6.1]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.6.1
 [0.6.0]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.6.0

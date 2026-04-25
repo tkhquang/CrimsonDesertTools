@@ -8,7 +8,7 @@
 // ========================================================================== //
 #define VERSION_MAJOR 0
 #define VERSION_MINOR 6
-#define VERSION_PATCH 2
+#define VERSION_PATCH 3
 // ========================================================================== //
 
 // Helper macros for stringification — DO NOT MODIFY.
