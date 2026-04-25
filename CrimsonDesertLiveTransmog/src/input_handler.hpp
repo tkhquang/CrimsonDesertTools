@@ -5,38 +5,32 @@
 
 namespace Transmog
 {
-    /** @brief Register all configured hotkey bindings with the input manager. */
+    /**
+     * @brief Register all hotkey bindings and INI keys with DetourModKit.
+     *
+     * Each binding is wired via DMK::Config::register_press_combo, which
+     * fuses the INI registration, default-combo parsing, and the
+     * InputManager press registration into a single call. The returned
+     * InputBindingGuards are stashed in a process-lifetime static vector
+     * so the cancellation flag survives until InputManager teardown.
+     *
+     * Must be invoked before DMK::Config::load() (so the registered
+     * setters fire on the first load pass) and before
+     * InputManager::start() (so the bindings are picked up by the
+     * poller).
+     */
     void register_hotkeys();
 
-    /** @brief Set the key combo(s) that toggle transmog on/off. */
-    void set_toggle_combos(DMK::Config::KeyComboList combos);
-
-    /** @brief Set the key combo(s) that force-apply the current preset. */
-    void set_apply_combos(DMK::Config::KeyComboList combos);
-
-    /** @brief Set the key combo(s) that clear all transmog and restore originals. */
-    void set_clear_combos(DMK::Config::KeyComboList combos);
-
-    /** @brief Set the key combo(s) that capture the currently equipped gear. */
-    void set_capture_combos(DMK::Config::KeyComboList combos);
-
-    /** @brief Set the key combo(s) that append a new preset from current state. */
-    void set_preset_append_combos(DMK::Config::KeyComboList combos);
-
-    /** @brief Set the key combo(s) that replace the active preset. */
-    void set_preset_replace_combos(DMK::Config::KeyComboList combos);
-
-    /** @brief Set the key combo(s) that remove the active preset. */
-    void set_preset_remove_combos(DMK::Config::KeyComboList combos);
-
-    /** @brief Set the key combo(s) that cycle to the next preset. */
-    void set_preset_next_combos(DMK::Config::KeyComboList combos);
-
-    /** @brief Set the key combo(s) that cycle to the previous preset. */
-    void set_preset_prev_combos(DMK::Config::KeyComboList combos);
-
-    /** @brief Set the key combo(s) that toggle overlay visibility. */
-    void set_overlay_toggle_combos(DMK::Config::KeyComboList combos);
+    /**
+     * @brief Drops the guard vector populated by register_hotkeys().
+     *
+     * Releases the per-binding cancellation flags so a subsequent
+     * register_hotkeys() pass starts from an empty stash. The
+     * InputManager poller and its registered bindings are torn down
+     * by DMK_Shutdown() immediately before this helper runs, so this
+     * call only resets the local guard vector.
+     */
+    void clear_hotkey_guards() noexcept;
 
 } // namespace Transmog
 

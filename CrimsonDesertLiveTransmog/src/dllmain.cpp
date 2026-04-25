@@ -5,114 +5,75 @@
 #include "transmog.hpp"
 #include "version.hpp"
 
-#include <cdcore/dev_helpers.hpp>
-
 #include <DetourModKit.hpp>
+#include <DetourModKit/bootstrap.hpp>
+#include <DetourModKit/filesystem.hpp>
 
 #include <Windows.h>
 
-static HANDLE g_shutdownEvent = nullptr;
-static HANDLE g_instanceMutex = nullptr;
-static HANDLE g_lifecycleThread = nullptr;
-static HMODULE g_hModule = nullptr;
-
-static DWORD WINAPI lifecycle_thread(LPVOID /*param*/)
+namespace
 {
-    // Process gate — UAL loads ASIs into every process in the game
-    // directory including crashpad_handler.exe. Bail immediately.
-    if (!CDCore::Dev::is_target_process(Transmog::GAME_PROCESS_NAME))
-        return 0;
+    // Module handle captured at attach. The lifecycle worker spawned by
+    // Bootstrap::on_dll_attach runs init_fn off the loader lock; the
+    // overlay needs the host module handle to register a Win32 hook
+    // class, so we cache it here.
+    HMODULE s_hModule = nullptr;
 
-    DMK::Logger::configure("Transmog", Transmog::LOG_FILE, "%Y-%m-%d %H:%M:%S");
-    auto &logger = DMK::Logger::get_instance();
-
-    DMK::AsyncLoggerConfig asyncCfg;
-    asyncCfg.overflow_policy = DMK::OverflowPolicy::SyncFallback;
-    logger.enable_async_mode(asyncCfg);
-
-    Transmog::Version::logVersionInfo();
-
-    std::wstring runtimeDirW = DMK::Filesystem::get_runtime_directory();
-    std::string runtimeDir;
-    if (!runtimeDirW.empty())
+    // Init body invoked on the worker thread (off loader lock).
+    bool init_mod()
     {
-        int needed = WideCharToMultiByte(
-            CP_UTF8, 0,
-            runtimeDirW.data(), static_cast<int>(runtimeDirW.size()),
-            nullptr, 0, nullptr, nullptr);
-        if (needed > 0)
+        auto &logger = DetourModKit::Logger::get_instance();
+        Transmog::Version::logVersionInfo();
+
+        const auto runtimeDir =
+            DetourModKit::Filesystem::get_runtime_directory_utf8();
+        logger.info("DLL loaded, runtime dir: {}", runtimeDir);
+
+        if (!Transmog::init())
         {
-            runtimeDir.resize(static_cast<std::size_t>(needed));
-            WideCharToMultiByte(
-                CP_UTF8, 0,
-                runtimeDirW.data(), static_cast<int>(runtimeDirW.size()),
-                runtimeDir.data(), needed, nullptr, nullptr);
+            logger.error("Transmog initialization FAILED. Mod will not function.");
+            return false;
         }
-    }
-    logger.info("DLL loaded, runtime dir: {}", runtimeDir);
 
-    if (!CDCore::Dev::acquire_instance_mutex(
-            Transmog::INSTANCE_MUTEX_PREFIX, g_instanceMutex))
+        // Overlay is best-effort; mod still works via hotkeys if it fails.
+        (void)Transmog::init_overlay(s_hModule);
+
+        logger.info("Transmog initialization complete.");
+        return true;
+    }
+
+    void shutdown_mod()
     {
-        logger.error("Another instance of CrimsonDesertLiveTransmog is already loaded. "
-                     "Check for duplicate .asi files in the game directory.");
-        return 1;
+        Transmog::shutdown_overlay();
+        Transmog::shutdown();
     }
-
-    if (!Transmog::init())
-    {
-        logger.error("Transmog initialization FAILED. Mod will not function.");
-        return 1;
-    }
-
-    // Overlay is best-effort; mod still works via hotkeys if it fails.
-    (void)Transmog::init_overlay(g_hModule);
-
-    logger.info("Transmog initialization complete.");
-
-    WaitForSingleObject(g_shutdownEvent, INFINITE);
-    Transmog::shutdown_overlay();
-    Transmog::shutdown();
-    return 0;
-}
+} // namespace
 
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved)
 {
     switch (ul_reason_for_call)
     {
     case DLL_PROCESS_ATTACH:
-        DisableThreadLibraryCalls(hModule);
-        g_hModule = hModule;
+    {
+        s_hModule = hModule;
 
-        g_shutdownEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
-        if (!g_shutdownEvent)
-            return FALSE;
+        DetourModKit::AsyncLoggerConfig asyncCfg;
+        asyncCfg.overflow_policy = DetourModKit::OverflowPolicy::SyncFallback;
 
-        g_lifecycleThread = CreateThread(nullptr, 0, lifecycle_thread, nullptr, 0, nullptr);
-        if (!g_lifecycleThread)
-        {
-            CloseHandle(g_shutdownEvent);
-            g_shutdownEvent = nullptr;
-            return FALSE;
-        }
-        break;
+        const DetourModKit::Bootstrap::ModInfo info{
+            "Transmog",
+            Transmog::LOG_FILE,
+            Transmog::GAME_PROCESS_NAME,
+            "CrimsonDesertLiveTransmog_",
+            asyncCfg,
+        };
+
+        return DetourModKit::Bootstrap::on_dll_attach(
+            hModule, info, &init_mod, &shutdown_mod);
+    }
 
     case DLL_PROCESS_DETACH:
-        if (g_shutdownEvent)
-        {
-            SetEvent(g_shutdownEvent);
-            if (lpReserved == nullptr && g_lifecycleThread)
-                WaitForSingleObject(g_lifecycleThread, 5000);
-
-            CloseHandle(g_shutdownEvent);
-            g_shutdownEvent = nullptr;
-        }
-        if (g_lifecycleThread)
-        {
-            CloseHandle(g_lifecycleThread);
-            g_lifecycleThread = nullptr;
-        }
-        CDCore::Dev::release_instance_mutex(g_instanceMutex);
+        DetourModKit::Bootstrap::on_dll_detach(lpReserved != nullptr);
         break;
 
     default:

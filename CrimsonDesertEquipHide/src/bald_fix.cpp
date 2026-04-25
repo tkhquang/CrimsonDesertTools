@@ -165,7 +165,17 @@ namespace EquipHide
         auto itemCount = *reinterpret_cast<uint32_t *>(context + 0x60);
 
         if (itemsPtr < 0x10000 || itemCount == 0 || itemCount > k_maxItems)
-            return s_originalPostfixEval(ruleObj, context);
+        {
+            // Snapshot guards a teardown race: shutdown's remove_hook()
+            // disables the detour while a game thread may still be
+            // mid-call here. NULL means SafetyHook has already restored
+            // the prologue and torn the trampoline down; returning 0
+            // matches the rule-evaluator's "no rule fired" shape.
+            auto trampoline = s_originalPostfixEval;
+            if (!trampoline)
+                return 0;
+            return trampoline(ruleObj, context);
+        }
 
         auto hiddenMask = hidden_headgear_mask();
 
@@ -210,7 +220,12 @@ namespace EquipHide
             }
         }
 
-        __int64 result = s_originalPostfixEval(ruleObj, context);
+        // Snapshot guards a teardown race (see early-out branch above).
+        // If we got this far we already mutated patchCount item bytes
+        // and must run the restore loop regardless, so a NULL trampoline
+        // returns a zero result without skipping cleanup.
+        auto trampoline = s_originalPostfixEval;
+        __int64 result = trampoline ? trampoline(ruleObj, context) : 0;
 
         for (int i = 0; i < patchCount; ++i)
         {
@@ -266,7 +281,11 @@ namespace EquipHide
             {
             }
         }
-        return s_originalPostfixEval(ruleObj, context);
+        // Snapshot guards a teardown race (see eval_with_priority_override).
+        auto trampoline = s_originalPostfixEval;
+        if (!trampoline)
+            return 0;
+        return trampoline(ruleObj, context);
     }
 
 } // namespace EquipHide

@@ -39,7 +39,15 @@ namespace EquipHide
                 slotId, itemId);
             s_equipChangeDetected.store(true, std::memory_order_relaxed);
         }
-        return s_originalVisualEquipChange(bodyComp, slotId, itemId, itemData);
+        // Snapshot guards a teardown race: shutdown calls remove_hook()
+        // which restores the prologue and disables the detour, but a
+        // game thread already past the JMP might still enter the body
+        // before the DLL unmaps. Returning zero matches the engine's
+        // own no-op shape for this slot-update API.
+        auto trampoline = s_originalVisualEquipChange;
+        if (!trampoline)
+            return 0;
+        return trampoline(bodyComp, slotId, itemId, itemData);
     }
 
     // --- VisualEquipSwap hook (direct item-to-item swap) ---
@@ -86,7 +94,11 @@ namespace EquipHide
             }
         }
         __except (EXCEPTION_EXECUTE_HANDLER) {}
-        return s_originalVisualEquipSwap(a1, a2, a3, a4);
+        // Snapshot guards a teardown race (see on_visual_equip_change).
+        auto trampoline = s_originalVisualEquipSwap;
+        if (!trampoline)
+            return 0;
+        return trampoline(a1, a2, a3, a4);
     }
 
     bool consume_equip_change() noexcept

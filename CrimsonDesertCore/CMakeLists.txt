@@ -33,10 +33,11 @@ if(NOT TARGET DetourModKit)
 endif()
 
 add_library(CrimsonDesertCore STATIC
-    src/aob_resolver.cpp
     src/controlled_char.cpp
-    src/indexed_string_table.cpp
     src/dev_helpers.cpp
+    src/dmk_glue.cpp
+    src/indexed_string_table.cpp
+    src/prologue_check.cpp
 )
 
 # Path to the shared dev-build hot-reload loader source. Consumers that
@@ -54,6 +55,12 @@ target_include_directories(CrimsonDesertCore PUBLIC
 )
 
 target_link_libraries(CrimsonDesertCore PUBLIC DetourModKit)
+
+# psapi is required by dmk_glue.cpp's EnumProcessModules /
+# GetModuleFileNameExW path used to detect sibling-mod presence.
+if(WIN32)
+    target_link_libraries(CrimsonDesertCore PRIVATE psapi)
+endif()
 
 target_compile_options(CrimsonDesertCore PRIVATE /W4)
 

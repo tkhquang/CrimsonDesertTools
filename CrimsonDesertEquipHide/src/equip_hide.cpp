@@ -19,9 +19,10 @@
 
 #include <Windows.h>
 
+#include <atomic>
+#include <chrono>
 #include <cstring>
 #include <string>
-#include <string_view>
 #include <vector>
 
 namespace EquipHide
@@ -42,34 +43,22 @@ namespace EquipHide
     // --- Config ---
     static void load_config()
     {
-        DMK::Config::register_string("General", "LogLevel", "Log Level", [](const std::string &val)
-                                     {
-                auto& logger = DMK::Logger::get_instance();
-                logger.set_log_level(DMK::Logger::string_to_log_level(val)); }, "Info");
+        DMK::Config::register_log_level(
+            "General", "LogLevel", "INFO");
 
-        DMK::Config::register_bool("General", "PlayerOnly", "Player Only", [](bool val)
-                                   { flag_player_only().store(val, std::memory_order_relaxed); }, true);
-
-        DMK::Config::register_bool("General", "ForceShow", "Force Show", [](bool val)
-                                   { flag_force_show().store(val, std::memory_order_relaxed); }, false);
-
-        DMK::Config::register_bool("General", "BaldFix", "Bald Fix", [](bool val)
-                                   { flag_bald_fix().store(val, std::memory_order_relaxed); }, true);
-
-        DMK::Config::register_bool("General", "GlidingFix", "Gliding Fix", [](bool val)
-                                   { flag_gliding_fix().store(val, std::memory_order_relaxed); }, true);
-
-        DMK::Config::register_bool("General", "IndependentToggle", "Independent Toggle", [](bool val)
-                                   { flag_independent_toggle().store(val, std::memory_order_relaxed); }, false);
-
-        DMK::Config::register_bool("General", "CascadeFix", "Cascade Fix", [](bool val)
-                                   { flag_cascade_fix().store(val, std::memory_order_relaxed); }, false);
-
-        DMK::Config::register_key_combo("General", "ShowAllHotkey", "Show All Hotkey", [](const DMK::Config::KeyComboList &combos)
-                                        { set_show_all_combos(combos); }, "");
-
-        DMK::Config::register_key_combo("General", "HideAllHotkey", "Hide All Hotkey", [](const DMK::Config::KeyComboList &combos)
-                                        { set_hide_all_combos(combos); }, "");
+        DMK::Config::register_atomic<bool>(
+            "General", "PlayerOnly", "Player Only", flag_player_only(), true);
+        DMK::Config::register_atomic<bool>(
+            "General", "ForceShow", "Force Show", flag_force_show(), false);
+        DMK::Config::register_atomic<bool>(
+            "General", "BaldFix", "Bald Fix", flag_bald_fix(), true);
+        DMK::Config::register_atomic<bool>(
+            "General", "GlidingFix", "Gliding Fix", flag_gliding_fix(), true);
+        DMK::Config::register_atomic<bool>(
+            "General", "IndependentToggle", "Independent Toggle",
+            flag_independent_toggle(), false);
+        DMK::Config::register_atomic<bool>(
+            "General", "CascadeFix", "Cascade Fix", flag_cascade_fix(), false);
 
         for (std::size_t i = 0; i < CATEGORY_COUNT; ++i)
         {
@@ -79,19 +68,9 @@ namespace EquipHide
             const bool active = (cat == Category::Shields ||
                                  cat == Category::Helm ||
                                  cat == Category::Mask);
-            const char *defaultToggle = active ? "V" : "";
 
             DMK::Config::register_bool(section, "Enabled", section + " Enabled", [i](bool val)
                                        { category_states()[i].enabled.store(val, std::memory_order_relaxed); }, active);
-
-            DMK::Config::register_key_combo(section, "ToggleHotkey", section + " Toggle Hotkey", [i](const DMK::Config::KeyComboList &combos)
-                                            { category_states()[i].toggleHotkeyCombos = combos; }, defaultToggle);
-
-            DMK::Config::register_key_combo(section, "ShowHotkey", section + " Show Hotkey", [i](const DMK::Config::KeyComboList &combos)
-                                            { category_states()[i].showHotkeyCombos = combos; }, "");
-
-            DMK::Config::register_key_combo(section, "HideHotkey", section + " Hide Hotkey", [i](const DMK::Config::KeyComboList &combos)
-                                            { category_states()[i].hideHotkeyCombos = combos; }, "");
 
             DMK::Config::register_bool(section, "DefaultHidden", section + " Default Hidden", [i](bool val)
                                        { category_states()[i].hidden.store(val, std::memory_order_relaxed); }, active);
@@ -99,8 +78,8 @@ namespace EquipHide
             DMK::Config::register_string(section, "Parts", section + " Parts", [cat](const std::string &val)
                                          { register_parts(cat, val); }, default_parts_string(cat));
 
-            /* Per-character Parts overrides: [Section:Kliff], [Section:Damiane],
-               [Section:Oongka]. Empty value (section missing) inherits from base. */
+            // Per-character Parts overrides: [Section:Kliff], [Section:Damiane],
+            // [Section:Oongka]. Empty value (section missing) inherits from base.
             for (std::size_t charIdx = 0; charIdx < kCharIdxCount; ++charIdx)
             {
                 const std::string charName{character_name_for_idx(charIdx)};
@@ -114,10 +93,78 @@ namespace EquipHide
             }
         }
 
+        // Auto-reload toggle. Off-by-default would force a relaunch
+        // for every INI tweak; on-by-default keeps the iteration loop
+        // tight. Setters invoked from the watcher thread are idempotent.
+        static std::atomic<bool> s_autoReload{true};
+        DMK::Config::register_atomic<bool>(
+            "General", "AutoReloadConfig", "Auto-Reload Config",
+            s_autoReload, true);
+
+        // Hotkey bindings (Toggle/Show/Hide per category + ShowAll/HideAll)
+        // are registered via DMK::Config::register_press_combo, which fuses
+        // the INI key registration with the InputManager press registration.
+        // Must precede Config::load() so the press_combo INI keys land in
+        // the same load pass as the rest of the config items above.
+        register_hotkeys();
+
         DMK::Config::load(INI_FILE);
         DMK::Config::log_all();
+
         build_part_lookup();
         update_hidden_mask();
+
+        if (s_autoReload.load(std::memory_order_relaxed))
+        {
+            // Per-setter callbacks refresh the visibility atomics inline.
+            // The reload tail re-derives cached hidden-state masks and
+            // hands the actual vis-byte commit to the game thread via
+            // needs_direct_write, the same primitive that drives
+            // character-swap re-application. Doing the writes from the
+            // watcher thread directly contends with the game thread's
+            // vis_write_mutex (try_lock bails silently) and skips the
+            // s_hideLocked clear that the mid-hook performs alongside
+            // its writes, so the next mid-hook frame would see stale
+            // locks and refuse to re-transition. The Parts= setter
+            // populates the inactive lookup buffer but does not flip
+            // s_activeMap; rebuild_part_lookup() rebuilds from the
+            // stored per-category strings (honouring per-character
+            // overrides) and atomically publishes the new buffer so
+            // the mid-hook and direct-write paths see edited part
+            // lists on the next tick.
+            const auto status = DMK::Config::enable_auto_reload(
+                std::chrono::milliseconds{250},
+                [](bool content_changed)
+                {
+                    auto &logger = DMK::Logger::get_instance();
+                    if (!content_changed)
+                    {
+                        logger.info("INI auto-reload: skipped (no content delta)");
+                        return;
+                    }
+
+                    rebuild_part_lookup();
+                    update_hidden_mask();
+
+                    auto &ps = player_state();
+                    for (int i = 0; i < k_maxProtagonists; ++i)
+                        ps.armorInjected[i].store(
+                            false, std::memory_order_relaxed);
+
+                    needs_direct_write().store(
+                        true, std::memory_order_release);
+
+                    logger.info("INI auto-reload: setters applied, "
+                                "visibility scheduled");
+                });
+            if (status != DMK::Config::AutoReloadStatus::Started &&
+                status != DMK::Config::AutoReloadStatus::AlreadyRunning)
+            {
+                DMK::Logger::get_instance().warning(
+                    "INI auto-reload could not start (status enum {})",
+                    static_cast<int>(status));
+            }
+        }
 
         {
             auto &logger = DMK::Logger::get_instance();
@@ -400,30 +447,26 @@ namespace EquipHide
         load_config();
         original_vis_map().reserve(get_part_map().size());
 
-        std::vector<CompiledCandidate> compiledCandidates;
-        for (const auto &candidate : k_hookSiteCandidates)
-        {
-            auto compiled = DMK::Scanner::parse_aob(candidate.pattern);
-            if (compiled)
-                compiledCandidates.push_back({&candidate, std::move(*compiled)});
-            else
-                logger.warning("Failed to parse AOB pattern '{}'", candidate.name);
-        }
+        // Mid-body scan with the shared cascade resolver. The
+        // prologue-fallback variant survives dev hot-reload: when a
+        // prior Logic-DLL load left a SafetyHook detour-jump in place
+        // at this site, every original-bytes candidate fails on rescan,
+        // and the resolver retries each Direct candidate with the first
+        // five byte-tokens replaced by the near-JMP signature
+        // E9 ?? ?? ?? ??. The candidate's disp_offset is preserved, so
+        // the returned address still lands on the original cmp instr.
+        auto hookHit = DMK::Scanner::resolve_cascade_with_prologue_fallback(
+            std::span<const AddrCandidate>{k_hookSiteCandidates,
+                                           std::size(k_hookSiteCandidates)},
+            "EquipVisCheckHookSite");
 
-        if (compiledCandidates.empty())
-        {
-            logger.error("No valid AOB patterns available.");
-            return false;
-        }
-
-        const AobCandidate *matchedSource = nullptr;
-        uintptr_t hookAddr = scan_for_hook_target(compiledCandidates, matchedSource);
-
-        if (hookAddr == 0)
+        if (!hookHit.has_value())
         {
             logger.error("No AOB pattern matched. The mod may be outdated for this game version.");
             return false;
         }
+
+        const auto hookAddr = hookHit->address;
 
         auto &hookMgr = DMK::HookManager::get_instance();
         auto hookResult = hookMgr.create_mid_hook("EquipVisCheck", hookAddr, on_vis_check);
@@ -436,7 +479,7 @@ namespace EquipHide
         }
 
         logger.info("Hook installed via pattern '{}' at 0x{:X}",
-                    matchedSource->name, hookAddr);
+                    hookHit->winning_name, hookAddr);
 
         // Prevents hidden parts from flashing during state transitions (gliding exit).
         if (flag_gliding_fix().load(std::memory_order_relaxed))
@@ -578,8 +621,9 @@ namespace EquipHide
             }
         }
 
-        register_hotkeys();
-
+        // Hotkey bindings were registered in load_config() so the
+        // press_combo INI keys could be picked up during Config::load().
+        // Now flip InputManager live.
         auto &inputMgr = DMK::InputManager::get_instance();
         inputMgr.start();
 
@@ -606,13 +650,41 @@ namespace EquipHide
     void shutdown()
     {
         DMK::Logger::get_instance().info("{} shutting down...", MOD_NAME);
+
+        // Disable the INI watcher up front so an in-flight save event
+        // cannot fire setters while we are tearing state down.
+        DMK::Config::disable_auto_reload();
+
         shutdown_requested().store(true, std::memory_order_relaxed);
         lazy_probe_pending().store(false, std::memory_order_relaxed);
 
+        // Drain workers before the DMK teardown removes the hooks they
+        // call into. shutdown_requested is the cooperative stop signal
+        // each StoppableWorker body polls; joining them first guarantees
+        // no worker is mid-call into a SafetyHook trampoline when the
+        // trampoline pages are unmapped.
         join_background_threads();
 
+        // Restore visibility bytes while the hooks are still installed
+        // and the game's part registry is reachable. The vis-byte
+        // cleanup walks per-actor arrays and writes back the original
+        // bytes recorded at first hide; running it after DMK_Shutdown
+        // would race the loader unmapping the Logic-DLL pages backing
+        // the cleanup function itself.
         cleanup_vis_bytes();
+
+        // Full DMK teardown: removes every managed hook (EquipVisCheck,
+        // PartAddShow, PostfixEval, VisualEquipChange, VisualEquipSwap),
+        // stops and clears the InputManager poller along with its
+        // registered bindings, stops the ConfigWatcher, and clears the
+        // Config registered-items list. Idempotent and safe to re-init
+        // from on the next Logic-DLL load. Each detour body snapshots
+        // its trampoline pointer at entry and bails to a benign default
+        // if the snapshot is null, defending the brief drain window
+        // between hook removal and DLL unmap.
         DMK_Shutdown();
+
+        clear_hotkey_guards();
     }
 
 } // namespace EquipHide

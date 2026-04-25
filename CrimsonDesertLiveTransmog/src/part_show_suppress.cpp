@@ -141,6 +141,18 @@ namespace Transmog::PartShowSuppress
         __int64 a1, uint8_t a2, uint64_t partHashPtr, float blend,
         __int64 a5, __int64 a6, __int64 a7, __int64 a8, __int64 a9)
     {
+        // Snapshot the trampoline pointer at entry. SafetyHook drains
+        // in-flight callers under its own shared lock, but the brief
+        // teardown window between hook removal and the loader unmapping
+        // the Logic DLL can still see this body executing with a torn
+        // trampoline if a game thread re-enters after the drain. A
+        // null snapshot means teardown is in progress; bailing to 0
+        // (the suppressed-return convention) mirrors what an
+        // early-cancelled call would have produced.
+        const auto trampoline = s_originalPartAddShow;
+        if (!trampoline)
+            return 0;
+
         const uint32_t partHash = read_hash_safe(partHashPtr);
         const uint32_t idx = partHash & 0xFFFF;
         const bool enabled = flag_enabled().load(std::memory_order_relaxed);
@@ -164,8 +176,8 @@ namespace Transmog::PartShowSuppress
             return 0;
         }
 
-        return s_originalPartAddShow(a1, a2, partHashPtr, blend,
-                                     a5, a6, a7, a8, a9);
+        return trampoline(a1, a2, partHashPtr, blend,
+                          a5, a6, a7, a8, a9);
     }
 
 } // namespace Transmog::PartShowSuppress
