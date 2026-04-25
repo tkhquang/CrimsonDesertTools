@@ -3,9 +3,27 @@
 namespace EquipHide
 {
     static ResolvedAddresses s_resolvedAddrs{};
-    static PlayerState s_playerState{};
+    // Initialise visCharIdx to -1 (unknown) so any pre-resolve consumer
+    // (e.g. apply_direct_vis_write firing before resolve_player_vis_ctrls
+    // has populated the slots) treats the entry as "no per-character
+    // override -- fall back to the active character's hide mask".
+    // PlayerState's default ctor zero-inits the array; bring up an
+    // initialiser helper invoked at first access via construct-on-first-use.
+    static PlayerState &make_player_state() noexcept
+    {
+        static PlayerState state{};
+        static const bool s_seeded = []() noexcept
+        {
+            for (int i = 0; i < k_maxProtagonists; ++i)
+                state.visCharIdx[i].store(-1, std::memory_order_relaxed);
+            return true;
+        }();
+        (void)s_seeded;
+        return state;
+    }
+
     static std::mutex s_visWriteMtx;
-    static std::unordered_map<uintptr_t, uint8_t> s_originalVis;
+    static std::unordered_map<VisKey, uint8_t, VisKeyHash> s_originalVis;
     static std::atomic<bool> s_needsDirectWrite{false};
 
     static std::atomic<bool> s_playerOnly{true};
@@ -22,9 +40,9 @@ namespace EquipHide
     static std::atomic<int64_t> s_lazyProbeSignal{0};
 
     ResolvedAddresses &resolved_addrs() { return s_resolvedAddrs; }
-    PlayerState &player_state() { return s_playerState; }
+    PlayerState &player_state() { return make_player_state(); }
     std::mutex &vis_write_mutex() { return s_visWriteMtx; }
-    std::unordered_map<uintptr_t, uint8_t> &original_vis_map() { return s_originalVis; }
+    std::unordered_map<VisKey, uint8_t, VisKeyHash> &original_vis_map() { return s_originalVis; }
     std::atomic<bool> &needs_direct_write() { return s_needsDirectWrite; }
 
     std::atomic<bool> &flag_player_only() { return s_playerOnly; }

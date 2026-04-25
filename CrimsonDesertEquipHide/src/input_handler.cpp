@@ -44,6 +44,14 @@ namespace EquipHide
             ps.armorInjected[i].store(false, std::memory_order_relaxed);
 
         inject_armor_entries();
+        /* Publish the request before attempting the write inline. If
+           apply_direct_vis_write loses the lock race against the
+           mid-hook or resolve poll, the next mid-hook tick clears the
+           flag and re-runs the write -- the toggle is no longer
+           silently dropped on contention. The inline call below still
+           executes on the common (uncontended) path so single-shot
+           hotkey latency is unchanged. */
+        needs_direct_write().store(true, std::memory_order_release);
         apply_direct_vis_write();
     }
 

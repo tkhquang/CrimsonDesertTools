@@ -59,7 +59,7 @@ namespace EquipHide
         }
     }
 
-    static int inject_armor_entries_for_map(uintptr_t mapBase) noexcept
+    static int inject_armor_entries_for_map(uintptr_t mapBase, int charIdx) noexcept
     {
         auto &mtx = vis_write_mutex();
         if (!mtx.try_lock())
@@ -94,9 +94,20 @@ namespace EquipHide
                 category_bit(Category::Gloves) |
                 category_bit(Category::Boots);
 
-            for (const auto &[hash, mask] : get_part_map())
+            // Per-character map drives both the part list AND the
+            // hide-mask classification: charIdx=-1 (unknown body or
+            // fallback path) collapses to the active-character map
+            // through get_part_map_for / is_any_category_hidden_for so
+            // single-character behaviour is preserved for unidentified
+            // slots.
+            const auto &partMap =
+                (charIdx >= 0 && charIdx < static_cast<int>(kCharIdxCount))
+                    ? get_part_map_for(charIdx)
+                    : get_part_map();
+
+            for (const auto &[hash, mask] : partMap)
             {
-                const bool hidden = is_any_category_hidden(mask);
+                const bool hidden = is_any_category_hidden_for(mask, charIdx);
 
                 if (!hidden)
                 {
@@ -170,6 +181,13 @@ namespace EquipHide
         if (!addrs.mapInsert || !addrs.mapLookup || !addrs.indexedStringGlobal)
             return;
 
+        // Hidden-state masks (used by is_any_category_hidden_for) are
+        // global, so the global anyHidden short-circuit is still
+        // correct: if no category is hidden anywhere, every per-
+        // character query also returns false. The cascade-fix injection
+        // path also writes vis=0 when no category is hidden, which we
+        // intentionally still skip here -- it would re-fire on every
+        // tick in the no-hidden case.
         bool anyHidden = false;
         for (std::size_t i = 0; i < CATEGORY_COUNT; ++i)
         {
@@ -206,6 +224,12 @@ namespace EquipHide
             if (!vc)
                 continue;
 
+            // Per-slot character idx. -1 (unknown / fallback path)
+            // routes injection through the active-character map so
+            // unidentified slots preserve single-character behaviour.
+            const int charIdx =
+                ps.visCharIdx[i].load(std::memory_order_relaxed);
+
             /* Per-player SEH so one bad pointer does not skip the rest. */
             __try
             {
@@ -225,10 +249,10 @@ namespace EquipHide
                 }
                 auto mapBase = descNode + 0x20;
                 logger.trace("ArmorInject [{}]: vc=0x{:X} comp=0x{:X} "
-                             "descNode=0x{:X} mapBase=0x{:X}",
-                             i, vc, comp, descNode, mapBase);
+                             "descNode=0x{:X} mapBase=0x{:X} char_idx={}",
+                             i, vc, comp, descNode, mapBase, charIdx);
 
-                int result = inject_armor_entries_for_map(mapBase);
+                int result = inject_armor_entries_for_map(mapBase, charIdx);
                 if (result >= 0)
                 {
                     ps.armorInjected[i].store(true, std::memory_order_relaxed);

@@ -147,6 +147,39 @@ namespace CDCore
     [[nodiscard]] std::uint32_t current_controlled_character_idx() noexcept;
 
     /**
+     * @brief One-based protagonist index for an arbitrary body pointer.
+     * @details Walks the live WorldSystem chain to recover the
+     *          primary-actor (always Kliff on a Kliff-led save) slot byte
+     *          at +0x50, then computes
+     *          `bodySlot - primarySlot` from the matching byte read off
+     *          the supplied body. The diff maps to:
+     *
+     *              0 = Kliff   (returns 1)
+     *              1 = Damiane (returns 2)
+     *              2 = Oongka  (returns 3)
+     *
+     *          Any other diff, an out-of-range body pointer, an
+     *          un-published WorldSystem holder, or a faulted chain walk
+     *          all return 0 (unknown). The returned 1-based index aligns
+     *          with current_controlled_character_idx() so consumers that
+     *          subtract 1 to get a 0-based array index can use this
+     *          helper interchangeably.
+     *
+     *          Cheap and SEH-protected: safe to call from any thread,
+     *          including the rendering thread, and tolerates the body
+     *          pointer being recycled, freed, or torn between the read
+     *          of the primary chain and the +0x50 byte read on `body`.
+     * @param body Pointer to a ClientChildOnlyInGameActor instance
+     *             (the same kind of pointer EquipHide enumerates from
+     *             user+0xD0..+0x108). Pass 0 to disable the lookup
+     *             (returns 0).
+     * @return 1 for Kliff, 2 for Damiane, 3 for Oongka, or 0 when the
+     *         identity cannot be resolved.
+     */
+    [[nodiscard]] std::uint32_t resolve_character_idx_for_body(
+        std::uintptr_t body) noexcept;
+
+    /**
      * @brief Clear the last-known-good identity cache.
      * @details Call on world-reload transitions (save load, return to
      *          title) so the resolver does not keep returning the

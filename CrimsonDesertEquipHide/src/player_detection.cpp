@@ -185,37 +185,189 @@ namespace EquipHide
                 set_active_character(idx);
             }
 
-            static constexpr ptrdiff_t k_bodyOffsets[] = {
-                0xD0, 0xD8, 0xE0, 0xE8, 0xF0, 0xF8, 0x100, 0x108};
+            /* Protagonist enumeration -- two complementary walks.
+               The UA+0xD0..+0x108 stride-8 array is the PRIMARY
+               source: it always carries the controlled body and on
+               multi-protagonist saves typically also the anchor and
+               at least one party-member slot. Per-slot SEH and a
+               vtable filter give deterministic identity decoding via
+               the same +0x68 / +0x40 / +0xE8 chain the body-to-vc
+               resolver uses. The ActorManager body pool at AM+0xF0
+               AUGMENTS the UA walk to pick up summoned party members
+               that the UA stride does not expose on every build
+               (observed: third party member surfacing only through
+               the AM pool on certain world states). The dedupe pass
+               below skips an AM entry whose vis_ctrl already matches
+               a UA-walk slot.
+
+               AM-pool field layout:
+                 AM+0xF0 = body pointer array (densely populated)
+                 AM+0xF8 = packed u64 -- LOW u32 = count, HIGH u32 = cap.
+                           Iterate against `cap` (HIGH u32) because the
+                           count field has been observed reading 0 on
+                           populated worlds while the allocation cap
+                           still reflects the entries that exist; using
+                           count would skip every live body. The hard
+                           cap k_amBodyArrayHardCap below absorbs a
+                           torn HIGH u32 that overflows reasonable
+                           pool sizes.
+                 body+0x50 = slot byte. NOT a reliable discriminator
+                             in this pool (live entries seen carrying
+                             values like 0x23). Acceptance is on vtable
+                             equality + CDCore positive identity decode
+                             below; the slot byte is read only inside
+                             CDCore's own pointer-validity discipline.
+               read_qword_unsafe is required because the standard
+               read_ptr_unsafe filters values below 0x10000 to zero,
+               which would discard the entire packed field whenever
+               either half lives in that range. */
+            constexpr ptrdiff_t k_amBodyArrayDataOff   = 0xF0;
+            constexpr ptrdiff_t k_amBodyArrayPackedOff = 0xF8;
+            constexpr uint32_t  k_amBodyArrayHardCap   = 4096;
 
             int count = 0;
-            for (auto off : k_bodyOffsets)
+            int uaWalkCount = 0;
+            int amWalkCount = 0;
+
+            /* PRIMARY: UA stride walk over user+{0xD0, 0xD8, 0xE0,
+               0xE8, 0xF0, 0xF8, 0x100, 0x108}. Per-slot SEH absorbs a
+               single stale pointer without aborting the rest. */
+            constexpr ptrdiff_t k_uaStrideOffsets[] = {
+                0xD0, 0xD8, 0xE0, 0xE8, 0xF0, 0xF8, 0x100, 0x108
+            };
+            for (auto off : k_uaStrideOffsets)
             {
                 if (count >= k_maxProtagonists)
                     break;
-
-                /* Per-slot SEH so one bad body pointer does not abort the loop. */
                 __try
                 {
-                    auto candidate = read_ptr_unsafe(user, off);
+                    const auto candidate = read_ptr_unsafe(user, off);
                     if (!candidate)
                         continue;
 
-                    auto vt = read_ptr_unsafe(candidate, 0);
+                    const auto vt = read_ptr_unsafe(candidate, 0);
                     if (vt != addrs.childActorVtbl)
                         continue;
 
-                    auto vc = body_to_vis_ctrl(candidate);
-                    if (vc)
-                        ps.visCtrls[count++] = vc;
+                    const auto vc = body_to_vis_ctrl(candidate);
+                    if (!vc)
+                        continue;
+
+                    bool dup = false;
+                    for (int k = 0; k < count; ++k)
+                    {
+                        if (ps.visCtrls[k].load(std::memory_order_relaxed) == vc)
+                        {
+                            dup = true;
+                            break;
+                        }
+                    }
+                    if (dup)
+                        continue;
+
+                    const auto idxU32 =
+                        CDCore::resolve_character_idx_for_body(candidate);
+                    const int charIdx = (idxU32 >= 1 && idxU32 <= 3)
+                                            ? static_cast<int>(idxU32) - 1
+                                            : -1;
+
+                    ps.visCtrls[count].store(vc, std::memory_order_relaxed);
+                    ps.visCharIdx[count].store(charIdx, std::memory_order_relaxed);
+                    ++count;
+                    ++uaWalkCount;
                 }
                 __except (EXCEPTION_EXECUTE_HANDLER)
                 {
                 }
             }
 
+            /* AUGMENT: AM body-pool walk. Iterates against the HIGH u32
+               of AM+0xF8 (cap) because the LOW u32 (count) has been
+               observed reading 0 on populated worlds. Vtable-only
+               filter at this point (slot-byte at +0x50 is unreliable
+               in this pool); positive identity decode via CDCore is
+               required below before admitting any candidate, so a
+               vtable-equal NPC sharing the protagonist child-actor
+               class cannot leak in. Dedupe against the UA-walk
+               results so a body appearing in both sources occupies
+               a single visCtrls slot. */
+            const auto bodyArr = read_ptr_unsafe(am, k_amBodyArrayDataOff);
+            if (bodyArr)
+            {
+                const uint64_t packed =
+                    read_qword_unsafe(am, k_amBodyArrayPackedOff);
+                const uint32_t cap = static_cast<uint32_t>(packed >> 32);
+                uint32_t iterCount = cap;
+                if (iterCount > k_amBodyArrayHardCap)
+                {
+                    static std::atomic<bool> s_clampLogged{false};
+                    if (!s_clampLogged.exchange(true, std::memory_order_relaxed))
+                        DMK::Logger::get_instance().warning(
+                            "Resolve: AM body-pool cap {} exceeds hard cap {}; clamping",
+                            cap, k_amBodyArrayHardCap);
+                    iterCount = k_amBodyArrayHardCap;
+                }
+
+                for (uint32_t i = 0; i < iterCount && count < k_maxProtagonists; ++i)
+                {
+                    /* Per-entry SEH so a single stale / NULL slot does
+                       not abort enumeration of the rest of the pool. */
+                    __try
+                    {
+                        const auto candidate = read_ptr_unsafe(
+                            bodyArr, static_cast<ptrdiff_t>(i) * 8);
+                        if (!candidate)
+                            continue;
+
+                        const auto vt = read_ptr_unsafe(candidate, 0);
+                        if (vt != addrs.childActorVtbl)
+                            continue;
+
+                        const auto vc = body_to_vis_ctrl(candidate);
+                        if (!vc)
+                            continue;
+
+                        bool dup = false;
+                        for (int k = 0; k < count; ++k)
+                        {
+                            if (ps.visCtrls[k].load(std::memory_order_relaxed) == vc)
+                            {
+                                dup = true;
+                                break;
+                            }
+                        }
+                        if (dup)
+                            continue;
+
+                        /* Vtable equality alone admits companions and
+                           horses sharing the protagonist child-actor
+                           class, which would flood visCtrls with
+                           phantom slots that consume the cap and
+                           receive the active character's mask. Require
+                           a positive CDCore identity decode (1..3)
+                           before admitting an AM candidate. */
+                        const auto idxU32 =
+                            CDCore::resolve_character_idx_for_body(candidate);
+                        if (idxU32 < 1 || idxU32 > 3)
+                            continue;
+                        const int charIdx = static_cast<int>(idxU32) - 1;
+
+                        ps.visCtrls[count].store(vc, std::memory_order_relaxed);
+                        ps.visCharIdx[count].store(charIdx, std::memory_order_relaxed);
+                        ++count;
+                        ++amWalkCount;
+                    }
+                    __except (EXCEPTION_EXECUTE_HANDLER)
+                    {
+                    }
+                }
+            }
+
             for (int i = count; i < k_maxProtagonists; ++i)
+            {
                 ps.visCtrls[i].store(0, std::memory_order_relaxed);
+                ps.visCharIdx[i].store(-1, std::memory_order_relaxed);
+            }
 
             ps.primaryVisCtrl.store(
                 count > 0 ? ps.visCtrls[0].load(std::memory_order_relaxed) : 0,
@@ -232,6 +384,15 @@ namespace EquipHide
                     DMK::Logger::get_instance().debug(
                         "Resolve: ws=0x{:X} am=0x{:X} user=0x{:X} count={}",
                         ws, am, user, count);
+            }
+            if (count > 0)
+            {
+                static std::atomic<bool> s_resolvedLogged{false};
+                if (!s_resolvedLogged.exchange(true, std::memory_order_relaxed))
+                    DMK::Logger::get_instance().info(
+                        "Player set resolved: {} protagonist(s) tracked "
+                        "(UA-walk={}, AM-walk={})",
+                        count, uaWalkCount, amWalkCount);
             }
             if (count > 0)
             {
@@ -344,6 +505,16 @@ namespace EquipHide
                                         expected, n + 1, std::memory_order_relaxed))
                                 {
                                     ps.visCtrls[n].store(a1, std::memory_order_relaxed);
+                                    /* Fallback path runs when the global
+                                       chain-walk AOB failed at init, so
+                                       the body pointer underlying `a1`
+                                       is not directly reachable -- mark
+                                       the slot's identity as unknown.
+                                       Consumers fall back to the active
+                                       character's hide mask, mirroring
+                                       single-character semantics for
+                                       unidentified slots. */
+                                    ps.visCharIdx[n].store(-1, std::memory_order_relaxed);
                                     ps.primaryVisCtrl.store(
                                         ps.visCtrls[0].load(std::memory_order_relaxed),
                                         std::memory_order_relaxed);

@@ -240,7 +240,7 @@ In this example, pressing `V` would still toggle Shields and Masks, but Helm wou
 
 ## Per-Character Parts Overrides
 
-Each category's `Parts` list can be overridden per protagonist by adding a section named `[CategoryName:CharacterName]`. Supported names: `Kliff`, `Damiane`, `Oongka`. Only the `Parts` key is per-character; `Enabled`, `DefaultHidden`, and hotkeys remain global.
+Each category's `Parts` list can be overridden per protagonist by adding a section named `[CategoryName:CharacterName]`. Supported names: `Kliff`, `Damiane`, `Oongka`. Only the `Parts` key is per-character; `Enabled`, `DefaultHidden`, and hotkeys remain global. The shipped INI template lists the exact `CD_*` part name beside each per-character override comment so you can pick names out without guessing.
 
 Three ways to set a per-character `Parts` value:
 
@@ -277,7 +277,7 @@ Parts = CD_MainWeapon_Sword_R, CD_MainWeapon_Sword_L, ...
 Parts = CD_MainWeapon_Sword_R, CD_MainWeapon_Sword_L, ..., CD_MainWeapon_Axe_R, CD_MainWeapon_Axe_L, CD_MainWeapon_Mace_R, CD_MainWeapon_Mace_L
 ```
 
-The active character is detected by walking the live WorldSystem pointer chain to the currently-controlled actor and decoding its built-in identity fields. Switching between protagonists automatically swaps the effective Parts list on the next tick.
+The active character is detected by walking the live WorldSystem pointer chain to the currently-controlled actor and decoding its built-in identity fields. Each party member visible on screen tracks its own per-character Parts list independently, so hiding armor on Damiane and then swapping back to Kliff keeps Damiane's armor hidden while Kliff renders under his own configuration. The previously-controlled character's hide state is preserved across swaps until you toggle it off explicitly.
 
 ## Compatibility with Replacer Mods
 

@@ -232,6 +232,51 @@ namespace EquipHide
     /** @brief Returns true if ANY category in the given bitmask is currently hidden. */
     bool is_any_category_hidden(CategoryMask mask);
 
+    /**
+     * @brief Returns true if ANY category in the bitmask is hidden FOR a
+     *        specific protagonist idx.
+     * @details Looks up a per-character classification map keyed on charIdx
+     *          (0=Kliff, 1=Damiane, 2=Oongka). Each per-character map
+     *          merges the base [Section] Parts with that character's
+     *          [Section:CharName] Parts overrides exactly as the active-
+     *          character map does, but every map is kept resident
+     *          simultaneously so per-vis-ctrl writes can resolve the
+     *          right hide mask without re-running set_active_character.
+     *
+     *          charIdx == -1 (unknown body / NPC follower / pre-resolve
+     *          tick) falls back to the active-character map so a slot
+     *          with unresolved identity mirrors the active character's
+     *          hide state (single-character semantics).
+     * @param mask Category bitmask -- the part-classification value
+     *             returned by classify_part.
+     * @param charIdx 0..kCharIdxCount-1 for a known protagonist, or -1
+     *                for the active-character fallback.
+     */
+    [[nodiscard]] bool is_any_category_hidden_for(CategoryMask mask,
+                                                  int charIdx) noexcept;
+
+    /**
+     * @brief Classify a part hash USING a specific character's part map.
+     * @details Mirror of classify_part keyed on charIdx. charIdx == -1
+     *          falls back to the active-character map so an unidentified
+     *          slot still classifies correctly under single-character
+     *          semantics.
+     * @return 0 if the hash is not tracked in the requested character's
+     *         (or the active character's, on -1) part map.
+     */
+    [[nodiscard]] CategoryMask classify_part_for(uint32_t partHash,
+                                                 int charIdx) noexcept;
+
+    /**
+     * @brief Per-character variant of needs_classification.
+     * @details Exists for parity with the active-character classification
+     *          fast path. Returns true if hash N has an entry in the
+     *          character-specific part map. Caller is expected to follow
+     *          up with classify_part_for and is_any_category_hidden_for.
+     */
+    [[nodiscard]] bool needs_classification_for(uint32_t hash,
+                                                int charIdx) noexcept;
+
     /** @brief Recompute cached hidden-state masks from category_states(). Call after any mutation. */
     void update_hidden_mask();
 
@@ -242,5 +287,19 @@ namespace EquipHide
      *          not overlap a second rebuild.
      */
     const std::unordered_map<uint32_t, CategoryMask> &get_part_map();
+
+    /**
+     * @brief Returns the per-character part map for a specific protagonist idx.
+     * @details Built alongside the active-map double-buffer in
+     *          rebuild_part_lookup(); each character's map is a snapshot of
+     *          (base [Section] Parts merged with that character's
+     *          [Section:CharName] override) at the last rebuild point.
+     *          Caller MUST pass a valid charIdx (0..kCharIdxCount-1);
+     *          the active-character fallback is the consumer's
+     *          responsibility (see is_any_category_hidden_for and the
+     *          direct-write loop for the canonical pattern).
+     */
+    [[nodiscard]] const std::unordered_map<uint32_t, CategoryMask> &
+    get_part_map_for(int charIdx) noexcept;
 
 } // namespace EquipHide

@@ -1,4 +1,5 @@
 #include "background_threads.hpp"
+#include "constants.hpp"
 #include "indexed_string_table.hpp"
 #include "player_detection.hpp"
 #include "shared_state.hpp"
@@ -32,10 +33,17 @@ namespace EquipHide
         std::unique_ptr<DetourModKit::StoppableWorker> s_resolvePollWorker;
 
         // --- Deferred IndexedStringA scan tuning ---
-        constexpr int k_maxScanAttempts = 10;
+        // Stability-based convergence mirrors LT's "wait until ready, then
+        // commit once" pattern. LT signals readiness via build()==Ok; the
+        // IndexedStringA table has no equivalent ready signal because it
+        // populates incrementally as scenes load, so the analog is
+        // structural settling: commit once the scan count stops changing
+        // for k_stabilityRequired consecutive polls (~6s of no growth at
+        // the 2s retry cadence).
         constexpr int k_scanRetryMs = 2000;
-        constexpr int k_scanIdleRetryMs = 10000;
         constexpr int k_scanInitialDelayMs = 8000;
+        constexpr int k_scanWarnEvery = 30;
+        constexpr int k_stabilityRequired = 3;
 
         // Sleeps in short slices and observes both the StoppableWorker
         // stop_token and the legacy shutdown_requested() flag so the
@@ -62,75 +70,122 @@ namespace EquipHide
         {
             auto &logger = DMK::Logger::get_instance();
             const auto mapLookupAddr = resolved_addrs().mapLookup;
+            if (!mapLookupAddr)
+                return;
 
-            int realAttempts = 0;
-            bool tableReady = false;
+            // Initial grace mirrors LT's k_nametableInitialDelayMs so the
+            // game has a chance to seed the table before we start polling.
+            if (!sleep_responsive_ms(st, k_scanInitialDelayMs))
+                return;
+
+            std::size_t prevCount = 0;
+            int stableStreak = 0;
+            int attempt = 0;
+
             for (;;)
             {
-                int sleepMs;
-                if (realAttempts == 0 && !tableReady)
-                    sleepMs = k_scanInitialDelayMs;
-                else if (!tableReady)
-                    sleepMs = k_scanIdleRetryMs;
-                else
-                    sleepMs = k_scanRetryMs;
-
-                if (!sleep_responsive_ms(st, sleepMs))
+                if (!sleep_responsive_ms(st, k_scanRetryMs))
                     return;
 
+                ++attempt;
                 auto runtimeHashes = scan_indexed_string_table(mapLookupAddr);
-                if (runtimeHashes.empty())
+                const auto curCount = runtimeHashes.size();
+
+                if (curCount == 0)
+                {
+                    // Table still entirely empty: reset streak so we never
+                    // commit the empty state on stability.
+                    if (attempt % k_scanWarnEvery == 0)
+                        logger.warning(
+                            "IndexedStringA deferred scan: still waiting "
+                            "after {} attempts (table empty)",
+                            attempt);
+                    stableStreak = 0;
+                    prevCount = 0;
                     continue;
+                }
+
+                if (curCount != prevCount)
+                {
+                    // Growing or shrinking: not stable yet, reset streak
+                    // and update the baseline.
+                    stableStreak = 0;
+                    prevCount = curCount;
+                    logger.trace(
+                        "IndexedStringA deferred scan: attempt {}, {} "
+                        "entries (changed, stability streak reset)",
+                        attempt, curCount);
+
+                    if (attempt % k_scanWarnEvery == 0)
+                        logger.warning(
+                            "IndexedStringA deferred scan: still waiting "
+                            "after {} attempts ({} entries currently, "
+                            "table still settling)",
+                            attempt, curCount);
+                    continue;
+                }
+
+                ++stableStreak;
+                if (stableStreak < k_stabilityRequired)
+                {
+                    logger.trace(
+                        "IndexedStringA deferred scan: attempt {}, {} "
+                        "entries (stable {}/{}, awaiting commit)",
+                        attempt, curCount, stableStreak,
+                        k_stabilityRequired);
+
+                    if (attempt % k_scanWarnEvery == 0)
+                        logger.warning(
+                            "IndexedStringA deferred scan: {} entries "
+                            "after {} attempts (stable streak {}/{}, "
+                            "need {} consecutive identical scans)",
+                            curCount, attempt, stableStreak,
+                            k_stabilityRequired, k_stabilityRequired);
+                    continue;
+                }
+
+                // Re-check stop right before the blocking commit
+                // sequence. cleanup_vis_bytes() blocking-locks
+                // vis_write_mutex; if shutdown raced past join here,
+                // skipping the commit lets the worker exit cleanly.
+                if (st.stop_requested() ||
+                    shutdown_requested().load(std::memory_order_relaxed))
+                    return;
 
                 const auto totalParts = total_part_count();
+                // Capture unresolved parts BEFORE moving runtimeHashes into
+                // the published map, since get_unresolved_parts borrows it.
                 auto unresolved = get_unresolved_parts(runtimeHashes);
                 const auto resolvedCount = totalParts - unresolved.size();
 
-                // Table not meaningfully populated yet -- keep waiting
-                // without burning attempt budget.
-                if (resolvedCount < 10)
-                    continue;
+                logger.info(
+                    "IndexedStringA deferred scan: stable at {} entries "
+                    "across {} consecutive scans, committing "
+                    "({}/{} resolved, {} attempts)",
+                    curCount, k_stabilityRequired,
+                    resolvedCount, totalParts, attempt);
 
-                tableReady = true;
-                ++realAttempts;
+                set_runtime_hashes(std::move(runtimeHashes));
+                rebuild_part_lookup();
+                deferred_scan_pending().store(
+                    false, std::memory_order_relaxed);
 
-                // Accept results when >=90% resolved or attempt budget spent.
-                constexpr auto k_minResolvePct = 90;
-                const bool enough =
-                    (resolvedCount * 100 / totalParts) >= k_minResolvePct;
+                // Restore any vis bytes set during a prior scan phase
+                // so the rebuilt part map can re-apply with correct
+                // hashes.
+                cleanup_vis_bytes();
 
-                if (enough || realAttempts >= k_maxScanAttempts)
-                {
-                    set_runtime_hashes(std::move(runtimeHashes));
-                    rebuild_part_lookup();
-                    deferred_scan_pending().store(
+                auto &ps = player_state();
+                for (int j = 0; j < k_maxProtagonists; ++j)
+                    ps.armorInjected[j].store(
                         false, std::memory_order_relaxed);
+                needs_direct_write().store(
+                    true, std::memory_order_relaxed);
 
-                    // Restore any vis bytes set during a prior scan phase
-                    // so the rebuilt part map can re-apply with correct
-                    // hashes.
-                    cleanup_vis_bytes();
-
-                    auto &ps = player_state();
-                    for (int j = 0; j < k_maxProtagonists; ++j)
-                        ps.armorInjected[j].store(
-                            false, std::memory_order_relaxed);
-                    needs_direct_write().store(
+                if (!unresolved.empty())
+                    lazy_probe_pending().store(
                         true, std::memory_order_relaxed);
-
-                    logger.info(
-                        "Deferred scan complete: {}/{} resolved ({} attempts)",
-                        resolvedCount, totalParts, realAttempts);
-
-                    if (!unresolved.empty())
-                        lazy_probe_pending().store(
-                            true, std::memory_order_relaxed);
-                    return;
-                }
-
-                logger.trace(
-                    "Deferred scan attempt {}: {}/{} resolved, retrying",
-                    realAttempts, resolvedCount, totalParts);
+                return;
             }
         }
 
@@ -166,6 +221,14 @@ namespace EquipHide
                 auto unresolved = get_unresolved_parts(runtimeHashes);
                 if (unresolved.empty())
                 {
+                    // Same stop-check rationale as deferred_scan_body:
+                    // cleanup_vis_bytes() takes vis_write_mutex blocking,
+                    // which can stall behind the resolve-poll worker's
+                    // try-locked critical section during shutdown.
+                    if (st.stop_requested() ||
+                        shutdown_requested().load(std::memory_order_relaxed))
+                        return;
+
                     set_runtime_hashes(std::move(runtimeHashes));
                     rebuild_part_lookup();
                     cleanup_vis_bytes();
@@ -323,18 +386,56 @@ namespace EquipHide
         // shutdown() flips the legacy shutdown_requested() flag before
         // calling here; explicit shutdown() on each worker also
         // request_stop()s the stop_token so bodies exit promptly.
-        std::lock_guard<std::mutex> lk(s_workersMtx);
+        //
+        // Lock-ordering: extract each unique_ptr into a local under
+        // s_workersMtx, then RELEASE the mutex before joining. Joining
+        // while holding s_workersMtx deadlocks against the mid-hook
+        // path on the game thread: an EquipVisCheck tick calls
+        // launch_lazy_probe() which blocks on s_workersMtx.lock();
+        // meanwhile the lazy-probe worker body itself calls
+        // cleanup_vis_bytes() (blocking lock on vis_write_mutex) which
+        // can stall behind the resolve-poll worker's try_lock-held
+        // critical section in resolve_player_vis_ctrls. With the lock
+        // held, shutdown waits on the lazy-probe join while the game
+        // thread waits on s_workersMtx -- forever.
+        //
+        // Request stop on all three first so the bodies start unwinding
+        // concurrently while we sequentially join, shaving wall-clock
+        // shutdown latency without changing the join order.
+        auto &logger = DMK::Logger::get_instance();
 
-        if (s_deferredScanWorker)
-            s_deferredScanWorker->shutdown();
-        if (s_lazyProbeWorker)
-            s_lazyProbeWorker->shutdown();
-        if (s_resolvePollWorker)
-            s_resolvePollWorker->shutdown();
+        std::unique_ptr<DetourModKit::StoppableWorker> deferredLocal;
+        std::unique_ptr<DetourModKit::StoppableWorker> lazyLocal;
+        std::unique_ptr<DetourModKit::StoppableWorker> resolveLocal;
+        {
+            std::lock_guard<std::mutex> lk(s_workersMtx);
+            deferredLocal = std::move(s_deferredScanWorker);
+            lazyLocal = std::move(s_lazyProbeWorker);
+            resolveLocal = std::move(s_resolvePollWorker);
+        }
 
-        s_deferredScanWorker.reset();
-        s_lazyProbeWorker.reset();
-        s_resolvePollWorker.reset();
+        if (deferredLocal)
+            deferredLocal->request_stop();
+        if (lazyLocal)
+            lazyLocal->request_stop();
+        if (resolveLocal)
+            resolveLocal->request_stop();
+
+        if (resolveLocal)
+        {
+            logger.info("{} shutdown: joining resolve-poll worker", MOD_NAME);
+            resolveLocal->shutdown();
+        }
+        if (lazyLocal)
+        {
+            logger.info("{} shutdown: joining lazy-probe worker", MOD_NAME);
+            lazyLocal->shutdown();
+        }
+        if (deferredLocal)
+        {
+            logger.info("{} shutdown: joining deferred-scan worker", MOD_NAME);
+            deferredLocal->shutdown();
+        }
     }
 
 } // namespace EquipHide

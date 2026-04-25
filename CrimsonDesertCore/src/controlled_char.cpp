@@ -347,6 +347,142 @@ namespace CDCore
         return 0;
     }
 
+    namespace
+    {
+        // Read just the primary actor's slot-index byte. Mirrors
+        // walk_chain_seh's pointer-validity discipline (every intermediate
+        // pointer below the 64 KiB guard region is rejected) so a torn
+        // chain can never reach the final byte read with garbage state.
+        // Output is the slot byte in `outPrimarySlot` plus a `valid` flag;
+        // a faulted walk leaves the byte at zero and `valid` at false.
+        struct PrimarySlotProbe
+        {
+            std::uint8_t slot;
+            bool         valid;
+        };
+
+        PrimarySlotProbe read_primary_slot_seh(std::uintptr_t holder) noexcept
+        {
+            PrimarySlotProbe out{};
+            if (holder < k_minValidPtr)
+            {
+                return out;
+            }
+            __try
+            {
+                const auto ws =
+                    *reinterpret_cast<const volatile std::uintptr_t *>(holder);
+                if (ws < k_minValidPtr)
+                {
+                    return out;
+                }
+                const auto am =
+                    *reinterpret_cast<const volatile std::uintptr_t *>(
+                        ws + k_wsToActorMgrOffset);
+                if (am < k_minValidPtr)
+                {
+                    return out;
+                }
+                const auto user =
+                    *reinterpret_cast<const volatile std::uintptr_t *>(
+                        am + k_actorMgrToUserOffset);
+                if (user < k_minValidPtr)
+                {
+                    return out;
+                }
+                const auto primary =
+                    *reinterpret_cast<const volatile std::uintptr_t *>(
+                        user + k_userToPrimaryActorOffset);
+                if (primary < k_minValidPtr)
+                {
+                    return out;
+                }
+                out.slot =
+                    *reinterpret_cast<const volatile std::uint8_t *>(
+                        primary + k_actorSlotIndexByteOffset);
+                out.valid = true;
+                return out;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return out;
+            }
+        }
+
+        // SEH-isolated single-byte read on an arbitrary body pointer.
+        // Returns the slot byte plus a validity flag; a fault during the
+        // read (recycled or freed body, partially-torn structure right
+        // after a swap) leaves the byte at zero and the flag at false.
+        struct BodySlotProbe
+        {
+            std::uint8_t slot;
+            bool         valid;
+        };
+
+        BodySlotProbe read_body_slot_seh(std::uintptr_t body) noexcept
+        {
+            BodySlotProbe out{};
+            if (body < k_minValidPtr)
+            {
+                return out;
+            }
+            __try
+            {
+                out.slot =
+                    *reinterpret_cast<const volatile std::uint8_t *>(
+                        body + k_actorSlotIndexByteOffset);
+                out.valid = true;
+                return out;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return out;
+            }
+        }
+
+    } // anonymous namespace
+
+    std::uint32_t resolve_character_idx_for_body(std::uintptr_t body) noexcept
+    {
+        if (body < k_minValidPtr)
+        {
+            return 0;
+        }
+        const auto holder = s_wsHolder.load(std::memory_order_acquire);
+        if (holder == 0)
+        {
+            return 0;
+        }
+        // Two independent SEH probes: the primary-actor walk faulting
+        // does not invalidate the body byte read and vice versa. Both
+        // must succeed for the diff to mean anything.
+        const auto primary = read_primary_slot_seh(holder);
+        if (!primary.valid)
+        {
+            return 0;
+        }
+        const auto bodyProbe = read_body_slot_seh(body);
+        if (!bodyProbe.valid)
+        {
+            return 0;
+        }
+        const int diff = static_cast<int>(bodyProbe.slot) -
+                         static_cast<int>(primary.slot);
+        if (diff == 0)
+        {
+            return 1; // Kliff
+        }
+        if (diff == k_damianeSlotDiff)
+        {
+            return 2; // Damiane
+        }
+        if (diff == k_oongkaSlotDiff)
+        {
+            return 3; // Oongka
+        }
+        return 0;
+    }
+
     void invalidate_controlled_character() noexcept
     {
         // Release ordering pairs with the acquire load in
