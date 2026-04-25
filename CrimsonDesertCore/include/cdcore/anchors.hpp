@@ -41,10 +41,13 @@
 // so call sites remain unchanged.
 // ---------------------------------------------------------------------------
 
-#include <cdcore/aob_resolver.hpp>
+#include <DetourModKit/scanner.hpp>
 
 namespace CDCore::Anchors
 {
+    using AddrCandidate = DetourModKit::Scanner::AddrCandidate;
+    using ResolveMode = DetourModKit::Scanner::ResolveMode;
+
     // -----------------------------------------------------------------------
     // WorldSystem -- static pointer for the root world-system global.
     //

@@ -27,21 +27,25 @@ namespace Transmog
         // the pointer differs or the chain faults. Good enough for
         // the transmog hooks -- misclassification just produces a
         // harmless no-op apply (no presets exist for unknown chars).
-        __try
-        {
-            auto actor = *reinterpret_cast<uintptr_t *>(a1 + 8);
-            if (actor < 0x10000)
-                return false;
-            auto typeEntry = *reinterpret_cast<uintptr_t *>(actor + 0x88);
-            if (typeEntry < 0x10000)
-                return false;
-            auto actorMgr = *reinterpret_cast<uintptr_t *>(typeEntry + 8);
-            return actorMgr >= 0x10000;
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER)
-        {
+        //
+        // DMK::Memory::read_ptr_unsafe is SEH-protected on MSVC and
+        // VirtualQuery-guarded on MinGW; on fault it returns 0, which
+        // the < 0x10000 guard rejects. This avoids the SEH-vs-C++-
+        // destructors restriction that previously forced this whole
+        // chain into a single __try frame.
+        if (a1 < 0x10000)
             return false;
-        }
+
+        const auto actor = static_cast<__int64>(
+            DMK::Memory::read_ptr_unsafe(static_cast<uintptr_t>(a1), 8));
+        if (actor < 0x10000)
+            return false;
+        const auto typeEntry = DMK::Memory::read_ptr_unsafe(
+            static_cast<uintptr_t>(actor), 0x88);
+        if (typeEntry < 0x10000)
+            return false;
+        const auto actorMgr = DMK::Memory::read_ptr_unsafe(typeEntry, 8);
+        return actorMgr >= 0x10000;
     }
 
     // Slot tags we transmog. Everything outside this set (weapons, rings,
@@ -75,12 +79,23 @@ namespace Transmog
 
     __int64 __fastcall on_vec(__int64 a1, __int16 slotId, __int16 itemId, __int64 a4)
     {
+        // Snapshot the trampoline pointer at entry. Even with SafetyHook
+        // draining in-flight callers under its shared lock during
+        // shutdown, a game thread that re-enters the patched site
+        // between the drain and the DLL unmap can observe a torn
+        // trampoline. A null snapshot means teardown is in progress;
+        // bail with a benign zero return rather than dereferencing
+        // through a dangling pointer.
+        const auto trampoline = s_origVEC;
+        if (!trampoline)
+            return 0;
+
         // Recursion guard + suppress during clear+apply cycle.
         if (in_transmog().load(std::memory_order_relaxed) ||
             suppress_vec().load(std::memory_order_acquire))
-            return s_origVEC(a1, slotId, itemId, a4);
+            return trampoline(a1, slotId, itemId, a4);
 
-        __int64 ret = s_origVEC(a1, slotId, itemId, a4);
+        __int64 ret = trampoline(a1, slotId, itemId, a4);
 
         if (!flag_enabled().load(std::memory_order_relaxed))
             return ret;
@@ -110,10 +125,19 @@ namespace Transmog
     static uint32_t *__fastcall on_batch_equip_impl(
         __int64 a1, uint32_t *a2, __int64 **a3, __int64 **a4)
     {
-        if (in_transmog().load(std::memory_order_relaxed))
-            return s_origBatchEquip(a1, a2, a3, a4);
+        // Snapshot the trampoline pointer at entry; see on_vec for the
+        // teardown-window rationale. Returning the caller's a2 buffer
+        // pointer matches the upstream contract for a no-op pass-through
+        // (the game checks the pointer for non-null, not the buffer
+        // contents, when an early bail is needed).
+        const auto trampoline = s_origBatchEquip;
+        if (!trampoline)
+            return a2;
 
-        uint32_t *ret = s_origBatchEquip(a1, a2, a3, a4);
+        if (in_transmog().load(std::memory_order_relaxed))
+            return trampoline(a1, a2, a3, a4);
+
+        uint32_t *ret = trampoline(a1, a2, a3, a4);
 
         if (flag_enabled().load(std::memory_order_relaxed) &&
             (!flag_player_only().load(std::memory_order_relaxed) || is_player_actor(a1)) &&
@@ -150,7 +174,11 @@ namespace Transmog
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
-            return s_origBatchEquip(a1, a2, a3, a4);
+            // Mirror the impl's null-snapshot guard: if SEH fires while
+            // the trampoline has just been swapped out, do not deref
+            // through a dangling pointer.
+            const auto trampoline = s_origBatchEquip;
+            return trampoline ? trampoline(a1, a2, a3, a4) : a2;
         }
     }
 

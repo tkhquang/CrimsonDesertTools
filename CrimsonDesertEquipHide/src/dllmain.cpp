@@ -4,108 +4,62 @@
 #include "equip_hide.hpp"
 #include "version.hpp"
 
-#include <cdcore/dev_helpers.hpp>
-
 #include <DetourModKit.hpp>
+#include <DetourModKit/bootstrap.hpp>
+#include <DetourModKit/filesystem.hpp>
 
 #include <Windows.h>
 
-static HANDLE g_shutdownEvent = nullptr;
-static HANDLE g_instanceMutex = nullptr;
-static HANDLE g_lifecycleThread = nullptr;
-
-static DWORD WINAPI lifecycle_thread(LPVOID /*param*/)
+namespace
 {
-    // Process gate -- UAL loads ASIs into every process in the game
-    // directory including crashpad_handler.exe. Bail immediately.
-    if (!CDCore::Dev::is_target_process(EquipHide::GAME_PROCESS_NAME))
-        return 0;
-
-    DMK::Logger::configure("EquipHide", EquipHide::LOG_FILE, "%Y-%m-%d %H:%M:%S");
-    auto &logger = DMK::Logger::get_instance();
-
-    DMK::AsyncLoggerConfig asyncCfg;
-    asyncCfg.overflow_policy = DMK::OverflowPolicy::SyncFallback;
-    logger.enable_async_mode(asyncCfg);
-
-    EquipHide::Version::logVersionInfo();
-
-    std::wstring runtimeDirW = DMK::Filesystem::get_runtime_directory();
-    std::string runtimeDir;
-    if (!runtimeDirW.empty())
+    bool init_mod()
     {
-        int needed = WideCharToMultiByte(
-            CP_UTF8, 0,
-            runtimeDirW.data(), static_cast<int>(runtimeDirW.size()),
-            nullptr, 0, nullptr, nullptr);
-        if (needed > 0)
+        auto &logger = DetourModKit::Logger::get_instance();
+        EquipHide::Version::logVersionInfo();
+
+        const auto runtimeDir =
+            DetourModKit::Filesystem::get_runtime_directory_utf8();
+        logger.info("DLL loaded, runtime dir: {}", runtimeDir);
+
+        if (!EquipHide::init())
         {
-            runtimeDir.resize(static_cast<std::size_t>(needed));
-            WideCharToMultiByte(
-                CP_UTF8, 0,
-                runtimeDirW.data(), static_cast<int>(runtimeDirW.size()),
-                runtimeDir.data(), needed, nullptr, nullptr);
+            logger.error("Equip hide initialization FAILED. Mod will not function.");
+            return false;
         }
-    }
-    logger.info("DLL loaded, runtime dir: {}", runtimeDir);
 
-    if (!CDCore::Dev::acquire_instance_mutex(
-            EquipHide::INSTANCE_MUTEX_PREFIX, g_instanceMutex))
+        logger.info("Equip hide initialization complete.");
+        return true;
+    }
+
+    void shutdown_mod()
     {
-        logger.error("Another instance of CrimsonDesertEquipHide is already loaded. "
-                     "Check for duplicate .asi files in the game directory.");
-        return 1;
+        EquipHide::shutdown();
     }
-
-    if (!EquipHide::init())
-    {
-        logger.error("Equip hide initialization FAILED. Mod will not function.");
-        return 1;
-    }
-
-    logger.info("Equip hide initialization complete.");
-
-    WaitForSingleObject(g_shutdownEvent, INFINITE);
-    EquipHide::shutdown();
-    return 0;
-}
+} // namespace
 
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved)
 {
     switch (ul_reason_for_call)
     {
     case DLL_PROCESS_ATTACH:
-        DisableThreadLibraryCalls(hModule);
+    {
+        DetourModKit::AsyncLoggerConfig asyncCfg;
+        asyncCfg.overflow_policy = DetourModKit::OverflowPolicy::SyncFallback;
 
-        g_shutdownEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
-        if (!g_shutdownEvent)
-            return FALSE;
+        const DetourModKit::Bootstrap::ModInfo info{
+            "EquipHide",
+            EquipHide::LOG_FILE,
+            EquipHide::GAME_PROCESS_NAME,
+            "CrimsonDesertEquipHide_",
+            asyncCfg,
+        };
 
-        g_lifecycleThread = CreateThread(nullptr, 0, lifecycle_thread, nullptr, 0, nullptr);
-        if (!g_lifecycleThread)
-        {
-            CloseHandle(g_shutdownEvent);
-            g_shutdownEvent = nullptr;
-            return FALSE;
-        }
-        break;
+        return DetourModKit::Bootstrap::on_dll_attach(
+            hModule, info, &init_mod, &shutdown_mod);
+    }
 
     case DLL_PROCESS_DETACH:
-        if (g_shutdownEvent)
-        {
-            SetEvent(g_shutdownEvent);
-            if (lpReserved == nullptr && g_lifecycleThread)
-                WaitForSingleObject(g_lifecycleThread, 5000);
-
-            CloseHandle(g_shutdownEvent);
-            g_shutdownEvent = nullptr;
-        }
-        if (g_lifecycleThread)
-        {
-            CloseHandle(g_lifecycleThread);
-            g_lifecycleThread = nullptr;
-        }
-        CDCore::Dev::release_instance_mutex(g_instanceMutex);
+        DetourModKit::Bootstrap::on_dll_detach(lpReserved != nullptr);
         break;
 
     default:

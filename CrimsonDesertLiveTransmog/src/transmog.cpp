@@ -15,11 +15,14 @@
 #include "transmog_worker.hpp"
 
 #include <cdcore/controlled_char.hpp>
+#include <cdcore/dmk_glue.hpp>
 
 #include <DetourModKit.hpp>
 
 #include <Windows.h>
 
+#include <atomic>
+#include <chrono>
 #include <string>
 
 namespace Transmog
@@ -28,33 +31,17 @@ namespace Transmog
 
     static void load_config()
     {
-        DMK::Config::register_string(
-            "General", "LogLevel", "Log Level",
-            [](const std::string &val)
-            {
-                auto &logger = DMK::Logger::get_instance();
-                logger.set_log_level(DMK::Logger::string_to_log_level(val));
-            },
-            "Info");
+        DMK::Config::register_log_level(
+            "General", "LogLevel", "INFO");
 
-        DMK::Config::register_bool(
-            "General", "Enabled", "Enabled",
-            [](bool val)
-            {
-                flag_enabled().store(val, std::memory_order_relaxed);
-            },
-            true);
+        DMK::Config::register_atomic<bool>(
+            "General", "Enabled", "Enabled", flag_enabled(), true);
 
-        DMK::Config::register_bool(
-            "General", "PlayerOnly", "Player Only",
-            [](bool val)
-            {
-                flag_player_only().store(val, std::memory_order_relaxed);
-            },
-            true);
+        DMK::Config::register_atomic<bool>(
+            "General", "PlayerOnly", "Player Only", flag_player_only(), true);
 
         // When true, always use the standalone transparent overlay window
-        // instead of the ReShade addon tab.  Useful if ReShade is installed
+        // instead of the ReShade addon tab. Useful if ReShade is installed
         // but the user prefers the standalone overlay.
         DMK::Config::register_bool(
             "General", "ForceStandaloneOverlay", "Force Standalone Overlay",
@@ -64,89 +51,51 @@ namespace Transmog
             },
             false);
 
-        DMK::Config::register_key_combo(
-            "General", "ToggleHotkey", "Toggle Hotkey",
-            [](const DMK::Config::KeyComboList &combos)
-            {
-                set_toggle_combos(combos);
-            },
-            "");
+        // Auto-reload toggle. Off-by-default would force a relaunch for
+        // every INI tweak; on-by-default keeps the iteration loop tight.
+        // Setters invoked from the watcher thread are idempotent (every
+        // register_atomic / register_press_combo path is safe to
+        // re-fire).
+        static std::atomic<bool> s_autoReload{true};
+        DMK::Config::register_atomic<bool>(
+            "General", "AutoReloadConfig", "Auto-Reload Config",
+            s_autoReload, true);
 
-        DMK::Config::register_key_combo(
-            "General", "ApplyHotkey", "Apply Transmog Hotkey",
-            [](const DMK::Config::KeyComboList &combos)
-            {
-                set_apply_combos(combos);
-            },
-            "");
-
-        DMK::Config::register_key_combo(
-            "General", "ClearHotkey", "Clear Transmog Hotkey",
-            [](const DMK::Config::KeyComboList &combos)
-            {
-                set_clear_combos(combos);
-            },
-            "");
-
-        DMK::Config::register_key_combo(
-            "General", "CaptureHotkey", "Capture Outfit Hotkey",
-            [](const DMK::Config::KeyComboList &combos)
-            {
-                set_capture_combos(combos);
-            },
-            "");
-
-        DMK::Config::register_key_combo(
-            "Presets", "AppendHotkey", "Append Preset Hotkey",
-            [](const DMK::Config::KeyComboList &combos)
-            {
-                set_preset_append_combos(combos);
-            },
-            "");
-
-        DMK::Config::register_key_combo(
-            "Presets", "ReplaceHotkey", "Replace Preset Hotkey",
-            [](const DMK::Config::KeyComboList &combos)
-            {
-                set_preset_replace_combos(combos);
-            },
-            "");
-
-        DMK::Config::register_key_combo(
-            "Presets", "RemoveHotkey", "Remove Preset Hotkey",
-            [](const DMK::Config::KeyComboList &combos)
-            {
-                set_preset_remove_combos(combos);
-            },
-            "");
-
-        DMK::Config::register_key_combo(
-            "Presets", "NextHotkey", "Next Preset Hotkey",
-            [](const DMK::Config::KeyComboList &combos)
-            {
-                set_preset_next_combos(combos);
-            },
-            "");
-
-        DMK::Config::register_key_combo(
-            "Presets", "PrevHotkey", "Previous Preset Hotkey",
-            [](const DMK::Config::KeyComboList &combos)
-            {
-                set_preset_prev_combos(combos);
-            },
-            "");
-
-        // Default to Home.  Configurable via INI.
-        DMK::Config::register_key_combo(
-            "General", "OverlayToggleHotkey", "Overlay Toggle Hotkey",
-            [](const DMK::Config::KeyComboList &combos)
-            {
-                set_overlay_toggle_combos(combos);
-            },
-            "Home");
+        // Hotkey bindings are registered here, while the Config registry
+        // is being populated, so the press_combo INI keys participate in
+        // the same Config::load() pass below. register_press_combo also
+        // ties each binding to InputManager directly; we just need to
+        // ensure that InputManager::start() runs after this call (handled
+        // in init() further down).
+        register_hotkeys();
 
         DMK::Config::load(INI_FILE);
         DMK::Config::log_all();
+
+        if (s_autoReload.load(std::memory_order_relaxed))
+        {
+            // Atomic flags update silently through their per-setter
+            // callbacks; the watcher does not drive any game-state
+            // work. Re-applying or clearing transmog still requires
+            // a hotkey or in-game action.
+            const auto status = DMK::Config::enable_auto_reload(
+                std::chrono::milliseconds{250},
+                [](bool content_changed)
+                {
+                    auto &logger = DMK::Logger::get_instance();
+                    if (content_changed)
+                        logger.info("INI auto-reload: setters applied");
+                    else
+                        logger.info("INI auto-reload: skipped (no content delta)");
+                });
+            if (status != DMK::Config::AutoReloadStatus::Started &&
+                status != DMK::Config::AutoReloadStatus::AlreadyRunning)
+            {
+                DMK::Logger::get_instance().warning(
+                    "INI auto-reload could not start (status enum {})",
+                    static_cast<int>(status));
+            }
+        }
     }
 
     // --- Public interface ---
@@ -632,12 +581,18 @@ namespace Transmog
         // isn't fixed), and one side can end up silently bypassed.
         // LT's hook is cosmetic polish, EH's is user-visible
         // functionality -- when both are present, yield to EH.
-        // Dual-name check covers both dev two-DLL and release single-
-        // ASI EH layouts.
+        //
+        // DMK 3.2.2 ships HookManager::is_target_already_hooked() for the
+        // managed-hook-vs-managed-hook collision case, but the substring
+        // module-name match here covers the orthogonal scenario where EH
+        // has been loaded but has not yet installed its hook (load-order
+        // race during the worker thread's init pass) or hooks via a
+        // non-DMK route. Yielding on module presence avoids the race
+        // entirely. The substring match covers both the dev two-DLL
+        // ("..._Logic.dll") and the release single-ASI (".asi") layouts
+        // in one call.
         const bool ehPresent =
-            GetModuleHandleA("CrimsonDesertEquipHide_Logic.dll") != nullptr ||
-            GetModuleHandleA("CrimsonDesertEquipHide.asi") != nullptr ||
-            GetModuleHandleA("CrimsonDesertEquipHide.dll") != nullptr;
+            CDCore::Glue::is_sibling_mod_loaded("CrimsonDesertEquipHide");
         if (ehPresent)
         {
             logger.info("[dispatch] PartAddShow hook skipped -- "
@@ -724,7 +679,10 @@ namespace Transmog
         start_load_detect_thread();
         ensure_apply_worker_started();
 
-        register_hotkeys();
+        // Hotkey bindings were registered in load_config() so the
+        // press_combo INI keys could be picked up during Config::load().
+        // Now flip InputManager live; the bindings start firing on the
+        // next poll tick.
         DMK::InputManager::get_instance().start();
 
         logger.info("Transmog initialization complete -- SlotPopulator {}",
@@ -736,22 +694,34 @@ namespace Transmog
     void shutdown()
     {
         DMK::Logger::get_instance().info("{} shutting down...", MOD_NAME);
+
+        // Disable the INI watcher up front so an in-flight save event
+        // cannot fire setters while we are tearing state down.
+        DMK::Config::disable_auto_reload();
+
         shutdown_requested().store(true, std::memory_order_release);
 
-        // Order is load-bearing: workers first, hooks second.
-        //
-        // Every worker we spawned calls raw game functions under SEH
-        // (apply_all_transmog -> SlotPopulator, debounce worker ->
-        // RealPartTearDown -> safeTearDown). Joining them BEFORE
-        // DMK_Shutdown removes the SafetyHook trampolines guarantees
-        // no worker is mid-call into game code that the loader is
-        // about to unmap.
-
+        // Drain workers before the DMK teardown removes the hooks they
+        // call into. Every worker we spawned calls raw game functions
+        // under SEH (apply_all_transmog -> SlotPopulator, debounce
+        // worker -> RealPartTearDown -> safeTearDown), so joining them
+        // first guarantees no worker is mid-call into a SafetyHook
+        // trampoline when the trampoline pages are unmapped.
         stop_load_detect_thread();
         stop_apply_worker();
         join_deferred_nametable_scan();
 
+        // Full DMK teardown: removes every managed hook (BatchEquip,
+        // VEC, PartAddShow), stops and clears the InputManager poller
+        // along with its registered bindings, stops the ConfigWatcher,
+        // and clears the Config registered-items list. Idempotent and
+        // safe to re-init from on the next Logic-DLL load. Each detour
+        // body snapshots its trampoline pointer at entry and bails to
+        // a benign default if the snapshot is null, defending the
+        // brief drain window between hook removal and DLL unmap.
         DMK_Shutdown();
+
+        clear_hotkey_guards();
     }
 
 } // namespace Transmog
