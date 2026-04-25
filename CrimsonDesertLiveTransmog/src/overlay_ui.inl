@@ -312,53 +312,78 @@ static bool name_contains_ci(const std::string &hay, const char *needle) noexcep
     static constexpr ImU32 k_colorAmbiguous = IM_COL32(230, 210, 120, 255);
     static constexpr ImU32 k_colorDimmed = IM_COL32(160, 160, 160, 200);
 
-    int shown = 0;
+    // Active character's body kind (CE-verified 2026-04-21). Stable
+    // for the entire popup invocation: PresetManager state cannot
+    // mutate between picker frames on the render thread, so resolving
+    // it once here avoids ~6k redundant PresetManager + string
+    // comparisons per frame inside the filter loop. Armor rule
+    // classifier tokens partition the catalog into disjoint body
+    // families:
+    //   Male:   {0x0018, 0x0058, 0x02E3}
+    //   Female: {0x0072, 0x0382, 0x0300}
+    //   Horse / pet / wagon / dragon: separate token pools with
+    //     zero overlap with humanoid. Flagged as NonHumanoid and
+    //     hidden unconditionally -- these never render on a human
+    //     skeleton (horse saddles, cat backpacks, etc.).
+    using BK = Transmog::ItemNameTable::BodyKind;
+    BK charBody;
+    {
+        const auto &pm = Transmog::PresetManager::instance();
+        const std::string ov =
+            pm.body_kind_of(pm.active_character());
+        if (ov == "Male")
+            charBody = BK::Male;
+        else if (ov == "Female")
+            charBody = BK::Female;
+        else if (ov == "Both")
+            charBody = BK::Both;
+        else // "Auto" or unrecognised
+            charBody =
+                Transmog::ItemNameTable::body_kind_for_character(
+                    pm.active_character());
+    }
+
+    // Two-pass filter+draw. Pass 1 collects matching catalog indices;
+    // pass 2 renders. The split lets the post-loop nav-clamp see the
+    // full visible count without rescanning, and supports unbounded
+    // result sets (the catalog has more chest items than any single
+    // hardcoded cap could safely truncate).
+    //
+    // Do NOT replace this with ImGuiListClipper: reshade_overlay.hpp
+    // (used by overlay_reshade.cpp) does not provide inline thunks for
+    // ImGuiListClipper::Begin/End/Step. Adding any such reference pulls
+    // imgui_lib's real symbols into the link, which collides with every
+    // COMDAT ImGui:: thunk in overlay_reshade.obj (LNK2005 cascade).
+    // Any new ImGui:: symbol added in this file must already exist as
+    // an inline thunk in external/reshade-sdk/include/reshade_overlay.hpp.
+    // ~6k Selectables per popup frame is acceptable in measurement.
+    //
+    // s_filtered is thread_local + static so the storage is reused
+    // across frames without per-frame allocation. Safe because only
+    // one picker popup can be open at a time (single call site, no
+    // nested-popup re-entry path exists).
+    static thread_local std::vector<std::size_t> s_filtered;
+    s_filtered.clear();
+    s_filtered.reserve(entries.size());
     int filteredByCategory = 0;
     int filteredByUnsafe = 0;
-    constexpr int k_maxShown = 512;
-    for (const auto &e : entries)
+    for (std::size_t idx = 0; idx < entries.size(); ++idx)
     {
+        const auto &e = entries[idx];
         if (ui.exactFilter && e.category != slotCategory)
         {
             ++filteredByCategory;
             continue;
         }
-        const bool nonEquipment =
-            (e.category == Transmog::TransmogSlot::Count);
-        // Per-character body-kind filter (CE-verified 2026-04-21).
-        // Armor rule classifier tokens partition the catalog into
-        // disjoint body families:
-        //   Male:   {0x0018, 0x0058, 0x02E3}
-        //   Female: {0x0072, 0x0382, 0x0300}
-        //   Horse / pet / wagon / dragon: separate token pools with
-        //     zero overlap with humanoid. Flagged as NonHumanoid and
-        //     hidden unconditionally -- these never render on a human
-        //     skeleton (horse saddles, cat backpacks, etc.).
-        const auto &pm = Transmog::PresetManager::instance();
-        using BK = Transmog::ItemNameTable::BodyKind;
-        // Resolve the active character's body kind: per-character
-        // override in presets.json wins, "Auto" falls through to the
-        // hardcoded default (Kliff/Oongka = Male, Damiane = Female).
-        BK charBody;
-        {
-            const std::string ov =
-                pm.body_kind_of(pm.active_character());
-            if (ov == "Male")
-                charBody = BK::Male;
-            else if (ov == "Female")
-                charBody = BK::Female;
-            else if (ov == "Both")
-                charBody = BK::Both;
-            else // "Auto" or unrecognised
-                charBody =
-                    Transmog::ItemNameTable::body_kind_for_character(
-                        pm.active_character());
-        }
         const bool nonHumanoid = (e.bodyKind == BK::NonHumanoid);
+        const bool incompatible =
+            (e.category == Transmog::TransmogSlot::Count) || nonHumanoid;
+        if (ui.hideIncompatible && incompatible)
+        {
+            ++filteredByUnsafe;
+            continue;
+        }
         const bool ambiguousBody = (e.bodyKind == BK::Ambiguous);
-        // Ambiguous items pass the body-match gate (still humanoid-
-        // range), but get an amber tag in the color logic below so
-        // the user knows render fidelity is inconsistent.
         const bool bodyMatches =
             !nonHumanoid && (
                 ambiguousBody ||
@@ -366,25 +391,12 @@ static bool name_contains_ci(const std::string &hay, const char *needle) noexcep
                 (e.bodyKind == BK::Both) ||
                 (charBody == BK::Generic) ||
                 (e.bodyKind == charBody));
-        // Non-humanoid items are always treated as "incompatible" --
-        // there's no toggle to show them; they'd never render.
-        const bool incompatible = nonEquipment || nonHumanoid;
-        const bool npcVariant = e.hasVariantMeta;
-        if (ui.hideIncompatible && incompatible)
-        {
-            ++filteredByUnsafe;
-            continue;
-        }
-        // Cross-body filter: hide items whose body type doesn't
-        // match the active character. Default on; can be toggled
-        // off for experimentation (they may still partially render
-        // via the carrier path but often look broken).
         if (ui.hideBodyMismatch && !bodyMatches)
         {
             ++filteredByUnsafe;
             continue;
         }
-        if (ui.hideVariants && npcVariant)
+        if (ui.hideVariants && e.hasVariantMeta)
         {
             ++filteredByUnsafe;
             continue;
@@ -392,8 +404,27 @@ static bool name_contains_ci(const std::string &hay, const char *needle) noexcep
         if (!name_contains_ci(e.name, ui.searchBuf) &&
             !name_contains_ci(e.displayName, ui.searchBuf))
             continue;
-        if (shown >= k_maxShown)
-            break;
+        s_filtered.push_back(idx);
+    }
+
+    const int shown = static_cast<int>(s_filtered.size());
+
+    // Pass 2: render the filtered rows. bodyMatches is recomputed
+    // here rather than cached from pass 1 because the per-item flag
+    // also drives the colour tier and the carrier/crash-risk tag --
+    // recomputation is cheaper than a parallel side-vector allocation.
+    for (int row = 0; row < shown; ++row)
+    {
+        const auto &e = entries[s_filtered[row]];
+        const bool nonHumanoid = (e.bodyKind == BK::NonHumanoid);
+        const bool ambiguousBody = (e.bodyKind == BK::Ambiguous);
+        const bool bodyMatches =
+            !nonHumanoid && (
+                ambiguousBody ||
+                (e.bodyKind == BK::Generic) ||
+                (e.bodyKind == BK::Both) ||
+                (charBody == BK::Generic) ||
+                (e.bodyKind == charBody));
 
         // Tag items with visible badges:
         //   - "CRASH RISK"  -> !isPlayerCompatible (red)
@@ -430,7 +461,7 @@ static bool name_contains_ci(const std::string &hay, const char *needle) noexcep
         else if (usesCarrier)
             tag = "carrier";
 
-        const bool isNavTarget = (shown == ui.navIndex);
+        const bool isNavTarget = (row == ui.navIndex);
         const bool highlighted =
             (targetItemId == e.id) || isNavTarget;
 
@@ -529,13 +560,11 @@ static bool name_contains_ci(const std::string &hay, const char *needle) noexcep
         {
             ui.hoverPendingId = e.id;
             ui.hoverStartMs = Transmog::steady_ms();
-            ui.navIndex = shown;
+            ui.navIndex = row;
         }
 
         if (crashRisk || crossBodyCarrier || ambiguousCarrier || usesCarrier)
             ImGui::PopStyleColor(); // Header color
-
-        ++shown;
     }
 
     if (shown == 0)
@@ -551,11 +580,6 @@ static bool name_contains_ci(const std::string &hay, const char *needle) noexcep
         else
             ui_text_disabled("no matches");
     }
-    else if (shown >= k_maxShown)
-    {
-        ui_text_disabled("(truncated -- narrow your search)");
-    }
-
     // Clamp nav index to the actual visible count so stale values
     // from a wider filter don't point past the end of the list.
     ui.lastVisibleCount = shown;
