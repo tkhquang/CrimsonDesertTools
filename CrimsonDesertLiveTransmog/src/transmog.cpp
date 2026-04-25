@@ -98,6 +98,28 @@ namespace Transmog
         }
     }
 
+    // --- Player-component layout ---
+    //
+    // Pointer to the PartDef/auth-table container on the SlotPopulator
+    // descriptor (a1). The container is the entry table used by the
+    // capture path:
+    //
+    //   container +0x08  QWORD   stride-0xC8 entry array base
+    //   container +0x10  DWORD   live entry count
+    //   container +0x14  DWORD   capacity
+    //
+    // The pointer slot itself shifted between game versions as the
+    // component grew new fields below it:
+    //
+    //   v1.03.01 -- pointer @ a1 + 0x78
+    //   v1.04.00 -- pointer @ a1 + 0x88   (+0x10 of new fields inserted)
+    //
+    // Reading the old offset on v1.04.00 returns garbage (the qword
+    // that lives at +0x78 is no longer the container pointer), which
+    // is what produced the "Capture: no entry table" warning. Mirrors
+    // k_containerPtrOffset in real_part_tear_down.cpp.
+    constexpr std::ptrdiff_t k_compEntryTablePtrOffset = 0x88;
+
     // --- Public interface ---
 
     static __int64 get_player_a1()
@@ -186,7 +208,7 @@ namespace Transmog
 
         __try
         {
-            auto entryDesc = *reinterpret_cast<uintptr_t *>(a1 + 120);
+            auto entryDesc = *reinterpret_cast<uintptr_t *>(a1 + k_compEntryTablePtrOffset);
             if (entryDesc < 0x10000) { logger.warning("Capture: no entry table"); return; }
             auto entryArray = *reinterpret_cast<uintptr_t *>(entryDesc + 8);
             auto entryCount = *reinterpret_cast<uint32_t *>(entryDesc + 16);
@@ -246,7 +268,7 @@ namespace Transmog
 
         __try
         {
-            auto entryDesc = *reinterpret_cast<uintptr_t *>(a1 + 120);
+            auto entryDesc = *reinterpret_cast<uintptr_t *>(a1 + k_compEntryTablePtrOffset);
             if (entryDesc < 0x10000) return;
             auto entryArray = *reinterpret_cast<uintptr_t *>(entryDesc + 8);
             auto entryCount = *reinterpret_cast<uint32_t *>(entryDesc + 16);

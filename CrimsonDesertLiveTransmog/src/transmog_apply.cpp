@@ -32,6 +32,17 @@ namespace Transmog
     constexpr std::ptrdiff_t k_compSlotCacheCountOffset   = 0x1E0;
     constexpr std::ptrdiff_t k_compSlotCacheCapOffset     = 0x1E4;
 
+    // Pointer to the PartDef/auth-table container on a1.
+    //
+    //   v1.03.01 -- container @ a1 + 0x78
+    //   v1.04.00 -- container @ a1 + 0x88   (+0x10 of new fields below)
+    //
+    // Mirrors k_containerPtrOffset in real_part_tear_down.cpp. Reading
+    // the old offset on v1.04.00 yields a non-container qword that
+    // either dereferences to junk or fails the >0x10000 sanity gate,
+    // skipping the real-item restore loop entirely.
+    constexpr std::ptrdiff_t k_compEntryTablePtrOffset    = 0x88;
+
     void apply_transmog(__int64 a1, uint16_t targetId)
     {
         auto slotPop = slot_populator_fn();
@@ -1393,7 +1404,7 @@ namespace Transmog
 
         __try
         {
-            auto entryDesc = *reinterpret_cast<uintptr_t *>(a1 + 120);
+            auto entryDesc = *reinterpret_cast<uintptr_t *>(a1 + k_compEntryTablePtrOffset);
             if (entryDesc > 0x10000)
             {
                 auto entryArray = *reinterpret_cast<uintptr_t *>(entryDesc + 8);
