@@ -2,6 +2,10 @@
 
 All notable changes to the CrimsonDesertLiveTransmog mod will be documented in this file.
 
+## [0.6.4] - Game Patch 1.04.00 Capture Outfit Fix
+
+- Capture Outfit and the equipment restore after Clear work again on game version 1.04.00.
+
 ## [0.6.3] - DetourModKit 3.2.3 refresh
 
 - Faster, lighter mod startup and shutdown.
@@ -86,6 +90,7 @@ All notable changes to the CrimsonDesertLiveTransmog mod will be documented in t
 - Modular code split: `transmog_apply` (apply/clear logic), `transmog_hooks` (VEC/BatchEquip callbacks), `transmog_worker` (debounce/load-detect/nametable threads), `shared_state` (cross-TU atomics)
 - Docs clarify ReShade is required for GUI; without it, users edit JSON manually via Capture hotkey
 
+[0.6.4]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.6.4
 [0.6.3]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.6.3
 [0.6.2]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.6.2
 [0.6.1]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.6.1
