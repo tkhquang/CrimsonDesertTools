@@ -1,3 +1,5 @@
-## Game Patch 1.04.00 Capture Outfit Fix
+## [Title for next release]
 
-- Capture Outfit and the equipment restore after Clear work again on game version 1.04.00.
+- New feature
+- Bug fix
+- Improvement
