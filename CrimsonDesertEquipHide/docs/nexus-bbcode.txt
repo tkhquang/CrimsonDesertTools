@@ -109,8 +109,6 @@ The mod can be configured by editing the [b]CrimsonDesertEquipHide.ini[/b] file:
 [General]
 ; Log level: Trace, Debug, Info, Warning, Error
 LogLevel = Info
-; Apply only to player characters
-PlayerOnly = true
 ; Set to true if you use mods that alter the default visibility of equipment
 ; via PAZ patching (e.g. character replacers like 'Playing Kliff as Damiane',
 ; armor replacers, transmog mods). ForceShow overrides their changes so

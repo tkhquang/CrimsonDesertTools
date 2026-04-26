@@ -453,9 +453,6 @@ namespace EquipHide
 
     bool check_player_filter(uintptr_t a1) noexcept
     {
-        if (!flag_player_only().load(std::memory_order_relaxed))
-            return true;
-
         if (a1 < 0x10000)
             return false;
 
@@ -530,7 +527,14 @@ namespace EquipHide
                 }
             }
 
-            return ps.count.load(std::memory_order_relaxed) <= 0 ||
+            /* Fail-closed: until the fallback path has cached at
+               least one protagonist, do NOT admit the candidate. The
+               historic permissive `<= 0` admitted every actor during
+               the resolve gap, leaking hides onto NPCs that then
+               could not be restored at runtime (their vis ctrls were
+               never in the active set, so the orphan sweep skipped
+               them). */
+            return ps.count.load(std::memory_order_relaxed) > 0 &&
                    is_player_vis_ctrl(a1);
         }
 
@@ -540,7 +544,8 @@ namespace EquipHide
             (cnt & (k_resolveInterval - 1)) == 0)
             resolve_player_vis_ctrls();
 
-        return ps.count.load(std::memory_order_relaxed) <= 0 ||
+        /* Fail-closed (see fallback branch above for rationale). */
+        return ps.count.load(std::memory_order_relaxed) > 0 &&
                is_player_vis_ctrl(a1);
     }
 

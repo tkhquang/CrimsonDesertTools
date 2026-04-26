@@ -12,7 +12,9 @@ namespace EquipHide
 
     /**
      * @brief Check player-only filter. Returns false (reject) if the actor
-     *        is not a known protagonist when PlayerOnly mode is active.
+     *        is not a known protagonist; admission is unconditional --
+     *        equipment hiding only applies to the playable cast (Kliff,
+     *        Damiane, Oongka), never to NPCs.
      *
      * Side effects: triggers resolve cycle (global chain) or caches new
      * vis ctrls (fallback mode).
