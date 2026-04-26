@@ -2,6 +2,14 @@
 
 All notable changes to the CrimsonDesertEquipHide mod will be documented in this file.
 
+## [0.6.3] - [Title for next release]
+
+- Fix: equipment hiding no longer occasionally bleeds onto NPCs after a
+  save load or character swap.
+- Removed the `PlayerOnly` setting; hiding is now always limited to the
+  playable cast. Existing INIs with the entry can leave it in place; it
+  is simply ignored.
+
 ## [0.6.2] - Multi-Protagonist Support and 1.04.00 Reliability
 
 - Per-character armor-hide settings now stick when you swap protagonists; hiding gear on one party member no longer flips back when you switch to another.
@@ -207,6 +215,7 @@ All notable changes to the CrimsonDesertEquipHide mod will be documented in this
 - Customizable part lists per category via INI configuration
 - Configurable init delay and log level
 
+[0.6.3]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/equip-hide/v0.6.3
 [0.6.2]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/equip-hide/v0.6.2
 [0.6.1]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/equip-hide/v0.6.1
 [0.6.0]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/equip-hide/v0.6.0
