@@ -26,7 +26,6 @@ namespace EquipHide
     static std::unordered_map<VisKey, uint8_t, VisKeyHash> s_originalVis;
     static std::atomic<bool> s_needsDirectWrite{false};
 
-    static std::atomic<bool> s_playerOnly{true};
     static std::atomic<bool> s_forceShow{false};
     static std::atomic<bool> s_baldFix{true};
     static std::atomic<bool> s_glidingFix{true};
@@ -45,7 +44,6 @@ namespace EquipHide
     std::unordered_map<VisKey, uint8_t, VisKeyHash> &original_vis_map() { return s_originalVis; }
     std::atomic<bool> &needs_direct_write() { return s_needsDirectWrite; }
 
-    std::atomic<bool> &flag_player_only() { return s_playerOnly; }
     std::atomic<bool> &flag_force_show() { return s_forceShow; }
     std::atomic<bool> &flag_bald_fix() { return s_baldFix; }
     std::atomic<bool> &flag_gliding_fix() { return s_glidingFix; }

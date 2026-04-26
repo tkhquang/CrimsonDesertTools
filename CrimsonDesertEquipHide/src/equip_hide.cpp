@@ -47,8 +47,6 @@ namespace EquipHide
             "General", "LogLevel", "INFO");
 
         DMK::Config::register_atomic<bool>(
-            "General", "PlayerOnly", "Player Only", flag_player_only(), true);
-        DMK::Config::register_atomic<bool>(
             "General", "ForceShow", "Force Show", flag_force_show(), false);
         DMK::Config::register_atomic<bool>(
             "General", "BaldFix", "Bald Fix", flag_bald_fix(), true);
