@@ -242,6 +242,7 @@ Built with [url=https://github.com/tkhquang/DetourModKit]DetourModKit[/url] for 
 [*][url=https://github.com/ocornut/imgui]Dear ImGui[/url] by Omar Cornut -overlay GUI
 [*][url=https://github.com/microsoft/DirectXMath]DirectXMath[/url] by Microsoft -math primitives
 [*][url=https://reshade.me/]ReShade[/url] by crosire -optional addon host
+[*][url=https://github.com/FransBouma]Frans 'Otis_Inf' Bouma[/url] -v1.05.00 AOB shift diagnosis
 [*]Pearl Abyss -Crimson Desert
 [/list]
 

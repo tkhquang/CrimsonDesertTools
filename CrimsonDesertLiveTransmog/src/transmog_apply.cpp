@@ -36,12 +36,27 @@ namespace Transmog
     //
     //   v1.03.01 -- container @ a1 + 0x78
     //   v1.04.00 -- container @ a1 + 0x88   (+0x10 of new fields below)
+    //   v1.05.00 -- container @ a1 + 0x88   (unchanged from v1.04)
     //
     // Mirrors k_containerPtrOffset in real_part_tear_down.cpp. Reading
     // the old offset on v1.04.00 yields a non-container qword that
     // either dereferences to junk or fails the >0x10000 sanity gate,
     // skipping the real-item restore loop entirely.
     constexpr std::ptrdiff_t k_compEntryTablePtrOffset    = 0x88;
+
+    // Entry layout within the auth-table array. v1.05 grew the entry
+    // by 8 bytes and shifted the slot tag accordingly:
+    //
+    //   v1.04.00: stride=0xC8 (200), slotTag@+0xC0
+    //   v1.05.00: stride=0xD0 (208), slotTag@+0xC8
+    //
+    // primary item id at +0x08 is unchanged. Slot-tag VALUES themselves
+    // are unchanged from v1.04; only the position within the entry
+    // shifted. Mirrors k_entryStride / k_entrySlotTagOffset in
+    // real_part_tear_down.cpp.
+    constexpr std::ptrdiff_t k_compEntryStride           = 0xD0;
+    constexpr std::ptrdiff_t k_compEntryItemIdOffset     = 0x08;
+    constexpr std::ptrdiff_t k_compEntrySlotTagOffset    = 0xC8;
 
     void apply_transmog(__int64 a1, uint16_t targetId)
     {
@@ -1462,9 +1477,9 @@ namespace Transmog
 
                 for (uint32_t e = 0; e < entryCount && entryArray > 0x10000; ++e)
                 {
-                    auto base = entryArray + e * 200;
-                    auto gameSlot = *reinterpret_cast<int16_t *>(base + 192);
-                    auto itemId = *reinterpret_cast<uint16_t *>(base + 8);
+                    auto base = entryArray + e * k_compEntryStride;
+                    auto gameSlot = *reinterpret_cast<int16_t *>(base + k_compEntrySlotTagOffset);
+                    auto itemId = *reinterpret_cast<uint16_t *>(base + k_compEntryItemIdOffset);
 
                     if (itemId == 0 || itemId == 0xFFFF)
                         continue;

@@ -234,6 +234,7 @@ Press **Numpad 0** in-game to trigger a reload after rebuilding.
 - [cursey](https://github.com/cursey) - for SafetyHook
 - [Brodie Thiesfield](https://github.com/brofield) - for SimpleIni
 - [Omar Cornut](https://github.com/ocornut) - for Dear ImGui
+- [Frans 'Otis_Inf' Bouma](https://github.com/FransBouma) - for v1.05.00 AOB shift diagnosis
 - Pearl Abyss - for Crimson Desert
 
 ## Changelog

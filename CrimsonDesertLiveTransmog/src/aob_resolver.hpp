@@ -144,29 +144,60 @@ namespace Transmog
      *        item_name_table.cpp for the full 4-step chain.
      */
     inline constexpr AddrCandidate k_subTranslatorCandidates[] = {
-        // P1 -- full prologue. Stack disp8 (B9), stack-alloc size
-        // (00 01 00 00), and the two local-variable disp8 values in
-        // lea rdx,[rbp+X] / lea rcx,[rbp+Y] wildcarded. The
-        // 41 B8 01 00 00 00 (mov r8d, 1) is a SEMANTIC argument
-        // flag, kept literal.
+        // P0 -- v1.05.00 full prologue. The second lea encodes
+        // rsp-relative (`48 8D 4C 24 ??`, 4 bytes) instead of the
+        // v1.04 rbp-relative form (`48 8D 4D ??`, 3 bytes), shifting
+        // the body by 1 byte. Body shape (mov r8d=1, lea rdx=[rbp+X],
+        // lea rcx=[rsp+Y]) is otherwise unchanged. 1 unique hit on
+        // v1.05.00 at 0x140799CA9. dispOffset 0 returns the prologue
+        // start; this candidate is consumed by ItemNameTable::build()
+        // as a chain anchor (no hook installed here).
+        {"SubTranslator_P0_v105_FullPrologue",
+         "48 89 5C 24 08 66 89 54 24 10 55 56 57 "
+         "48 8D 6C 24 ?? 48 81 EC ?? ?? ?? ?? "
+         "48 8B F9 41 B8 01 00 00 00 48 8D 55 ?? 48 8D 4C 24 ??",
+         ResolveMode::Direct, 0, 0},
+
+        // P0b -- v1.05.00 post-alloca anchor. Same disp8 wildcarding
+        // as P0 but no head sentinels. Walk-back matches v1.04 P2
+        // (-0x19): the encoding shift sits inside the pattern, not
+        // before the anchor.
+        {"SubTranslator_P0b_v105_PostAlloca",
+         "48 8B F9 41 B8 01 00 00 00 48 8D 55 ?? 48 8D 4C 24 ?? E8",
+         ResolveMode::Direct, -0x19, 0},
+
+        // P0c -- v1.05.00 deeper anchor: mov-r8d-1 + lea pair followed
+        // by the unique 90 48 8B D0 48 8B CF E8 post-call tail. 1
+        // unique hit on v1.05.00 at 0x140799CAC; function starts at
+        // 0x140799C90, so walk-back -0x1C (matches v1.04 P3 semantics).
+        {"SubTranslator_P0c_v105_ScratchBufPrep",
+         "41 B8 01 00 00 00 48 8D 55 ?? 48 8D 4C 24 ?? E8 ?? ?? ?? ?? "
+         "90 48 8B D0 48 8B CF E8",
+         ResolveMode::Direct, -0x1C, 0},
+
+        // P1 -- v1.04.00 full prologue. Stack disp8 (B9), stack-alloc
+        // size (00 01 00 00), and the two local-variable disp8 values
+        // in lea rdx,[rbp+X] / lea rcx,[rbp+Y] wildcarded. The
+        // 41 B8 01 00 00 00 (mov r8d, 1) is a SEMANTIC argument flag
+        // and is kept literal. Inert on v1.05.00 (lea encoding shift).
         {"SubTranslator_P1_FullPrologue",
          "48 89 5C 24 08 66 89 54 24 10 55 56 57 "
          "48 8D 6C 24 ?? 48 81 EC ?? ?? ?? ?? "
          "48 8B F9 41 B8 01 00 00 00 48 8D 55 ?? 48 8D 4D ??",
          ResolveMode::Direct, 0, 0},
 
-        // P2 -- post-alloca scratch-buffer prep anchor. Same disp8
-        // wildcarding as P1.
+        // P2 -- v1.04.00 post-alloca scratch-buffer prep anchor. Same
+        // disp8 wildcarding as P1. Inert on v1.05.00.
         {"SubTranslator_P2_PostAlloca",
          "48 8B F9 41 B8 01 00 00 00 48 8D 55 ?? 48 8D 4D ?? E8",
          ResolveMode::Direct, -0x19, 0},
 
-        // P3 -- deeper anchor without the mov rdi, rcx leading move.
-        // Without the 90 48 8B D0 48 8B CF E8 post-call suffix this
-        // shortened pattern matches 5 sibling call sites (same
+        // P3 -- v1.04.00 deeper anchor without the leading `mov rdi,
+        // rcx`. Without the 90 48 8B D0 48 8B CF E8 post-call suffix
+        // this shortened pattern matches 5 sibling call sites (same
         // mov r8d,1 / lea rdx / lea rcx / call boilerplate); the
-        // suffix pins the specific follow-up into this function's
-        // second call (CE aob_scan 2026-04-19).
+        // suffix pins this function's second call (CE aob_scan
+        // 2026-04-19). Inert on v1.05.00.
         {"SubTranslator_P3_ScratchBufPrep",
          "41 B8 01 00 00 00 48 8D 55 ?? 48 8D 4D ?? E8 ?? ?? ?? ?? "
          "90 48 8B D0 48 8B CF E8",

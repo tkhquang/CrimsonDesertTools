@@ -38,15 +38,22 @@ namespace Transmog
     //   v1.04.00 -- +0x3C8 (descriptor gained 0x28 bytes of new fields
     //               between +0x3A0 and +0x3C8; +0x3A0 now carries an
     //               unrelated `0x1FFFFFFFF` bit-pattern value)
+    //   v1.05.00 -- +0x3D0 (descriptor gained another 8 bytes;
+    //               desc+0x298 also holds a sentinel on every item, so
+    //               the constraint that distinguishes the variant-meta
+    //               field is "sentinel for direct-wear items, per-item
+    //               heap pointer for carrier-required items"). Anchor
+    //               sentinel observed at 0x145BC3638.
     //
     // The sentinel value itself is also unstable (any .data reshuffle
     // moves it). Rather than hardcoding either the offset or the
     // sentinel RVA, the builder resolves the sentinel statistically at
-    // catalog-build time: scan every valid descriptor's +0x3C8 qword,
-    // the value that appears in the clear majority of items (~3-5k of
-    // ~6k) IS the sentinel. Self-heals across future game updates as
-    // long as the catalog stays statistically dominated by base items.
-    static constexpr std::ptrdiff_t k_descVariantMetaOffset = 0x3C8;
+    // catalog-build time: scan every valid descriptor's qword at this
+    // offset, the value that appears in the clear majority of items
+    // (~3-5k of ~6k) IS the sentinel. Self-heals across future game
+    // updates as long as the catalog stays statistically dominated by
+    // base items.
+    static constexpr std::ptrdiff_t k_descVariantMetaOffset = 0x3D0;
 
     // --- iteminfo (qword_145CEF370) container layout, v1.02.00 ---
     // Source: IDA sub_1402D75D0 + static analysis. These are runtime data
@@ -481,24 +488,39 @@ namespace Transmog
         }
 
         // Step 1: locate the `call sub_141D45270` inside sub_14076D950.
-        // Historically at fixed offset +0x2A, but compiler prologue reshuffles
-        // in future patches would silently drift that offset. Scan instead:
-        // the `E8` call is preceded by a unique 14-byte anchor
-        //   41 B8 01 00 00 00 48 8D 55 6F 48 8D 4D 87
-        // (mov r8d,1 / lea rdx,[rbp+C6h] / lea rcx,[rbp+DEh]) which is
-        // globally unique in v1.02.00 .text and stays stable as long as
-        // the call site's register setup doesn't change. Bounded scan of
-        // the first 0x80 bytes of the function so a false match elsewhere
-        // can't leak in.
+        // Historically at fixed offset +0x2A, but compiler prologue
+        // reshuffles drift that offset between patches. Scan a bounded
+        // 0x80-byte window of the function instead.
+        //
+        // Two anchor variants are tried (v1.05.00 first, v1.04.00 fallback):
+        //   v1.05.00: 41 B8 01 00 00 00 48 8D 55 ?? 48 8D 4C 24 ??
+        //             (mov r8d,1 / lea rdx,[rbp+disp8] / lea rcx,[rsp+disp8])
+        //             The second lea encodes rsp-relative (4 bytes)
+        //             instead of v1.04's rbp-relative (3 bytes); both
+        //             disp8 values are also reshuffled. 1 unique hit on
+        //             v1.05.00 at 0x140799CB9 inside SubTranslator.
+        //   v1.04.00: 41 B8 01 00 00 00 48 8D 55 ?? 48 8D 4D ??
+        //             (mov r8d,1 / lea rdx,[rbp+disp8] / lea rcx,[rbp+disp8])
+        //
+        // Both disp8 slots are wildcarded so a future stack-frame shift
+        // inside the same function does not require another anchor
+        // variant. The 0x80-byte window keeps a stray match elsewhere in
+        // .text from leaking in.
         const auto subTxStart = reinterpret_cast<const std::byte *>(subTranslatorAddr);
-        auto anchor1 = DMK::Scanner::parse_aob(
-            "41 B8 01 00 00 00 48 8D 55 6F 48 8D 4D 87 E8 | ?? ?? ?? ??");
-        if (!anchor1)
+
+        auto anchorV105 = DMK::Scanner::parse_aob(
+            "41 B8 01 00 00 00 48 8D 55 ?? 48 8D 4C 24 ?? E8 | ?? ?? ?? ??");
+        auto anchorV104 = DMK::Scanner::parse_aob(
+            "41 B8 01 00 00 00 48 8D 55 ?? 48 8D 4D ?? E8 | ?? ?? ?? ??");
+        if (!anchorV105 || !anchorV104)
         {
-            logger.warning("[nametable] parse_aob failed for sub_141D45270 anchor");
+            logger.warning("[nametable] parse_aob failed for sub_141D45270 anchors");
             return false;
         }
-        const auto *match1 = DMK::Scanner::find_pattern(subTxStart, 0x80, *anchor1);
+
+        const auto *match1 = DMK::Scanner::find_pattern(subTxStart, 0x80, *anchorV105);
+        if (!match1)
+            match1 = DMK::Scanner::find_pattern(subTxStart, 0x80, *anchorV104);
         if (!match1)
         {
             logger.warning("[nametable] anchor for sub_141D45270 call "
