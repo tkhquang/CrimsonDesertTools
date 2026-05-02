@@ -295,6 +295,246 @@ namespace CDCore::Anchors
          ResolveMode::Direct, -0x25, 0},
     };
 
+    // -----------------------------------------------------------------------
+    // Player -- static pointer for the server-side party-state root global.
+    //
+    // Resolves to qword_145F0D580 in the v1.04.00 .text. The dereference of
+    // that qword is a heap-allocated root object (no specific RTTI) whose
+    // chain is:
+    //
+    //   *(player_static)        -> root container
+    //   *(root  + 0x18)         -> pa::NwVirtualAsyncSession
+    //   *(nwSes + 0xA0)         -> pa::ServerUserActor
+    //   *(srvUA + 0xD0)         -> pa::ServerChildOnlyInGameActor
+    //                              (the party container)
+    //
+    // Inside the party container the three protagonist slots are inline
+    // structs at fixed offsets with stride 0x100:
+    //
+    //   party + 0x68            = Kliff slot
+    //   party + 0x168           = Damiane slot
+    //   party + 0x268           = Oongka slot
+    //
+    // Per slot the active-flag byte is at slot+0x2C (1 = currently
+    // controlled, 0 = passive). The character is identified by which slot
+    // offset, NEVER by a stored character ID. The +0x40 dword is an
+    // observability handle and is volatile; it is logged for diagnostics
+    // but not used for identity.
+    //
+    // The CE-validated state-transition table (5 transitions across radial
+    // swaps and a save-load) confirmed the invariant that exactly one slot
+    // has +0x2C == 1 while the player is in-world; zero slots are active
+    // during cutscenes / loading screens. The top three pointers in the
+    // chain (root, NwVirtualAsyncSession, ServerUserActor) stay identical
+    // across save-load; only the final party container reallocates.
+    //
+    // Why this static and not the older WorldSystem holder at +0x5F0D210:
+    // the WorldSystem chain reaches a CLIENT-side ChildOnlyInGameActor pool
+    // whose per-actor +0x50 byte was the prior identity discriminator. On
+    // v1.04.00 that byte ceased to discriminate (every protagonist reads
+    // 0x08), and actor-pool reuse made the field unstable across radial
+    // swaps. The Player static reaches the SERVER-side party state, which
+    // identifies the controlled character by slot offset (a structural
+    // invariant) instead of by a value the engine can repurpose.
+    //
+    // 3-tier cascade. Stable read sites verified unique on v1.04.00 via
+    // mcp__cheatengine__aob_scan (each returns exactly 1 hit).
+    // -----------------------------------------------------------------------
+    inline constexpr AddrCandidate k_playerStaticCandidates[] = {
+        // P1 -- the unique writer site at sub_1420D0470.
+        //   4C 89 3D <disp32>          mov [rip+disp32], r15
+        //   48 8B 8F F8 00 00 00       mov rcx, [rdi+0xF8]
+        //   41 BC 04 02 00 00          mov r12d, 0x204
+        //   48 85 C9 ??                test rcx, rcx ; jcc rel8
+        //
+        // Writer encodings on globals are typically rare (one or two per
+        // module) and the immediately-following load from [rdi+0xF8] +
+        // mov-r12d-0x204 sequence is semantically distinctive. The 0x204
+        // is a SEMANTIC constant (an initialisation tag) and is kept
+        // literal per the §2 exception; the rel8 of the trailing jcc is
+        // wildcarded because branch distance can shift.
+        {"PlayerStatic_P1_WriterSite",
+         "4C 89 3D ?? ?? ?? ?? 48 8B 8F F8 00 00 00 "
+         "41 BC 04 02 00 00 48 85 C9 ??",
+         ResolveMode::RipRelative, 3, 7},
+
+        // P2 -- read-into-r12 at sub_1420D3700+0x39.
+        //   4C 8B 25 <disp32>          mov r12, [rip+disp32]
+        //   8B D5                      mov edx, ebp
+        //   4C 8B F0                   mov r14, rax
+        //   E8 <disp32>                call <subroutine>
+        //   48 8B D8                   mov rbx, rax
+        //   48 85 C0 ??                test rax, rax ; jcc rel8
+        //
+        // The 4C 8B 25 prefix (load into r12) is uncommon; combined with
+        // the immediate mov-edx-ebp / mov-r14-rax / call / mov-rbx-rax /
+        // test-rax-rax tail it pins this single read site. Both rel32
+        // displacements are wildcarded (linker-owned).
+        {"PlayerStatic_P2_ReadIntoR12",
+         "4C 8B 25 ?? ?? ?? ?? 8B D5 4C 8B F0 "
+         "E8 ?? ?? ?? ?? 48 8B D8 48 85 C0 ??",
+         ResolveMode::RipRelative, 3, 7},
+
+        // P3 -- read-into-rcx + stack-slot test at sub_140819600+0x14F.
+        //   48 8B 0D <disp32>          mov rcx, [rip+disp32]
+        //   E8 <disp32>                call <subroutine>
+        //   83 7C 24 ?? 00             cmp dword [rsp+disp8], 0
+        //   74 ??                      jz rel8
+        //   48 8B 8E E0 00 00 00       mov rcx, [rsi+0xE0]
+        //
+        // The 48 8B 0D / E8 mov-then-call shape is common, but the tail
+        // (cmp dword [rsp+disp8], 0; jz rel8; mov rcx, [rsi+0xE0]) pins
+        // this site. 0xE0 is a game-struct ABI offset, kept literal. The
+        // stack disp8 in the cmp and the rel8 jz target are wildcarded.
+        {"PlayerStatic_P3_ReadStackTest",
+         "48 8B 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? "
+         "83 7C 24 ?? 00 74 ?? 48 8B 8E E0 00 00 00",
+         ResolveMode::RipRelative, 3, 7},
+    };
+
+    // -----------------------------------------------------------------------
+    // RadialSwapKey -- mid-body anchor inside the radial-UI character-swap
+    // handler (sub_1422019A0). At this site EAX has just been loaded with
+    // the requested characterinfo key from the radial input pointer in RSI:
+    //
+    //   ; sub_1422019A0 fragment, loads the destination key and forwards to
+    //   ; sub_141B0C2B0 which commits the new actor to User+0xD8.
+    //   8B 06              mov eax, [rsi]            ; ANCHOR
+    //   89 45 78           mov [rbp+0x78], eax       ; HOOK +2 lands here
+    //   48 8B 0D ?? ?? ?? ?? mov rcx, [rip+disp32]   ; lookup table base
+    //   48 83 C1 60        add rcx, 60h
+    //   48 8D 55 78        lea rdx, [rbp+0x78]
+    //   E8 ?? ?? ?? ??     call sub_1402FB1C0        ; hash table lookup
+    //   B9 FF FF 00 00     mov ecx, 0FFFFh           ; sentinel
+    //   48 85 C0           test rax, rax
+    //   74 05              jz <skip>
+    //   0F B7 18           movzx ebx, word ptr [rax]
+    //   EB 02              jmp +2
+    //
+    // CE-verified live (v1.04.00, 2026-05-02) across four protagonist
+    // transitions: EAX = 0x01 (Kliff), 0x04 (Damiane), 0x06 (Oongka).
+    //
+    // The hook offset is +2 (the byte length of `mov eax, [rsi]`) so the
+    // mid-hook lands on the immediately-following `mov [rbp+0x78], eax`,
+    // i.e. the instruction at which the captured key is fully realised in
+    // the EAX register and not yet shadowed by the lookup-table call. EAX
+    // is the source of the captured value; reading it from the SafetyHook
+    // Context64 as `ctx.rax & 0xFFFF'FFFFu` gives the raw key.
+    //
+    // Coverage caveat: scripted cutscene auto-switches that drive the
+    // player back to Kliff do NOT pass through this handler (verified
+    // live: zero hits on a forced Kliff return). The +0x2C slot decode
+    // and the resolver's last-known-good cache cover those paths.
+    //
+    // 5-tier cascade ordered for cross-mod coordination.
+    //
+    // Cross-mod model: CrimsonDesertCore is a STATIC library, so each Logic
+    // DLL (LiveTransmog, EquipHide) carries its own copy of CDCore state and
+    // installs its own SafetyHook MidHook against this site. SafetyHook's
+    // internal chaining at the JMP-target site lets two MidHooks coexist --
+    // each consumer's trampoline runs independently on every radial swap.
+    // The price is that whichever consumer initialises FIRST overwrites the
+    // hook target's prelude bytes with the SafetyHook stub (a 5-byte JMP at
+    // match+2 plus zero or more NOP-padded partial-instruction bytes); the
+    // sibling consumer that scans SECOND no longer sees the original
+    // `89 45 78 48 8B 0D ...` shape at offset +2 through +11 of the match.
+    //
+    // Patch survival:
+    //   - SafetyHook's MidHook overwrites COMPLETE instructions starting at
+    //     the hook target. Bytes 0..1 of the match (`8B 06`, the leading
+    //     mov-eax-from-rsi) are LEFT INTACT because the hook target is at
+    //     match+2.
+    //   - Bytes match+2 through match+11 (the `89 45 78 48 8B 0D ?? ?? ?? ??`
+    //     window -- 3 bytes of `mov [rbp+0x78], eax` plus 7 bytes of
+    //     `mov rcx, [rip+disp32]`) are FULLY OVERWRITTEN by the JMP+pad.
+    //   - Bytes match+12 onward (`48 83 C1 60 48 8D 55 78 E8 ?? ?? ?? ?? B9
+    //     FF FF 00 00 48 85 C0 74 05 0F B7 18 EB 02`) are UNCHANGED -- they
+    //     sit past the displaced range and are reached only via the
+    //     SafetyHook trampoline's epilogue.
+    //
+    // P1 / P2 anchor exclusively in the post-patch-invariant tail
+    // (match+12 onward) so they match the live binary regardless of whether
+    // a sibling has already patched the prelude. dispOffset = -10 walks back
+    // from the new anchor's start (which is at original-match+12) to the
+    // hook target (at original-match+2): -10 = +2 - 12. P3 / P4 / P5 are
+    // the original prelude-anchored candidates retained for the
+    // pre-any-patch first-load case where every byte still matches; on a
+    // post-patched site they fail gracefully and the cascade falls through
+    // to P1 / P2.
+    //
+    // resolve_cascade iterates declaration order and returns first match
+    // (see scanner.cpp scan_candidates), so the post-patch-tolerant
+    // candidates MUST come first to guarantee the second consumer resolves
+    // the same hook target the first consumer already patched.
+    //
+    // The `0F B7 18 EB 02` (movzx ebx, word ptr [rax]; jmp +2) tail is the
+    // unique disambiguator: a structurally identical shape at sub_1421D5990
+    // in a different handler is followed by an index-write
+    // (`48 89 B5 28 03 00 00`) instead, so any candidate that includes
+    // bytes past the call locks onto this site exclusively.
+    // -----------------------------------------------------------------------
+    inline constexpr AddrCandidate k_radialSwapKeyCandidates[] = {
+        // P1 -- post-patch-invariant tail with literal rel8 jz. Anchors
+        // entirely in the bytes past the SafetyHook displaced window
+        // (match+12 onward of the original prelude shape):
+        //   add rcx, 0x60; lea rdx,[rbp+0x78]; call <disp32>;
+        //   mov ecx, 0xFFFF; test rax,rax; jz +5; movzx ebx,[rax];
+        //   jmp +2.
+        // The unique movzx-ebx + jmp-+2 tail pins this site (see comment
+        // block above for the sibling-handler disambiguator). dispOffset
+        // -10 walks back to the original hook target at match+2 of the
+        // prelude shape (= start-of-this-anchor + 2 - 12).
+        {"RadialSwapKey_P1_PostPatchFull",
+         "48 83 C1 60 48 8D 55 78 E8 ?? ?? ?? ?? "
+         "B9 FF FF 00 00 48 85 C0 74 05 0F B7 18 EB 02",
+         ResolveMode::Direct, -10, 0},
+
+        // P2 -- same post-patch-invariant tail with the rel8 jz target
+        // wildcarded. Survives a recompile that shifts the branch
+        // distance while the surrounding instruction stream is preserved.
+        // Falls back to P1 only when an exact-byte match wins first; same
+        // dispOffset semantics.
+        {"RadialSwapKey_P2_PostPatchWildcardRel8",
+         "48 83 C1 60 48 8D 55 78 E8 ?? ?? ?? ?? "
+         "B9 FF FF 00 00 48 85 C0 74 ?? 0F B7 18 EB 02",
+         ResolveMode::Direct, -10, 0},
+
+        // P3 -- pre-patch full-prelude anchor (was P1). Matches only on a
+        // first-load scan against an unpatched site. Anchors on the full
+        // prelude (mov eax,[rsi]; mov [rbp+0x78],eax; mov rcx,[rip+disp32];
+        // add rcx,0x60; lea rdx,[rbp+0x78]; call <disp32>) followed by the
+        // unique tail (mov ecx,0xFFFF; test rax,rax; jz +5; movzx ebx,[rax];
+        // jmp +2). dispOffset +2 walks forward to the hook target. After
+        // a sibling has patched, bytes match+2..+11 differ, so this
+        // candidate fails gracefully and the cascade falls through to P1.
+        {"RadialSwapKey_P3_FullSequence",
+         "8B 06 89 45 78 48 8B 0D ?? ?? ?? ?? "
+         "48 83 C1 60 48 8D 55 78 E8 ?? ?? ?? ?? "
+         "B9 FF FF 00 00 48 85 C0 74 05 0F B7 18 EB 02",
+         ResolveMode::Direct, 2, 0},
+
+        // P4 -- pre-patch prelude with wildcarded rel8 jz target (was P2).
+        // Same first-load-only matching characteristic as P3; tolerates a
+        // future build that shifts the jz branch distance.
+        {"RadialSwapKey_P4_WildcardRel8",
+         "8B 06 89 45 78 48 8B 0D ?? ?? ?? ?? "
+         "48 83 C1 60 48 8D 55 78 E8 ?? ?? ?? ?? "
+         "B9 FF FF 00 00 48 85 C0 74 ?? 0F B7 18 EB 02",
+         ResolveMode::Direct, 2, 0},
+
+        // P5 -- minimal-tail prelude anchor (was P3). Drops the post-call
+        // test/movzx tail and ends at the `mov ecx, 0xFFFF` sentinel-load.
+        // Verified unique on v1.04.00. Last-resort first-load fallback if
+        // both P3 and P4 fail to a future tail rewrite. Also fails on a
+        // post-patched site (the prelude bytes are gone), at which point
+        // P1 / P2 carry the resolution.
+        {"RadialSwapKey_P5_MinimalTail",
+         "8B 06 89 45 78 48 8B 0D ?? ?? ?? ?? "
+         "48 83 C1 60 48 8D 55 78 E8 ?? ?? ?? ?? "
+         "B9 FF FF 00 00",
+         ResolveMode::Direct, 2, 0},
+    };
+
 } // namespace CDCore::Anchors
 
 #endif // CDCORE_ANCHORS_HPP

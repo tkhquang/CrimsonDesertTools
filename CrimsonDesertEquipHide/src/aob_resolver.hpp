@@ -36,6 +36,8 @@ namespace EquipHide
 
     inline constexpr auto &k_worldSystemCandidates =
         CDCore::Anchors::k_worldSystemCandidates;
+    inline constexpr auto &k_playerStaticCandidates =
+        CDCore::Anchors::k_playerStaticCandidates;
     inline constexpr auto &k_mapLookupCandidates =
         CDCore::Anchors::k_mapLookupCandidates;
     inline constexpr auto &k_partAddShowCandidates =
@@ -44,6 +46,8 @@ namespace EquipHide
         CDCore::Anchors::k_visualEquipChangeCandidates;
     inline constexpr auto &k_batchEquipCandidates =
         CDCore::Anchors::k_batchEquipCandidates;
+    inline constexpr auto &k_radialSwapKeyCandidates =
+        CDCore::Anchors::k_radialSwapKeyCandidates;
     // Historical EH name. BatchEquip is the unified label.
     inline constexpr auto &k_visualEquipSwapCandidates =
         CDCore::Anchors::k_batchEquipCandidates;

@@ -411,13 +411,66 @@ namespace EquipHide
             k_worldSystemCandidates, std::size(k_worldSystemCandidates),
             "WorldSystem");
 
-        // Publish the WorldSystem holder to the Core controlled-character
-        // resolver. Core walks WorldSystem -> ActorManager -> UserActor ->
-        // controlled_actor(+0xD8) -> identity u32s at +0xDC and +0xEC.
-        // Idempotent across consumers: when CrimsonDesertLiveTransmog is
-        // loaded alongside, both publish the same address and the later
-        // writer wins (the intended behaviour after a re-resolve).
+        // Publish the WorldSystem holder to Core. The WorldSystem chain
+        // is the client-side reach used by the per-frame body-pool walk
+        // and by other client-side state. Identity decoding no longer
+        // consumes this pointer on v1.04.00 (the discriminator byte
+        // ceased to be unique in this build); the player static
+        // resolved below feeds the controlled-character resolver
+        // instead. Idempotent across consumers: when LiveTransmog is
+        // loaded alongside, both publish the same address and the
+        // later writer wins.
         CDCore::set_world_system_holder(addrs.worldSystem);
+
+        addrs.playerStatic = resolve_address(
+            k_playerStaticCandidates, std::size(k_playerStaticCandidates),
+            "PlayerStatic");
+
+        // Publish the player static to the Core controlled-character
+        // resolver. The chain (root -> NwVirtualAsyncSession ->
+        // ServerUserActor -> ServerChildOnlyInGameActor) reaches the
+        // server-side party container, where each protagonist occupies
+        // a fixed-offset slot (Kliff=0x68, Damiane=0x168, Oongka=0x268)
+        // and the active-flag byte at slot+0x2C identifies the
+        // currently-controlled character. Idempotent with the matching
+        // publish in LiveTransmog.
+        CDCore::set_player_static_holder(addrs.playerStatic);
+
+        // Install the radial-swap-key capture mid-hook via Core. Core
+        // owns this DLL's SafetyHook instance and the per-DLL
+        // actor->character cache; EquipHide's role is to publish the
+        // resolved hook address so the controlled-character resolver
+        // gains its deterministic ghost-roster layer even when
+        // LiveTransmog is not loaded.
+        //
+        // Two-consumer (EH + LT) coordination: CrimsonDesertCore is a
+        // STATIC library, so this DLL owns its own MidHook independent
+        // of any sibling DLL's MidHook against the same process address.
+        // The AOB cascade is ordered to match either an unpatched site
+        // or a site whose prelude bytes have already been displaced by
+        // a sibling's earlier MidHook install (see anchors.hpp), so the
+        // scan succeeds regardless of load order. SafetyHook's internal
+        // chaining at the JMP target lets both DLLs' callbacks fire on
+        // every radial swap.
+        {
+            const auto radialAddr = resolve_address(
+                k_radialSwapKeyCandidates,
+                std::size(k_radialSwapKeyCandidates),
+                "RadialSwapKey");
+            if (radialAddr)
+            {
+                if (!CDCore::install_radial_swap_hook(radialAddr))
+                    logger.warning(
+                        "Radial-swap key hook install failed -- "
+                        "ghost-roster character resolution disabled");
+            }
+            else
+            {
+                logger.warning(
+                    "RadialSwapKey AOB failed -- ghost-roster "
+                    "character resolution disabled");
+            }
+        }
 
         addrs.childActorVtbl = resolve_address(
             k_childActorVtblCandidates, std::size(k_childActorVtblCandidates),
@@ -750,6 +803,12 @@ namespace EquipHide
         // would race the loader unmapping the Logic-DLL pages backing
         // the cleanup function itself.
         cleanup_vis_bytes();
+        logger.flush();
+
+        // Tear down the Core-owned radial-swap mid-hook before the
+        // SafetyHook trampoline pages can be touched by a late-firing
+        // game thread. Idempotent.
+        CDCore::uninstall_radial_swap_hook();
         logger.flush();
 
         logger.info("{} shutdown: step 5 DMK_Shutdown", MOD_NAME);

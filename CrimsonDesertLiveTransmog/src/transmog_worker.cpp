@@ -534,6 +534,15 @@ namespace Transmog
                         CDCore::invalidate_controlled_character();
                         prevCharName.clear();
                         pendingCharName.clear();
+                        // Save-load wipes every pending state -- any
+                        // body the swap guard had captured against the
+                        // outgoing world is by definition gone now, so
+                        // clear it. Leaving a stale value here would
+                        // suppress the first post-load apply if the new
+                        // world happened to recycle the same component
+                        // address.
+                        swap_stale_comp().store(
+                            0, std::memory_order_release);
                     }
                     prevUser = curUser;
                 }
@@ -602,6 +611,30 @@ namespace Transmog
                         }
                         logger.info("Char swap detected: {} -> {}",
                                     oldName, liveName);
+                        // Stale-body guard. On a save-load that
+                        // reaches the swap branch (e.g. loading a
+                        // Damiane save), the engine spawns Kliff's
+                        // body first and routes the saved-character
+                        // transition through this same handler ~10s
+                        // later, but `user+0xD8` does not rotate to
+                        // the new body until several seconds AFTER
+                        // we schedule the apply. Without a guard the
+                        // apply runs while resolve_player_component()
+                        // still walks to the soon-to-be-obsolete body
+                        // (Kliff) and writes the new character's
+                        // preset onto the wrong actor. Stamp the
+                        // body we last observed so the apply entry
+                        // can short-circuit until the engine
+                        // finishes rotating; the load-detect block
+                        // below fires its own apply on the new body
+                        // once the rotation completes. Skip the
+                        // store on first-tick (prevComp == 0): no
+                        // observation has been made, so there is
+                        // nothing to mark stale.
+                        if (prevComp > 0x10000)
+                            swap_stale_comp().store(
+                                static_cast<std::uintptr_t>(prevComp),
+                                std::memory_order_release);
                         if (flag_enabled().load(std::memory_order_relaxed))
                             schedule_transmog_ms(200);
                         pm.save();
@@ -614,45 +647,47 @@ namespace Transmog
             // Detect change: new component appeared or address changed.
             if (comp > 0x10000 && comp != prevComp)
             {
-                // Advance prevComp BEFORE the controlled-char gate so
-                // the worker does not re-observe the same change every
-                // tick while the world is still loading. The next
-                // genuine component change is still detected because
-                // prevComp tracks the most recent observed value, not
-                // the most recent successfully-applied one.
-                logger.info("Load detect: player component changed ({:#x} -> {:#x})",
-                            static_cast<uint64_t>(prevComp),
-                            static_cast<uint64_t>(comp));
-                prevComp = comp;
-
-                // Wipe the controlled-character LKG cache so the gate
-                // below decides on a fresh chain walk instead of stale
-                // identity from a previous controlled actor. A
-                // player_component change always means user+0xD8 now
-                // points at a different ClientChildOnlyInGameActor; the
-                // LKG identity from the prior actor is no longer
-                // applicable, but the resolver's torn-read absorption
-                // would otherwise return that stale name on any chain
-                // walk that lands on the new wrapper before its slot
-                // fields (actor+0x60 slot-index byte used by the
-                // companion diff) have been populated. That stale name
-                // would route the auto-apply pipeline through
-                // PresetManager::set_active_character() with the wrong
-                // character, committing the previous character's
-                // preset onto the new actor. Invalidating here costs
-                // at most one outer-loop tick of latency (the gate
-                // defers until the chain walk lands a known key) and
-                // is the only correctness-preserving choice on a swap.
-                CDCore::invalidate_controlled_character();
-
-                // Safety gate: do not auto-apply until the resolver
-                // returns a known character. With LKG invalidated
-                // immediately above, liveChar comes back empty until
-                // the chain walk on the new wrapper lands a known
-                // identity; the retry loop below tolerates that by
-                // design (next outer-loop tick re-evaluates).
+                // Resolve identity WITHOUT invalidating the LKG cache.
+                //
+                // The new resolver in CDCore walks a fresh chain every
+                // call (Player static -> party container -> per-slot
+                // active-flag bytes) and never caches a per-actor
+                // pointer that could go stale, so the historical reason
+                // for invalidating on every player_component change no
+                // longer applies.
+                //
+                // Trade-off resolved against keeping LKG: the engine
+                // rotates player_component before it commits the new
+                // active-flag byte to the server-side party container.
+                // During that window the chain reads all-zero flags and
+                // the resolver returns Unknown. Invalidating LKG here
+                // would force the auto-apply gate to defer until the
+                // engine settled, which on certain saves (Prologue,
+                // post-cutscene resume) it never does until the player
+                // takes a control action. Letting LKG persist makes the
+                // resolver fall back to the previously-controlled
+                // character through that window. The fallback is
+                // correct for save-load resuming the same identity
+                // (the dominant case) and self-corrects within one
+                // tick after the engine writes the new flag for an
+                // in-session swap.
                 const std::string liveChar =
                     current_controlled_character_name();
+
+                // Advance prevComp BEFORE the controlled-char gate so
+                // the worker does not re-observe the same change every
+                // tick while the world is still loading. prevComp
+                // tracks the most recent observed value, not the most
+                // recent successfully-applied one.
+                logger.info(
+                    "Load detect: player component changed "
+                    "({:#x} -> {:#x}); controlled = {}",
+                    static_cast<uint64_t>(prevComp),
+                    static_cast<uint64_t>(comp),
+                    liveChar.empty() ? std::string_view{"<unresolved>"}
+                                     : std::string_view{liveChar});
+                prevComp = comp;
+
                 if (liveChar.empty())
                 {
                     logger.trace(

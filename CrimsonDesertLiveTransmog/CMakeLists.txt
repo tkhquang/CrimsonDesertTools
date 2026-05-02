@@ -219,7 +219,7 @@ execute_process(
     RESULT_VARIABLE rc
 )
 if(rc EQUAL 0)
-    message(STATUS "Direct deploy OK — cleaning staging")
+    message(STATUS "Direct deploy OK -- cleaning staging")
     file(REMOVE "${STAGING_DLL}")
     if(EXISTS "${SRC_PDB}")
         execute_process(

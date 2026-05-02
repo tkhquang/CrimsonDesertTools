@@ -693,11 +693,58 @@ namespace Transmog
             return;
         }
 
+        // Stale-body guard. The load-detect thread stamps the
+        // about-to-be-obsolete body pointer into swap_stale_comp()
+        // when an in-session character swap fires before the engine
+        // has rotated `user+0xD8` to the new body. If our resolver
+        // still walks to that pre-rotation body, applying here would
+        // paint the new character's preset onto the previous body
+        // (e.g. on a Damiane save: Kliff's body ends up wearing
+        // Damiane's outfit until the engine finally rotates and the
+        // load-detect retry fires a fresh apply on the correct body).
+        // Skipping returns control to the load-detect retry budget,
+        // which will see the new component address on its next tick.
+        // Apply paths that run on a body other than the stale one
+        // clear the guard; save-load invalidation also clears it.
+        {
+            const auto staleComp =
+                swap_stale_comp().load(std::memory_order_acquire);
+            if (staleComp != 0 &&
+                staleComp == static_cast<std::uintptr_t>(a1))
+            {
+                logger.debug(
+                    "[dispatch] apply_all_transmog skipped: body still "
+                    "pre-swap, a1={:#018x}, stale={:#018x}",
+                    static_cast<uint64_t>(a1),
+                    static_cast<uint64_t>(staleComp));
+                return;
+            }
+        }
+
         // Suppress VEC hook for the entire operation.
         suppress_vec().store(true, std::memory_order_release);
 
         logger.trace("[dispatch] apply_all_transmog entry a1={:#018x}",
                      static_cast<uint64_t>(a1));
+
+        // Body has rotated past the stale one (or no swap was in
+        // flight) -- this apply will run against the live body, so
+        // any captured stale value is now obsolete. CAS-clear under
+        // the original captured value to avoid stomping a fresh
+        // capture from a later swap that raced into the worker
+        // between the early-out above and here.
+        {
+            auto staleComp =
+                swap_stale_comp().load(std::memory_order_acquire);
+            if (staleComp != 0 &&
+                staleComp != static_cast<std::uintptr_t>(a1))
+            {
+                swap_stale_comp().compare_exchange_strong(
+                    staleComp, 0,
+                    std::memory_order_release,
+                    std::memory_order_relaxed);
+            }
+        }
 
         // Snapshot lastIds for diagnostic logging.
         const std::array<uint16_t, k_slotCount> prevIds = lastIds;

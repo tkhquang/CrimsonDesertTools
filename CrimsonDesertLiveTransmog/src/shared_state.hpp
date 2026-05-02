@@ -118,6 +118,27 @@ namespace Transmog
     /// effect. This is acceptable -- the user's most recent action wins.
     std::atomic<std::size_t> &pending_slot_index();
 
+    /// Stale-body guard for the load-time char-swap window.
+    ///
+    /// On a save-load with a non-Kliff protagonist the engine first
+    /// spawns Kliff's body, then transitions `user+0xD8` to the saved
+    /// character's body several seconds later. Between those two events
+    /// the in-session swap detector observes the identity change and
+    /// schedules an apply, but the WS-chain walk inside
+    /// `resolve_player_component()` still resolves the soon-to-be-
+    /// obsolete (Kliff) body. That apply would write the new
+    /// character's preset onto the wrong actor, leaving the previous
+    /// body wearing the wrong outfit once the engine finishes rotating.
+    ///
+    /// The detector stamps the about-to-be-stale `comp` here; the
+    /// apply entry returns early when `a1` matches. Once `user+0xD8`
+    /// rotates and the next apply runs against a different `a1`, the
+    /// guard clears itself. Save-load invalidation also clears it
+    /// because all queued state is wiped at that boundary anyway.
+    /// Zero means "no stale body in flight"; a successful skip is
+    /// silent except for a debug log line.
+    std::atomic<std::uintptr_t> &swap_stale_comp();
+
     // --- Hot-path utilities ---
 
     inline int64_t steady_ms() noexcept
