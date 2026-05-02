@@ -45,49 +45,46 @@ namespace Transmog::RealPartTearDown
 
         // ---- Runtime struct layout for the PartDef/auth-table container ----
         //
-        // Source of truth: IDA decompile of sub_148EB6700 +
-        // cross-referenced via live CE dumps at multiple call sites on
-        // v1.02.00. These are data-layout offsets so they cannot be
-        // AOB-scanned. If a future patch reshapes the struct the sanity
-        // checks below bail out (count > k_maxPlausibleEntries,
-        // arrayBase < 0x10000, slotTag outside plausible range) before
-        // we touch anything dangerous.
+        // These are data-layout offsets, not AOB-anchored, so they
+        // shift across game patches. Sanity checks (container >0x10000,
+        // count <= k_maxPlausibleEntries, slotTag in plausible range)
+        // bail out before touching anything dangerous if a future
+        // patch reshapes the struct again.
         //
-        // a1 (SlotPopulator descriptor context) layout:
-        //   +0x78 QWORD pointer to the PartDef/auth-table container on
-        //               v1.03.01; shifted to +0x88 on v1.04.00 as the
-        //               component struct gained 0x10 bytes of new
-        //               fields in front of this slot.
+        // a1 is the SlotPopulator descriptor context. The container
+        // pointer field shifted as the component grew new fields in
+        // front of this slot:
+        //   v1.03.01: container @ a1 + 0x78
+        //   v1.04.00: container @ a1 + 0x88   (+0x10 of new fields)
+        //   v1.05.00: container @ a1 + 0x88   (unchanged from v1.04)
         //
-        // container layout (unchanged across v1.03.01 / v1.04.00):
-        //   +0x00 QWORD header (unused by this module)
-        //   +0x08 QWORD base address of stride-0xC8 entry array
+        // container layout (unchanged across all versions):
+        //   +0x00 QWORD header (unused)
+        //   +0x08 QWORD base address of entry array
         //   +0x10 DWORD live entry count
         //   +0x14 DWORD capacity
         //
-        // entry layout (stride 0xC8 / 200 bytes, unchanged):
-        //   +0x08 WORD  primary item word (0xFFFF == empty slot)
-        //   +0x10 QWORD gate (must be non-zero for live entries)
-        //   +0x88 WORD  alt item word (0xFFFF -> fall back to +0x08)
-        //   +0xC0 WORD  slot tag (search key; helm=0x0003 .. boot=0x0010)
+        // entry layout shifted between v1.04 and v1.05:
+        //   v1.04.00: stride 0xC8, slot tag @ +0xC0
+        //   v1.05.00: stride 0xD0, slot tag @ +0xC8 (entry grew 8 bytes)
         //
-        // v1.04.00 entry-layout confirmation: the ADD path in the game's
-        // auth-table helper (sub_14EF6B830) executes
-        //     add rbx, [r12+08]        ; rbx = array + offset
-        //     mov [rbx+0xC0], ax        ; slot tag write
-        //     inc [r12+0x10]            ; count++
-        // captured live under a data-write breakpoint on the count
-        // field during a helm unequip. Confirms stride 0xC8 (rbx pre-add
-        // was 0xAF0 = 14 * 0xC8 for the 14 live entries observed) and
-        // slot-tag offset 0xC0.
-        constexpr std::uintptr_t k_containerPtrOffset      = 0x88;
+        // entry fields (offsets within an entry, v1.05):
+        //   +0x08 WORD  primary item word (0xFFFF or 0 == empty)
+        //   +0x10 QWORD gate (must be non-zero for a live entry)
+        //   +0xC8 WORD  slot tag (search key; helm=0x0003 .. cloak=0x0010)
+        //
+        // The alt item word at +0x88 used by older versions is no
+        // longer relied on; the primary path at +0x08 is sufficient.
+        // Slot-tag values themselves are unchanged across versions
+        // (Helm=0x03, Chest=0x04, Gloves=0x05, Boots=0x06, Cloak=0x10);
+        // only the position within the entry shifted.
+        constexpr std::uintptr_t k_containerPtrOffset       = 0x88;
         constexpr std::uintptr_t k_containerArrayBaseOffset = 0x08;
-        constexpr std::uintptr_t k_containerCountOffset    = 0x10;
-        constexpr std::uintptr_t k_entryStride             = 0xC8;
-        constexpr std::uintptr_t k_entryPrimaryWordOffset  = 0x08;
-        constexpr std::uintptr_t k_entryGateOffset         = 0x10;
-        constexpr std::uintptr_t k_entryAltWordOffset      = 0x88;
-        constexpr std::uintptr_t k_entrySlotTagOffset      = 0xC0;
+        constexpr std::uintptr_t k_containerCountOffset     = 0x10;
+        constexpr std::uintptr_t k_entryStride              = 0xD0;
+        constexpr std::uintptr_t k_entryPrimaryWordOffset   = 0x08;
+        constexpr std::uintptr_t k_entrySlotTagOffset       = 0xC8;
+        constexpr std::uintptr_t k_entryGateOffset          = 0x10;
 
         constexpr std::uint32_t k_maxPlausibleEntries      = 0x1000;
         constexpr std::uint16_t k_minPlausibleSlotTag      = 0x0003;
@@ -290,9 +287,7 @@ namespace Transmog::RealPartTearDown
             return false;
         }
 
-        bool entryFound = false;
         std::uint32_t hash = 0;
-        bool result = false;
 
         __try
         {
@@ -318,42 +313,31 @@ namespace Transmog::RealPartTearDown
                 return false;
             }
 
-            // First-entry sanity log, once per session. Warns loudly if
-            // the gate qword is zero -- that would mean the struct
-            // reshaped and every subsequent walk is reading garbage.
+            // First-entry sanity log, once per session.
             bool expected = false;
             if (g_loggedFirstEntry.compare_exchange_strong(
                     expected, true, std::memory_order_acq_rel))
             {
-                const auto firstEntry = arrayBase;
                 const auto p0 =
                     *reinterpret_cast<volatile std::uint16_t *>(
-                        firstEntry + k_entryPrimaryWordOffset);
-                const auto g0 =
-                    *reinterpret_cast<volatile std::uint64_t *>(
-                        firstEntry + k_entryGateOffset);
-                const auto a0 =
-                    *reinterpret_cast<volatile std::uint16_t *>(
-                        firstEntry + k_entryAltWordOffset);
+                        arrayBase + k_entryPrimaryWordOffset);
                 const auto t0 =
                     *reinterpret_cast<volatile std::uint16_t *>(
-                        firstEntry + k_entrySlotTagOffset);
+                        arrayBase + k_entrySlotTagOffset);
+                const auto g0 =
+                    *reinterpret_cast<volatile std::uint64_t *>(
+                        arrayBase + k_entryGateOffset);
                 logger.info(
                     "[dispatch] tear_down first-entry sanity: "
-                    "count={} primary={:#06x} gate={:#018x} alt={:#06x} "
-                    "slotTag={:#06x}",
-                    count, p0,
-                    static_cast<std::uint64_t>(g0), a0, t0);
-                if (g0 == 0)
-                {
-                    logger.warning(
-                        "[dispatch] tear_down: first-entry gate is zero -- "
-                        "PartDef struct layout may have shifted, all "
-                        "subsequent walks are suspect");
-                }
+                    "count={} primary={:#06x} slotTag={:#06x}@+{:#x} "
+                    "gate={:#018x}",
+                    count, p0, t0,
+                    static_cast<std::uint64_t>(k_entrySlotTagOffset),
+                    static_cast<std::uint64_t>(g0));
             }
 
             std::uintptr_t foundEntry = 0;
+            std::uint16_t  itemWord   = 0;
             for (std::uint32_t i = 0; i < count; ++i)
             {
                 const auto entry = arrayBase + k_entryStride * i;
@@ -361,7 +345,7 @@ namespace Transmog::RealPartTearDown
                 const auto primary =
                     *reinterpret_cast<volatile std::uint16_t *>(
                         entry + k_entryPrimaryWordOffset);
-                if (primary == 0xFFFF)
+                if (primary == 0xFFFF || primary == 0)
                     continue;
 
                 const auto gate =
@@ -377,6 +361,7 @@ namespace Transmog::RealPartTearDown
                     continue;
 
                 foundEntry = entry;
+                itemWord = primary;
                 break;
             }
 
@@ -389,44 +374,37 @@ namespace Transmog::RealPartTearDown
                 return false;
             }
 
-            entryFound = true;
-
-            // Hash extraction (verbatim from sub_148EB6700 decompile).
-            std::uint16_t itemWord =
-                *reinterpret_cast<volatile std::uint16_t *>(
-                    foundEntry + k_entryAltWordOffset);
-            if (itemWord == 0xFFFF)
-                itemWord = *reinterpret_cast<volatile std::uint16_t *>(
-                    foundEntry + k_entryPrimaryWordOffset);
-
-            // Copy to a stable local -- the lookup fn takes the ADDRESS of a
-            // short and may dereference it multiple times.
+            // Resolve hash via the engine's interner.
             std::uint16_t localWord = itemWord;
             void *hashPtr = lookupFn(&localWord);
             if (!hashPtr)
             {
                 logger.trace(
                     "[dispatch] tear_down slot={:#06x} entryFound=true "
-                    "itemWord={:#06x} hash=<lookup_null>",
+                    "primary={:#06x} hash=<lookup_null>",
                     gameSlotTag, itemWord);
                 return false;
             }
-
             hash = *reinterpret_cast<volatile std::uint32_t *>(hashPtr);
             if (hash == 0 || hash == 0xFFFFFFFF)
             {
                 logger.trace(
                     "[dispatch] tear_down slot={:#06x} entryFound=true "
-                    "itemWord={:#06x} hash={:#010x} <rejected>",
+                    "primary={:#06x} hash={:#010x} <rejected>",
                     gameSlotTag, itemWord, hash);
                 return false;
             }
 
-            // Safe scene-graph tear-down. This path goes through
-            // sub_1425EBAE0 and does NOT touch the auth table.
+            // Safe scene-graph tear-down: routes through sub_1425EBAE0
+            // and does NOT mutate the authoritative entry array we just
+            // walked, which is what makes it safe to call mid-iteration.
             safeFn(static_cast<std::int64_t>(a1), hash,
                    static_cast<std::int16_t>(gameSlotTag));
-            result = true;
+            logger.trace(
+                "[dispatch] tear_down slot={:#06x} entryFound=true "
+                "primary={:#06x} hash={:#010x} result=true",
+                gameSlotTag, itemWord, hash);
+            return true;
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
@@ -435,11 +413,6 @@ namespace Transmog::RealPartTearDown
                 gameSlotTag);
             return false;
         }
-
-        logger.trace(
-            "[dispatch] tear_down slot={:#06x} entryFound={} hash={:#010x} result={}",
-            gameSlotTag, entryFound, hash, result);
-        return result;
     }
 
     std::uint16_t get_real_item_id(void *a1Raw,
@@ -477,7 +450,7 @@ namespace Transmog::RealPartTearDown
                 const auto primary =
                     *reinterpret_cast<volatile std::uint16_t *>(
                         entry + k_entryPrimaryWordOffset);
-                if (primary == 0xFFFF)
+                if (primary == 0xFFFF || primary == 0)
                     continue;
 
                 const auto gate =
@@ -492,21 +465,14 @@ namespace Transmog::RealPartTearDown
                 if (tag != gameSlotTag)
                     continue;
 
-                // Prefer +0x88 (alt id) when valid, fall back to +0x08
-                // primary. Matches sub_148EB6700's word-selection recipe.
-                std::uint16_t w =
-                    *reinterpret_cast<volatile std::uint16_t *>(
-                        entry + k_entryAltWordOffset);
-                if (w == 0xFFFF)
-                    w = primary;
-                return w;
+                return primary;
             }
+            return 0;
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
             return 0;
         }
-        return 0;
     }
 
     bool tear_down_by_item_id(void *a1Raw, std::uint16_t itemId,

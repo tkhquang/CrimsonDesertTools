@@ -104,7 +104,7 @@ namespace Transmog
     // descriptor (a1). The container is the entry table used by the
     // capture path:
     //
-    //   container +0x08  QWORD   stride-0xC8 entry array base
+    //   container +0x08  QWORD   entry array base
     //   container +0x10  DWORD   live entry count
     //   container +0x14  DWORD   capacity
     //
@@ -113,12 +113,27 @@ namespace Transmog
     //
     //   v1.03.01 -- pointer @ a1 + 0x78
     //   v1.04.00 -- pointer @ a1 + 0x88   (+0x10 of new fields inserted)
+    //   v1.05.00 -- pointer @ a1 + 0x88   (unchanged from v1.04)
     //
     // Reading the old offset on v1.04.00 returns garbage (the qword
     // that lives at +0x78 is no longer the container pointer), which
     // is what produced the "Capture: no entry table" warning. Mirrors
     // k_containerPtrOffset in real_part_tear_down.cpp.
     constexpr std::ptrdiff_t k_compEntryTablePtrOffset = 0x88;
+
+    // Entry layout within the auth-table array. v1.05 grew the entry
+    // by 8 bytes and shifted the slot tag accordingly:
+    //
+    //   v1.04.00: stride=0xC8 (200), slotTag@+0xC0
+    //   v1.05.00: stride=0xD0 (208), slotTag@+0xC8
+    //
+    // primary item id at +0x08 is unchanged across versions. Slot-tag
+    // VALUES themselves are unchanged (Helm=0x03, Chest=0x04, Gloves=0x05,
+    // Boots=0x06, Cloak=0x10); only the position within the entry shifted.
+    // Mirrors k_entryStride / k_entrySlotTagOffset in real_part_tear_down.cpp.
+    constexpr std::ptrdiff_t k_compEntryStride         = 0xD0;
+    constexpr std::ptrdiff_t k_compEntryItemIdOffset   = 0x08;
+    constexpr std::ptrdiff_t k_compEntrySlotTagOffset  = 0xC8;
 
     // --- Public interface ---
 
@@ -224,9 +239,9 @@ namespace Transmog
             int captured = 0;
             for (uint32_t e = 0; e < entryCount && entryArray > 0x10000; ++e)
             {
-                auto base = entryArray + e * 200;
-                auto gameSlot = *reinterpret_cast<int16_t *>(base + 192);
-                auto itemId = *reinterpret_cast<uint16_t *>(base + 8);
+                auto base = entryArray + e * k_compEntryStride;
+                auto gameSlot = *reinterpret_cast<int16_t *>(base + k_compEntrySlotTagOffset);
+                auto itemId = *reinterpret_cast<uint16_t *>(base + k_compEntryItemIdOffset);
 
                 logger.info("  Slot {:>2} ({:<12}) = item {:#06x}",
                             gameSlot, game_slot_name(gameSlot), itemId);
@@ -275,9 +290,9 @@ namespace Transmog
 
             for (uint32_t e = 0; e < entryCount && entryArray > 0x10000; ++e)
             {
-                auto base = entryArray + e * 200;
-                auto gameSlot = *reinterpret_cast<int16_t *>(base + 192);
-                auto itemId = *reinterpret_cast<uint16_t *>(base + 8);
+                auto base = entryArray + e * k_compEntryStride;
+                auto gameSlot = *reinterpret_cast<int16_t *>(base + k_compEntrySlotTagOffset);
+                auto itemId = *reinterpret_cast<uint16_t *>(base + k_compEntryItemIdOffset);
 
                 auto tmSlot = slot_from_game_slot(gameSlot);
                 if (tmSlot.has_value() && itemId != 0 && itemId != 0xFFFF)
