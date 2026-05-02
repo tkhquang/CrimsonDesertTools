@@ -2,6 +2,16 @@
 
 All notable changes to the CrimsonDesertLiveTransmog mod will be documented in this file.
 
+## [0.7.0] - v1.05.00 patch support + multi-protagonist fixes
+
+- Updated for game version 1.05.00: transmog correctly identifies carrier-required versus direct-wear items on the latest patch.
+- Updated for game version 1.05.00: real-equipment capture and restore now read the live equipment table on the latest patch.
+- Restored radial character-swap detection on game version 1.05.00.
+- Updated item display names to match the v1.05.00 catalog.
+- Radial-menu character switching is now reliably tracked, so each protagonist's preset applies after a swap.
+- Fixed the wrong outfit briefly appearing on a teammate after a save-load.
+- Fixed coexistence with Equip Hide: both mods can now be loaded together without breaking radial-menu tracking.
+
 ## [0.6.4] - Game Patch 1.04.00 Capture Outfit Fix
 
 - Capture Outfit and the equipment restore after Clear work again on game version 1.04.00.
@@ -90,6 +100,7 @@ All notable changes to the CrimsonDesertLiveTransmog mod will be documented in t
 - Modular code split: `transmog_apply` (apply/clear logic), `transmog_hooks` (VEC/BatchEquip callbacks), `transmog_worker` (debounce/load-detect/nametable threads), `shared_state` (cross-TU atomics)
 - Docs clarify ReShade is required for GUI; without it, users edit JSON manually via Capture hotkey
 
+[0.7.0]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.7.0
 [0.6.4]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.6.4
 [0.6.3]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.6.3
 [0.6.2]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.6.2
