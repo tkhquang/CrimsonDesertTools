@@ -474,16 +474,63 @@ namespace CDCore::Anchors
     // bytes past the call locks onto this site exclusively.
     // -----------------------------------------------------------------------
     inline constexpr AddrCandidate k_radialSwapKeyCandidates[] = {
-        // P1 -- post-patch-invariant tail with literal rel8 jz. Anchors
-        // entirely in the bytes past the SafetyHook displaced window
-        // (match+12 onward of the original prelude shape):
+        // P0 -- v1.05.00 full pre-patch sequence. Differences vs v1.04:
+        //   * Source register rsi -> rdi (`8B 06` -> `8B 07`).
+        //   * Sentinel emitted as `mov r14d, 0xFFFF` (41 BE ...) AFTER
+        //     the lookup call instead of `mov ecx, 0xFFFF` (B9 ...)
+        //     before it.
+        //   * Tail jmp rel8 target shifted from `EB 02` to `EB 03`.
+        // 1 unique hit on v1.05.00 at 0x1421CE795. dispOffset +2 walks
+        // forward to the same `mov [rbp+0x78], eax` hook target as the
+        // v1.04 prelude-anchored candidates.
+        {"RadialSwapKey_P0_v105_FullSequence",
+         "8B 07 89 45 78 48 8B 0D ?? ?? ?? ?? "
+         "48 83 C1 60 48 8D 55 78 E8 ?? ?? ?? ?? "
+         "41 BE FF FF 00 00 48 85 C0 74 05 0F B7 18 EB 03",
+         ResolveMode::Direct, 2, 0},
+
+        // P0b -- v1.05.00 full pre-patch with rel8 targets wildcarded.
+        // Tolerates a future build that shifts the test-jz / movzx-jmp
+        // branch distances. Same dispOffset semantics as P0.
+        {"RadialSwapKey_P0b_v105_WildcardRel8",
+         "8B 07 89 45 78 48 8B 0D ?? ?? ?? ?? "
+         "48 83 C1 60 48 8D 55 78 E8 ?? ?? ?? ?? "
+         "41 BE FF FF 00 00 48 85 C0 74 ?? 0F B7 18 EB ??",
+         ResolveMode::Direct, 2, 0},
+
+        // P0c -- v1.05.00 post-patch tail. Anchors past the SafetyHook
+        // displaced window (`8B 07 89 45 78` overwritten by E9 rel32):
+        //   add rcx, 0x60; lea rdx,[rbp+0x78]; call <disp32>;
+        //   mov r14d, 0xFFFF; test rax,rax; jz +5; movzx ebx,[rax];
+        //   jmp +3.
+        // Survives a sibling MidHook install in either load order (LT
+        // before EH or EH before LT) because the prelude bytes are not
+        // part of the match. dispOffset -10 walks back to the original
+        // hook target at `89 45 78` of the prelude (semantically equal
+        // to the v1.04 post-patch walk).
+        {"RadialSwapKey_P0c_v105_PostPatchFull",
+         "48 83 C1 60 48 8D 55 78 E8 ?? ?? ?? ?? "
+         "41 BE FF FF 00 00 48 85 C0 74 05 0F B7 18 EB 03",
+         ResolveMode::Direct, -10, 0},
+
+        // P0d -- v1.05.00 post-patch with rel8 wildcards. Same -10
+        // dispOffset semantics as P0c.
+        {"RadialSwapKey_P0d_v105_PostPatchWildcardRel8",
+         "48 83 C1 60 48 8D 55 78 E8 ?? ?? ?? ?? "
+         "41 BE FF FF 00 00 48 85 C0 74 ?? 0F B7 18 EB ??",
+         ResolveMode::Direct, -10, 0},
+
+        // P1 -- v1.04.00 post-patch-invariant tail with literal rel8 jz.
+        // Anchors entirely in the bytes past the SafetyHook displaced
+        // window (match+12 onward of the original prelude shape):
         //   add rcx, 0x60; lea rdx,[rbp+0x78]; call <disp32>;
         //   mov ecx, 0xFFFF; test rax,rax; jz +5; movzx ebx,[rax];
         //   jmp +2.
         // The unique movzx-ebx + jmp-+2 tail pins this site (see comment
         // block above for the sibling-handler disambiguator). dispOffset
         // -10 walks back to the original hook target at match+2 of the
-        // prelude shape (= start-of-this-anchor + 2 - 12).
+        // prelude shape (= start-of-this-anchor + 2 - 12). Inert on
+        // v1.05.00 because the sentinel encoding changed from B9 to 41 BE.
         {"RadialSwapKey_P1_PostPatchFull",
          "48 83 C1 60 48 8D 55 78 E8 ?? ?? ?? ?? "
          "B9 FF FF 00 00 48 85 C0 74 05 0F B7 18 EB 02",

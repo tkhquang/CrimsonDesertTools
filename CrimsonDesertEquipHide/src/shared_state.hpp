@@ -113,7 +113,6 @@ namespace EquipHide
     std::atomic<bool> &needs_direct_write();
 
     // --- Feature flags ---
-    std::atomic<bool> &flag_force_show();
     std::atomic<bool> &flag_bald_fix();
     std::atomic<bool> &flag_gliding_fix();
     std::atomic<bool> &flag_fallback_mode();

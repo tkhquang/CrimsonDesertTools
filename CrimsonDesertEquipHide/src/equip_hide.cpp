@@ -47,8 +47,6 @@ namespace EquipHide
             "General", "LogLevel", "INFO");
 
         DMK::Config::register_atomic<bool>(
-            "General", "ForceShow", "Force Show", flag_force_show(), false);
-        DMK::Config::register_atomic<bool>(
             "General", "BaldFix", "Bald Fix", flag_bald_fix(), true);
         DMK::Config::register_atomic<bool>(
             "General", "GlidingFix", "Gliding Fix", flag_gliding_fix(), true);
@@ -300,7 +298,7 @@ namespace EquipHide
             s_hideLocked[hashIdx] &&
             is_any_category_hidden(mask))
         {
-            auto *visPtr = reinterpret_cast<uint8_t *>(partInOut + 0x1C);
+            auto *visPtr = reinterpret_cast<uint8_t *>(partInOut + 0x20);
             if (s_hideLocked[hashIdx] == 2)
             {
                 *visPtr = 0;
@@ -358,7 +356,7 @@ namespace EquipHide
 
         if (is_any_category_hidden_for(charMask, charIdx))
         {
-            auto *visPtr = reinterpret_cast<uint8_t *>(partInOut + 0x1C);
+            auto *visPtr = reinterpret_cast<uint8_t *>(partInOut + 0x20);
             *visPtr = 2;
             if (cascadeOn && isChest)
             {
@@ -372,12 +370,6 @@ namespace EquipHide
         {
             if (cascadeOn && isChest)
                 s_hideLocked[hashIdx] = 0;
-
-            if (flag_force_show().load(std::memory_order_relaxed))
-            {
-                auto *visPtr = reinterpret_cast<uint8_t *>(partInOut + 0x1C);
-                *visPtr = 0;
-            }
         }
     }
 

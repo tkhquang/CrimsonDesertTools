@@ -105,19 +105,37 @@ namespace EquipHide
                     ? get_part_map_for(charIdx)
                     : get_part_map();
 
+            int reinjected = 0;
+
             for (const auto &[hash, mask] : partMap)
             {
                 const bool hidden = is_any_category_hidden_for(mask, charIdx);
+                auto existing = lookup(mapBase, &hash);
 
                 if (!hidden)
                 {
-                    if (!cascadeOn || (mask & k_cascadeBodyMask) == 0)
-                        continue;
+                    /* Toggle-off cache flush. The engine caches a
+                       hidden render-state when our inject inserts an
+                       entry with vis=2; the cache is read from a
+                       struct field that direct vis-byte writes do not
+                       reach, so body armor stays visually hidden after
+                       toggle-off unless we re-insert with vis=0. The
+                       re-insert path below forces the engine to
+                       re-process the entry and clear its cached
+                       hidden state. Visible parts with no existing
+                       entry have nothing to flush, so skip unless the
+                       cascade-fix path needs them. */
+                    if (!existing)
+                    {
+                        if (!cascadeOn || (mask & k_cascadeBodyMask) == 0)
+                            continue;
+                    }
                 }
-
-                auto existing = lookup(mapBase, &hash);
-                if (existing)
+                else if (existing)
                 {
+                    /* Hidden category, entry already present: vis byte
+                       is updated in-place by the direct-write path; no
+                       re-insert needed. */
                     ++existing_set;
                     continue;
                 }
@@ -156,11 +174,17 @@ namespace EquipHide
                     logger.debug("  0x{:X} -- INJECTED new entry", hash);
                     ++injected;
                 }
+                else if (!hidden)
+                {
+                    logger.trace("  0x{:X} -- RE-INJECTED visible (cache flush)",
+                                 hash);
+                    ++reinjected;
+                }
             }
 
             logger.debug("ArmorInject map: {} injected, {} existing updated, "
-                         "{} skipped (no bucket key)",
-                         injected, existing_set, skipped_key);
+                         "{} re-injected, {} skipped (no bucket key)",
+                         injected, existing_set, reinjected, skipped_key);
             result = injected;
         }
         __except (EXCEPTION_EXECUTE_HANDLER)

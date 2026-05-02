@@ -109,7 +109,7 @@ namespace EquipHide
                 if (!entry)
                     continue;
 
-                const auto visAddr = entry + 0x1C;
+                const auto visAddr = entry + 0x20;
                 const VisKey key{vc, visAddr};
                 s_touchedVisKeys.push_back(key);
                 auto *visPtr = reinterpret_cast<uint8_t *>(visAddr);
@@ -133,23 +133,27 @@ namespace EquipHide
                 }
                 else
                 {
+                    /* Always force vis=0 for visible parts. Cached
+                       origVis values cannot be restored verbatim:
+                       the engine writes its own state into this byte
+                       (sample values 0xE6, 0xF6 observed in trace)
+                       with the hidden-bit (0x02) set, so restoring
+                       the cached value keeps the part hidden. */
+                    *visPtr = 0;
                     auto it = origVis.find(key);
                     if (it != origVis.end())
                     {
-                        const auto restored = (it->second == 2) ? 0 : it->second;
-                        *visPtr = static_cast<uint8_t>(restored);
-                        logger.trace("  [{}] 0x{:04X} restored (vis={}, char_idx={})",
-                                     i, hash, restored, charIdx);
+                        logger.trace("  [{}] 0x{:04X} restored (vis=0, "
+                                     "cached_orig=0x{:02X}, char_idx={})",
+                                     i, hash, it->second, charIdx);
                         origVis.erase(it);
-                        ++restoredCount;
                     }
-                    else if (flag_force_show().load(std::memory_order_relaxed))
+                    else
                     {
-                        *visPtr = 0;
-                        ++restoredCount;
                         logger.trace("  [{}] 0x{:04X} force-shown (vis=0, char_idx={})",
                                      i, hash, charIdx);
                     }
+                    ++restoredCount;
                 }
             }
         }
@@ -219,9 +223,11 @@ namespace EquipHide
             }
 
             auto *visPtr = reinterpret_cast<uint8_t *>(entryKey.addr);
-            const auto origVal = it->second;
-            const auto restored = (origVal == 2) ? 0 : origVal;
-            *visPtr = static_cast<uint8_t>(restored);
+            // Cached origVis values can carry the engine's own
+            // hidden-bit (0x02). Restoring verbatim keeps the part
+            // hidden, so write a literal 0 (same reasoning as the
+            // main restore branch above).
+            *visPtr = 0;
             it = origVis.erase(it);
             ++orphanRestored;
         }

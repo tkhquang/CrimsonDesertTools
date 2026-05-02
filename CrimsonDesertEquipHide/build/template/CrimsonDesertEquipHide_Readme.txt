@@ -14,7 +14,6 @@ FEATURES:
   Shoulder, Mask, Glasses, Accessories
 - 3 User Presets: custom part groups combining parts from any category
 - Global show-all / hide-all hotkeys
-- ForceShow mode for compatibility with third-party replacer mods
 - Fully customizable settings through INI configuration
 
 INSTALLATION:
@@ -79,11 +78,6 @@ USING WITH OPTISCALER:
 
   This applies to any ASI mod. If you have other .asi mods (e.g.
   CDSprintHold), move them into the plugins folder as well.
-
-REPLACER MOD COMPATIBILITY:
-  If equipment stays invisible when toggling to visible (common with
-  third-party "Playing as" character mods), set ForceShow = true in
-  the [General] section of the INI file.
 
 CONFIGURATION:
 Edit CrimsonDesertEquipHide.ini to customize hotkeys, categories,
