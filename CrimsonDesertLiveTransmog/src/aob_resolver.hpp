@@ -29,6 +29,8 @@ namespace Transmog
     // single source of truth lives in cdcore/anchors.hpp).
     inline constexpr auto &k_worldSystemCandidates =
         CDCore::Anchors::k_worldSystemCandidates;
+    inline constexpr auto &k_playerStaticCandidates =
+        CDCore::Anchors::k_playerStaticCandidates;
     inline constexpr auto &k_mapLookupCandidates =
         CDCore::Anchors::k_mapLookupCandidates;
     inline constexpr auto &k_partAddShowCandidates =
@@ -39,6 +41,8 @@ namespace Transmog
         CDCore::Anchors::k_visualEquipChangeCandidates;
     inline constexpr auto &k_batchEquipCandidates =
         CDCore::Anchors::k_batchEquipCandidates;
+    inline constexpr auto &k_radialSwapKeyCandidates =
+        CDCore::Anchors::k_radialSwapKeyCandidates;
 
     namespace detail
     {

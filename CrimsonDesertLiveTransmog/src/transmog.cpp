@@ -675,10 +675,13 @@ namespace Transmog
         // --- Input ---
 
         // Resolve WorldSystem pointer for player detection on load and
-        // publish the same address to the Core controlled-character
-        // resolver. Core walks WorldSystem -> ActorManager -> UserActor ->
-        // controlled_actor(+0xD8) -> identity u32s at +0xDC and +0xEC;
-        // unresolved holder degrades to Unknown without crashing.
+        // publish the same address to Core. The WorldSystem chain is the
+        // client-side reach used by load-time transmog and the per-frame
+        // body-pool walk; on v1.04.00 it no longer participates in
+        // controlled-character identification (the +0x50 byte that used
+        // to discriminate between protagonists ceased to be unique in
+        // this build). Identity decoding now consumes the player static
+        // resolved below.
         {
             auto wsAddr = resolve_address(
                 k_worldSystemCandidates,
@@ -695,6 +698,75 @@ namespace Transmog
                 logger.warning(
                     "WorldSystem AOB failed -- load-time transmog and "
                     "per-character presets disabled");
+            }
+        }
+
+        // Resolve the server-side player static and publish it to Core.
+        // The cascade exposes a RIP-relative load-or-store of the static
+        // qword (writer in P1, two readers in P2/P3); the resolver walks
+        // root -> NwVirtualAsyncSession (+0x18) -> ServerUserActor (+0xA0)
+        // -> ServerChildOnlyInGameActor (+0xD0) and identifies the
+        // controlled character by which fixed-offset slot inside the
+        // party container has slot+0x2C set to 1. An unresolved holder
+        // degrades the resolver to Unknown without crashing; consumer
+        // code already treats Unknown as "preserve previous identity".
+        {
+            auto playerAddr = resolve_address(
+                k_playerStaticCandidates,
+                std::size(k_playerStaticCandidates),
+                "PlayerStatic");
+            if (playerAddr)
+            {
+                logger.info("Player static at 0x{:X}", playerAddr);
+                CDCore::set_player_static_holder(playerAddr);
+            }
+            else
+            {
+                logger.warning(
+                    "PlayerStatic AOB failed -- controlled-character "
+                    "detection disabled, presets cannot route by character");
+            }
+        }
+
+        // Resolve the radial-UI swap-key capture site and install the
+        // mid-hook in Core. The hook stamps a pending characterinfo key
+        // (1 = Kliff, 4 = Damiane, 6 = Oongka) every time the radial UI
+        // commits a swap; the resolver consumes that key on the next
+        // chain walk to bind the live userActor pointer to a known
+        // character, providing deterministic identity for ghost-roster
+        // states the slot-offset decode cannot resolve. Optional
+        // feature -- failure leaves the slot-offset decode and the LKG
+        // cache as the resolver's only layers, which is the pre-fix
+        // behaviour.
+        //
+        // Two-consumer (LT + EH) coordination: CrimsonDesertCore is a
+        // STATIC library, so this DLL owns its own MidHook independent
+        // of any sibling DLL's MidHook against the same process address.
+        // The AOB cascade is ordered to match either an unpatched site
+        // or a site whose prelude bytes have already been displaced by
+        // a sibling's earlier MidHook install (see anchors.hpp), so the
+        // scan succeeds regardless of load order. SafetyHook's internal
+        // chaining at the JMP target lets both DLLs' callbacks fire on
+        // every radial swap.
+        {
+            const auto radialAddr = resolve_address(
+                k_radialSwapKeyCandidates,
+                std::size(k_radialSwapKeyCandidates),
+                "RadialSwapKey");
+            if (radialAddr)
+            {
+                if (!CDCore::install_radial_swap_hook(radialAddr))
+                {
+                    logger.warning(
+                        "Radial-swap key hook install failed -- "
+                        "ghost-roster character resolution disabled");
+                }
+            }
+            else
+            {
+                logger.warning(
+                    "RadialSwapKey AOB failed -- ghost-roster "
+                    "character resolution disabled");
             }
         }
 
@@ -732,6 +804,13 @@ namespace Transmog
         stop_load_detect_thread();
         stop_apply_worker();
         join_deferred_nametable_scan();
+
+        // Tear down the Core-owned radial-swap mid-hook before the
+        // SafetyHook trampoline pages can be touched by a late-firing
+        // game thread. Idempotent: safe to call when no hook is
+        // installed and when the matching uninstall has already run
+        // from a sibling consumer.
+        CDCore::uninstall_radial_swap_hook();
 
         // Full DMK teardown: removes every managed hook (BatchEquip,
         // VEC, PartAddShow), stops and clears the InputManager poller
