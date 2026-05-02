@@ -16,7 +16,6 @@
 - IndependentToggle mode: categories sharing a hotkey flip their own state individually, preserving mixed visible/hidden configurations
 - BaldFix: runtime hair-visibility fix when helmet/cloak/mask is hidden - no PAZ patching needed. Hair/beard may occasionally disappear; re-toggling the headgear (show then hide) restores it
 - GlidingFix: prevents hidden equipment from briefly flashing visible during state transitions (e.g. exiting gliding, cutscene transitions)
-- ForceShow mode for compatibility with mods that alter default equipment visibility via PAZ patching (e.g. character replacers, armor replacers, transmog mods)
 - Hot-reload cleanup: visibility bytes restored on DLL unload
 - SEH-protected hook callback to prevent crashes if mod is outdated
 - Fully customizable settings via INI configuration
@@ -102,12 +101,6 @@ The mod is configured via the `CrimsonDesertEquipHide.ini` file:
 [General]
 ; Log level: Trace, Debug, Info, Warning, Error
 LogLevel = Info
-; Set to true if you use mods that alter the default visibility of equipment
-; via PAZ patching (e.g. character replacers like 'Playing Kliff as Damiane',
-; armor replacers, transmog mods). ForceShow overrides their changes so
-; toggling equipment back to visible still works.
-; Safe to leave false if you are not using such mods.
-ForceShow = false
 ; Prevents baldness when hiding helmets/cloaks/masks
 ; Hair/beard may occasionally disappear; re-toggling the helmet (show then hide) restores it
 BaldFix = true
@@ -277,17 +270,6 @@ Parts = CD_MainWeapon_Sword_R, CD_MainWeapon_Sword_L, ..., CD_MainWeapon_Axe_R, 
 
 The active character is detected by walking the live WorldSystem pointer chain to the currently-controlled actor and decoding its built-in identity fields. Each party member visible on screen tracks its own per-character Parts list independently, so hiding armor on Damiane and then swapping back to Kliff keeps Damiane's armor hidden while Kliff renders under his own configuration. The previously-controlled character's hide state is preserved across swaps until you toggle it off explicitly.
 
-## Compatibility with Replacer Mods
-
-Set `ForceShow = true` if you use mods that alter the default visibility of equipment via PAZ patching (e.g. character replacers like "Playing Kliff as Damiane", armor replacers, transmog mods). ForceShow overrides their changes so toggling equipment back to visible still works:
-
-```ini
-[General]
-ForceShow = true
-```
-
-Safe to leave `false` if you are not using such mods.
-
 ## Known Issues
 
 | Issue | Details | Workaround |
@@ -346,6 +328,7 @@ The loader (`CrimsonDesertEquipHide.asi`) and logic DLL (`CrimsonDesertEquipHide
 - [ThirteenAG](https://github.com/ThirteenAG) -- for the Ultimate ASI Loader
 - [cursey](https://github.com/cursey) -- for SafetyHook
 - [Brodie Thiesfield](https://github.com/brofield) -- for SimpleIni
+- [Frans 'Otis_Inf' Bouma](https://github.com/FransBouma) -- for v1.05.00 AOB shift diagnosis
 - Pearl Abyss -- for Crimson Desert
 
 ## License

@@ -24,7 +24,12 @@ namespace EquipHide
     // we scan a small stack window; if the landmark is present, we defer
     // to the original evaluator without mutating any item bitmasks. No
     // ctx caching, no frequency threshold, no per-item hash heuristic.
-    static constexpr int k_stackScanDepth = 24;
+    // The scan window must be deep enough to span every wrapper frame
+    // between PostfixEval and the prefab-build call site. v1.05 added at
+    // least one additional frame on the NPC path: a 24-slot window left
+    // the landmark out of reach and the override applied to NPCs. 64
+    // slots covers the new depth with margin.
+    static constexpr int k_stackScanDepth = 64;
 
     // Dedup tables so the trace log fires at most once per ever-seen ctx.
     // Sized generously: the live build has at most 3 player protagonists

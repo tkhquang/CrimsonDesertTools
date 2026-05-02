@@ -198,20 +198,42 @@ namespace EquipHide
      *       only shortens the verified suffix, not the match start).
      */
     inline constexpr AddrCandidate k_hookSiteCandidates[] = {
-        // P1 -- ends at cmp al, 3, does not cross the jz.
-        // Hook lands on the cmp (match + 4).
+        // P0 -- v1.05.00. The visibility byte field on PartInOutSocket
+        // shifted from +0x1C to +0x20, so the movzx disp8 byte is
+        // wildcarded. The movzx-cmp idiom plus the literal 3 sentinel
+        // are still distinctive enough for a unique CrimsonDesert.exe
+        // match (1 hit on v1.05.00 at the PartInOut site). Hook lands
+        // on the cmp at match + 4 (same offset semantics as P1; only
+        // the byte value differs, length is unchanged).
+        {"PartInOut_P0_v105_WildcardVisOffset",
+         "48 8B 45 5F 0F B6 40 ?? 3C 03",
+         ResolveMode::Direct, 4, 0},
+
+        // P0b -- v1.05.00 widened with the leading `mov r8b, 1`
+        // (41 B0 01) for extra structural pinning. Same wildcarded
+        // disp8 as P0; hook lands on the cmp at match + 7.
+        {"PartInOut_P0b_v105_PrecedingGate",
+         "41 B0 01 48 8B 45 5F 0F B6 40 ?? 3C 03",
+         ResolveMode::Direct, 7, 0},
+
+        // P1 -- v1.04.00. Ends at `cmp al, 3` and does not cross the
+        // following jz. Hook lands on the cmp at match + 4. Inert on
+        // v1.05.00 because the visibility byte sits at +0x20, not +0x1C.
         {"PartInOut_P1_DirectSite",
          "48 8B 45 5F 0F B6 40 1C 3C 03",
          ResolveMode::Direct, 4, 0},
 
-        // P2 -- ends at cmp rax, rcx, does not cross the following jz.
-        // Hook lands +0x30 inside the wider preamble.
+        // P2 -- v1.04.00 wider context. Tied to specific register
+        // assignments (r13/r15) that the v1.05.00 compiler reshuffled,
+        // so this candidate is inert on v1.05.00; retained for the
+        // v1.04.00 path.
         {"PartInOut_P2_WiderContext",
          "45 32 C0 49 8B 45 ?? 41 8B 4D ?? 48 C1 E1 04 48 03 C8 48 3B C1",
          ResolveMode::Direct, 0x30, 0},
 
-        // P3 -- ends at cmp al, 3, does not cross the jz.
-        // Hook lands on the cmp (match + 7).
+        // P3 -- v1.04.00 with the `mov r8b, 1` prefix. Ends at the cmp,
+        // does not cross the jz. Hook lands at match + 7. Inert on
+        // v1.05.00 (same reason as P1).
         {"PartInOut_P3_PrecedingGate",
          "41 B0 01 48 8B 45 5F 0F B6 40 1C 3C 03",
          ResolveMode::Direct, 7, 0},

@@ -109,12 +109,6 @@ The mod can be configured by editing the [b]CrimsonDesertEquipHide.ini[/b] file:
 [General]
 ; Log level: Trace, Debug, Info, Warning, Error
 LogLevel = Info
-; Set to true if you use mods that alter the default visibility of equipment
-; via PAZ patching (e.g. character replacers like 'Playing Kliff as Damiane',
-; armor replacers, transmog mods). ForceShow overrides their changes so
-; toggling equipment back to visible still works.
-; Safe to leave false if you are not using such mods.
-ForceShow = false
 ; Prevents baldness when hiding helmets/cloaks/masks
 ; Hair/beard may occasionally disappear; re-toggling the helmet (show then hide) restores it
 BaldFix = true
@@ -241,18 +235,6 @@ The active character is detected by walking the live WorldSystem pointer chain t
 
 [line]
 
-[size=5]Compatibility with Replacer Mods[/size]
-Set [b]ForceShow = true[/b] if you use mods that alter the default visibility of equipment via PAZ patching (e.g. character replacers like "Playing Kliff as Damiane", armor replacers, transmog mods). ForceShow overrides their changes so toggling equipment back to visible still works:
-
-[code]
-[General]
-ForceShow = true
-[/code]
-
-Safe to leave [b]false[/b] if you are not using such mods.
-
-[line]
-
 [size=5]User Presets[/size]
 The INI file includes three [b]UserPreset[/b] sections (UserPreset1, UserPreset2, UserPreset3) that let you create custom part groups with independent visibility control.
 
@@ -309,6 +291,7 @@ Built with [url=https://github.com/tkhquang/DetourModKit]DetourModKit[/url] for 
 [*] [url=https://github.com/ThirteenAG]ThirteenAG[/url] for the Ultimate ASI Loader
 [*] [url=https://github.com/cursey]cursey[/url] for SafetyHook
 [*] Brodie Thiesfield for SimpleIni
+[*] [url=https://github.com/FransBouma]Frans 'Otis_Inf' Bouma[/url] for v1.05.00 AOB shift diagnosis
 [*] Pearl Abyss for creating Crimson Desert
 [/list]
 

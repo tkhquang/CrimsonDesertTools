@@ -19,6 +19,31 @@ namespace EquipHide
     static uintptr_t s_prevVisCtrls[k_maxProtagonists]{};
     static int s_prevCount = 0;
 
+    /* Per-body vc cache. v1.05 zeroes body+0x68 (and downstream) for
+       inactive protagonists, so the live chain walk only succeeds
+       for the currently-controlled body. The vis_ctrl pointer itself
+       stays valid across swaps within a session, so caching the last
+       successful resolution per body lets the resolver publish all
+       three protagonists' vcs after the user has cycled through them
+       once. Across save-load the engine reallocates its arenas: the
+       cached vcs are dangling and MUST be wiped or DirectWrite stomps
+       freed memory. File-scope so resolve_player_vis_ctrls can clear
+       it on the save-load transition. */
+    struct Body2VcEntry
+    {
+        uintptr_t body;
+        uintptr_t vc;
+    };
+    static Body2VcEntry s_body2vcLru[k_maxProtagonists]{};
+    static int s_body2vcNext = 0;
+
+    static void clear_body_to_vis_ctrl_cache() noexcept
+    {
+        for (auto &e : s_body2vcLru)
+            e = {0, 0};
+        s_body2vcNext = 0;
+    }
+
     /** @brief Traverse body -> vis_ctrl pointer chain. Caller MUST be SEH-protected.
      *  @details Trace-logs only when a (body -> vc) mapping is new or has
      *           changed since the last walk; successful walks with a
@@ -30,39 +55,43 @@ namespace EquipHide
     {
         if (!body)
             return 0;
+
         auto inner = read_ptr_unsafe(body, 0x68);
         if (!inner)
         {
+            for (const auto &e : s_body2vcLru)
+            {
+                if (e.body == body && e.vc != 0)
+                    return e.vc;
+            }
             DMK::Logger::get_instance().trace(
-                "body_to_vis_ctrl: body=0x{:X} inner=NULL (+0x68)", body);
+                "body_to_vis_ctrl: body=0x{:X} inner=NULL (+0x68), no cache",
+                body);
             return 0;
         }
         auto sub = read_ptr_unsafe(inner, 0x40);
         if (!sub)
         {
+            for (const auto &e : s_body2vcLru)
+            {
+                if (e.body == body && e.vc != 0)
+                    return e.vc;
+            }
             DMK::Logger::get_instance().trace(
-                "body_to_vis_ctrl: body=0x{:X} inner=0x{:X} sub=NULL (+0x40)",
-                body, inner);
+                "body_to_vis_ctrl: body=0x{:X} inner=0x{:X} sub=NULL (+0x40), "
+                "no cache", body, inner);
             return 0;
         }
         auto vc = read_ptr_unsafe(sub, 0xE8);
 
-        // Dedupe on (body, vc): only log when this body resolves to a
-        // different vc than last seen. Small fixed LRU sized to the max
-        // protagonist count -- any more is not useful for this resolver.
-        struct Entry
-        {
-            uintptr_t body, vc;
-        };
-        static Entry s_lru[k_maxProtagonists]{};
-        static int s_next = 0;
-        for (auto &e : s_lru)
+        // Update LRU on success and dedupe trace logging.
+        for (auto &e : s_body2vcLru)
         {
             if (e.body == body && e.vc == vc)
                 return vc;
         }
-        s_lru[s_next] = {body, vc};
-        s_next = (s_next + 1) % k_maxProtagonists;
+        s_body2vcLru[s_body2vcNext] = {body, vc};
+        s_body2vcNext = (s_body2vcNext + 1) % k_maxProtagonists;
 
         DMK::Logger::get_instance().trace(
             "body_to_vis_ctrl: body=0x{:X} inner=0x{:X} sub=0x{:X} vc=0x{:X}",
@@ -126,43 +155,89 @@ namespace EquipHide
                 s_prevUser = user;
             }
 
-            /* Character-swap invalidation. In-session protagonist
-               swaps (Kliff <-> Damiane <-> Oongka) rotate user+0xD8 to
-               point at a different ClientChildOnlyInGameActor without
-               touching the UserActor singleton above, so the first
-               trigger does not catch them. Without this second point
-               the LKG identity cached by CDCore against the prior
-               actor stays valid from Core's perspective and the
-               resolver's torn-read absorption returns the previous
-               character's name on any chain walk that lands on the
-               new wrapper before the slot decode catches up.
+            /* Character-swap / save-load invalidation, split by
+               transition type:
 
-               We use invalidate_swap_caches() (not the full
-               invalidate_controlled_character()) because in-session
-               swaps rotate user+0xD8 between EXISTING body pointers in
-               the pool without reallocating bodies. The body learning
-               cache (body -> character) populated by CDCore stays
-               valid across the swap; flushing it would force every
-               party member visible in the world to fall back to the
-               active character's hide mask until the user manually
-               cycled through each protagonist again, which is exactly
-               the bug this split is fixing. We only need to evict the
-               swap-scope state here: the LKG identity (so the resolver
-               does not return the OLD character on the first post-swap
-               query before the radial hook / slot decode catches up)
-               and the actor->character cache (which is bounded small
-               enough that flushing on every swap costs nothing).
+               1. controlledActor X -> 0  (entering load screen). v1.05
+                  preserves the UserActor singleton across save-load,
+                  so the s_prevUser branch above does NOT fire. The
+                  only reliable signal that the world is being torn
+                  down is user+0xD8 going NULL. We mark a deferred
+                  reload; the actual cache wipe happens on the
+                  matching 0 -> Y transition because flushing while
+                  the engine is mid-teardown can race with bodies
+                  still in flight. CDCore::invalidate_controlled_
+                  character() and the body_to_vis_ctrl LRU clear
+                  together drop every dangling vc pointer that would
+                  otherwise alias into the next save's freshly
+                  reallocated arena -- DirectWrite stomping a freed
+                  vc was the v1.05 post-load regression.
 
-               The prevControlledActor != 0 guard mirrors the
-               first-boot suppression above: on the very first tick
-               the prior value is zero and the freshly-walked pointer
-               is the initial controlled actor, so invalidating would
-               wipe a cache just populated against it. */
+               2. controlledActor 0 -> Y  (load screen -> new save).
+                  Drain the deferred reload flag: full invalidation +
+                  LRU wipe so the next resolve cycle rebuilds from
+                  scratch against the new world's bodies.
+
+               3. controlledActor X -> Y, both non-zero  (in-session
+                  Kliff <-> Damiane <-> Oongka swap). Bodies are
+                  reused from the pool and the body learning cache
+                  populated by CDCore stays valid across the swap;
+                  flushing it would force every party member to fall
+                  back to the active character's hide mask until the
+                  user manually cycled through each protagonist
+                  again. Only evict the swap-scope state here: the
+                  LKG identity (so the resolver does not return the
+                  OLD character on the first post-swap query before
+                  the radial hook / slot decode catches up) and the
+                  actor->character cache.
+
+               First-boot suppression (s_prevControlledActor != 0)
+               guards transitions where the prior value is sentinel
+               zero and the freshly-walked pointer is the initial
+               controlled actor, so invalidating would wipe a cache
+               just populated against it. */
             auto controlledActor = read_ptr_unsafe(user, 0xD8);
             static std::uintptr_t s_prevControlledActor = 0;
+            static bool s_pendingReloadInvalidation = false;
             if (controlledActor != s_prevControlledActor)
             {
-                if (s_prevControlledActor != 0)
+                if (controlledActor == 0 && s_prevControlledActor != 0)
+                {
+                    DMK::Logger::get_instance().info(
+                        "Save-load detected: controlled actor "
+                        "(0x{:X} -> 0x0); deferring full cache wipe "
+                        "until new world is live",
+                        s_prevControlledActor);
+                    s_pendingReloadInvalidation = true;
+                }
+                else if (controlledActor != 0 && s_prevControlledActor == 0 &&
+                         s_pendingReloadInvalidation)
+                {
+                    DMK::Logger::get_instance().info(
+                        "Save-load complete: new controlled actor 0x{:X}; "
+                        "wiping body cache + body_to_vis_ctrl LRU",
+                        controlledActor);
+                    CDCore::invalidate_controlled_character();
+                    clear_body_to_vis_ctrl_cache();
+                    /* Drop stale player_state too: visCtrls hold the
+                       previous save's vc pointers, and the s_prev*
+                       diff guard below would otherwise see "no
+                       change" and skip rescheduling DirectWrite. */
+                    auto &psWipe = player_state();
+                    for (int j = 0; j < k_maxProtagonists; ++j)
+                    {
+                        psWipe.visCtrls[j].store(0, std::memory_order_relaxed);
+                        psWipe.visCharIdx[j].store(-1, std::memory_order_relaxed);
+                        psWipe.armorInjected[j].store(false, std::memory_order_relaxed);
+                    }
+                    psWipe.primaryVisCtrl.store(0, std::memory_order_relaxed);
+                    psWipe.count.store(0, std::memory_order_relaxed);
+                    for (int j = 0; j < k_maxProtagonists; ++j)
+                        s_prevVisCtrls[j] = 0;
+                    s_prevCount = 0;
+                    s_pendingReloadInvalidation = false;
+                }
+                else if (s_prevControlledActor != 0 && controlledActor != 0)
                 {
                     DMK::Logger::get_instance().info(
                         "Char swap detected: controlled actor "
@@ -173,6 +248,14 @@ namespace EquipHide
                 }
                 s_prevControlledActor = controlledActor;
             }
+
+            /* Bail until the new world has a controlled actor. With
+               s_pendingReloadInvalidation still set, walking the body
+               cache against the next save's bodies before the wipe
+               re-publishes the previous save's vcs (and DirectWrite
+               then stomps freed memory). */
+            if (controlledActor == 0)
+                return;
 
             /* Controlled-character identity via the shared Core
                resolver. Core walks WorldSystem -> ActorManager ->
