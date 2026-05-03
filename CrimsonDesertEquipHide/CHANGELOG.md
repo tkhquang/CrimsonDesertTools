@@ -2,6 +2,10 @@
 
 All notable changes to the CrimsonDesertEquipHide mod will be documented in this file.
 
+## [0.7.1] - v1.05.00 atomic save-load fix
+
+- Fixed cases where loading a save while the mod was active could break the hide toggle until the game was restarted.
+
 ## [0.7.0] - v1.05.00 patch support + multi-protagonist fixes
 
 - NPCs are no longer accidentally stripped by the protagonist hide settings.
@@ -225,6 +229,7 @@ All notable changes to the CrimsonDesertEquipHide mod will be documented in this
 - Customizable part lists per category via INI configuration
 - Configurable init delay and log level
 
+[0.7.1]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/equip-hide/v0.7.1
 [0.7.0]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/equip-hide/v0.7.0
 [0.6.3]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/equip-hide/v0.6.3
 [0.6.2]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/equip-hide/v0.6.2
