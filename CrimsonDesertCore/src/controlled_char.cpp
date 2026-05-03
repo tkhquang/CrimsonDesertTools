@@ -934,6 +934,24 @@ namespace CDCore
         return written;
     }
 
+    bool radial_swap_pending() noexcept
+    {
+        /* Two-load probe of the pending-key record. The radial-swap
+           safetyhook callback writes deadline-then-key with release
+           ordering; the matching acquire-loads here pair with that to
+           guarantee an observer that sees a non-zero key also sees
+           the deadline written for it. A consumer (try_commit_pending)
+           sets both back to zero on commit/expiry; either zero short-
+           circuits the answer. Tick comparison uses GetTickCount64
+           for parity with the writer's clock source. */
+        const auto key = s_pendingKey.load(std::memory_order_acquire);
+        if (key == 0)
+            return false;
+        const auto deadline =
+            s_pendingDeadlineMs.load(std::memory_order_acquire);
+        return GetTickCount64() <= deadline;
+    }
+
     void invalidate_swap_caches() noexcept
     {
         // Release ordering pairs with the acquire load in

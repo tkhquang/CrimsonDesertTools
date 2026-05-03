@@ -44,6 +44,33 @@ namespace EquipHide
         s_body2vcNext = 0;
     }
 
+    /* Full save-load wipe shared by the X->0->Y deferred-reload
+       state machine and the atomic-swap fallback (where the engine
+       rotates user+0xD8 between two non-zero values without ever
+       publishing the null window). Both paths land here once the
+       resolver has decided "this is a new world, drop everything":
+       Core's body learning cache, the per-body vc LRU, and the
+       published player_state must all be cleared together so the
+       next resolve cycle rebuilds against the fresh arena instead
+       of stomping freed memory through stale vc pointers. */
+    static void apply_full_reload_wipe() noexcept
+    {
+        CDCore::invalidate_controlled_character();
+        clear_body_to_vis_ctrl_cache();
+        auto &psWipe = player_state();
+        for (int j = 0; j < k_maxProtagonists; ++j)
+        {
+            psWipe.visCtrls[j].store(0, std::memory_order_relaxed);
+            psWipe.visCharIdx[j].store(-1, std::memory_order_relaxed);
+            psWipe.armorInjected[j].store(false, std::memory_order_relaxed);
+        }
+        psWipe.primaryVisCtrl.store(0, std::memory_order_relaxed);
+        psWipe.count.store(0, std::memory_order_relaxed);
+        for (int j = 0; j < k_maxProtagonists; ++j)
+            s_prevVisCtrls[j] = 0;
+        s_prevCount = 0;
+    }
+
     /** @brief Traverse body -> vis_ctrl pointer chain. Caller MUST be SEH-protected.
      *  @details Trace-logs only when a (body -> vc) mapping is new or has
      *           changed since the last walk; successful walks with a
@@ -217,34 +244,84 @@ namespace EquipHide
                         "Save-load complete: new controlled actor 0x{:X}; "
                         "wiping body cache + body_to_vis_ctrl LRU",
                         controlledActor);
-                    CDCore::invalidate_controlled_character();
-                    clear_body_to_vis_ctrl_cache();
-                    /* Drop stale player_state too: visCtrls hold the
-                       previous save's vc pointers, and the s_prev*
-                       diff guard below would otherwise see "no
-                       change" and skip rescheduling DirectWrite. */
-                    auto &psWipe = player_state();
-                    for (int j = 0; j < k_maxProtagonists; ++j)
-                    {
-                        psWipe.visCtrls[j].store(0, std::memory_order_relaxed);
-                        psWipe.visCharIdx[j].store(-1, std::memory_order_relaxed);
-                        psWipe.armorInjected[j].store(false, std::memory_order_relaxed);
-                    }
-                    psWipe.primaryVisCtrl.store(0, std::memory_order_relaxed);
-                    psWipe.count.store(0, std::memory_order_relaxed);
-                    for (int j = 0; j < k_maxProtagonists; ++j)
-                        s_prevVisCtrls[j] = 0;
-                    s_prevCount = 0;
+                    apply_full_reload_wipe();
                     s_pendingReloadInvalidation = false;
                 }
                 else if (s_prevControlledActor != 0 && controlledActor != 0)
                 {
-                    DMK::Logger::get_instance().info(
-                        "Char swap detected: controlled actor "
-                        "(0x{:X} -> 0x{:X}); invalidating swap-scope "
-                        "caches (body cache preserved)",
-                        s_prevControlledActor, controlledActor);
-                    CDCore::invalidate_swap_caches();
+                    /* Atomic-swap save-load: v1.05 sometimes rotates
+                       user+0xD8 directly between two non-zero values
+                       (load-screen window shorter than the resolver's
+                       1 s poll, or the engine builds the new actor
+                       and atomically swaps without ever publishing
+                       null) which defeats the X->0->Y state machine
+                       above and would otherwise mis-classify as an
+                       in-session radial swap. Disambiguate via the
+                       Core body learning cache: every protagonist
+                       body that was ever observed as the controlled
+                       identity this session is cache-resident, so an
+                       arriving controlled actor that matches NONE of
+                       the cache's entries cannot be one of the bodies
+                       we have already learned. CDCore is statically
+                       linked into each Logic DLL, so this cache is
+                       EH-private (no race with LiveTransmog stamping
+                       its own copy first) and is only mutated by the
+                       resolver call further down in this function.
+                       Disambiguator: a real radial swap leaves a fresh
+                       pending-key record stamped by the radial-swap
+                       safetyhook callback (TTL ~2 s, consumed by the
+                       next chain walk). A save-load has no such record
+                       because
+                       the load originates from the pause/title menu,
+                       not the radial UI. So if the new actor is absent
+                       from the body cache AND no radial input was just
+                       observed, the rotation must be a new-arena
+                       allocation -- treat as save-load. The cache-size
+                       lower bound (>= 1) guards the immediate post-
+                       wipe / pre-stamp window where peekN == 0 carries
+                       no information. */
+                    std::array<CDCore::BodyCacheEntry, 3> peek;
+                    const auto peekN = CDCore::snapshot_body_cache(
+                        peek.data(), peek.size());
+                    bool inCache = false;
+                    for (std::size_t i = 0; i < peekN; ++i)
+                    {
+                        if (peek[i].body == controlledActor)
+                        {
+                            inCache = true;
+                            break;
+                        }
+                    }
+                    const bool atomicSaveLoad =
+                        peekN >= 1 && !inCache &&
+                        !CDCore::radial_swap_pending();
+
+                    if (atomicSaveLoad)
+                    {
+                        DMK::Logger::get_instance().info(
+                            "Save-load detected (atomic swap): "
+                            "controlled actor (0x{:X} -> 0x{:X}) "
+                            "absent from body cache (n={}, no pending "
+                            "radial); wiping body cache + "
+                            "body_to_vis_ctrl LRU",
+                            s_prevControlledActor, controlledActor,
+                            peekN);
+                        apply_full_reload_wipe();
+                        /* No X->0 was observed, so the deferred flag
+                           was never latched -- defensively clear so a
+                           later spurious X->0->Y cannot double-fire
+                           against this transition. */
+                        s_pendingReloadInvalidation = false;
+                    }
+                    else
+                    {
+                        DMK::Logger::get_instance().info(
+                            "Char swap detected: controlled actor "
+                            "(0x{:X} -> 0x{:X}); invalidating swap-scope "
+                            "caches (body cache preserved)",
+                            s_prevControlledActor, controlledActor);
+                        CDCore::invalidate_swap_caches();
+                    }
                 }
                 s_prevControlledActor = controlledActor;
             }

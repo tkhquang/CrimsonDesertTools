@@ -1,5 +1,3 @@
-## [Title for next release]
+## v1.05.00 atomic save-load fix
 
-- New feature
-- Bug fix
-- Improvement
+- Fixed cases where loading a save while the mod was active could break the hide toggle until the game was restarted.

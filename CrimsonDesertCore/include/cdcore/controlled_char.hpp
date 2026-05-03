@@ -295,6 +295,33 @@ namespace CDCore
     void uninstall_radial_swap_hook() noexcept;
 
     /**
+     * @brief Whether a radial-swap key was stamped within the
+     *        pending-key window and has not yet been consumed by a
+     *        resolver chain walk.
+     * @details Returns true when the user has just initiated a radial
+     *          swap and the resolver has not yet caught up to publish
+     *          the new identity. Lets consumers disambiguate an
+     *          in-session protagonist swap from a save-load when both
+     *          appear as a controlled-actor pointer rotation: a swap
+     *          fired by user input has a fresh pending key; a save-load
+     *          does not.
+     *
+     *          Window matches the pending-key TTL (2 s in the current
+     *          build). Returns false outside the window, after the
+     *          resolver consumed the key, or when no key has ever been
+     *          stamped this session.
+     *
+     *          Per-DLL state (CDCore is statically linked into each
+     *          consumer): observes the pending key written by THIS
+     *          DLL's radial-swap safetyhook callback. Sibling DLLs
+     *          maintain their own copy.
+     *
+     *          Safe to call from any thread; non-blocking (two relaxed
+     *          atomic loads + a tick comparison).
+     */
+    [[nodiscard]] bool radial_swap_pending() noexcept;
+
+    /**
      * @brief Full world-reload invalidation. Clears the last-known-good
      *        identity cache, the actor->character cache, the pending
      *        radial-swap-key record, AND the body->character learning
