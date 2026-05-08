@@ -21,6 +21,12 @@ namespace Transmog
         // The sole persistent identifier in the preset JSON. Resolved
         // to `itemId` at load time or after the deferred catalog scan.
         std::string itemName;
+        // Optional body-mesh prefab name (e.g. "cd_nhw_no_ub_20027").
+        // Empty when this slot has no body-mesh override. Resolved
+        // against PrefabWrapperSwap::slot_catalog() in apply_to_state;
+        // if the catalog isn't yet populated (boot heap walk still
+        // running) the resolution retries when the catalog finishes.
+        std::string prefabName;
     };
 
     struct Preset
@@ -106,6 +112,14 @@ namespace Transmog
 
         /// Apply the active preset's slot data to the global slot_mappings.
         void apply_to_state() const;
+
+        /// Look up the *active* preset for an arbitrary character without
+        /// changing the manager's currently-selected character. Used by
+        /// the body-mesh prefab picker to "borrow" the Kairos (default-
+        /// carrier) preset's slot itemIds when the user is editing on a
+        /// different character. Returns nullptr if the character is
+        /// unknown or has no presets.
+        const Preset *active_preset_of(const std::string &charName) const;
 
         /// Capture current slot_mappings into a Preset.
         static Preset capture_from_state(const std::string &name = "");

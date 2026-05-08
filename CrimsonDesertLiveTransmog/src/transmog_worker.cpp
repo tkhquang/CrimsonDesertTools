@@ -1,4 +1,5 @@
 #include "transmog_worker.hpp"
+#include "prefab_wrapper_swap.hpp"
 #include "constants.hpp"
 #include "item_name_table.hpp"
 #include "preset_manager.hpp"
@@ -207,6 +208,25 @@ namespace Transmog
     // stop retrying once a boot-time apply succeeds.
     static std::atomic<bool> s_lastApplyOk{false};
 
+    // True while load_detect_thread_fn has a controlled-character
+    // change parked in its settle window but not yet committed. The
+    // settle-window branch is the authoritative committer: it stamps
+    // swap_stale_comp() before flipping pm.active_character() so the
+    // next apply skips writing the new preset onto the pre-rotation
+    // body.
+    //
+    // Without this gate, sync_active_char_to_live() flips inline the
+    // moment the controlled-char probe returns the new identity, but
+    // the engine has not yet rotated user+0xD8 to the new actor. A
+    // hook-driven apply that races into run_debounced_apply during
+    // that window resolves a1 to the previous body, then writes the
+    // new character's preset onto it (e.g. save-load on Kliff that
+    // auto-toggles to Oongka leaves Kliff wearing Oongka's preset).
+    // sync_active_char_to_live consults this flag and returns false
+    // to defer; the caller re-arms the debounce until the settle
+    // commits.
+    static std::atomic<bool> s_charSwapPending{false};
+
     static std::mutex s_applyCvMtx;
     static std::condition_variable s_applyCv;
     static std::thread s_applyWorker;
@@ -218,14 +238,33 @@ namespace Transmog
     // switches to the live one and rebuilds slot_mappings from its
     // preset. Holds no __try block so std::string usage is fine; called
     // from run_debounced_apply (which cannot mix __try with C++ objects).
-    static void sync_active_char_to_live() noexcept
+    //
+    // Returns true when the apply may proceed, false when the caller
+    // must defer (re-arm the debounce). False is returned only while
+    // load_detect_thread_fn has an unfired char-swap parked in its
+    // settle window: see s_charSwapPending. Steady-state UI / state
+    // mismatches (e.g. user opened a different character's preset list
+    // in the overlay while controlling someone else) still flip inline
+    // here so the immediate apply targets the live character's preset.
+    [[nodiscard]] static bool sync_active_char_to_live() noexcept
     {
         const std::string live = current_controlled_character_name();
         if (live.empty())
-            return;
+            return true;
         auto &pm = PresetManager::instance();
         if (live == pm.active_character())
-            return;
+            return true;
+
+        // Defer when load_detect_thread_fn has a pending swap in
+        // flight. The settle-window branch is the authoritative
+        // committer: it stamps swap_stale_comp() before flipping so
+        // the apply does not paint the new preset onto the pre-
+        // rotation body. Convergence is bounded by the settle window
+        // (k_charSwapSettleMs); the caller re-arms via a 200ms
+        // schedule_transmog_ms() until then.
+        if (s_charSwapPending.load(std::memory_order_acquire))
+            return false;
+
         pm.set_active_character(live);
         for (auto &m : slot_mappings())
         {
@@ -237,6 +276,7 @@ namespace Transmog
         real_damaged().fill(false);
         last_applied_real_ids().fill(0);
         last_applied_carrier_ids().fill(0);
+        return true;
     }
 
     // One apply/clear pass. Pulled out of the worker body so the SEH
@@ -266,7 +306,19 @@ namespace Transmog
         // PresetManager + slot_mappings to the live character. Lives
         // outside this __try-containing function so std::string
         // destructors do not trip MSVC C2712.
-        sync_active_char_to_live();
+        //
+        // Helper returns false while load-detect has an unfired char
+        // swap parked in its settle window. In that case the engine
+        // has not yet rotated user+0xD8 to the new body, so applying
+        // here would paint the incoming preset onto the previous
+        // body. Re-arm the debounce; the load-detect commit will both
+        // flip pm.active_character() and stamp swap_stale_comp() so
+        // the next apply lands correctly.
+        if (!sync_active_char_to_live())
+        {
+            schedule_transmog_ms(200);
+            return;
+        }
         __int64 a1 = player_a1().load(std::memory_order_acquire);
         if (a1 <= 0x10000)
         {
@@ -543,6 +595,16 @@ namespace Transmog
                         // address.
                         swap_stale_comp().store(
                             0, std::memory_order_release);
+                        // Re-populate the body-mesh prefab catalog. Save
+                        // loads can rotate the AppearanceTableLoader
+                        // registry's resident wrapper set as zone-/
+                        // archetype-specific assets stream in/out, and
+                        // the picker dropdown otherwise stays pinned to
+                        // the boot snapshot until the user clicks
+                        // "Refresh Catalog" manually. Idempotent and
+                        // cheap (~5ms StringInfo walk + ~10ms registry
+                        // enum); fires once per save-load tick.
+                        PrefabWrapperSwap::populate_slot_catalogs();
                     }
                     prevUser = curUser;
                 }
@@ -578,11 +640,15 @@ namespace Transmog
                 if (liveName.empty() || liveName == prevCharName)
                 {
                     pendingCharName.clear();
+                    s_charSwapPending.store(false,
+                                            std::memory_order_release);
                 }
                 else if (liveName != pendingCharName)
                 {
                     pendingCharName = liveName;
                     pendingFirstSeenTick = GetTickCount64();
+                    s_charSwapPending.store(true,
+                                            std::memory_order_release);
                 }
                 else if (GetTickCount64() - pendingFirstSeenTick >=
                          k_charSwapSettleMs)
@@ -592,6 +658,15 @@ namespace Transmog
                                                     : prevCharName;
                     prevCharName = liveName;
                     pendingCharName.clear();
+                    // Clear BEFORE schedule_transmog_ms below so the
+                    // scheduled run_debounced_apply observes the
+                    // committed flip and does not defer again. The
+                    // stale-body guard stamped further down is the
+                    // mechanism that prevents writing onto the pre-
+                    // rotation body; this flag only gates the early
+                    // race window.
+                    s_charSwapPending.store(false,
+                                            std::memory_order_release);
 
                     if (liveName != pm.active_character())
                     {
@@ -687,6 +762,20 @@ namespace Transmog
                     liveChar.empty() ? std::string_view{"<unresolved>"}
                                      : std::string_view{liveChar});
                 prevComp = comp;
+
+                // Engine has rotated player_component to the new body,
+                // so the race window that s_charSwapPending guards is
+                // closed regardless of whether the char-swap auto-
+                // detect block above has finished its settle window.
+                // Without this clear, the retry loop below blocks the
+                // load-detect thread for several seconds, the auto-
+                // detect block never re-ticks during that span, and
+                // sync_active_char_to_live keeps deferring every
+                // scheduled apply -- the visible symptom is "scheduled
+                // apply (attempt N)" loglines with no apply ever
+                // landing after a save-load or radial swap.
+                s_charSwapPending.store(false,
+                                        std::memory_order_release);
 
                 if (liveChar.empty())
                 {

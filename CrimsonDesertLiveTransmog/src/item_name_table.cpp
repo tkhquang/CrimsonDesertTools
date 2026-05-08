@@ -1,4 +1,5 @@
 #include "item_name_table.hpp"
+#include "aob_resolver.hpp"
 #include "transmog_map.hpp"
 
 #include <DetourModKit.hpp>
@@ -418,23 +419,164 @@ namespace Transmog
     // 0x45 -> 0x46 on v1.04.00 (one-code insertion in the engine enum
     // between Boots and Cloak). Both legacy and current values accepted
     // so the mapping stays valid across patches that haven't shifted
-    // the earlier slots.
+    // the earlier slots. Live ground-truth captured 2026-05-07 via
+    // the [slot-discovery] dump's typeCode column; see
+    // reference_engine_slot_taxonomy_2026-05-07.md.
+    //
+    // Armor block (existing):
     //   0x04=Helm  0x05=Chest  0x06=Gloves  0x07=Boots
-    //   0x45/0x46=Cloak
-    // Other observed codes (explicitly rejected -- these are not
-    // transmog-compatible armor slots):
-    //   0x20=Shield, 0x53/0x54=Horse/mount armor, 0xFFFF=Quest/non-equipment,
-    //   plus any other unmapped code.
+    //   0x45/0x46=Cloak (shifted +1 on v1.04.00)
+    //
+    // Accessories:
+    //   0x08=Earring (Earring1/Earring2 share)
+    //   0x09=Necklace
+    //   0x0A=Ring (Ring1/Ring2 share)
+    //   0x37=Lantern
+    //   0x43=Backpack
+    //   0x47=Bracelet  0x48=Glasses  0x49=Mask
+    //
+    // Weapons (typeCode varies by weapon FAMILY and sometimes by
+    // character variant -- all sharing the MainHand/OffHand/Ranged/
+    // SubWeapon/TwoHandWeapon auth-table slots):
+    //   Weapon families derived from the [catalog-histogram] dump
+    //   (2026-05-07) which iterated every descriptor's typeCode and
+    //   showed sample item names. Live-equipped items provided ground
+    //   truth for confirmed entries; the rest were classified from
+    //   sample-name conventions (e.g. *_TwoHandHammer = TwoHandWeapon,
+    //   *_OneHandShotgun = Ranged). Items where the slot couldn't be
+    //   inferred from the name were left unmapped -- runtime
+    //   observation handles them when the user actually equips one.
+    //
+    //   1H families (MainHand, paired-pickered with OffHand):
+    //     0x00=1H Sword            0x01=OneHandShield (generic)
+    //     0x02=Damiane Shield      0x10=1H Axe
+    //     0x13=1H Mace             0x1D=Fist (Item_Fist_*)
+    //     0x20=Tower Shield        0x27=Rapier
+    //     0x30=Knuckle/Ring_Drill
+    //   Ranged:
+    //     0x03=Bow                 0x0D=Sprayer/utility (named BackPack)
+    //     0x22=Pistol              0x23=Musket
+    //     0x24=Shotgun             0x25=1H Cannon
+    //     0x2F=Crossbow            0x31=FlameThrower
+    //     0x32=IceThrower          0x33=LightningThrower
+    //     0x64=FishingRod
+    //   Sub-weapons:
+    //     0x0E=Dagger
+    //   2H weapons (combat + utility tools):
+    //     0x0F=2H Axe              0x11=Greatsword A
+    //     0x12=Greatsword B (NPC)  0x14=WarHammer
+    //     0x15=2H Spear/Polearm    0x1C=2H Hammer
+    //     0x1E=Drill               0x1F=Chainsaw
+    //     0x21=Halberd/Alebard     0x26=2H Cannon
+    //     0x55=Pickaxe             0x56=Iron Chain
+    //     0x57=Rake                0x58=Felling Axe (Boss_Reward_SuperWeapon)
+    //     0x59=Shovel              0x5A=Broom
+    //     0x5B=Hoe                 0x5C=Sickle/Scythe
+    //     0x5D=Work Hammer         0x5F=Saw
+    //     0x62=Stick               0x66=PriestWand
+    //     0x68=Crutch
+    //
+    //   Intentionally NOT mapped (not character transmog):
+    //     0x0B Oongka_Rocket_Helm (TransmogSlot::OongkaRocket commented)
+    //     0x17 Contribution_Flag, 0x18 Torch, 0x2B Witch_WingFan,
+    //     0x34 Poison_Stick (ambiguous; let runtime obs handle)
+    //     0x3A-0x3C PetArmor (pet/cat equipment)
+    //     0x3D-0x41 HorseArmor (mount equipment)
+    //     0x4A-0x54 WarRobot body parts (mech, not character)
+    //     0x60 Notepad/Pen, 0x6A FlatBasket, 0x6B Bucket, 0x6D Pot_Head
+    //     0xFFFF Arrow/Quiver/Quest items
+    //
+    // The 0x11 vs 0x12 split for 2H bastard swords looks like a
+    // character/gender variant axis -- they're the "same" weapon class
+    // visually but the engine tags them differently per protagonist.
+    // Both go in the TwoHandWeapon slot.
+    //
+    // More weapon-family typeCodes will surface as users equip new
+    // classes (crossbow, polearm, etc). Runtime `record_observed_slot`
+    // covers any unmapped family automatically once an item appears
+    // in the auth-table.
+    //
+    // Excluded by design (not LT-targeted):
+    //   0x0B=OongkaRocket Helm (the OongkaRocket TransmogSlot is
+    //        commented out 2026-05-07; leaving 0x0B unmapped keeps
+    //        those items out of every picker).
+    //
+    // For paired slots (weapons/earrings/rings) the static map points
+    // at the lower-indexed half of the pair; the picker UI uses
+    // `slots_share_picker` so both halves of a pair show the same
+    // items. The actual auth-table slot used at apply time is whichever
+    // TransmogSlot row the user committed against.
+    //
+    // Other observed codes explicitly rejected:
+    //   0x20=Shield, 0x53/0x54=Horse/mount armor, 0xFFFF=Quest/non-equipment.
     static TransmogSlot slot_from_type_code(std::uint16_t code) noexcept
     {
         switch (code)
         {
+        // Armor
         case 0x04: return TransmogSlot::Helm;
         case 0x05: return TransmogSlot::Chest;
         case 0x06: return TransmogSlot::Gloves;
         case 0x07: return TransmogSlot::Boots;
         case 0x45:
         case 0x46: return TransmogSlot::Cloak;
+        // Accessories
+        case 0x08: return TransmogSlot::Earring1; // shared with Earring2
+        case 0x09: return TransmogSlot::Necklace;
+        case 0x0A: return TransmogSlot::Ring1;    // shared with Ring2
+        case 0x37: return TransmogSlot::Lantern;
+        case 0x43: return TransmogSlot::Backpack;
+        case 0x47: return TransmogSlot::Bracelet;
+        case 0x48: return TransmogSlot::Glasses;
+        case 0x49: return TransmogSlot::Mask;
+        // 1H weapons -- all share MainHand (paired with OffHand)
+        case 0x00:                                 // 1H sword
+        case 0x01:                                 // shield (generic)
+        case 0x02:                                 // shield (Damiane variant)
+        case 0x10:                                 // 1H axe
+        case 0x13:                                 // 1H mace
+        case 0x1D:                                 // fist (Item_Fist_*)
+        case 0x20:                                 // tower shield
+        case 0x27:                                 // rapier
+        case 0x30: return TransmogSlot::MainHand; // knuckle / ring drill
+        // Ranged
+        case 0x03:                                 // bow
+        case 0x0D:                                 // sprayer/utility ranged
+        case 0x22:                                 // pistol
+        case 0x23:                                 // musket
+        case 0x24:                                 // shotgun
+        case 0x25:                                 // 1H cannon
+        case 0x2F:                                 // crossbow
+        case 0x31:                                 // flamethrower
+        case 0x32:                                 // ice thrower
+        case 0x33:                                 // lightning thrower
+        case 0x64: return TransmogSlot::Ranged;    // fishing rod
+        // Sub-weapons
+        case 0x0E: return TransmogSlot::SubWeapon; // dagger
+        // 2H weapons (combat + utility tools)
+        case 0x0F:                                     // 2H axe
+        case 0x11:                                     // 2H greatsword A
+        case 0x12:                                     // 2H greatsword B (Damiane/NPC)
+        case 0x14:                                     // war hammer
+        case 0x15:                                     // 2H spear / polearm
+        case 0x1C:                                     // 2H hammer
+        case 0x1E:                                     // drill
+        case 0x1F:                                     // chainsaw
+        case 0x21:                                     // halberd / alebard
+        case 0x26:                                     // 2H cannon
+        case 0x55:                                     // pickaxe
+        case 0x56:                                     // iron chain
+        case 0x57:                                     // rake
+        case 0x58:                                     // felling axe / boss super weapon
+        case 0x59:                                     // shovel
+        case 0x5A:                                     // broom
+        case 0x5B:                                     // hoe
+        case 0x5C:                                     // sickle/scythe
+        case 0x5D:                                     // work hammer
+        case 0x5F:                                     // saw
+        case 0x62:                                     // stick
+        case 0x66:                                     // priest wand
+        case 0x68: return TransmogSlot::TwoHandWeapon; // crutch
         default:   return TransmogSlot::Count;
         }
     }
@@ -508,10 +650,10 @@ namespace Transmog
         // .text from leaking in.
         const auto subTxStart = reinterpret_cast<const std::byte *>(subTranslatorAddr);
 
-        auto anchorV105 = DMK::Scanner::parse_aob(
-            "41 B8 01 00 00 00 48 8D 55 ?? 48 8D 4C 24 ?? E8 | ?? ?? ?? ??");
-        auto anchorV104 = DMK::Scanner::parse_aob(
-            "41 B8 01 00 00 00 48 8D 55 ?? 48 8D 4D ?? E8 | ?? ?? ?? ??");
+        auto anchorV105 =
+            DMK::Scanner::parse_aob(Transmog::k_nametableSubTxV105Anchor);
+        auto anchorV104 =
+            DMK::Scanner::parse_aob(Transmog::k_nametableSubTxV104Anchor);
         if (!anchorV105 || !anchorV104)
         {
             logger.warning("[nametable] parse_aob failed for sub_141D45270 anchors");
@@ -560,8 +702,8 @@ namespace Transmog
         // of THIS function -- global uniqueness doesn't matter, the
         // scan is locally bounded.
         const auto itemAccessorStart = reinterpret_cast<const std::byte *>(itemAccessor);
-        auto anchor3 = DMK::Scanner::parse_aob(
-            "41 56 48 83 EC 40 0F B7 39 | 48 8B 1D ?? ?? ?? ??");
+        auto anchor3 =
+            DMK::Scanner::parse_aob(Transmog::k_nametableItemAccessorAnchor);
         if (!anchor3)
         {
             logger.warning("[nametable] parse_aob failed for qword_145CEF370 anchor");
@@ -892,6 +1034,67 @@ namespace Transmog
         }
         // valid > 0 && valid == m_lastBuildValid → catalog stabilized.
 
+        // Catalog typeCode histogram. Groups every cataloged item by
+        // its `desc+0x44` typeCode and emits one log line per distinct
+        // code: count, current `slot_from_type_code` verdict, and 3
+        // sample item names. Lets the user see the FULL universe of
+        // typeCodes in one game launch instead of having to discover
+        // each one by wearing an item -- unmapped codes show with
+        // their sample names so it's obvious from the names which
+        // slot they belong in (e.g. "samples: Crossbow_Iron_I, ..." =>
+        // crossbow family => Ranged). Runs once per successful build.
+        {
+            std::unordered_map<std::uint16_t, std::vector<std::uint16_t>> bucket;
+            bucket.reserve(64);
+            for (const auto &kv : typeCodeMap)
+                bucket[kv.second].push_back(kv.first);
+
+            // Sort typeCodes descending by item count so high-volume
+            // codes show first.
+            std::vector<std::uint16_t> codes;
+            codes.reserve(bucket.size());
+            for (const auto &kv : bucket)
+                codes.push_back(kv.first);
+            std::sort(codes.begin(), codes.end(),
+                      [&](std::uint16_t a, std::uint16_t b) {
+                          return bucket[a].size() > bucket[b].size();
+                      });
+
+            logger.trace(
+                "[catalog-histogram] {} distinct typeCodes across {} items"
+                " (unmapped codes show samples so you can identify them "
+                "and add static slot_from_type_code cases)",
+                codes.size(), valid);
+
+            for (std::uint16_t code : codes)
+            {
+                auto &ids = bucket[code];
+                // Sort itemIds ascending and pick first 3 names for a
+                // stable sample window.
+                std::sort(ids.begin(), ids.end());
+                const auto take = std::min<std::size_t>(3, ids.size());
+
+                std::string samples;
+                for (std::size_t k = 0; k < take; ++k)
+                {
+                    auto it = idToName.find(ids[k]);
+                    if (k > 0) samples += ", ";
+                    samples += (it != idToName.end()) ? it->second
+                                                      : "<unknown>";
+                }
+
+                const TransmogSlot slot = slot_from_type_code(code);
+                const char *slotStr = (slot == TransmogSlot::Count)
+                                      ? "<UNMAPPED>"
+                                      : slot_name(slot);
+
+                logger.trace(
+                    "[catalog-histogram]   typeCode={:#06x} count={:>4} "
+                    "slot={:<13} samples: {}",
+                    code, ids.size(), slotStr, samples);
+            }
+        }
+
         {
             std::lock_guard<std::mutex> lk(s_tableMtx);
             m_idToName = std::move(idToName);
@@ -961,10 +1164,46 @@ namespace Transmog
     TransmogSlot ItemNameTable::category_of(uint16_t itemId) const noexcept
     {
         std::lock_guard<std::mutex> lk(s_tableMtx);
+        // Runtime-observed binding wins -- if the engine has actually
+        // equipped this itemId in a slot, we trust that over the static
+        // type-code heuristic. Lets accessory/weapon items show up in
+        // the correct picker the moment they're seen in the auth-table,
+        // even if `slot_from_type_code` doesn't know their typeCode yet.
+        if (auto obs = m_observedSlot.find(itemId);
+            obs != m_observedSlot.end())
+            return obs->second;
+
         auto it = m_typeCode.find(itemId);
         if (it == m_typeCode.end())
             return TransmogSlot::Count;
         return slot_from_type_code(it->second);
+    }
+
+    std::uint16_t ItemNameTable::type_code_of(std::uint16_t itemId) const noexcept
+    {
+        std::lock_guard<std::mutex> lk(s_tableMtx);
+        auto it = m_typeCode.find(itemId);
+        if (it == m_typeCode.end())
+            return 0xFFFFu;
+        return it->second;
+    }
+
+    void ItemNameTable::record_observed_slot(std::uint16_t itemId,
+                                             TransmogSlot slot) noexcept
+    {
+        std::lock_guard<std::mutex> lk(s_tableMtx);
+        if (slot == TransmogSlot::Count)
+        {
+            m_observedSlot.erase(itemId);
+            return;
+        }
+        m_observedSlot[itemId] = slot;
+    }
+
+    std::size_t ItemNameTable::observed_slot_count() const noexcept
+    {
+        std::lock_guard<std::mutex> lk(s_tableMtx);
+        return m_observedSlot.size();
     }
 
     ItemNameTable::BodyKind ItemNameTable::body_kind_for_character(

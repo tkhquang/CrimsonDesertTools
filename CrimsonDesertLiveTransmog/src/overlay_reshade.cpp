@@ -1,4 +1,4 @@
-// overlay_reshade.cpp — ReShade addon overlay path.
+// overlay_reshade.cpp -- ReShade addon overlay path.
 //
 // This TU includes the ReShade SDK's imgui.h which defines ImGui
 // functions as inline wrappers that call through ReShade's function
@@ -12,16 +12,19 @@
 // This file must NOT see imgui_lib's include path.  The CMakeLists.txt
 // configures this TU with the ReShade SDK include directory instead.
 
+#include "prefab_wrapper_swap.hpp"
 #include "constants.hpp"
 #include "item_name_table.hpp"
 #include "preset_manager.hpp"
 #include "shared_state.hpp"
+#include "slot_metadata.hpp"
 #include "transmog.hpp"
+#include "transmog_apply.hpp"
 #include "transmog_map.hpp"
 
 #include <DetourModKit.hpp>
 
-// ReShade SDK headers — imgui.h here is from external/reshade-sdk/include
+// ReShade SDK headers -- imgui.h here is from external/reshade-sdk/include
 // and provides the function-table wrappers, NOT the real ImGui.
 #pragma warning(push, 0)
 #include <imgui.h>
@@ -32,6 +35,7 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <vector>
 
 namespace Transmog
 {
@@ -43,7 +47,7 @@ namespace Transmog
     static HMODULE s_reshadeModule = nullptr;
     static bool s_reshadeActive = false;
 
-    // ReShade tab callback — content is drawn directly inside the
+    // ReShade tab callback -- content is drawn directly inside the
     // ReShade addon tab; no ImGui::Begin/End window management needed.
     static void draw_reshade_overlay(reshade::api::effect_runtime *)
     {

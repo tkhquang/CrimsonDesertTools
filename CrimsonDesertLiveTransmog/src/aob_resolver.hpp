@@ -281,6 +281,294 @@ namespace Transmog
          ResolveMode::Direct, -0x2D, 0},
     };
 
+    // -----------------------------------------------------------------------
+    // PrefabWrapperSwap module data globals (audit 2026-05-08).
+    //
+    // The PrefabWrapperSwap module previously hardcoded six absolute
+    // addresses derived from v1.05.01 RVAs. Each is now resolved through
+    // a 3-candidate cascade:
+    //
+    //   StringInfoRegistry  : MEMORY[0x145EF1DE8] -- registry struct.
+    //   StringInfoVtable    : 0x145BC4638        -- vtable sentinel filter.
+    //   LoaderRegistry      : MEMORY[0x145DDF8B0] -- partprefab name->wrapper.
+    //   ApptContainerVtable : 0x144D24358        -- partPrefabDataContainer
+    //                                              vtable; used by lookup
+    //                                              gating in
+    //                                              lookup_prefab_metadata.
+    //   NaturalPipeline     : sub_142711DF0 (RVA 0x2711DF0). Hooked.
+    //   ApptNameLookup      : sub_1424DF420 (RVA 0x24DF420). Called direct.
+    //
+    // For data globals (registry/vtable) the cascade resolves through a
+    // RIP-relative mov/lea instruction in a non-template caller. The
+    // disp32 is wildcarded; the cascade returns absolute target via
+    // ResolveMode::RipRelative.
+    //
+    // For the two function targets we use Direct mode against the
+    // function prologue. Three independent anchors per function let a
+    // future compiler shuffle the prologue without breaking resolution.
+    //
+    // Per feedback_aob_cascade_ordering: each P1 below is verified
+    // n=1 in v1.05.01 .text. P2/P3 are also unique to allow recovery
+    // when a future patch breaks P1.
+    //
+    // If these break: each candidate's comment names the anchor caller
+    // (e.g. "xref in sub_1402F58A0"). Re-find the function by name
+    // through IDA, locate the load instruction, copy the surrounding
+    // 16--32 bytes, wildcard the disp32, and verify uniqueness with
+    // mcp__ida-pro-mcp__find_bytes.
+    // -----------------------------------------------------------------------
+
+    /**
+     * @brief StringInfoRegistry global: MEMORY[0x145EF1DE8].
+     *
+     * The 17-slot StringInfo registry struct. +0x08 holds count u32,
+     * +0x50 holds the QWORD entry-array pointer. PrefabWrapperSwap walks
+     * this registry to resolve prefab NAMES to entry wrapper-ptrs.
+     *
+     * All three candidates anchor on a `mov reg, [rip+disp32]` that
+     * loads this address. Disp32 wildcarded; rest of the 16+ byte
+     * window is unique-text in v1.05.01 .text.
+     */
+    inline constexpr AddrCandidate k_stringInfoRegistryCandidates[] = {
+        // P1 -- xref in sub_141D81F90 at 0x141D8215E. Distinctive frame
+        // shape: load char-table eax, store at [rbp+0x58], then load
+        // registry into rcx, walk +0x60, lea rdx,[rbp+0x58], then call.
+        // The local-variable disp8 (0x58) is kept literal to disambiguate.
+        {"StringInfoRegistry_P1_LoadAddCallSite",
+         "8B 45 B0 89 45 58 48 8B 0D ?? ?? ?? ?? 48 83 C1 60 48 8D 55 58",
+         ResolveMode::RipRelative, 9, 13},
+
+        // P2 -- xref in sub_142144B10 (large parser, 0x1d6f bytes). A
+        // distinctive `mov [rbp-0x6A], al` + 32-bit local-store sequence
+        // precedes a `mov r15, [rip+disp32]` registry load. The local
+        // disp32 sequence (90 00 00 00) is kept literal -- it's the
+        // local frame's outer-scope variable offset.
+        {"StringInfoRegistry_P2_OuterScopeFrame",
+         "88 45 96 89 8D 90 00 00 00 4C 8B 3D ?? ?? ?? ?? "
+         "48 8D 95 90 00 00 00 49 8D 4F 60",
+         ResolveMode::RipRelative, 12, 16},
+
+        // P3 -- xref in sub_14074DD40. Conditional load+jump shape:
+        // load r9d, test, jz, store dword to [rbp+0x70], then load
+        // registry. The 8B 4F 74 (mov ecx, [rdi+0x74]) is a stable
+        // game-struct field offset.
+        {"StringInfoRegistry_P3_CondLoadStore",
+         "8B 4F 74 85 C9 74 5C 89 4D 70 48 8B 0D ?? ?? ?? ?? "
+         "48 83 C1 60 48 8D 55 70",
+         ResolveMode::RipRelative, 13, 17},
+    };
+
+    /**
+     * @brief StringInfoVtable sentinel: 0x145BC4638.
+     *
+     * Vtable pointer used as the +0x08 sentinel of every StringInfo
+     * entry. PrefabWrapperSwap reads it to filter out non-StringInfo
+     * heap rows during walk_string_info.
+     *
+     * All three candidates anchor on a `lea rax, [rip+disp32]` write.
+     * Each candidate is in a different function so a single-function
+     * recompile cannot break all three.
+     */
+    inline constexpr AddrCandidate k_stringInfoVtableCandidates[] = {
+        // P1 -- xref in sub_1402F58A0 (0x17b0 bytes, large method).
+        // `mov ecx, [rbp+0x1C0]; call rel32; lea r15, [rip+disp32];
+        //  mov [rbp+0x1C0], r15`. The 0x1C0 stack-frame offset is
+        // sufficiently distinctive in this 6kB function.
+        {"StringInfoVtable_P1_LargeMethodAssign",
+         "8B 8D C0 01 00 00 E8 ?? ?? ?? ?? 4C 8D 3D ?? ?? ?? ?? "
+         "4C 89 BD C0 01 00 00",
+         ResolveMode::RipRelative, 14, 18},
+
+        // P2 -- xref in sub_1403174F0 (0x535 bytes). Init block:
+        // `mov [rbp-0x50], eax; xor r12d, r12d; mov [rbp-0x48], r12;
+        //  lea r13, [rip+disp32]; nop`. The trailing 0x90 nop is
+        // alignment padding kept literal -- if a future build drops
+        // the padding, P3 catches it.
+        {"StringInfoVtable_P2_R13InitBlock",
+         "89 45 B0 45 33 E4 4C 89 65 B8 4C 8D 2D ?? ?? ?? ?? 90 "
+         "48 8B 45 C8",
+         ResolveMode::RipRelative, 13, 17},
+
+        // P3 -- xref in sub_14031AC50 (0xbfd bytes). Tail block:
+        // `mov [rbp+0x40], r13; mov rsi, [rbp+0x10]; lea rdi, [rip+disp32]`.
+        // The trailing `0F 1F 40 00` is a 4-byte nop the compiler
+        // emits for branch-target alignment -- stable for this site.
+        {"StringInfoVtable_P3_TailLeaRdi",
+         "4C 89 6D 40 48 8B 75 10 48 8D 3D ?? ?? ?? ?? 0F 1F 40 00",
+         ResolveMode::RipRelative, 11, 15},
+    };
+
+    /**
+     * @brief LoaderRegistry singleton: MEMORY[0x145DDF8B0].
+     *
+     * Engine partprefab name->wrapper registry singleton. The ApptName-
+     * Lookup function (sub_1424DF420, also AOB-resolved) dereferences
+     * this and queries [+0x50]. PrefabWrapperSwap reads this on init for
+     * heap-walk enumeration of prefab wrappers.
+     */
+    inline constexpr AddrCandidate k_loaderRegistryCandidates[] = {
+        // P1 -- xref in sub_1424E44A0 at 0x1424E4771. Distinctive
+        // 64-bit add-immediate `48 81 C1 D0 00 00 00` (add rcx, 0xD0)
+        // that follows the registry load -- a stable game-struct
+        // walk-offset.
+        {"LoaderRegistry_P1_AddD0CallSite",
+         "48 8B 0D ?? ?? ?? ?? 48 81 C1 D0 00 00 00 48 8D 56 20 E8",
+         ResolveMode::RipRelative, 3, 7},
+
+        // P2 -- xref in sub_1424E44A0 at 0x1424E47AA (different site).
+        // `mov [rbp+0x07], r15; mov r14, [rip+disp32]; add r14, ...`.
+        // The 4C 89 7D 07 (mov [rbp+0x07], r15) shape is unusual and
+        // distinguishes from the first call site.
+        {"LoaderRegistry_P2_R14ReadAfterStore",
+         "4C 89 7D 07 4C 8B 35 ?? ?? ?? ?? 49 83 C6",
+         ResolveMode::RipRelative, 7, 11},
+
+        // P3 -- xref in sub_142D1E220 at 0x142D1E7F1. This is a STORE
+        // (`mov [rip+disp32], rbx`) that initializes the singleton at
+        // engine-init time, NOT a load. The disp32 still resolves to
+        // the singleton address. Distinctive surrounding context: an
+        // inline EB 03 (jmp short) and a 32-bit struct-field compare
+        // `48 3B 9E 60 00 04 00`.
+        {"LoaderRegistry_P3_InitStoreSite",
+         "48 89 03 48 89 1D ?? ?? ?? ?? EB 03 48 8B DF "
+         "48 3B 9E 60 00 04 00",
+         ResolveMode::RipRelative, 6, 10},
+    };
+
+    /**
+     * @brief ApptContainerVtable: 0x144D24358 (partPrefabDataContainer).
+     *
+     * Per sub_141E2DBB0 (AppearanceTableLoader ctor), the loader
+     * allocates two containers and assigns final vtables:
+     *   a1[0] (_appearanceContainer)     -> &off_144D24308
+     *   a1[1] (_partPrefabDataContainer) -> &off_144D24358   <-- our target
+     *
+     * Single-xref site (in sub_141E2DBB0). The vtable-write pattern is
+     * a code-generator template emitted for ~9 sibling container types,
+     * so anchoring on the lea+mov[rdi] sequence alone is not unique.
+     *
+     * Resolution strategy: AOB-resolve sub_141E2DBB0's prologue (which
+     * IS unique), then the C++ resolver walks forward through the
+     * function body to find the SECOND `48 8D 05 ?? ?? ?? ?? 48 89 07`
+     * pair (the FIRST is the intermediate vtable 0x144D242B8; the SECOND
+     * is our target). The walk-forward logic lives in
+     * prefab_wrapper_swap.cpp::resolve_appt_container_vtable.
+     *
+     * If this breaks: re-AOB sub_141E2DBB0 by its prologue, then in
+     * IDA find the second `lea rax, [rip+disp32]; mov [rdi], rax` pair
+     * inside the function. The byte offset has shifted across builds
+     * (was at +0x2BF in v1.05.01); the walk is bounded to the
+     * function's first 0x400 bytes to avoid running off into the next
+     * function.
+     */
+    inline constexpr AddrCandidate k_apptLoaderCtorCandidates[] = {
+        // P1 -- full prologue (8 callee-saved regs + frame setup).
+        // Distinctive in v1.05.01: 1 unique hit. The 41 54 41 55 41 56
+        // 41 57 (push r12-r15) is the largest possible callee-save set,
+        // typical of a 540-byte function with many locals.
+        {"ApptLoaderCtor_P1_FullPrologue",
+         "48 89 54 24 10 48 89 4C 24 08 53 55 56 57 41 54 41 55 41 56 41 57 "
+         "48 83 EC 38 48 8B F1 45 33 F6 4C 89 31 4C 89 71 08 4C 89 71 10 "
+         "4C 89 71 18 44 88 71 20",
+         ResolveMode::Direct, 0, 0},
+
+        // P2 -- mid-prologue + first field-init. Skips the `mov rcx,rdx
+        // mov rax,rcx` boilerplate; anchors on the first XOR + the
+        // sequence of zero-stores into [rcx+0..0x18].
+        {"ApptLoaderCtor_P2_FieldInitChain",
+         "45 33 F6 4C 89 31 4C 89 71 08 4C 89 71 10 4C 89 71 18 "
+         "44 88 71 20 49 8B 00 48 89 41 10",
+         ResolveMode::Direct, -0x1D, 0},
+
+        // P3 -- mid-body anchor on the unique field-init shape that
+        // copies a 32-byte payload from a3 into a1+0x10..0x20: the
+        // 49 8B 00 / 48 89 41 10 / 49 8B 40 08 / 48 89 41 18 /
+        // 41 0F B6 40 10 sequence is the inline copy of {qword,qword,
+        // byte} from *a3. Unique to this loader ctor in v1.05.01.
+        // Walk-back -0x2F lands on function start.
+        {"ApptLoaderCtor_P3_PayloadCopy",
+         "44 88 71 20 49 8B 00 48 89 41 10 49 8B 40 08 48 89 41 18 "
+         "41 0F B6 40 10",
+         ResolveMode::Direct, -0x2F, 0},
+    };
+
+    /**
+     * @brief NaturalPipeline (sub_142711DF0) -- engine unlink fn.
+     *
+     * RVA 0x2711DF0. PrefabWrapperSwap installs a MidHook here to
+     * substitute Kliff src wrappers with target wrappers in the engine's
+     * unlink list (helm/cloak ghost cleanup, see ghost-helm-re memory).
+     *
+     * Function is a 6k-byte unlink pipeline with all 8 callee-saved
+     * registers pushed, so prologue is highly distinctive.
+     */
+    inline constexpr AddrCandidate k_naturalPipelineCandidates[] = {
+        // P1 -- full prologue + chkstk preamble. The 80 18 00 00 (mov
+        // eax, 0x1880) is the stack reservation passed to __chkstk.
+        // Stable for this exact function shape -- B8 imm32 will only
+        // change if the stack-allocation grows past 4kb.
+        {"NaturalPipeline_P1_FullPrologueChkstk",
+         "48 89 5C 24 10 4C 89 4C 24 20 4C 89 44 24 18 48 89 4C 24 08 "
+         "55 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 80 E8 FF FF "
+         "B8 80 18 00 00",
+         ResolveMode::Direct, 0, 0},
+
+        // P2 -- post-arg-spill prologue. Anchors past the four arg-
+        // home stores and on the lea rbp,[rsp-0x1780]+chkstk pair.
+        // Walk-back -5 = past `48 89 5C 24 10` to function start.
+        {"NaturalPipeline_P2_PostArgSpill",
+         "4C 89 4C 24 20 4C 89 44 24 18 48 89 4C 24 08 "
+         "55 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 80 E8 FF FF "
+         "B8 80 18 00 00",
+         ResolveMode::Direct, -0x05, 0},
+
+        // P3 -- chkstk + stack adjustment + arg-shuffle. The
+        // 48 2B E0 (sub rsp, rax) is the conventional __chkstk
+        // post-call. Walk-back -0x27 to function start.
+        {"NaturalPipeline_P3_PostChkstkArgShuffle",
+         "B8 80 18 00 00 E8 ?? ?? ?? ?? 48 2B E0 4D 8B E8 48 8B DA "
+         "4C 8B F9 41 83 78",
+         ResolveMode::Direct, -0x27, 0},
+    };
+
+    /**
+     * @brief ApptNameLookup (sub_1424DF420) -- name->wrapper primitive.
+     *
+     * RVA 0x24DF420. PrefabWrapperSwap calls this directly (not hooked)
+     * to resolve partprefab names to wrapper-ptrs. Lowercases the name,
+     * interns it, queries MEMORY[0x145DDF8B0]+0x50, returns entry+8 on
+     * hit or 0 on miss.
+     */
+    inline constexpr AddrCandidate k_apptNameLookupCandidates[] = {
+        // P1 -- full prologue + frame setup + first registry load.
+        // The 48 8D 6C 24 A0 (lea rbp,[rsp-0x60]) and 48 81 EC 60 01
+        // (sub rsp, 0x160) form a unique 0x160-byte stack frame. The
+        // immediately-following `mov rsi, [rip+disp32]` loads the
+        // LoaderRegistry singleton (also resolved separately).
+        {"ApptNameLookup_P1_FullPrologue",
+         "48 89 5C 24 10 48 89 4C 24 08 55 56 57 "
+         "48 8D 6C 24 A0 48 81 EC 60 01 00 00 "
+         "48 8B 35 ?? ?? ?? ?? 33 FF 48 89 7D 28",
+         ResolveMode::Direct, 0, 0},
+
+        // P2 -- post-arg-spill, before frame setup. Walk-back -10 to
+        // function start.
+        {"ApptNameLookup_P2_PostArgSpill",
+         "55 56 57 48 8D 6C 24 A0 48 81 EC 60 01 00 00 "
+         "48 8B 35 ?? ?? ?? ?? 33 FF",
+         ResolveMode::Direct, -0x0A, 0},
+
+        // P3 -- frame setup + xor edi,edi + the local-var inits.
+        // The 48 C7 45 30 05 01 00 00 (mov [rbp+0x30], 0x105) is a
+        // semantic constant (initial buffer capacity) -- stable.
+        // Walk-back -13 to function start.
+        {"ApptNameLookup_P3_LocalInitConstant",
+         "48 8D 6C 24 A0 48 81 EC 60 01 00 00 "
+         "48 8B 35 ?? ?? ?? ?? 33 FF 48 89 7D 28 "
+         "48 C7 45 30 05 01 00 00",
+         ResolveMode::Direct, -0x0D, 0},
+    };
+
     /**
      * @brief Patch site: CondPrefab evaluator secondary hash check
      *        (sub_141D5F470 at +0xC8, 0x141D5F538 on v1.02.00).
@@ -331,5 +619,315 @@ namespace Transmog
          "66 45 3B 0C 48 74 ?? FF C1 3B CA 72 ?? EB",
          ResolveMode::Direct, 0x17, 0},
     };
+
+    // -----------------------------------------------------------------------
+    // PrefabWrapperSwap module function targets (audit 2026-05-08 part 2).
+    //
+    // Four function-target cascades migrated out of prefab_wrapper_swap.cpp
+    // where they previously lived as single-anchor inline constexpr arrays.
+    // Each now has a 3-anchor cascade per the ordering rule in
+    // CrimsonDesertCore/external/DetourModKit/docs/misc/aob-signatures.md.
+    //
+    //   ApptResMgrInit  : sub_1408AF8F0 -- one-shot capture hook target;
+    //                                      reads ResMgr/loader/container.
+    //   ApptInnerLookup : sub_140350910 -- partprefab container hashtable
+    //                                      lookup primitive. Pure read.
+    //   ApptStringIntern: sub_1403016B0 -- StringInfo string-intern primitive
+    //                                      callable as `handle_t(const char*)`.
+    //   StructCopy      : sub_140352AA0 -- 0x40-byte struct-copy hot path
+    //                                      that PrefabWrapperSwap inline-hooks
+    //                                      to swap source wrapper-ptrs.
+    //
+    // Hit counts re-verified live via Cheat Engine + IDA on v1.05.01 .text
+    // before authoring. Where a function had a sibling clone (linker-emitted
+    // duplicate compiled from a templated header) and no global anchor was
+    // unique, the cascade leads with a RipRelative call-site anchor that
+    // walks an `E8 disp32` from a known caller (which IS unique) to the
+    // canonical target.
+    // -----------------------------------------------------------------------
+
+    /**
+     * @brief ApptResMgrInit (sub_1408AF8F0) -- one-shot capture hook target.
+     *
+     * Outer ResMgr-init function. PrefabWrapperSwap installs an inline
+     * entry hook that runs the trampoline and then snapshots ResMgr at
+     * a1[5] (a1+0x28), the loader at ResMgr+0x58, and the partprefab
+     * container at loader+0x08. The hook is one-shot; subsequent calls
+     * are pass-throughs.
+     *
+     * If these break: the function pushes all 8 callee-saved registers
+     * (push rbp/rbx/rsi/rdi/r12-r15 = `40 55 53 56 57 41 54 41 55 41 56
+     * 41 57`) and then sets up a 0xF8-byte stack frame. That 13-byte
+     * push run + the chkstk-free `48 81 EC F8 00 00 00` direct alloc are
+     * the two distinguishing prologue features. Re-anchor by combining
+     * either with one of the early-body markers (TLS slot 0x58 read or
+     * the constant `204h` payload size).
+     */
+    inline constexpr AddrCandidate k_apptResMgrInitCandidates[] = {
+        // P1 -- full prologue (8 callee-saved push run + lea rbp + direct
+        // 0xF8 alloc + arg shuffle). 1 hit on v1.05.01 .text. No RIP-rel
+        // bytes inside the window so wildcards are not needed.
+        {"PrefabWrapperSwap_ApptResMgrInit_P1_FullPrologue",
+         "40 55 53 56 57 41 54 41 55 41 56 41 57 "
+         "48 8D 6C 24 E1 "
+         "48 81 EC F8 00 00 00 "
+         "4C 8B FA 4C 8B F1",
+         ResolveMode::Direct, 0, 0},
+
+        // P2 -- mid-prologue: lea rbp,[rsp-0x1F] + direct alloc + arg
+        // shuffle + xor r13d,r13d. Walk-back -0x0D to function start.
+        // 1 hit on v1.05.01 .text. Survives a future build that adds or
+        // reorders early callee-save pushes (because the lea-rbp marker
+        // pins frame setup, not which regs were pushed first).
+        {"PrefabWrapperSwap_ApptResMgrInit_P2_PostPushAlloca",
+         "48 8D 6C 24 E1 48 81 EC F8 00 00 00 "
+         "4C 8B FA 4C 8B F1 45 33 ED",
+         ResolveMode::Direct, -0x0D, 0},
+
+        // P3 -- TLS-canary load body anchor. The unique `mov r12d, 204h ;
+        // mov rax, gs:58h ; add r12, [rax]` sequence reads the TLS slot
+        // into r12 to use as a per-thread scratch base (shape only this
+        // function emits in v1.05.01 -- the 204h immediate is a
+        // build-stable scratch-arena ID). Walk-back -0x2D to function
+        // start. Anchors past the prologue entirely so a prologue-shape
+        // shuffle does not sink P3.
+        {"PrefabWrapperSwap_ApptResMgrInit_P3_TlsScratchSetup",
+         "41 BC 04 02 00 00 65 48 8B 04 25 58 00 00 00 "
+         "4C 03 20 41 8D 55 10 8D 4A 30",
+         ResolveMode::Direct, -0x2D, 0},
+    };
+
+    /**
+     * @brief ApptInnerLookup (sub_140350910) -- partprefab container
+     *        hashtable lookup primitive. Pure read.
+     *
+     * Signature: `__int64(*)(table_struct*, key_wrapper_ptr_ptr*)`.
+     * `table_struct` is `container + 0x70` -- the boot-loaded primary
+     * hash table. Returns 0 on miss or `entry+0x10` on hit (a 24-byte
+     * metadata payload pointer).
+     *
+     * IMPORTANT: this function has a byte-identical sibling clone at
+     * `sub_1430C4880` (UI/render subsystem). Both implement the same
+     * primitive but only `sub_140350910` is wired to the partprefab
+     * `container+0x70` shape. P1 below leads with a RipRelative call-site
+     * anchor (in `sub_140347BB0` which calls into the canonical clone)
+     * because the function-prologue cascade alone matches BOTH copies.
+     * Per feedback_aob_cascade_ordering: any P1 with hit count >=2
+     * shadows unique fallbacks; the call-site anchor is unique and
+     * dispatches the cascade past the clone problem entirely.
+     *
+     * If these break: re-find an xref to `sub_140350910` from
+     * gameplay-side code (e.g. `sub_140347BB0` at +0x1A25 / +0x1B98 in
+     * v1.05.01) and grab the 12-byte window before the `E8 disp32` for a
+     * fresh RipRelative anchor.
+     */
+    inline constexpr AddrCandidate k_apptInnerLookupCandidates[] = {
+        // P1 -- RipRelative resolve via call site at 0x1403495D5 inside
+        // sub_140347BB0. Window: `mov ecx, [rax+disp32]` (the field-load
+        // disp32 is wildcarded since it is a stable game-struct offset
+        // but compiler-specific in encoding) + `add rcx, 0x70 ; mov rdx,
+        // rbx ; call sub_140350910`. The `48 83 C1 70` is the literal
+        // `+0x70` walk-offset that distinguishes the partprefab table from
+        // sibling tables; it is a SEMANTIC constant kept literal. `8B 88`
+        // = `mov ecx, [rax+disp32]`.
+        {"PrefabWrapperSwap_ApptInnerLookup_P1_CallSiteRipRel",
+         "8B 88 ?? ?? ?? ?? 48 83 C1 70 48 8B D3 E8 | ?? ?? ?? ??",
+         ResolveMode::RipRelative, 14, 18},
+
+        // P2 -- function prologue + early-return path. The prologue is
+        // shared with one templated clone (`sub_1430C4880`). When P1
+        // succeeds this is unused; when it fails this returns the FIRST
+        // linear-scan match which is `sub_140350910` on v1.05.01 (the
+        // canonical lookup primitive lives in the lower .text band). The
+        // `48 83 EC 20` direct alloc + `83 79 04 00` field-zero compare
+        // pin this function shape against unrelated functions.
+        {"PrefabWrapperSwap_ApptInnerLookup_P2_FullPrologueEarlyExit",
+         "4C 89 74 24 20 41 57 48 83 EC 20 "
+         "83 79 04 00 4C 8B FA 4C 8B F1 75 0E "
+         "33 C0 4C 8B 74 24 ?? 48 83 C4 20 41 5F C3",
+         ResolveMode::Direct, 0, 0},
+
+        // P3 -- prologue + post-early-exit field load. Walks one more
+        // basic block past P2 into the `mov [rsp+arg_0], rbx ; mov rbx,
+        // [rdx] ; mov [rsp+arg_10], rdi ; mov edi, [rbx+0xC]` shape. The
+        // first `?? ` is the rsp disp8 of the saved-r14 spill (compiler-
+        // owned). Same multi-hit caveat as P2 (clone shares this body).
+        {"PrefabWrapperSwap_ApptInnerLookup_P3_PrologueBodyChain",
+         "4C 89 74 24 20 41 57 48 83 EC 20 "
+         "83 79 04 00 4C 8B FA 4C 8B F1 75 0E "
+         "33 C0 4C 8B 74 24 ?? 48 83 C4 20 41 5F C3 "
+         "48 89 5C 24 30 48 8B 1A 48 89 7C 24 40 8B 7B 0C",
+         ResolveMode::Direct, 0, 0},
+    };
+
+    /**
+     * @brief ApptStringIntern (sub_1403016B0) -- string-intern primitive.
+     *
+     * Signature: `handle_t(*)(const char* utf8)`. Lowercases nothing,
+     * just returns the engine's interned-string handle expected by
+     * `sub_141D38810` and `sub_140350910`. Returns 0 for null/empty
+     * input.
+     *
+     * Like ApptInnerLookup, this function has a templated sibling clone
+     * (linker-emitted from a header). The full prologue is unique in
+     * v1.05.01 so P1 stays direct; P2 and P3 are body anchors that fall
+     * back if the prologue shifts.
+     *
+     * If these break: re-anchor on the unique `48 C7 C3 FF FF FF FF`
+     * (mov rbx, -1 = strlen-counter init) + the strncpy_s import-call
+     * `FF 15 ?? ?? ?? ??` shape -- the import slot is a __ImageImpDir
+     * entry whose location is build-stable.
+     */
+    inline constexpr AddrCandidate k_apptStringInternCandidates[] = {
+        // P1 -- full prologue + null/empty short-circuit + strlen-loop
+        // init. `48 C7 C3 FF FF FF FF` is `mov rbx, -1` -- strlen pre-
+        // decrement counter. 1 hit on v1.05.01 .text.
+        {"PrefabWrapperSwap_ApptStringIntern_P1_FullPrologue",
+         "40 56 48 83 EC 20 "
+         "48 8B F1 48 85 C9 74 52 "
+         "80 39 00 74 4D "
+         "48 89 5C 24 30 "
+         "48 C7 C3 FF FF FF FF",
+         ResolveMode::Direct, 0, 0},
+
+        // P2 -- mid-body anchor on the strlen-loop interior + the back-
+        // jump (`75 F7` = jne -9 to walk to next byte while [rcx+rbx]
+        // != 0). 1 hit on v1.05.01 .text. Walk-back -0x13 to function
+        // start. Survives a prologue-shuffle that drops the `74 52` /
+        // `74 4D` short-jumps in favour of `0F 84 rel32` (only the body
+        // shape is anchored).
+        {"PrefabWrapperSwap_ApptStringIntern_P2_StrlenLoopBody",
+         "48 89 5C 24 30 48 C7 C3 FF FF FF FF "
+         "48 89 7C 24 38 48 FF C3 80 3C 19 00 75 F7",
+         ResolveMode::Direct, -0x13, 0},
+
+        // P3 -- truncated prologue (no `mov rbx, -1`). Same head as P1
+        // but stops one step earlier; survives a build that re-orders
+        // the `mov [rsp+arg_0], rbx` / `mov rbx, -1` pair. Still unique
+        // on v1.05.01 because the `74 52 ... 74 4D ... 48 89 5C 24 30`
+        // null-empty-skip-then-spill sequence is function-specific.
+        {"PrefabWrapperSwap_ApptStringIntern_P3_HeadShortPair",
+         "40 56 48 83 EC 20 "
+         "48 8B F1 48 85 C9 74 52 "
+         "80 39 00 74 4D "
+         "48 89 5C 24 30",
+         ResolveMode::Direct, 0, 0},
+    };
+
+    /**
+     * @brief StructCopy (sub_140352AA0) -- 0x40-byte struct-copy hotpath.
+     *
+     * Signature: `__int64(*)(dst, src)`. The function copies a partprefab
+     * wrapper-related struct field-by-field. PrefabWrapperSwap installs
+     * an inline hook here and (when LT-active) substitutes Kliff source
+     * wrappers with target wrappers for the duration of the copy.
+     *
+     * Function reads the engine's StringInfo vtable sentinel
+     * `0x145BC4638` via a `lea rax, [rip+disp32]` early in the body;
+     * that single RIP-rel byte is wildcarded. All other bytes in the
+     * patterns below are stable.
+     *
+     * If these break: the function's signature is `dst,src ->
+     * mov [dst], 0 ; copy src->dst ; lea rax, [vtable] ; mov [src],
+     * rax ; movzx-byte transfers from [src+8..src+0xA] into [dst+8..]`.
+     * Re-anchor on the byte-transfer block (P3 below) -- it is the most
+     * function-specific shape and the least likely to shuffle.
+     */
+    inline constexpr AddrCandidate k_structCopyCandidates[] = {
+        // P1 -- full prologue + first qword copy + vtable load. Single
+        // RIP-rel `lea rax, [rip+disp32]` wildcarded (loads
+        // `0x145BC4638`). 1 hit on v1.05.01 .text.
+        {"PrefabWrapperSwap_StructCopy_P1_FullPrologueWithVtable",
+         "48 89 5C 24 18 48 89 6C 24 20 48 89 4C 24 08 "
+         "56 57 41 56 48 83 EC 20 "
+         "4C 8B F2 48 8B F1 33 ED 48 89 29 "
+         "48 8B 02 48 89 01 48 8D 05 ?? ?? ?? ?? 48 89 02",
+         ResolveMode::Direct, 0, 0},
+
+        // P2 -- truncated prologue (no RIP-rel). Stops at `48 89 29`
+        // (the `mov [rcx], rbp` zeroing of dst+0). Survives a future
+        // build that moves the vtable lea later in the function. WARNING:
+        // pattern fragment also matches `sub_140355210` (sibling). Hit
+        // count is 1 on the canonical target only when the cascade
+        // proceeds past P1 first; otherwise relies on
+        // `sanity_check_function_prologue` post-resolve.
+        {"PrefabWrapperSwap_StructCopy_P2_PrologueNoVtable",
+         "48 89 5C 24 18 48 89 6C 24 20 48 89 4C 24 08 "
+         "56 57 41 56 48 83 EC 20 "
+         "4C 8B F2 48 8B F1 33 ED 48 89 29",
+         ResolveMode::Direct, 0, 0},
+
+        // P3 -- byte-transfer body anchor. The unique 4-byte payload
+        // copy (`movzx eax, byte ptr [rdx+8/9/A] ; mov [rcx+8/9/A], al`
+        // x3) plus the `mov eax, [rdx+0xC] ; mov [rcx+0xC], eax` dword
+        // tail and the trailing `mov [rcx+0x10], rbp` zero-store. 1 hit
+        // on v1.05.01 .text. Walk-back -0x2F to function start.
+        // Patch-survival: the byte-by-byte transfer shape is what the
+        // compiler emits when struct alignment is 1 (packed); it is a
+        // strong tell of this exact function and is unlikely to shuffle.
+        {"PrefabWrapperSwap_StructCopy_P3_ByteTransferBlock",
+         "48 89 02 0F B6 42 08 88 41 08 "
+         "0F B6 42 09 88 41 09 "
+         "0F B6 42 0A 88 41 0A "
+         "8B 42 0C 89 41 0C 48 89 69 10",
+         ResolveMode::Direct, -0x2F, 0},
+    };
+
+    // -----------------------------------------------------------------------
+    // ItemNameTable bounded-window anchor patterns (audit 2026-05-08 part 3).
+    //
+    // These are NOT cascades: they are pattern strings handed to
+    // `DMK::Scanner::find_pattern` for a 0x40--0x80-byte LOCAL scan inside
+    // a function whose start has already been resolved (via
+    // `k_subTranslatorCandidates`). They live here to keep all byte-pattern
+    // string literals in one place per the audit policy.
+    //
+    // The `|` glyph marks the point where `parse_aob` should compute its
+    // pattern.offset for downstream `match + offset` arithmetic (DMK v3.0.2+
+    // applies offset internally during find_pattern).
+    //
+    // Consumed by `ItemNameTable::resolve_chain` in item_name_table.cpp.
+    // -----------------------------------------------------------------------
+
+    /**
+     * @brief Step-1 anchor inside SubTranslator (v1.05.00 encoding).
+     *
+     * Locates `call sub_141D45270` inside `sub_14076D950`. The second
+     * `lea` encodes rsp-relative (`48 8D 4C 24 ??`, 4 bytes) instead of
+     * v1.04's rbp-relative (`48 8D 4D ??`, 3 bytes). The disp8 slots are
+     * wildcarded so a future stack-frame shift inside the same function
+     * does not require another anchor variant.
+     *
+     * Used as the FIRST pattern in a 0x80-byte scan window. Anchor offset
+     * `|` lands on the byte immediately after the `E8` opcode = start of
+     * the call's disp32.
+     */
+    inline constexpr const char *k_nametableSubTxV105Anchor =
+        "41 B8 01 00 00 00 48 8D 55 ?? 48 8D 4C 24 ?? E8 | ?? ?? ?? ??";
+
+    /**
+     * @brief Step-1 anchor inside SubTranslator (v1.04.00 fallback).
+     *
+     * Older encoding where the second `lea` is rbp-relative. Tried after
+     * the v1.05 anchor inside the same 0x80-byte window.
+     */
+    inline constexpr const char *k_nametableSubTxV104Anchor =
+        "41 B8 01 00 00 00 48 8D 55 ?? 48 8D 4D ?? E8 | ?? ?? ?? ??";
+
+    /**
+     * @brief Step-3 anchor inside ItemAccessor (sub_1402D75D0).
+     *
+     * Locates `mov rbx, cs:qword_145CEF370` inside the 4th hop of the
+     * name-table chain. The 6-byte prologue-tail anchor (push r14 + sub
+     * rsp,0x40 + movzx edi,word ptr [rcx]) pins the call site inside a
+     * bounded 0x40-byte scan of the function -- global uniqueness is not
+     * required because the scan is locally bounded.
+     *
+     * Anchor offset `|` lands on the start of the `48 8B 1D disp32`
+     * instruction. The disp32 is read by the consumer with `read_i32_safe`
+     * at `match + 3` for RIP-relative resolution to qword_145CEF370.
+     */
+    inline constexpr const char *k_nametableItemAccessorAnchor =
+        "41 56 48 83 EC 40 0F B7 39 | 48 8B 1D ?? ?? ?? ??";
 
 } // namespace Transmog

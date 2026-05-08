@@ -1,5 +1,6 @@
 #include "transmog_map.hpp"
 #include "shared_state.hpp"
+#include "slot_metadata.hpp"
 
 #include <DetourModKit.hpp>
 
@@ -24,13 +25,9 @@ namespace Transmog
         {k_hashLowerbody, TransmogSlot::Chest},
     }};
 
-    static constexpr const char *k_slotNames[] = {
-        "Helm",
-        "Chest",
-        "Cloak",
-        "Gloves",
-        "Boots",
-    };
+    // Per-slot display names + engine slot tags + prefab prefixes are
+    // sourced from `slot_metadata.hpp::k_slotMetadata`. Each accessor
+    // here is a thin lookup against that single table.
 
     std::optional<TransmogSlot> slot_from_equip_hash(uint32_t hash)
     {
@@ -46,7 +43,7 @@ namespace Transmog
     {
         auto idx = static_cast<std::size_t>(slot);
         if (idx < k_slotCount)
-            return k_slotNames[idx];
+            return k_slotMetadata[idx].displayName;
         return "Unknown";
     }
 
@@ -72,58 +69,34 @@ namespace Transmog
         return mapping.targetItemId;
     }
 
-    // Game slot ID -> TransmogSlot mapping.
-    // Discovered via CE entry table dumps + runtime logging.
+    // Engine slot tag -> TransmogSlot. Linear search of k_slotMetadata
+    // (20 entries; cheap; called sparingly). Returns std::nullopt for
+    // tags LT does not manage (e.g. 0x0E or Oongka-only 0x15).
     std::optional<TransmogSlot> slot_from_game_slot(int16_t gameSlotId)
     {
-        switch (gameSlotId)
-        {
-        case 3:  return TransmogSlot::Helm;
-        case 4:  return TransmogSlot::Chest;
-        case 5:  return TransmogSlot::Gloves;
-        case 6:  return TransmogSlot::Boots;
-        case 16: return TransmogSlot::Cloak;
-        default: return std::nullopt;
-        }
+        return slot_from_game_tag(gameSlotId);
     }
 
+    // Friendly engine-tag name. Looks up the matching SlotMetadata by
+    // gameTag and returns its displayName; "Unknown" for tags without a
+    // managed slot (0x0E, 0x15, anything > 0x15).
     const char *game_slot_name(int16_t gameSlotId)
     {
-        switch (gameSlotId)
-        {
-        case 0:  return "MainWeapon";
-        case 1:  return "SubWeapon";
-        case 2:  return "Accessory1";
-        case 3:  return "Helm";
-        case 4:  return "Chest";
-        case 5:  return "Gloves";
-        case 6:  return "Boots";
-        case 7:  return "Ring1";
-        case 8:  return "Ring2";
-        case 9:  return "Earring1";
-        case 10: return "Earring2";
-        case 11: return "Necklace";
-        case 12: return "Belt";
-        case 13: return "Accessory2";
-        case 15: return "Lantern";
-        case 16: return "Cloak";
-        case 18: return "Earring3";
-        case 20: return "Mount";
-        default: return "Unknown";
-        }
+        if (auto s = slot_from_game_tag(gameSlotId))
+            return slot_meta(*s).displayName;
+        // Tag 0x15 (OongkaRocket) is intentionally unmanaged but still
+        // shows up in [slot-discovery] dumps for diagnostic purposes.
+        if (gameSlotId == 0x15)
+            return "OongkaRocket";
+        return "Unknown";
     }
 
     int16_t game_slot_from_transmog(TransmogSlot slot)
     {
-        switch (slot)
-        {
-        case TransmogSlot::Helm:   return 3;
-        case TransmogSlot::Chest:  return 4;
-        case TransmogSlot::Gloves: return 5;
-        case TransmogSlot::Boots:  return 6;
-        case TransmogSlot::Cloak:  return 16;
-        default: return -1;
-        }
+        const auto idx = static_cast<std::size_t>(slot);
+        if (idx >= k_slotCount)
+            return -1;
+        return k_slotMetadata[idx].gameTag;
     }
 
     uint16_t get_target_item_id_by_slot(int16_t gameSlotId)
@@ -138,6 +111,21 @@ namespace Transmog
             return 0;
 
         return mapping.targetItemId;
+    }
+
+    bool slots_share_picker(TransmogSlot a, TransmogSlot b)
+    {
+        if (a == b) return true;
+
+        // Pairs from the engine's typeCode taxonomy. Picker filter
+        // checks both directions so order doesn't matter.
+        const auto eq = [&](TransmogSlot x, TransmogSlot y) {
+            return (a == x && b == y) || (a == y && b == x);
+        };
+        if (eq(TransmogSlot::Earring1,  TransmogSlot::Earring2))  return true;
+        if (eq(TransmogSlot::Ring1,     TransmogSlot::Ring2))     return true;
+        if (eq(TransmogSlot::MainHand, TransmogSlot::OffHand))  return true;
+        return false;
     }
 
 } // namespace Transmog

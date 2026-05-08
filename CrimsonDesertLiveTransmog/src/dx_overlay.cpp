@@ -41,7 +41,7 @@ namespace Transmog
     static HWND s_overlayHwnd = nullptr;
     static HWND s_gameHwnd = nullptr;
 
-    // D3D11 WARP device — no swap chain.
+    // D3D11 WARP device, no swap chain.
     static ID3D11Device *s_device = nullptr;
     static ID3D11DeviceContext *s_context = nullptr;
 
@@ -227,16 +227,28 @@ namespace Transmog
     {
         auto &logger = DMK::Logger::get_instance();
 
-        // Wait for game world.
+        // Wait for game world. Slow boots, intro cinematics, OS-level
+        // game updates and similar can all push this past the old
+        // 5-minute cap; with no upper bound the overlay simply waits
+        // until the world resolves OR the mod is shutting down. Heart-
+        // beat log every 60s so the wait is visible to the user, with
+        // no warning noise from a hard timeout that never made sense.
         logger.info("[dx_overlay] Waiting for game world...");
-        for (int i = 0; i < 3000; ++i)
+        for (int tick = 0;; ++tick)
         {
-            if (s_shutdownRequested.load(std::memory_order_relaxed)) return 0;
-            if (Transmog::is_world_ready()) break;
+            if (s_shutdownRequested.load(std::memory_order_relaxed))
+                return 0;
+            if (Transmog::is_world_ready())
+                break;
+            // 600 * 100ms == 60s. Log a heartbeat at each minute mark
+            // so a user looking at the log can confirm the overlay
+            // thread is still alive while they sit on a long load.
+            if (tick > 0 && (tick % 600) == 0)
+                logger.info(
+                    "[dx_overlay] Still waiting for game world ({} min)",
+                    tick / 600);
             Sleep(100);
         }
-        if (!Transmog::is_world_ready())
-        { logger.warning("[dx_overlay] World timeout"); return 0; }
 
         Sleep(2000);
         s_gameHwnd = find_game_hwnd();
@@ -250,7 +262,7 @@ namespace Transmog
         logger.info("[dx_overlay] Game {}x{}", gw, gh);
 
         // --- Overlay window (layered, never receives its own
-        //     D3D/DXGI objects — purely a GDI composite target) ---
+        //     D3D/DXGI objects, purely a GDI composite target) ---
         WNDCLASSEXW wc{sizeof(wc)};
         wc.lpfnWndProc = overlay_wndproc;
         wc.hInstance = GetModuleHandleW(nullptr);
@@ -258,7 +270,7 @@ namespace Transmog
         RegisterClassExW(&wc);
 
         GetWindowRect(s_gameHwnd, &gr);
-        // No WS_EX_TOPMOST — we position relative to the game window
+        // No WS_EX_TOPMOST: we position relative to the game window
         // each frame so the overlay doesn't cover the taskbar or appear
         // above other apps when the game isn't focused.
         s_overlayHwnd = CreateWindowExW(
@@ -380,7 +392,7 @@ namespace Transmog
 
             if (!visible)
             {
-                // Nothing to draw — sleep longer to save CPU.
+                // Nothing to draw, sleep longer to save CPU.
                 Sleep(50);
                 continue;
             }
@@ -407,7 +419,7 @@ namespace Transmog
 
             blit_to_screen();
 
-            Sleep(16); // ~60fps — sufficient for UI, reduces CPU/GDI load
+            Sleep(16); // ~60fps; sufficient for UI, reduces CPU/GDI load
         }
 
         // Cleanup.

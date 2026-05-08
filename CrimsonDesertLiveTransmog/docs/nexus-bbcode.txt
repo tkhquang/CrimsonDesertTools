@@ -16,7 +16,8 @@ Change the visual appearance of your equipped armor [b]in real time[/b] without 
 
 [list]
 [*][b]Built-in overlay[/b] -no external tools required. Press [b]Home[/b] to toggle the overlay
-[*][b]In-game item browser[/b] -searchable dropdown with all armor pieces, auto-categorized by slot (Helm, Chest, Cloak, Gloves, Boots)
+[*][b]In-game item browser[/b] -searchable dropdown auto-categorized by slot (helm, chest, cloak, gloves, boots, necklace, lantern, glasses, mask, backpack)
+[*][b]Body-mesh prefab picker[/b] -optional per-slot prefab swap for users who want to mix and match individual mesh variants beyond what the item picker exposes
 [*][b]Preset system[/b] -save, load, rename, and cycle through multiple transmog presets per character
 [*][b]Multi-character support[/b] -independent preset lists for Kliff, Damiane, and Oongka; the active preset swaps automatically when you change who you control
 [*][b]Body-type filter[/b] -hides items whose body type (male/female) does not match the active character so broken meshes stay out of the picker. Per-character override available in the overlay for body-swap mod users

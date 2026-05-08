@@ -1,4 +1,4 @@
-// overlay.cpp — Standalone overlay path (D3D11 WARP + GDI blit).
+// overlay.cpp -- Standalone overlay path (D3D11 WARP + GDI blit).
 //
 // This TU includes overlay_ui.inl which resolves ImGui calls against
 // imgui_lib (the real ImGui compiled from source).  The ReShade path
@@ -6,12 +6,15 @@
 // function-table wrappers instead.
 
 #include "overlay.hpp"
+#include "prefab_wrapper_swap.hpp"
 #include "constants.hpp"
 #include "dx_overlay.hpp"
 #include "item_name_table.hpp"
 #include "preset_manager.hpp"
 #include "shared_state.hpp"
+#include "slot_metadata.hpp"
 #include "transmog.hpp"
+#include "transmog_apply.hpp"
 #include "transmog_map.hpp"
 
 #include <DetourModKit.hpp>
@@ -26,6 +29,7 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <vector>
 
 namespace Transmog
 {
@@ -73,10 +77,10 @@ namespace Transmog
         auto &logger = DMK::Logger::get_instance();
         bool hasOverlay = false;
 
-        // Always try ReShade — registers the addon tab if ReShade is loaded.
+        // Always try ReShade -- registers the addon tab if ReShade is loaded.
         if (init_reshade_overlay(hModule))
         {
-            logger.info("[overlay] ReShade detected — registered addon tab "
+            logger.info("[overlay] ReShade detected -- registered addon tab "
                         "(open ReShade with Home key)");
             hasOverlay = true;
         }
@@ -94,7 +98,7 @@ namespace Transmog
         }
 
         if (!hasOverlay)
-            logger.warning("[overlay] No overlay available — "
+            logger.warning("[overlay] No overlay available -- "
                            "mod still works via hotkeys");
         return hasOverlay;
     }

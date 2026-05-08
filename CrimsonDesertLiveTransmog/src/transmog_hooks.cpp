@@ -1,5 +1,6 @@
 #include "transmog_hooks.hpp"
 #include "shared_state.hpp"
+#include "transmog_map.hpp"
 #include "transmog_worker.hpp"
 
 #include <DetourModKit.hpp>
@@ -48,17 +49,11 @@ namespace Transmog
         return actorMgr >= 0x10000;
     }
 
-    // Slot tags we transmog. Everything outside this set (weapons, rings,
-    // shoulders, belts, etc.) must not trigger apply_all_transmog.
-    // CE-verified via hardware BP on sub_148EB6700.
-    static constexpr bool is_armor_slot_tag(__int16 slotId) noexcept
-    {
-        const auto t = static_cast<std::uint16_t>(slotId);
-        return t == 0x0003 || t == 0x0004 || t == 0x0005 ||
-               t == 0x0006 || t == 0x0010;
-    }
-
     // --- VEC hook (sub_14076D520) ---
+    // The set of slot tags LT operates on is owned by slot_from_game_slot
+    // (the single source of truth -- returns nullopt for the engine-
+    // internal 0x0E and Oongka-only 0x15 and a TransmogSlot for every
+    // tag LT manages). The hook below queries it directly.
 
     // Returns true iff a1 matches the controlled-character's actor
     // component (WS → ActorManager+0x30 → UserActor+0x28 → +0xD8).
@@ -109,11 +104,26 @@ namespace Transmog
         if (!is_controlled_actor(a1))
             return ret;
 
-        // Skip non-armor slot changes (weapons, rings, etc.). We still
-        // capture a1 so manual applies have the latest player pointer.
+        // Skip equip events for slot tags LT doesn't manage (e.g. the
+        // engine-internal 0x0E or NPC-only 0x15). We still capture a1
+        // so manual applies have the latest player pointer.
         player_a1().store(a1, std::memory_order_release);
-        if (!is_armor_slot_tag(slotId))
+        const auto tslotOpt = slot_from_game_slot(slotId);
+        if (!tslotOpt)
             return ret;
+
+        // Force the dispatcher to re-apply this specific slot. Without
+        // this signal, when the user has a transmog already configured
+        // (so wouldBe == prevIds[i]) and the underlying real item
+        // changed on a non-armor slot, the dispatcher's "no state
+        // change" gate would skip -- last_applied_real_ids only tracks
+        // the 5 armor slots, so a real change on Earring/Ring/Lantern/
+        // Glasses/Mask/Backpack/Bracelet/weapon is otherwise invisible
+        // to it. Setting the flag bypasses both the whole-call early-
+        // out and the per-slot one. Phase A `tear_down_fake` then runs
+        // against the prior carrier so the new real item gets re-
+        // dressed cleanly.
+        force_apply_pending()[static_cast<std::size_t>(*tslotOpt)] = true;
 
         schedule_transmog(a1, 0);
 
@@ -153,6 +163,19 @@ namespace Transmog
             {
                 real_damaged().fill(false);
                 last_applied_real_ids().fill(0);
+
+                // On save-load / zone transition only: force a re-apply
+                // of every slot LT manages. After the wipe above, the
+                // dispatcher's `realChanged` check recovers re-apply
+                // for the 5 armor slots, but any configured transmog
+                // on accessory or weapon slots would otherwise be
+                // missed (last_applied_real_ids is 5-armor-only). For
+                // ordinary equip events the per-slot VEC hook already
+                // sets force_apply_pending for the changed slot, so
+                // BatchEquip does not need to broadcast.
+                auto &fa = force_apply_pending();
+                for (std::size_t i = 0; i < k_slotCount; ++i)
+                    fa[i] = true;
             }
 
             DMK::Logger::get_instance().info(

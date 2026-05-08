@@ -1,6 +1,9 @@
 #include "aob_resolver.hpp"
+#include "item_name_table.hpp"
 #include "real_part_tear_down.hpp"
 #include "shared_state.hpp"
+#include "slot_metadata.hpp"
+#include "transmog_map.hpp"
 
 #include <DetourModKit.hpp>
 
@@ -9,6 +12,7 @@
 #include <atomic>
 #include <cstdint>
 #include <cstring>
+#include <string>
 
 namespace Transmog::RealPartTearDown
 {
@@ -42,6 +46,25 @@ namespace Transmog::RealPartTearDown
         // patch reshaping the struct is immediately visible in the log
         // (the container ptr + entry offsets are not AOB-anchored).
         std::atomic<bool> g_loggedFirstEntry{false};
+
+        // Auth-table verbose dump tracker. Fires the full enumeration
+        // once per distinct (a1, count) pair so character switches and
+        // table resizes re-emit the slot inventory, but a single
+        // session of stable equip state doesn't spam the log on every
+        // tear-down call. Used by the slot-discovery research pass --
+        // helps decide whether a character actually has live entries
+        // for tags beyond the documented Helm/Chest/Gloves/Boots/Cloak
+        // (0x03/0x04/0x05/0x06/0x10) set. The dump function itself is
+        // defined below the layout constants because it reads them.
+        std::atomic<std::uintptr_t> g_lastDumpedA1{0};
+        std::atomic<std::uint32_t>  g_lastDumpedCount{0};
+        // Hash over the entry-array's primary IDs so the dedupe also
+        // catches gear changes within the same (a1, count) -- without
+        // it, the auth table's `count` is the slot-array capacity (not
+        // the equipped count: empty slots persist as 0xFFFF sentinels)
+        // so equip/unequip never bumps count and the prior dedupe key
+        // wouldn't re-fire after the first dump per actor.
+        std::atomic<std::uint64_t>  g_lastDumpedContentHash{0};
 
         // ---- Runtime struct layout for the PartDef/auth-table container ----
         //
@@ -87,12 +110,218 @@ namespace Transmog::RealPartTearDown
         constexpr std::uintptr_t k_entryGateOffset          = 0x10;
 
         constexpr std::uint32_t k_maxPlausibleEntries      = 0x1000;
-        constexpr std::uint16_t k_minPlausibleSlotTag      = 0x0003;
-        constexpr std::uint16_t k_maxPlausibleSlotTag      = 0x0010;
+        // Slot-tag range covers the full engine taxonomy: 0x00..0x15.
+        // Tag 0x0E is engine-unused but harmless to include in the
+        // range -- the auth-table walk simply never finds an entry
+        // for it. See reference_engine_slot_taxonomy_2026-05-07.md.
+        constexpr std::uint16_t k_minPlausibleSlotTag      = 0x0000;
+        constexpr std::uint16_t k_maxPlausibleSlotTag      = 0x0015;
 
         [[nodiscard]] bool plausible_slot_tag(std::uint16_t tag) noexcept
         {
             return tag >= k_minPlausibleSlotTag && tag <= k_maxPlausibleSlotTag;
+        }
+
+        // Engine-only slot tags absent from `TransmogSlot` (and therefore
+        // from `slot_metadata.hpp::k_slotMetadata`) but still part of the
+        // engine taxonomy. Both kept here so the dump emits a readable
+        // label instead of "?". `is_documented_slot` deliberately returns
+        // false for these so the dump still flags them as NEW SLOT TAG
+        // candidates the mod has not lifted into TransmogSlot yet.
+        [[nodiscard]] const char *engine_only_slot_name(
+            std::uint16_t tag) noexcept
+        {
+            switch (tag)
+            {
+                case 0x000E: return "Unknown";
+                case 0x0015: return "OongkaRocket";
+                default:     return "?";
+            }
+        }
+
+        // Slot label resolver. Defers to `slot_metadata.hpp` (single
+        // source of truth for per-slot static data) when the tag maps to
+        // a `TransmogSlot`; falls back to the engine-only override table
+        // for the two tags LT does not manage.
+        [[nodiscard]] const char *known_slot_name(std::uint16_t tag) noexcept
+        {
+            if (const auto s = slot_from_game_tag(static_cast<std::int16_t>(tag)))
+                return slot_meta(*s).displayName;
+            return engine_only_slot_name(tag);
+        }
+
+        // A tag is "documented" iff it round-trips through `slot_metadata`
+        // (and therefore has a `TransmogSlot` enum entry). The two
+        // engine-only tags (0x000E Unknown, 0x0015 OongkaRocket) live
+        // outside the enum on purpose, so they fall through to the
+        // false branch and get flagged in the dump.
+        [[nodiscard]] bool is_documented_slot(std::uint16_t tag) noexcept
+        {
+            return slot_from_game_tag(static_cast<std::int16_t>(tag)).has_value();
+        }
+
+        // Friendly name for the LT-internal TransmogSlot category that
+        // ItemNameTable::category_of returns when classifying an item
+        // by its descriptor (independent of the auth-table slot tag).
+        // Defers to slot_name() which knows every TransmogSlot enum
+        // entry; "Other" is the catch-all for items whose descriptor
+        // type-code didn't classify (returned TransmogSlot::Count).
+        [[nodiscard]] const char *transmog_category_str(
+            TransmogSlot s) noexcept
+        {
+            if (s == TransmogSlot::Count)
+                return "Other";
+            return slot_name(s);
+        }
+
+        // Walks every live entry in the auth table once per (a1, count)
+        // change and logs (index, slotTag, primary, gate-non-null) plus
+        // the resolved item name + LT-classified category. SEH-guarded
+        // by the caller's __try; container/arrayBase/count have already
+        // been validated by the caller. Cheap: at most
+        // k_maxPlausibleEntries iterations and emits one log line per
+        // live entry. Item-name resolution falls back to "<unresolved>"
+        // when ItemNameTable hasn't built (e.g. early in load).
+        void dump_full_auth_table_if_changed(
+            std::uintptr_t a1,
+            std::uintptr_t arrayBase,
+            std::uint32_t  count) noexcept
+        {
+            // Cheap pre-pass: FNV-1a 64-bit hash over the primary IDs
+            // so equip/unequip events (which leave count unchanged) are
+            // visible to the dedupe gate. ~20 entries * 2 bytes hashed
+            // per call -- negligible. Caller's __try frame covers the
+            // volatile reads.
+            std::uint64_t contentHash = 0xCBF29CE484222325ULL;
+            for (std::uint32_t i = 0; i < count; ++i)
+            {
+                const auto entry = arrayBase + k_entryStride * i;
+                const auto primary =
+                    *reinterpret_cast<volatile std::uint16_t *>(
+                        entry + k_entryPrimaryWordOffset);
+                contentHash ^= static_cast<std::uint64_t>(primary);
+                contentHash *= 0x100000001B3ULL;
+            }
+
+            const auto prevA1    = g_lastDumpedA1.load(std::memory_order_acquire);
+            const auto prevCount = g_lastDumpedCount.load(std::memory_order_acquire);
+            const auto prevHash  = g_lastDumpedContentHash.load(std::memory_order_acquire);
+            if (prevA1 == a1 && prevCount == count && prevHash == contentHash)
+                return;
+
+            // Stamp the dedupe tracker only when ItemNameTable is ready
+            // -- otherwise the first dump fires from the early load-
+            // detect retry probe (which runs ~1s before the catalog
+            // is built), names show as "<unresolved>", and we'd never
+            // re-dump once stamped. By deferring the stamp until names
+            // resolve, the dump re-fires up to a couple times during
+            // the load window (cheap: one log batch per retry tick)
+            // and lands its FINAL emission with full item names.
+            auto &logger = DMK::Logger::get_instance();
+            auto &itemTable = ItemNameTable::instance();
+            const bool  itemTableReady = itemTable.size() > 0;
+            if (itemTableReady)
+            {
+                g_lastDumpedA1.store(a1, std::memory_order_release);
+                g_lastDumpedCount.store(count, std::memory_order_release);
+                g_lastDumpedContentHash.store(contentHash, std::memory_order_release);
+            }
+
+            logger.trace(
+                "[slot-discovery] auth-table dump begin a1=0x{:X} "
+                "arrayBase=0x{:X} count={} stride={:#x} slotTag@+{:#x} "
+                "ItemNameTable={}",
+                static_cast<std::uint64_t>(a1),
+                static_cast<std::uint64_t>(arrayBase),
+                count,
+                static_cast<std::uint64_t>(k_entryStride),
+                static_cast<std::uint64_t>(k_entrySlotTagOffset),
+                itemTableReady ? "ready" : "not-ready");
+
+            std::uint32_t live = 0;
+            std::uint32_t documented = 0;
+            std::uint32_t newTags = 0;
+            for (std::uint32_t i = 0; i < count; ++i)
+            {
+                const auto entry = arrayBase + k_entryStride * i;
+                const auto primary =
+                    *reinterpret_cast<volatile std::uint16_t *>(
+                        entry + k_entryPrimaryWordOffset);
+                const auto gate =
+                    *reinterpret_cast<volatile std::uint64_t *>(
+                        entry + k_entryGateOffset);
+                const auto tag =
+                    *reinterpret_cast<volatile std::uint16_t *>(
+                        entry + k_entrySlotTagOffset);
+
+                const bool isLive = !(primary == 0xFFFF || primary == 0)
+                                    && gate != 0;
+                if (!isLive)
+                    continue;
+
+                ++live;
+                const bool documentedTag = is_documented_slot(tag);
+                if (documentedTag)
+                    ++documented;
+                else
+                    ++newTags;
+
+                const char *tagName = known_slot_name(tag);
+                const char *newTagMarker =
+                    documentedTag ? "" : "  *** NEW SLOT TAG ***";
+
+                if (!itemTableReady)
+                {
+                    // Catalog not built yet -- skip the resolved fields
+                    // entirely (they would all be default-init noise:
+                    // equipType=0, typeCode=0xFFFF, cat=Other) and just
+                    // print the raw engine-side fields. This branch
+                    // re-fires on the next probe tick once names land.
+                    logger.trace(
+                        "[slot-discovery]   [{:>2}] tag={:#06x} ({:<12}) "
+                        "primary={:#06x} <unresolved>{}",
+                        i, tag, tagName, primary, newTagMarker);
+                    continue;
+                }
+
+                std::string itemName = itemTable.name_of(primary);
+                if (itemName.empty())
+                    itemName = "<unresolved>";
+
+                const char *categoryStr =
+                    transmog_category_str(itemTable.category_of(primary));
+                const std::uint16_t equipType = itemTable.equip_type_of(primary);
+                const std::uint16_t typeCode  = itemTable.type_code_of(primary);
+
+                // Auto-record (itemId -> TransmogSlot) for the picker
+                // catalog. The engine just told us which slot this item
+                // belongs in -- ground truth that overrides the static
+                // type-code heuristic. Skips when the tag has no
+                // TransmogSlot mapping (e.g. tag 0x0E "Unknown" or 0x15
+                // OongkaRocket -- both intentionally not in TransmogSlot).
+                if (auto tslot = slot_from_game_slot(static_cast<std::int16_t>(tag));
+                    tslot.has_value())
+                {
+                    itemTable.record_observed_slot(primary, *tslot);
+                }
+
+                logger.trace(
+                    "[slot-discovery]   [{:>2}] tag={:#06x} ({:<12}) "
+                    "primary={:#06x} equipType={:#06x} typeCode={:#06x} "
+                    "cat={:<13} name=\"{}\"{}",
+                    i, tag, tagName, primary, equipType, typeCode,
+                    categoryStr, itemName, newTagMarker);
+            }
+
+            logger.trace(
+                "[slot-discovery] auth-table dump end live={} "
+                "documented={} new_tags={} runtime_obs_total={} "
+                "(NEW SLOT TAG entries are candidates for TransmogSlot "
+                "enum extension; runtime_obs_total counts session-wide "
+                "(itemId->slot) bindings the picker now uses to override "
+                "static type-code mapping)",
+                live, documented, newTags,
+                itemTableReady ? itemTable.observed_slot_count() : std::size_t{0});
         }
 
         // First-byte prologue sanity check. Thin wrapper that defers to
@@ -169,7 +398,18 @@ namespace Transmog::RealPartTearDown
             // whose slot entries are not yet populated -- placeholder or
             // mid-wiring. The upper bound rejects torn reads that would
             // otherwise pass the lower bound by accident.
-            return count >= 1 && count <= k_maxPlausibleEntries;
+            const bool ready =
+                count >= 1 && count <= k_maxPlausibleEntries;
+
+            // Passive slot-discovery: dump the auth table the moment a
+            // ready actor first appears (and again whenever a1 or count
+            // changes -- character swap, table resize). Fires before any
+            // tear-down call lands, so we get visibility even if the
+            // user never toggles LT for a given character.
+            if (ready)
+                dump_full_auth_table_if_changed(a1, arrayBase, count);
+
+            return ready;
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
@@ -335,6 +575,12 @@ namespace Transmog::RealPartTearDown
                     static_cast<std::uint64_t>(k_entrySlotTagOffset),
                     static_cast<std::uint64_t>(g0));
             }
+
+            // Verbose slot-discovery dump: enumerates every live entry
+            // so additional slot tags (lower body, mask, neck, etc.)
+            // populated by the engine for the active character become
+            // visible. One-shot per distinct (a1, count) pair.
+            dump_full_auth_table_if_changed(a1, arrayBase, count);
 
             std::uintptr_t foundEntry = 0;
             std::uint16_t  itemWord   = 0;
