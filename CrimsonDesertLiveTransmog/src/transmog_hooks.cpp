@@ -17,23 +17,22 @@ namespace Transmog
 
     bool is_player_actor(__int64 a1) noexcept
     {
-        // Originally this checked `*(typeEntry+1) == 1` (role byte).
-        // CE probing on 1.03.01 showed the byte is character-specific
-        // (Kliff=1, Damiane=4, Oongka=?), not a clean player/NPC flag,
-        // so the equality check silently rejected every companion.
+        // The role byte at typeEntry+1 is character-specific
+        // (Kliff=1, Damiane=4, Oongka unique), not a clean player/NPC
+        // flag, so an equality check would silently reject companions.
         //
-        // New filter: pointer chain is readable AND typeEntry+8 is a
-        // non-null pointer. For every party member we sampled, this
+        // Filter used here: pointer chain is readable AND typeEntry+8
+        // is a non-null pointer. For every party member sampled, this
         // value is the same ActorManager pointer; for unrelated NPCs
         // the pointer differs or the chain faults. Good enough for
-        // the transmog hooks -- misclassification just produces a
-        // harmless no-op apply (no presets exist for unknown chars).
+        // the transmog hooks -- misclassification produces a harmless
+        // no-op apply (no presets exist for unknown chars).
         //
         // DMK::Memory::read_ptr_unsafe is SEH-protected on MSVC and
         // VirtualQuery-guarded on MinGW; on fault it returns 0, which
         // the < 0x10000 guard rejects. This avoids the SEH-vs-C++-
-        // destructors restriction that previously forced this whole
-        // chain into a single __try frame.
+        // destructors restriction that would otherwise require this
+        // whole chain to live inside a single __try frame.
         if (a1 < 0x10000)
             return false;
 

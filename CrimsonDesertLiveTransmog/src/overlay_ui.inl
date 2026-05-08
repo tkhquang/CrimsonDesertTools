@@ -789,19 +789,19 @@ static bool name_contains_ci(const std::string &hay, const char *needle) noexcep
             // and only Selectable() the visible window. Net cost per
             // frame: O(visible_rows) instead of O(totalShown). For the
             // observed lag this drops from ~5000 emits to ~30.
-            const float rowH = ImGui::GetTextLineHeightWithSpacing();
+            const float prefabRowH = ImGui::GetTextLineHeightWithSpacing();
             const float scrollY = ImGui::GetScrollY();
             const float winH = ImGui::GetWindowHeight();
             const int total = static_cast<int>(totalShown);
-            int firstVis = static_cast<int>(scrollY / rowH) - 1;
+            int firstVis = static_cast<int>(scrollY / prefabRowH) - 1;
             int lastVis = static_cast<int>(
-                (scrollY + winH) / rowH) + 2;
+                (scrollY + winH) / prefabRowH) + 2;
             if (firstVis < 0) firstVis = 0;
             if (lastVis > total) lastVis = total;
             if (firstVis > total) firstVis = total;
 
             if (firstVis > 0)
-                ImGui::Dummy(ImVec2(0.0f, firstVis * rowH));
+                ImGui::Dummy(ImVec2(0.0f, firstVis * prefabRowH));
             {
                 for (int row = firstVis; row < lastVis; ++row)
                 {
@@ -871,7 +871,7 @@ static bool name_contains_ci(const std::string &hay, const char *needle) noexcep
                 }
             }
             if (lastVis < total)
-                ImGui::Dummy(ImVec2(0.0f, (total - lastVis) * rowH));
+                ImGui::Dummy(ImVec2(0.0f, (total - lastVis) * prefabRowH));
             if (catalogedTotal == 0)
             {
                 ui_text_disabled(
@@ -886,12 +886,12 @@ static bool name_contains_ci(const std::string &hay, const char *needle) noexcep
         else
         {
             // Prefab catalog rendering is gated to prefabMode=true
-            // (the cross-slot browser block above). The user said the
-            // per-slot prefab list bloats the items dropdown, so when
-            // prefabMode is OFF we don't render rows at all -- only
-            // expose the clear-override option when an active prefab
-            // selection exists, so the user can always undo without
-            // having to flip the prefabMode toggle on first.
+            // (the cross-slot browser block above). The per-slot prefab
+            // list otherwise bloats the items dropdown, so when
+            // prefabMode is OFF we render no prefab rows; only the
+            // clear-override option appears when an active prefab
+            // selection exists, so it can be undone without flipping
+            // the prefabMode toggle on first.
             const int curTgt = PWS::selection_tgt_index(slotCategory);
             if (curTgt >= 0)
             {
@@ -1049,50 +1049,6 @@ static int s_renameIndex = -1;
     return false;
 }
 
-// Identify the "Kairos" character -- the default-carrier preset whose
-// chest item resolves to `cd_phm_00_ub_00_0435` wrappers (Kliff's
-// canonical body-mesh source). The body-mesh hook's swap-map source
-// only matches when this character's gear is loaded, so picking a
-// body-mesh prefab while another character (e.g. Wellsknight) is
-// active must temporarily borrow Kairos's slot itemIds.
-//
-// Resolution policy (in order):
-//   1. Exact name match "Kliff" -- the canonical default carrier.
-//   2. First character returned by character_names().
-//
-// Documented this way so adding a new "Kairos"-equivalent character
-// later is a one-line change. Returns empty string only if the
-// PresetManager has no characters at all (impossible at runtime).
-[[nodiscard]] static std::string kairos_character_name()
-{
-    const auto &pm = Transmog::PresetManager::instance();
-    const auto names = pm.character_names();
-    for (const auto &n : names)
-    {
-        if (n == "Kliff")
-            return n;
-    }
-    return names.empty() ? std::string{} : names.front();
-}
-
-// Borrow the Kairos preset's slot itemIds into the live slot_mappings.
-// Body-mesh swap matches by SOURCE wrapper (e.g. `0435`), which is
-// only resident when the matching carrier item is loaded. When the
-// user picks a body-mesh prefab while controlling another character,
-// the engine has Wellsknight wrappers loaded and the hook never fires.
-// Forcing Kairos's itemIds into slot_mappings makes the engine load
-// Kairos's gear, which loads the source wrappers, which the hook
-// then substitutes with the chosen prefab.
-//
-// Side-effect contract (intentional):
-//   - mutates slot_mappings()[*].targetItemId / .active for slots
-//     where the user has an active body-mesh prefab pick.
-//   - DOES NOT mutate PresetManager state (no set_active_character,
-//     no save). The user's saved preset is untouched.
-//
-// Slots WITHOUT a pickedPrefabName are left alone so the user can
-// stack a body-mesh override on chest while keeping Wellsknight's
-// helm/gloves visible.
 // Clear all picked-prefab UI state and deactivate the body-mesh hook.
 // Called BEFORE preset switches so the prefab swap is torn down before
 // the new preset's items are equipped -- otherwise the hook would still
@@ -1135,9 +1091,9 @@ static void force_active_character_carrier_for_picked_slots()
     // default_carrier_for_slot). The PWS swap is keyed by the source
     // wrapper that THAT character's body emits, so we need the
     // matching carrier to make the source wrapper resident at apply
-    // time. Previously hardcoded to "Kliff" -- which forced Kliff's
-    // plate item onto Damiane / Oongka when they had any prefab
-    // selection active, breaking their carrier-equip path.
+    // time. Hardcoding "Kliff" here would force Kliff's plate item
+    // onto Damiane / Oongka whenever they had a prefab selection
+    // active, breaking their carrier-equip path.
     auto &mappings = Transmog::slot_mappings();
     const auto &activeChar =
         Transmog::PresetManager::instance().active_character();

@@ -480,10 +480,6 @@ namespace Transmog
     //     apply_transmog_with_carrier.
     //   - State: only updates lastIds, carrier, suppress for this slot.
 
-    // (Removed 2026-05-07: k_gameSlotTags array. Use
-    // slot_meta(slot).gameTag from slot_metadata.hpp instead -- single
-    // source of truth for per-slot gameTag mappings.)
-
     void apply_single_slot_transmog(__int64 a1, std::size_t slotIdx)
     {
         if (slotIdx >= k_slotCount)
@@ -782,13 +778,6 @@ namespace Transmog
 
         logger.trace("[dispatch] apply_all_transmog entry a1={:#018x}",
                      static_cast<uint64_t>(a1));
-
-        // (Removed 2026-05-07: legacy PrefabWrapperSwap::
-        // reverse_write_tracked() call. The function was a no-op
-        // since 2026-05-05 because the natural-pipeline hook on
-        // sub_142711DF0 handles cleanup by substituting wrapper
-        // pointers in the engine's unlink list -- no staging revert
-        // is needed.)
 
         // Body has rotated past the stale one (or no swap was in
         // flight) -- this apply will run against the live body, so

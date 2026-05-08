@@ -46,78 +46,26 @@ namespace Transmog::PrefabWrapperSwap
     constexpr std::uint32_t  k_minPlausibleCount     = 100;
     constexpr std::uint32_t  k_maxPlausibleCount     = 200000;
 
-    // --- Runtime-resolved data globals (audit 2026-05-08) ---
+    // --- Runtime-resolved data globals ---
     //
-    // Hardcoded RVAs and absolute addresses were replaced with AOB
-    // cascades (see aob_resolver.hpp::k_stringInfoRegistryCandidates et
-    // al). The cascade resolves at init(); these atomics carry the
-    // resolved address into the hot path. Zero indicates "not yet
-    // resolved" -- every consumer must check for non-zero before
-    // dereferencing.
-    //
-    // Atomics are used because init() runs on the main thread but the
-    // hot path (walk_string_info, enumerate_loader_registry_into_catalog)
-    // can run on the background population thread. x64 qword stores are
-    // naturally atomic on aligned data; the explicit atomic gives the
-    // compiler the memory fence it needs.
+    // Resolved by AOB cascades at init() (see aob_resolver.hpp::
+    // k_stringInfoRegistryCandidates et al). Atomic because init runs on
+    // the main thread while the hot path (walk_string_info,
+    // enumerate_loader_registry_into_catalog) can run on the background
+    // population thread. Zero means "not resolved yet"; every consumer
+    // must check for non-zero before dereferencing.
     static std::atomic<std::uintptr_t> s_stringInfoRegistry{0};
     static std::atomic<std::uintptr_t> s_stringInfoVtable{0};
     static std::atomic<std::uintptr_t> s_loaderRegistrySingleton{0};
     static std::atomic<std::uintptr_t> s_apptContainerVtable{0};
 
-    // (Removed 2026-05-07: k_maxPairs / k_pathBufSize. Both backed
-    // the deleted INI Pair config -- no callers remain.)
-
-    // --- AOB for sub_14270B030 (resource binder) ---
-    //
-    // sub_14270B030 is called by sub_14270AD50 to bind resolved
-    // resources into a record's slots:
-    //   sub_14270B030(charState, entry+16, charState, entry, &v14)  // PRIMARY
-    //   sub_14270B030(charState, entry+24, charState, entry, &v13)  // SECONDARY
-    //
-    // The PRIMARY bind installs the full-string-lookup result (e.g.
-    // target prefab `_0395_c`). The SECONDARY bind installs the
-    // suffix-variant-lookup result (extracted suffix `_c`). When our
-    // pointer-swap changes a wrapper from `_d` (Kliff helm) to `_c`
-    // (target prefab), the secondary bind creates a NEW scene-graph
-    // node keyed on the `_c` suffix in a DIFFERENT class table that
-    // LT's tear_down doesn't traverse -- causing the helm to leak when
-    // the user clears or switches presets.
-    //
-    // Fix: hook this function and SKIP the secondary bind for any
-    // record whose wrapper matches one of our active target wrappers.
-    // The primary bind still happens (target prefab visible). The
-    // secondary suffix-variant bind is skipped (no leak).
-    //
-    // Detection: sub_14270B030 is variadic; va arg is at [rbp+0x60].
-    // Distinguishing primary-vs-secondary at the hook: a2 == entry+24
-    // means secondary (where entry == a4).
-    //
-    // First 50 bytes are a unique prologue + frame setup + first arg
-    // load (`mov rdi, [r12]; test rdi, rdi`); rel32 jcc disp32 after
-    // that varies, so we anchor on the prologue alone.
-    // (Removed 2026-05-07: AOB tables for sub_14275AC00 ResourceBinder,
-    // sub_14271A720 EngineUnlink, sub_1402F94B0 SmartPtrRelease, and
-    // sub_1427127D0 Factory. These supported the legacy helm-leak fix
-    // path -- ResourceBinder gating, factory orphan tracking, and
-    // do_reverse_write force-destroy cleanup. The natural-pipeline
-    // hook on sub_142711DF0 now handles cleanup at the unlink layer
-    // by substituting Kliff src wrappers with target wrappers in the
-    // engine's unlink list, so none of those primitives are referenced
-    // anymore. Verified live 2026-05-05: clear-all + save-reload runs
-    // clean without them. See diff snapshots in
-    // docs/research/ghost-helm-snapshots/diff-2026-05-05-cold/.)
-
-    // 4 inline AOB cascades migrated to aob_resolver.hpp on 2026-05-08
-    // (audit pass 2):
+    // The four cascades consumed below are defined in aob_resolver.hpp:
     //   k_apptResMgrInitCandidates    -- sub_1408AF8F0 capture hook
     //   k_apptInnerLookupCandidates   -- sub_140350910 lookup primitive
-    //                                    (renamed from k_apptLookupCandidates)
     //   k_apptStringInternCandidates  -- sub_1403016B0 string intern
     //   k_structCopyCandidates        -- sub_140352AA0 struct copy hot path
-    //
-    // Each is now a 3-anchor cascade per aob-signatures.md ordering rules.
-    // See aob_resolver.hpp for the cascade definitions and per-anchor docs.
+    // Each is a 3-anchor cascade per the AOB ordering rules in
+    // docs/aob-signatures.md (most-specific candidate first).
 
     // Offset within container where the boot-loaded hash table struct
     // begins. The boot loader (sub_1424E15F0) populates `container +
@@ -125,12 +73,9 @@ namespace Transmog::PrefabWrapperSwap
     // sub_140350910 takes the SAME table-struct pointer.
     static constexpr std::size_t k_apptHashTableOff = 0x70;
 
-    // (Removed 2026-05-07: legacy INI Pair config. The Pair struct,
-    // s_pairs[k_maxPairs] static array, s_enabled gate flag, and the
-    // s_bindings input-binding guard vector all supported the old
-    // [Research]-section INI keys (PrefabWrapperSwap_Pair{1..8} +
-    // ToggleHotkey). All gone -- selection is overlay-driven, no
-    // INI keys remain.)
+    // Module is "active" when at least one slot has a resolved swap
+    // pair installed in s_swapMap. Selection is overlay-driven; there
+    // are no INI keys for this feature.
     static std::atomic<bool> s_active{false};
 
     // Resolved wrapper address map: source_wrapper_ptr → target_wrapper_ptr.
@@ -167,50 +112,30 @@ namespace Transmog::PrefabWrapperSwap
     static std::vector<SubstRecord> s_substLog;
     static constexpr std::size_t  k_maxSubstLog = 256;
 
-    // (Removed 2026-05-07: ResourceBinderFn / s_origBinder /
-    // s_secondarySkipCount + FactoryFn / s_origFactory + LeakedStruct
-    // tracking (s_leakedMtx, s_leakedStructs, k_maxLeakedStructs,
-    // s_factoryHitCount, s_factoryTrackCount). All of these supported
-    // the legacy helm-leak fix path that the natpipe hook on
-    // sub_142711DF0 has obsoleted.)
-
-    // (Removed 2026-05-07: EngineUnlinkFn / s_engineUnlink and
-    // SmartPtrReleaseFn / s_smartPtrRelease typedefs + statics.
-    // Their consumers -- release_orphan_via_smartptr +
-    // do_reverse_write -- were removed in the same pass; the natpipe
-    // hook on sub_142711DF0 handles cleanup without these primitives.)
-
-    // Natural-pipeline unlink (sub_142711DF0) -- RVA 0x2711DF0. Called by
-    // safeTearDown (sub_14078BB20) and other unmount paths with a list
-    // of asset wrappers to unlink from parent+88 records. The function
-    // is content-keyed: it walks parent+88 looking for records whose
+    // Natural-pipeline unlink (sub_142711DF0). Called by safeTearDown
+    // (sub_14078BB20) and other unmount paths with a list of asset
+    // wrappers to unlink from parent+88 records. The function is
+    // content-keyed: it walks parent+88 looking for records whose
     // wrapper field == one of the wrappers in the input list.
     //
-    // ROOT CAUSE OF HELM GHOST (verified live 2026-05-05):
-    //   ExpandToMeshes returns u16=0x4213 (Kliff helm name).
-    //   safeTearDown resolves 0x4213 -> wrapper 0x4104E394BE0 (engine's
-    //   StringInfo entry's +0x18 = the SECOND src instance LT tracks).
-    //   But LT's pointer-swap (sub_140352AA0) installed target wrapper
-    //   0x4104A4B7C80 in parent+88's record. Engine searches for Kliff
-    //   src, doesn't find it, no unlink, helm renderable persists.
+    // Why we hook here: when LT's struct-copy hook substitutes a Kliff
+    // source wrapper with a target wrapper in parent+88, the engine's
+    // tear-down still looks up the original Kliff wrapper at unmount
+    // time, fails to find it, and leaves the substituted record alive
+    // (visible as a ghosted helm/cloak). At natural-pipeline entry we
+    // walk the unlink list and replace each Kliff src with the
+    // corresponding target so the engine's content-keyed search hits.
+    // Originals are restored on the way out so the caller's
+    // refcount-release loop decrements the same wrappers it
+    // incremented.
     //
-    // FIX: hook this function entry, walk RDX's wrapper list, and for
-    // each entry that matches a Kliff src in s_swapMap, replace with
-    // the corresponding target. Engine then matches the target in
-    // parent+88, unlinks correctly, helm cleans up.
-    //
-    // After the call returns we RESTORE the original wrappers so the
-    // caller's refcount-release loop on the list decrements the same
-    // wrapper it incremented (no refcount imbalance).
+    // Resolved via k_naturalPipelineCandidates in aob_resolver.hpp.
     using NaturalPipelineFn = std::int64_t(__fastcall *)(
         std::int64_t a1, std::uint64_t *a2, std::uint64_t *a3);
     static NaturalPipelineFn s_origNaturalPipeline = nullptr;
     static std::atomic<std::uint64_t> s_natpipeHitCount{0};
     static std::atomic<std::uint64_t> s_natpipeSubstCount{0};
     static std::atomic<std::uint64_t> s_natpipeListEntries{0};
-    // sub_142711DF0 -- engine unlink fn. Resolved through
-    // k_naturalPipelineCandidates cascade in aob_resolver.hpp at install
-    // time (audit 2026-05-08); RVA literal removed.
 
     // sub_1424DF420 -- name-based prefab lookup primitive.
     // Signature: `__int64 fn(__int64 unused_a1, const char* name)`.
@@ -275,10 +200,7 @@ namespace Transmog::PrefabWrapperSwap
 
     static std::atomic<std::uintptr_t> s_apptContainer{0};
     static std::atomic<bool>           s_apptCaptureDone{false};
-    // s_apptResMgr / s_apptLoader / s_apptForceLoadEnabled removed
-    // 2026-05-07: only the container snapshot is consumed by
-    // lookup_prefab_metadata; ResMgr/Loader were write-only state and
-    // ForceLoad was a stub-only INI flag.
+    // Only the container snapshot is consumed by lookup_prefab_metadata.
 
     // Lookup primitives, resolved by AOB at init. Both must be
     // non-null for lookup_prefab_metadata to succeed; they are
@@ -487,13 +409,6 @@ namespace Transmog::PrefabWrapperSwap
         return rv;
     }
 
-    // (Removed 2026-05-07: aob_scan_for_container fallback +
-    // try_capture_container_via_aob wrapper. Both were a dormant
-    // fallback path for the case where the chain-based ResMgrInit
-    // hook missed; in practice the hook fires reliably and the
-    // fallback was never triggered. The full-memory writable-heap
-    // vtable scan was overkill for a path with no callers.)
-
     // --- AppearanceTableLoader public API ---
 
     bool is_loader_ready() noexcept
@@ -527,12 +442,6 @@ namespace Transmog::PrefabWrapperSwap
         }();
         return result;
     }
-
-    // (Removed 2026-05-07: force_load_prefab documented stub.
-    // The orchestration call to sub_141E237C0 was out-of-scope research
-    // work that never landed; the public-API stub returned false in all
-    // builds. Removed alongside the s_apptForceLoadEnabled INI flag and
-    // the PrefabWrapperSwap_AttemptForceLoad INI key.)
 
     // --- Per-slot catalog state (Goal B) ---
     //
@@ -573,10 +482,11 @@ namespace Transmog::PrefabWrapperSwap
         = k_initialSelectionIndices;
     static std::atomic<bool>                                   s_catalogPopulated{false};
 
-    // Slot prefix tables. The engine uses `cd_phm_*` for male body
-    // prefabs and `cd_phw_*` for female; both variants live in the
-    // same StringInfo registry and can be transmogged interchangeably.
-    // We carry parallel tables so classification matches either.
+    // Slot prefix tables come from slot_metadata.hpp's SlotMetadata
+    // table (slot_meta(slot).prefabPrefixMale / .prefabPrefixFemale).
+    // The engine uses `cd_phm_*` for male body prefabs and `cd_phw_*`
+    // for female; both variants live in the same StringInfo registry
+    // and can be transmogged interchangeably.
     //
     //   Helm   -> "cd_ph[mw]_00_hel_00_"
     //   Chest  -> "cd_ph[mw]_00_ub_00_"
@@ -584,24 +494,12 @@ namespace Transmog::PrefabWrapperSwap
     //   Gloves -> "cd_ph[mw]_00_hand_00_"
     //   Boots  -> "cd_ph[mw]_00_foot_00_"
     //
-    // `slot_prefix_str` returns the male variant (used by the UI for
-    // default name-stripping); the UI also strips the female variant
-    // when present, so cd_phw_* entries display compactly too.
-    // Body-mesh prefab prefixes per TransmogSlot. The body-mesh-swap
-    // module is armor-family ONLY; accessory/utility slots (Earring*,
-    // Necklace, Ring*, Lantern, Glasses, Mask, Backpack, Bracelet) do
-    // not live under cd_phm_*/cd_phw_* prefab families and are excluded
-    // by giving them an empty prefix. Callers (slot_prefix_str /
-    // populate_slot_catalogs / resolve_pairs_into_map) treat an empty
-    // string as "this slot is not body-mesh-swappable" -- the picker
-    // dropdown for that slot stays empty and the user routes through
-    // the normal carrier-based transmog path instead.
-    // (Removed 2026-05-07: k_slotPrefixes / k_slotPrefixesFemale.
-    // Per-slot prefab prefixes now live on slot_metadata.hpp's single
-    // SlotMetadata table -- access via slot_meta(slot).prefabPrefixMale
-    // and slot_meta(slot).prefabPrefixFemale. Same content; one source
-    // of truth for both genders alongside displayName, gameTag, and
-    // partShowHashKey.)
+    // The body-mesh-swap module is armor-family ONLY; accessory slots
+    // (Earring*, Necklace, Ring*, Lantern, Glasses, Mask, Backpack,
+    // Bracelet) do not live under cd_phm_*/cd_phw_* and are excluded
+    // by giving them an empty prefix. An empty prefix means "this slot
+    // is not body-mesh-swappable" -- the picker dropdown stays empty
+    // and the slot routes through the carrier-based transmog path.
 
     // --- Shared StringInfo walker (Phase 1 fast path) ---
     //
@@ -864,17 +762,6 @@ namespace Transmog::PrefabWrapperSwap
             if (regionSize == 0) break;
         }
     }
-
-    // (Removed 2026-05-07: resolve_pairs_into_map. The StringInfo-based
-    // resolver was the engine for the legacy [Research] INI Pair config
-    // (PrefabWrapperSwap_Pair{1..8}_Source/_Target). With INI gone,
-    // its only caller -- on_hotkey -- removed too, the function is
-    // dead. apply_selections_to_swap_map() drives swap-map construction
-    // from the picker UI now and reads pre-cached PrefabEntry::wrappers
-    // from the catalog -- no walk, no INI lookup. Body deleted; the
-    // matching helpers it inlined (decode_name, try_parse_hex_addr,
-    // longest-common-prefix probe, partprefabdyeslot heap walk) all
-    // went with it.)
 
     // --- Per-slot catalog API (Goal B) ---
 
@@ -1383,23 +1270,21 @@ namespace Transmog::PrefabWrapperSwap
                 if (s_selTgtIdx[i] >= sz) s_selTgtIdx[i] = -1;
             }
 
-            // Auto-seed of src selections from INI pairs has been
-            // MOVED below to run AFTER enumerate_loader_registry_into_
-            // catalog(). That call adds thousands of entries and re-
-            // sorts each slot's vector, which would invalidate any
-            // index seeded here.
+            // Auto-seed of source selections runs below, AFTER
+            // enumerate_loader_registry_into_catalog(). That call adds
+            // thousands of entries and re-sorts each slot's vector,
+            // which would invalidate any index seeded here.
         }
 
         // --- Heap-walk merge: cache parallel-pool wrappers per name ---
         //
         // The StringInfo walk above seeded each PrefabEntry with the
-        // entry+0x18 wrapper (pool 0x4104E*). The engine ALSO sources
+        // entry+0x18 wrapper (pool 0x4104E*). The engine also sources
         // wrappers from a parallel partprefabdyeslot pool (e.g.
-        // 0x4104A*) which is NOT in StringInfo. Previously each picker
-        // pick re-walked all writable heap regions to find these (~7s
-        // per pick). Walk ONCE here at boot for ALL cataloged names --
-        // single pass cost is the same for N names as for 1 because
-        // the dominant cost is the heap traversal itself.
+        // 0x4104A*) which is NOT in StringInfo. We walk ONCE here at
+        // boot for ALL cataloged names; the dominant cost is the heap
+        // traversal itself, so the single-pass cost for N names is
+        // close to the cost for 1.
         //
         // Pass empty tgtNames so only the src side runs; we want all
         // wrappers per name regardless of src/tgt classification (the
@@ -1523,19 +1408,12 @@ namespace Transmog::PrefabWrapperSwap
             }
         }
 
-        // (Removed 2026-05-07: INI-pair src auto-seed block. Read
-        // s_pairs[k_maxPairs] (always empty since INI keys are gone)
-        // and seeded s_selSrcIdx for matching slots. The hardcoded
-        // k_defaultSrcByEnumSlot defaults below now own the seeding.)
-
         // --- AppearanceTableLoader metadata enrichment ---
         //
         // Cross-references each catalog entry against the engine's
-        // name->wrapper registry at MEMORY[0x145DDF8B0]+0x50 via
-        // sub_1424DF420 (RVA-resolved). Cheap: no full-heap AOB scan
-        // anymore, just one direct call per name. The legacy AOB
-        // fallback for the AppearanceTableLoader container is now
-        // dormant -- the new primitive is self-contained.
+        // name->wrapper registry at MEMORY[0x145DDF8B0]+0x50 via the
+        // RVA-resolved primitive sub_1424DF420. One direct call per
+        // name; no heap scan.
 
         // For every catalog entry seeded above (StringInfo-resident),
         // ask the loader whether it knows about the same name. We
@@ -1836,9 +1714,9 @@ namespace Transmog::PrefabWrapperSwap
 
     // Reactivate using the current per-slot dropdown selections. This
     // is the auto-apply path triggered when the slot-row body combos
-    // change in the overlay -- it reproduces the F10 toggle's
-    // deactivate-then-activate cycle so the new selection becomes
-    // visible without requiring a hotkey press.
+    // change in the overlay; it runs a deactivate-then-activate cycle
+    // so the new selection becomes visible without requiring a hotkey
+    // press.
     std::size_t reactivate_with_selections() noexcept
     {
         auto &logger = DMK::Logger::get_instance();
@@ -1874,15 +1752,6 @@ namespace Transmog::PrefabWrapperSwap
             resolved);
         return resolved;
     }
-
-    // (Removed 2026-05-07: on_resource_binder + on_factory. These
-    // were the legacy helm-leak fix path -- ResourceBinder gating to
-    // skip suffix-variant secondary binds, and the factory hook to
-    // capture (struct, kliff_source) for `do_reverse_write` to undo on
-    // deactivate. The natural-pipeline hook on sub_142711DF0
-    // substitutes wrappers in the engine's unlink list at the right
-    // moment without needing either of these. Verified live
-    // 2026-05-05.)
 
     // --- Hook callback ---
 
@@ -2103,18 +1972,11 @@ namespace Transmog::PrefabWrapperSwap
 
     // --- Init / shutdown ---
 
-    // (Removed 2026-05-07: copy_to_buf utility + on_hotkey toggle
-    // path. The legacy F10 toggle was retired when activation became
-    // driven by the overlay's per-slot picker. copy_to_buf was a
-    // helper for the old INI pair-string buffers, which no longer
-    // exist.)
-
     void register_config()
     {
         // Body-mesh swap has no INI keys. The hook installs at boot;
         // source defaults are hardcoded per-character (k_kliffCarriers
-        // etc.); target selection is user-driven via the overlay
-        // picker.
+        // etc.); target selection is overlay-driven.
     }
 
     bool init()
@@ -2275,31 +2137,6 @@ namespace Transmog::PrefabWrapperSwap
             "Hook gates on Transmog::in_transmog() so real-item flow is "
             "untouched.",
             addr);
-
-        // ResourceBinder + Factory hooks REMOVED 2026-05-05.
-        //
-        // Both were part of the *old* helm-leak fix attempt:
-        //   - ResourceBinder gate skipped suffix-mismatched secondary
-        //     binds (`_d -> _c`) to prevent duplicate scene-graph entries.
-        //   - Factory hook tracked the resulting orphans so
-        //     `do_reverse_write` could force-destroy them on deactivate.
-        //
-        // The natural-pipeline hook on sub_142711DF0 (installed below)
-        // now handles the leak at the unlink layer by substituting
-        // Kliff src wrappers with target wrappers in the engine's
-        // unlink list. The engine's content-keyed search then matches
-        // and unlinks correctly via its own natural pipeline. No
-        // secondary-bind gating or orphan tracking required.
-        //
-        // Verified live 2026-05-05: clear-all + save-reload cycles run
-        // clean with these hooks disabled. See diff snapshots in
-        // docs/research/ghost-helm-snapshots/diff-2026-05-05-cold/.
-
-        // (Removed 2026-05-07: EngineUnlink + SmartPtrRelease address
-        // resolution. Both feed dead-code paths -- their consumers
-        // release_orphan_via_smartptr / do_reverse_write were removed
-        // in the same pass, and the natpipe hook on sub_142711DF0
-        // handles cleanup without them.)
 
         // Natural-pipeline unlink hook (sub_142711DF0). Substitutes
         // Kliff src wrappers with target wrappers in the input
@@ -2559,16 +2396,6 @@ namespace Transmog::PrefabWrapperSwap
         return s_targetWrappers.size();
     }
 
-    // (Removed 2026-05-07: heap_scan_for_qword + same_heap_region +
-    // release_orphan_via_smartptr + do_reverse_write. The whole
-    // dead-code chain supported the legacy helm-leak fix path
-    // (force-destroy of orphan body-mesh structs on deactivate). Once
-    // the natural-pipeline hook on sub_142711DF0 took over scene-graph
-    // cleanup, do_reverse_write was hard-coded to a tracking-list
-    // clear (k_skipReverseWrite=true) and never actually called from
-    // anywhere. Removed alongside their s_engineUnlink /
-    // s_smartPtrRelease consumers.)
-
     void notify_apply_starting(const std::uint16_t (&itemIds)[5])
     {
         // Apply-only activation lifecycle. Mirrors the carrier hybrid
@@ -2602,10 +2429,6 @@ namespace Transmog::PrefabWrapperSwap
         s_lastApplyValid = true;
     }
 
-    // (Removed 2026-05-07: reverse_write_tracked no-op stub. Was
-    // empty since 2026-05-05; call site in transmog_apply.cpp also
-    // removed.)
-
     void deactivate_for_clear()
     {
         if (!s_active.load(std::memory_order_acquire))
@@ -2613,13 +2436,13 @@ namespace Transmog::PrefabWrapperSwap
         s_active.store(false, std::memory_order_release);
 
         // Swap map and target-wrapper set are PRESERVED across
-        // deactivate cycles -- F10 re-activate is instant (no heap
+        // deactivate cycles so re-activation is instant (no heap
         // walk). Clear only on shutdown or explicit re-resolve. The
         // active flag alone gates substitution; preserved map is fine.
         //
-        // Engine cleanup is now driven by the natural-pipeline hook on
-        // sub_142711DF0, which substitutes src -> tgt
-        // wrappers in the engine's unlink list at hook entry. No
+        // Engine cleanup is driven by the natural-pipeline hook on
+        // sub_142711DF0, which substitutes src -> tgt wrappers in the
+        // engine's unlink list at hook entry. No
         // explicit reverse-write, force-destroy, or smart-ptr-release
         // is performed here.
         DMK::Logger::get_instance().info(

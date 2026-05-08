@@ -55,10 +55,6 @@ namespace Transmog::PrefabWrapperSwap
     /// carrier's mesh). Idempotent.
     void deactivate_for_clear();
 
-    // (Removed 2026-05-07: reverse_write_tracked declaration. The
-    // function was a no-op stub since 2026-05-05 because the
-    // natural-pipeline hook on sub_142711DF0 handles cleanup.)
-
     /// Notify the module of an upcoming apply's slot itemIds. If swap
     /// is active AND the previous apply's recorded itemIds differ from
     /// these, treat this as a preset-switch and `deactivate_for_clear`
@@ -146,11 +142,6 @@ namespace Transmog::PrefabWrapperSwap
     /// snapshots of partPrefabContainer.
     [[nodiscard]] bool is_loader_ready() noexcept;
 
-    // (Removed 2026-05-07: force_load_prefab declaration. Was a
-    // documented stub gated on PrefabWrapperSwap_AttemptForceLoad
-    // INI; the orchestration call is out-of-scope and the stub
-    // always returned false.)
-
     /// Idempotent. Walks StringInfo with prefix "cd_phm_00_" once and
     /// classifies entries into per-slot vectors (sorted by name).
     /// Returns total entries cataloged. Does NOT mutate s_swapMap or
@@ -199,10 +190,9 @@ namespace Transmog::PrefabWrapperSwap
         Transmog::TransmogSlot fromSlot,
         int fromIdx) noexcept;
 
-    /// Rebuilds s_swapMap from current per-slot selections. Replaces
-    /// the legacy pair-config-driven resolve when called. Reads ALL
-    /// pre-cached wrapper instances per name from the catalog (the
-    /// boot-time heap walk merges parallel pool allocations into
+    /// Rebuilds s_swapMap from the current per-slot selections. Reads
+    /// every pre-cached wrapper instance per name from the catalog
+    /// (the boot-time heap walk merges parallel pool allocations into
     /// PrefabEntry::wrappers); no I/O or heap walk on this hot path.
     /// Returns the count of slot pairs successfully bound. Safe to
     /// call when inactive -- this only resolves; it does NOT toggle
@@ -210,8 +200,6 @@ namespace Transmog::PrefabWrapperSwap
     std::size_t apply_selections_to_swap_map() noexcept;
 
     /// True if at least one slot has BOTH a src AND tgt selection set.
-    /// Activation handlers should prefer apply_selections_to_swap_map
-    /// over resolve_pairs_into_map when this is true.
     [[nodiscard]] bool has_any_selection() noexcept;
 
     /// Reactivate using the current per-slot dropdown selections. If

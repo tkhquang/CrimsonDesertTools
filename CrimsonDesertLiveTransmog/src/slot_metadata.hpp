@@ -89,16 +89,16 @@ namespace Transmog
         { TransmogSlot::Mask,          0x12, "Mask",          "cd_phm_00_mask_00_",     "cd_phw_00_mask_00_",    nullptr        , true  },
         { TransmogSlot::Backpack,      0x13, "Backpack",      "cd_phm_00_bag_0",        "cd_phw_00_bag_0",       nullptr        , true  },
         // Bracelet uses cd_phw_*_rinkband_ on BOTH genders (phw natively,
-        // even for male characters -- engine quirk verified live).
-        // DISABLED: multi-prefab non-armor slot.
+        // even for male characters -- engine quirk verified live). Marked
+        // disabled (`enabled=false`) because it is a multi-prefab,
+        // non-armor slot the current pipeline does not handle.
         { TransmogSlot::Bracelet,      0x14, "Bracelet",      "cd_phw_00_rinkband_",    "cd_phw_00_rinkband_",   nullptr        , false },
-        // -- DISABLED (weapon family): every weapon slot below emits
-        //    multiple prefabs per item (mesh + scabbard + FX + binds),
-        //    and MainHand/OffHand additionally share tag space when
-        //    dual-wielding. Need a separate cd_phw_* weapon pipeline
-        //    + sub-index disambiguation in SlotPopulator before re-
-        //    enabling. Tracked in memory file `engine_slot_taxonomy_
-        //    2026-05-07` Tier 3.
+        // Weapon family slots below are marked disabled (`enabled=false`):
+        // every weapon slot emits multiple prefabs per item (mesh +
+        // scabbard + FX + binds), and MainHand/OffHand share tag space
+        // when dual-wielding. A separate cd_phw_* weapon pipeline plus
+        // sub-index disambiguation in SlotPopulator is required before
+        // re-enabling them.
         { TransmogSlot::MainHand,     0x00, "MainHand",     "cd_phm_01_",             "cd_phw_01_",            nullptr        , false },
         { TransmogSlot::OffHand,      0x01, "OffHand",      "cd_phm_01_",             "cd_phw_01_",            nullptr        , false },
         { TransmogSlot::Ranged,        0x02, "Ranged",        "cd_phm_04_",             "cd_phw_04_",            nullptr        , false },
