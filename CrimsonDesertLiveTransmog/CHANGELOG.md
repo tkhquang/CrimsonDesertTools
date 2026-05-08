@@ -2,6 +2,15 @@
 
 All notable changes to the CrimsonDesertLiveTransmog mod will be documented in this file.
 
+## [0.8.0] - Expanded Slot Coverage and Body-Mesh Prefab Picker
+
+- Slot picker now covers 10 equipment slots (helm, chest, cloak, gloves, boots, necklace, lantern, glasses, mask, backpack) instead of the 5 armor slots only. Weapon, ring, earring, and bracelet slots are not yet supported.
+- New body-mesh prefab picker lets you pick a prefab variant to swap onto a slot, in addition to the regular item picker
+- Body-mesh prefab selections persist with your preset (saved as a new `prefabName` field; older preset files load unchanged)
+- Preset JSON format updated: slots are now stored as a keyed object (by slot name) instead of a positional array, so future slot additions will not shift older saves. Legacy array-format presets load automatically and are rewritten in the new format on next save.
+- Optional cross-slot prefab browser mode: list every body-mesh prefab in one place and apply it to its native slot from any picker
+- Removed the hard world-load timeout in the standalone overlay path. The mod now waits indefinitely for the game world to become ready (with a heartbeat log every minute) instead of giving up and warning, which prevented the overlay from initializing on slow boots.
+
 ## [0.7.0] - v1.05.00 patch support + multi-protagonist fixes
 
 - Updated for game version 1.05.00: transmog correctly identifies carrier-required versus direct-wear items on the latest patch.
@@ -100,6 +109,7 @@ All notable changes to the CrimsonDesertLiveTransmog mod will be documented in t
 - Modular code split: `transmog_apply` (apply/clear logic), `transmog_hooks` (VEC/BatchEquip callbacks), `transmog_worker` (debounce/load-detect/nametable threads), `shared_state` (cross-TU atomics)
 - Docs clarify ReShade is required for GUI; without it, users edit JSON manually via Capture hotkey
 
+[0.8.0]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.8.0
 [0.7.0]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.7.0
 [0.6.4]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.6.4
 [0.6.3]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.6.3
