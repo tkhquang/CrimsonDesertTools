@@ -1,4 +1,5 @@
 #include "transmog_worker.hpp"
+#include "prefab_wrapper_swap.hpp"
 #include "constants.hpp"
 #include "item_name_table.hpp"
 #include "preset_manager.hpp"
@@ -543,6 +544,16 @@ namespace Transmog
                         // address.
                         swap_stale_comp().store(
                             0, std::memory_order_release);
+                        // Re-populate the body-mesh prefab catalog. Save
+                        // loads can rotate the AppearanceTableLoader
+                        // registry's resident wrapper set as zone-/
+                        // archetype-specific assets stream in/out, and
+                        // the picker dropdown otherwise stays pinned to
+                        // the boot snapshot until the user clicks
+                        // "Refresh Catalog" manually. Idempotent and
+                        // cheap (~5ms StringInfo walk + ~10ms registry
+                        // enum); fires once per save-load tick.
+                        PrefabWrapperSwap::populate_slot_catalogs();
                     }
                     prevUser = curUser;
                 }

@@ -1,7 +1,10 @@
 #include "preset_manager.hpp"
+#include "prefab_wrapper_swap.hpp"
 #include "constants.hpp"
 #include "item_name_table.hpp"
+#include "slot_metadata.hpp"
 #include "transmog.hpp"
+#include "transmog_apply.hpp"
 #include "transmog_map.hpp"
 
 #include <DetourModKit.hpp>
@@ -17,10 +20,15 @@ namespace Transmog
 
     static json slot_to_json(const PresetSlot &s)
     {
-        return json{
+        json j{
             {"active", s.active},
             {"itemName", s.itemName},
         };
+        // Only emit prefabName when set, to keep the JSON tidy for
+        // the common (no body-mesh override) case.
+        if (!s.prefabName.empty())
+            j["prefabName"] = s.prefabName;
+        return j;
     }
 
     static PresetSlot slot_from_json(const json &j)
@@ -28,6 +36,7 @@ namespace Transmog
         PresetSlot s;
         s.active = j.value("active", false);
         s.itemName = j.value("itemName", std::string());
+        s.prefabName = j.value("prefabName", std::string());
 
         if (s.itemName.empty())
             return s;
@@ -56,13 +65,35 @@ namespace Transmog
         return s;
     }
 
+    // Keyed-object slot serialization. Old format was a positional
+    // array (slots[0]=Helm, [1]=Chest, ...) which broke whenever the
+    // TransmogSlot enum gained a row -- legacy presets shifted by
+    // one. Object form keys each slot by its slot_metadata display
+    // name ("Helm", "Chest", ...) so the JSON survives enum
+    // additions/removals as long as the names stay stable.
+    //
+    // Migration is automatic: preset_from_json accepts BOTH the
+    // legacy array form AND the new object form. The next save
+    // rewrites every loaded file in object form.
+    //
+    // Disabled slots and default-empty rows are omitted from the
+    // object to keep the JSON tidy. A completely-empty preset
+    // serializes as `{"slots": {}}`.
     static json preset_to_json(const Preset &p)
     {
-        json slotsArr = json::array();
-        for (std::size_t i = 0; i < k_slotCount; ++i)
-            slotsArr.push_back(slot_to_json(p.slots[i]));
-
-        return json{{"name", p.name}, {"slots", slotsArr}};
+        json slotsObj = json::object();
+        for (std::size_t i = 0; i < k_slotCount; ++i) {
+            const auto &s = p.slots[i];
+            if (!Transmog::slot_enabled(i))
+                continue;
+            const bool defaultRow = !s.active && s.itemName.empty() &&
+                                    s.prefabName.empty();
+            if (defaultRow)
+                continue;
+            slotsObj[Transmog::slot_meta(static_cast<TransmogSlot>(i))
+                         .displayName] = slot_to_json(s);
+        }
+        return json{{"name", p.name}, {"slots", slotsObj}};
     }
 
     static Preset preset_from_json(const json &j)
@@ -70,11 +101,52 @@ namespace Transmog
         Preset p;
         p.name = j.value("name", std::string("Unnamed"));
 
-        if (j.contains("slots") && j["slots"].is_array())
+        if (!j.contains("slots"))
+            return p;
+
+        const auto &slotsJ = j["slots"];
+
+        // New format: object keyed by slot displayName.
+        if (slotsJ.is_object())
         {
-            auto &arr = j["slots"];
-            for (std::size_t i = 0; i < k_slotCount && i < arr.size(); ++i)
-                p.slots[i] = slot_from_json(arr[i]);
+            for (auto it = slotsJ.begin(); it != slotsJ.end(); ++it)
+            {
+                bool matched = false;
+                for (std::size_t i = 0; i < k_slotCount; ++i)
+                {
+                    const auto &m = k_slotMetadata[i];
+                    if (it.key() == m.displayName)
+                    {
+                        p.slots[i] = slot_from_json(it.value());
+                        matched = true;
+                        break;
+                    }
+                }
+                if (!matched)
+                {
+                    DMK::Logger::get_instance().warning(
+                        "[preset] '{}' has unknown slot key '{}' -- "
+                        "ignored (slot may have been renamed or "
+                        "removed)",
+                        p.name, it.key());
+                }
+            }
+            return p;
+        }
+
+        // Legacy format: positional array. Indices map directly to
+        // TransmogSlot enum order. Auto-migrated to object form on
+        // next save.
+        if (slotsJ.is_array())
+        {
+            DMK::Logger::get_instance().info(
+                "[preset] '{}' loaded from legacy array format -- "
+                "next save will rewrite as keyed object",
+                p.name);
+            for (std::size_t i = 0;
+                 i < k_slotCount && i < slotsJ.size();
+                 ++i)
+                p.slots[i] = slot_from_json(slotsJ[i]);
         }
         return p;
     }
@@ -298,6 +370,24 @@ namespace Transmog
         return &it->second.presets[static_cast<std::size_t>(idx)];
     }
 
+    const Preset *PresetManager::active_preset_of(
+        const std::string &charName) const
+    {
+        // Read-only sibling of active_preset() that targets an arbitrary
+        // character. Used by the body-mesh prefab picker to borrow the
+        // Kairos (default-carrier) preset's itemIds while leaving the
+        // manager's active_character untouched -- mutating active_character
+        // here would side-trigger load-detect / radial-swap state and
+        // cascade into a save.
+        auto it = m_characters.find(charName);
+        if (it == m_characters.end() || it->second.presets.empty())
+            return nullptr;
+
+        auto idx = std::clamp(it->second.activePreset, 0,
+                              static_cast<int>(it->second.presets.size()) - 1);
+        return &it->second.presets[static_cast<std::size_t>(idx)];
+    }
+
     Preset *PresetManager::active_preset_mut()
     {
         auto it = m_characters.find(m_activeCharacter);
@@ -470,8 +560,81 @@ namespace Transmog
         // apply runs, breaking drop detection.
         for (std::size_t i = 0; i < k_slotCount; ++i)
         {
+            // Disabled slots (multi-prefab non-armor / duplicate-tag
+            // -- see slot_metadata.hpp `enabled` doc) cannot be applied
+            // and are hidden from the picker. A legacy preset saved
+            // before these slots were disabled may still carry
+            // active=true with a non-zero itemId. Force everything off
+            // here so downstream code (lastIds clearing, carrier-borrow,
+            // PWS sync below) doesn't see a stale ticked state for a
+            // slot the user has no way to interact with.
+            if (!Transmog::slot_enabled(i))
+            {
+                mappings[i].active = false;
+                mappings[i].targetItemId = 0;
+                continue;
+            }
+
             mappings[i].active = p->slots[i].active;
             mappings[i].targetItemId = p->slots[i].itemId;
+
+            // Body-mesh slots only persist `prefabName`; the carrier
+            // itemId is derived here from the active character's
+            // default Kliff/Damiane/Oongka plate set. This keeps the
+            // user-facing JSON clean (no spurious "Kliff_PlateArmor_*"
+            // names cluttering body-mesh-only preset entries).
+            if (mappings[i].targetItemId == 0 &&
+                !p->slots[i].prefabName.empty())
+            {
+                const auto carrier = Transmog::default_carrier_for_slot(
+                    static_cast<TransmogSlot>(i), m_activeCharacter);
+                if (carrier != 0)
+                {
+                    mappings[i].targetItemId = carrier;
+                    mappings[i].active = true;
+                }
+            }
+        }
+
+        // Sync body-mesh prefab selections. For each slot, if the
+        // preset stores a prefabName, look it up in the slot's catalog
+        // and set the PWS target index. Empty prefabName clears the
+        // target (slot reverts to plain carrier rendering). When the
+        // catalog isn't yet populated (boot heap walk in progress)
+        // resolution silently misses; the boot thread re-runs
+        // apply_to_state when populate_slot_catalogs finishes so the
+        // selection lands as soon as the data is available.
+        namespace PWS = Transmog::PrefabWrapperSwap;
+        for (std::size_t i = 0; i < k_slotCount; ++i)
+        {
+            const auto tslot = static_cast<TransmogSlot>(i);
+            const int curSrc = PWS::selection_src_index(tslot);
+            // Force-clear any persisted PWS selection on disabled
+            // slots so a legacy preset's body-mesh prefab can't keep
+            // a target index live (which the natural-pipeline hook
+            // would otherwise still apply against).
+            if (!Transmog::slot_enabled(i))
+            {
+                PWS::set_selection(tslot, curSrc, -1);
+                continue;
+            }
+            const auto &name = p->slots[i].prefabName;
+            if (name.empty())
+            {
+                PWS::set_selection(tslot, curSrc, -1);
+                continue;
+            }
+            const auto &cat = PWS::slot_catalog(tslot);
+            int found = -1;
+            for (std::size_t k = 0; k < cat.size(); ++k)
+            {
+                if (cat[k].name == name)
+                {
+                    found = static_cast<int>(k);
+                    break;
+                }
+            }
+            PWS::set_selection(tslot, curSrc, found);
         }
     }
 
@@ -482,15 +645,55 @@ namespace Transmog
 
         auto &mappings = slot_mappings();
         const auto &table = ItemNameTable::instance();
+        namespace PWS = Transmog::PrefabWrapperSwap;
 
         for (std::size_t i = 0; i < k_slotCount; ++i)
         {
+            // Disabled slots (multi-prefab non-armor / duplicate-tag,
+            // see slot_metadata.hpp) are WIP -- don't bloat the JSON
+            // with their current in-memory state. Leaving p.slots[i]
+            // default-constructed serializes the row as
+            // `{"active":false,"itemName":""}` so the array indexing
+            // stays positional but the entry is empty. Any stale data
+            // from an older preset (saved before the slot was
+            // disabled) is discarded on the next save.
+            if (!Transmog::slot_enabled(i))
+                continue;
+
             p.slots[i].active = mappings[i].active;
             p.slots[i].itemId = mappings[i].targetItemId;
-            // id 0 means "none" -- don't resolve a name for it.
-            // The catalog's entry at index 0 is a real item
-            // (Pyeonjeon_Arrow) and saving that name would cause
-            // the preset to load an unintended item on reresolve.
+
+            // Capture the active body-mesh prefab name (target side
+            // of the swap) so it is restored on next load. The src
+            // side is the hardcoded Kliff default and need not be
+            // persisted.
+            const auto tslot = static_cast<TransmogSlot>(i);
+            const int tgtIdx = PWS::selection_tgt_index(tslot);
+            if (tgtIdx >= 0)
+            {
+                const auto &cat = PWS::slot_catalog(tslot);
+                if (static_cast<std::size_t>(tgtIdx) < cat.size())
+                    p.slots[i].prefabName = cat[tgtIdx].name;
+            }
+
+            // When a body-mesh prefab is set, the carrier itemId is
+            // an internal implementation detail (the auto-borrowed
+            // Kairos plate that feeds the source wrapper). Don't
+            // persist itemName for these slots -- the JSON only
+            // shows the user-meaningful prefabName, and load-time
+            // re-derives the carrier via default_carrier_for_slot.
+            if (!p.slots[i].prefabName.empty())
+            {
+                p.slots[i].itemName.clear();
+                continue;
+            }
+
+            // Plain carrier slot (no body-mesh override). Resolve
+            // itemName for round-trip persistence. id 0 means "none"
+            // -- don't resolve a name for it; the catalog's entry at
+            // index 0 is a real item (Pyeonjeon_Arrow) and saving
+            // that name would cause the preset to load an unintended
+            // item on reresolve.
             if (table.ready() && mappings[i].targetItemId != 0)
                 p.slots[i].itemName = table.name_of(mappings[i].targetItemId);
             else

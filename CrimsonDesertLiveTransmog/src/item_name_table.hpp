@@ -276,6 +276,29 @@ namespace Transmog
          */
         TransmogSlot category_of(uint16_t itemId) const noexcept;
 
+        /// Raw item-type code u16 at `desc+0x44` for the given item, or
+        /// 0xFFFF if unknown. Useful for slot-discovery research --
+        /// printing it next to the live engine slot tag reveals the
+        /// (typeCode -> slot) mapping that drives `slot_from_type_code`,
+        /// so accessory and weapon codes can be added without static
+        /// guessing.
+        std::uint16_t type_code_of(std::uint16_t itemId) const noexcept;
+
+        /// Record an observed `(itemId -> slot)` binding seen in the
+        /// engine's live auth-table. The runtime map is consulted by
+        /// `category_of()` BEFORE the static type-code map, so any
+        /// item the engine has actually equipped becomes correctly
+        /// categorized for the picker even when its `desc+0x44`
+        /// type-code isn't yet listed in the static switch. Slot ==
+        /// `TransmogSlot::Count` clears the entry. Thread-safe; cheap
+        /// (one hash insert per call).
+        void record_observed_slot(std::uint16_t itemId,
+                                  TransmogSlot slot) noexcept;
+
+        /// Number of currently-recorded runtime slot observations.
+        /// Diagnostic only.
+        std::size_t observed_slot_count() const noexcept;
+
         /// Dump the full catalog to a TSV file next to the game exe.
         /// Columns: ItemID, Slot, Variant, PlayerSafe, Name.
         void dump_catalog_tsv() const;
@@ -313,6 +336,13 @@ namespace Transmog
         std::unordered_map<uint16_t, uint16_t> m_equipType;
         std::unordered_map<uint16_t, uint8_t> m_bodyBits;
         std::unordered_map<uint16_t, uint16_t> m_typeCode; // desc+0x44 canonical item-type code
+        // Runtime-learned `itemId -> TransmogSlot` map. Populated by
+        // `record_observed_slot` (called from the slot-discovery dump
+        // when it observes live auth-table bindings). Authoritative
+        // override for the static type-code switch -- if the engine
+        // has actually equipped an item in a given slot, we trust that
+        // over any heuristic. Session-scoped (no disk persistence).
+        std::unordered_map<uint16_t, TransmogSlot> m_observedSlot;
         std::unordered_map<std::string, std::string> m_displayNames; // lowercase internal -> display
         mutable std::vector<Entry> m_sortedCache;
 

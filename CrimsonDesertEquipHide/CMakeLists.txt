@@ -23,7 +23,7 @@ endif()
 
 # --- CrimsonDesertCore (shared library, monorepo sibling) ---
 # Core owns DetourModKit as its own submodule and re-exports it via PUBLIC
-# link, so this target gets the DetourModKit target transitively — no
+# link, so this target gets the DetourModKit target transitively; no
 # separate add_subdirectory for DMK is needed at this level.
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../CrimsonDesertCore/CMakeLists.txt")
     add_subdirectory(
@@ -74,7 +74,7 @@ if(EQUIPHIDE_DEV_BUILD)
     # =====================================================================
     # Dev Build: two-DLL hot-reload (loader + logic)
     # =====================================================================
-    message(STATUS "DEV BUILD enabled — building loader + logic DLL pair")
+    message(STATUS "DEV BUILD enabled: building loader + logic DLL pair")
 
     # --- Loader ASI (thin stub, no DetourModKit) ---
     # Sources live in CrimsonDesertCore; parameterized via CDCORE_LOADER_* macros.
@@ -184,7 +184,7 @@ if(rc EQUAL 0)
         endif()
     endif()
 else()
-    message(STATUS "Direct deploy skipped (file locked) — using staging")
+    message(STATUS "Direct deploy skipped (file locked); using staging")
 endif()
 ]=])
 

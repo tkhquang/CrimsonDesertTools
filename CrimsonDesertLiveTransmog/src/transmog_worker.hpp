@@ -23,7 +23,7 @@ namespace Transmog
     /// apply/clear once the burst has been quiet for the specified window.
     void schedule_transmog_ms(std::uint64_t debounce_ms);
 
-    /// Hook-thread entry point. Arguments are intentionally dropped —
+    /// Hook-thread entry point. Arguments are intentionally dropped;
     /// the worker re-resolves both from authoritative state at apply time.
     void schedule_transmog(__int64 a1, std::uint16_t targetId);
 

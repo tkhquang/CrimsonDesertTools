@@ -1,5 +1,6 @@
 #include "part_show_suppress.hpp"
 #include "shared_state.hpp"
+#include "slot_metadata.hpp"
 
 #include <DetourModKit.hpp>
 
@@ -27,22 +28,19 @@ namespace Transmog::PartShowSuppress
         std::array<uint32_t, 4> hashes; // zero-terminated, unused = 0
     };
 
-    // Slot name -> TransmogSlot index mapping. Kept separate from
-    // s_slotHashes so init can look up each slot by its CD_* string.
-    struct SlotNameEntry
-    {
-        std::size_t slot;
-        const char *name;
-    };
+    // The (TransmogSlot -> "CD_*") slot-name table sourced from
+    // slot_metadata.hpp's `partShowHashKey` field. Only the 5 original
+    // armor slots have CD_* slot-suffix hashes in IndexedStringA --
+    // accessory and weapon slots store nullptr there and are filtered
+    // out below. (Replaces a local 5-entry table; extending the
+    // TransmogSlot enum is now safe -- nullptr trailing entries are
+    // skipped explicitly.)
 
-    static constexpr std::array<SlotNameEntry, k_slotCount> k_slotNames = {{
-        {static_cast<std::size_t>(TransmogSlot::Helm),   "CD_Helm"},
-        {static_cast<std::size_t>(TransmogSlot::Chest),  "CD_Upperbody"},
-        {static_cast<std::size_t>(TransmogSlot::Cloak),  "CD_Cloak"},
-        {static_cast<std::size_t>(TransmogSlot::Gloves), "CD_Hand"},
-        {static_cast<std::size_t>(TransmogSlot::Boots),  "CD_Foot"},
-    }};
-
+    // s_slotHashes stays sized to k_slotCount because callers index it
+    // by TransmogSlot value (which can be any of the 20 entries). The
+    // 15 trailing slots have all-zero hashes and act as a no-op for
+    // suppression -- correct behavior since accessories don't use
+    // this hash-driven path.
     static std::array<SlotHashes, k_slotCount> s_slotHashes{};
     static std::atomic<bool> s_slotHashesReady{false};
 
@@ -88,24 +86,33 @@ namespace Transmog::PartShowSuppress
         auto &logger = DMK::Logger::get_instance();
         std::size_t resolved = 0;
 
+        // Walk slot_metadata; only rows where partShowHashKey is set
+        // (the 5 armor slots) participate in IndexedStringA-driven
+        // suppression. Other rows (accessories, weapons) keep their
+        // zero-initialized s_slotHashes entry as a no-op so set_mask
+        // calls for those bits silently pass through.
         for (std::size_t i = 0; i < k_slotCount; ++i)
         {
-            s_slotHashes[i].slot = k_slotNames[i].slot;
+            s_slotHashes[i].slot = i;
             s_slotHashes[i].hashes = {0, 0, 0, 0};
 
-            auto it = nameToHash.find(k_slotNames[i].name);
+            const char *partShowKey = k_slotMetadata[i].partShowHashKey;
+            if (!partShowKey || partShowKey[0] == '\0')
+                continue;
+
+            auto it = nameToHash.find(partShowKey);
             if (it == nameToHash.end())
             {
                 logger.warning(
                     "[dispatch] slot hash missing: '{}' not found in "
                     "IndexedStringA -- suppression for slot {} disabled",
-                    k_slotNames[i].name, k_slotNames[i].slot);
+                    partShowKey, i);
                 continue;
             }
 
             s_slotHashes[i].hashes[0] = it->second;
             logger.info("[dispatch] slot hash resolved: {} = 0x{:X}",
-                        k_slotNames[i].name, it->second);
+                        partShowKey, it->second);
             ++resolved;
         }
 

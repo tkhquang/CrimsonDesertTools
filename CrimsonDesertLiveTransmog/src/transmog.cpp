@@ -1,5 +1,6 @@
 #include "transmog.hpp"
 #include "aob_resolver.hpp"
+#include "prefab_wrapper_swap.hpp"
 #include "constants.hpp"
 #include "indexed_string_table.hpp"
 #include "input_handler.hpp"
@@ -8,6 +9,7 @@
 #include "preset_manager.hpp"
 #include "real_part_tear_down.hpp"
 #include "shared_state.hpp"
+#include "slot_metadata.hpp"
 #include "overlay.hpp"
 #include "transmog_apply.hpp"
 #include "transmog_hooks.hpp"
@@ -68,6 +70,8 @@ namespace Transmog
         // ensure that InputManager::start() runs after this call (handled
         // in init() further down).
         register_hotkeys();
+
+        PrefabWrapperSwap::register_config();
 
         DMK::Config::load(INI_FILE);
         DMK::Config::log_all();
@@ -230,8 +234,30 @@ namespace Transmog
 
             logger.info("=== CAPTURE: {} equipment slots ===", entryCount);
 
+            namespace PWS = Transmog::PrefabWrapperSwap;
+
+            // Capture is "snapshot what the user is currently
+            // equipped with". Any session-only PWS prefab picks must
+            // be cleared so the captured carrier itemIds become the
+            // visible state -- otherwise the cyan prefab label would
+            // hide the captured gear behind a stale prefab pick.
+            // Disabled slots are skipped entirely (the dispatcher
+            // won't service them; writing any captured state into
+            // their mapping just bloats the in-memory rows the next
+            // Save would already drop on disk per slot_metadata.hpp).
             for (std::size_t i = 0; i < k_slotCount; ++i)
             {
+                if (!Transmog::slot_enabled(i))
+                    continue;
+                const auto tslot = static_cast<TransmogSlot>(i);
+                const int curSrc = PWS::selection_src_index(tslot);
+                PWS::set_selection(tslot, curSrc, -1);
+            }
+
+            for (std::size_t i = 0; i < k_slotCount; ++i)
+            {
+                if (!Transmog::slot_enabled(i))
+                    continue;
                 slot_mappings()[i].active = true;
                 slot_mappings()[i].targetItemId = 0;
             }
@@ -250,6 +276,13 @@ namespace Transmog
                 if (tmSlot.has_value() && itemId != 0 && itemId != 0xFFFF)
                 {
                     auto idx = static_cast<std::size_t>(*tmSlot);
+                    if (!Transmog::slot_enabled(idx))
+                    {
+                        logger.info(
+                            "    -> Skipping {} (slot disabled)",
+                            slot_name(*tmSlot));
+                        continue;
+                    }
                     slot_mappings()[idx].targetItemId = itemId;
                     ++captured;
                     logger.info("    -> Captured as {} target", slot_name(*tmSlot));
@@ -275,8 +308,26 @@ namespace Transmog
             return;
         }
 
+        // Capture-style snapshot: skip disabled slots so we don't
+        // bloat in-memory rows for slots the dispatcher won't service.
+        // PWS picks are intentionally NOT preserved -- this function is
+        // a "what is the user wearing right now" snapshot, mirroring
+        // capture_outfit, and any session-only prefab pick should
+        // surrender to the captured itemId so the visible state matches.
+        namespace PWS = Transmog::PrefabWrapperSwap;
         for (std::size_t i = 0; i < k_slotCount; ++i)
         {
+            if (!Transmog::slot_enabled(i))
+                continue;
+            const auto tslot = static_cast<TransmogSlot>(i);
+            const int curSrc = PWS::selection_src_index(tslot);
+            PWS::set_selection(tslot, curSrc, -1);
+        }
+
+        for (std::size_t i = 0; i < k_slotCount; ++i)
+        {
+            if (!Transmog::slot_enabled(i))
+                continue;
             slot_mappings()[i].active = true;
             slot_mappings()[i].targetItemId = 0;
         }
@@ -296,7 +347,12 @@ namespace Transmog
 
                 auto tmSlot = slot_from_game_slot(gameSlot);
                 if (tmSlot.has_value() && itemId != 0 && itemId != 0xFFFF)
-                    slot_mappings()[static_cast<std::size_t>(*tmSlot)].targetItemId = itemId;
+                {
+                    const auto idx = static_cast<std::size_t>(*tmSlot);
+                    if (!Transmog::slot_enabled(idx))
+                        continue;
+                    slot_mappings()[idx].targetItemId = itemId;
+                }
             }
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
@@ -785,6 +841,8 @@ namespace Transmog
             }
         }
 
+        PrefabWrapperSwap::init();
+
         start_load_detect_thread();
         ensure_apply_worker_started();
 
@@ -826,6 +884,8 @@ namespace Transmog
         // installed and when the matching uninstall has already run
         // from a sibling consumer.
         CDCore::uninstall_radial_swap_hook();
+
+        PrefabWrapperSwap::shutdown();
 
         // Full DMK teardown: removes every managed hook (BatchEquip,
         // VEC, PartAddShow), stops and clears the InputManager poller

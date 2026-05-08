@@ -35,4 +35,21 @@ namespace Transmog
     /** @brief Look up target item ID by game slot ID. Returns 0 if no swap. */
     uint16_t get_target_item_id_by_slot(int16_t gameSlotId);
 
+    /**
+     * @brief True iff two slots share an item picker -- they accept the
+     *        same items and only differ in which auth-table slot tag
+     *        gets the visual.
+     *
+     * Paired slots in Crimson Desert (engine descriptors share typeCode
+     * across both halves of each pair, see ItemNameTable::category_of):
+     *   - Earring1 + Earring2  (typeCode 0x08)
+     *   - Ring1 + Ring2        (typeCode 0x0A)
+     *   - MainHand + OffHand (typeCode 0x00)
+     *
+     * Returns true for any (a, a) too -- a slot always shares with
+     * itself. Used by the item picker so e.g. opening the Ring2 popup
+     * shows every ring even though `category_of` returns Ring1 for them.
+     */
+    bool slots_share_picker(TransmogSlot a, TransmogSlot b);
+
 } // namespace Transmog

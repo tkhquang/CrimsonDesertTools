@@ -43,10 +43,11 @@ namespace Transmog
     static std::atomic<__int64> s_playerA1{0};
     static std::atomic<uintptr_t> s_worldSystemPtr{0};
     static std::array<bool, k_slotCount> s_realDamaged{};
-    static std::array<std::uint16_t, 5> s_lastAppliedRealIds{};
+    static std::array<std::uint16_t, k_slotCount> s_lastAppliedRealIds{};
     static std::atomic<bool> s_clearPending{false};
     static std::atomic<std::size_t> s_pendingSlotIndex{k_slotCount};
     static std::array<std::uint16_t, k_slotCount> s_lastAppliedCarrierIds{};
+    static std::array<bool, k_slotCount> s_forceApplyPending{};
     static std::atomic<std::uintptr_t> s_swapStaleComp{0};
 
     ResolvedAddresses &resolved_addrs() { return s_resolvedAddrs; }
@@ -76,8 +77,9 @@ namespace Transmog
     }
     std::atomic<uintptr_t> &world_system_ptr() { return s_worldSystemPtr; }
     std::array<bool, k_slotCount> &real_damaged() { return s_realDamaged; }
-    std::array<std::uint16_t, 5> &last_applied_real_ids() { return s_lastAppliedRealIds; }
+    std::array<std::uint16_t, k_slotCount> &last_applied_real_ids() { return s_lastAppliedRealIds; }
     std::array<std::uint16_t, k_slotCount> &last_applied_carrier_ids() { return s_lastAppliedCarrierIds; }
+    std::array<bool, k_slotCount> &force_apply_pending() { return s_forceApplyPending; }
     std::atomic<bool> &clear_pending() { return s_clearPending; }
     std::atomic<std::size_t> &pending_slot_index() { return s_pendingSlotIndex; }
     std::atomic<std::uintptr_t> &swap_stale_comp() { return s_swapStaleComp; }
