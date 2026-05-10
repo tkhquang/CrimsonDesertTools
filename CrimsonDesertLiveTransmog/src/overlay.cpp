@@ -53,11 +53,20 @@ namespace Transmog
 
     void draw_overlay()
     {
-        // Size relative to display: 33% width, 80% height, capped at 800px wide.
+        // Default size: width auto-fits content, height fills 80%
+        // of the display. Passing 0 on an axis tells ImGui to size
+        // to content for that axis. ImGuiCond_FirstUseEver applies
+        // the size only on the first frame, so user resizes are
+        // preserved across subsequent frames.
+        //
+        // The previous fixed-percent width (33% capped at 1000px)
+        // left a wide empty band on 4K screens because the inner
+        // content -- driven by content-derived widths in
+        // overlay_ui.inl -- is now narrower than 1000px at typical
+        // font scales.
         const auto &displaySize = ImGui::GetIO().DisplaySize;
-        const float w = std::min(displaySize.x * 0.33f, 1000.0f);
         const float h = displaySize.y * 0.8f;
-        ImGui::SetNextWindowSize(ImVec2(w, h), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(ImVec2(0.0f, h), ImGuiCond_FirstUseEver);
         if (!ImGui::Begin(k_windowTitle))
         {
             ImGui::End();

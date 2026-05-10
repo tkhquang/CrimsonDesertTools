@@ -354,7 +354,15 @@ static bool name_contains_ci(const std::string &hay, const char *needle) noexcep
 
     // Fixed-height scrollable region so the popup doesn't resize
     // per keystroke as the filter narrows.
-    const float popupW = s_standaloneMode ? 720.0f : 560.0f;
+    //
+    // Width is content-derived in standalone mode: ~60 'M' glyphs
+    // at the current font is enough for the longest item names
+    // without leaving a wide empty band. The previous DPI-linear
+    // value scaled past 1800px on 4K screens and dominated the
+    // row. Reshade mode keeps a fixed 560px because its host UI
+    // already constrains the parent window.
+    const float popupW = s_standaloneMode
+        ? (ImGui::CalcTextSize("M").x * 60.0f) : 560.0f;
     ImGui::BeginChild("##itemlist",
                       ImVec2(popupW, twoLineH * 12.0f),
                       true);
@@ -1622,10 +1630,17 @@ static void draw_overlay_content()
             }
 
 
-            // Bumped 2026-05-07 from 160/120 -> 200/170 so the longer
-            // slot names ("TwoHandWeapon", "MainHand", "SubWeapon")
-            // don't overlap the picker button.
-            ImGui::SameLine(s_standaloneMode ? 200.0f : 170.0f);
+            // Slot-label column width: pick the longest slot name
+            // ("TwoHandWeapon" plus a trailing pad) and measure it
+            // with the live font. Content-derived rather than
+            // DPI-linear so the column stays tight at 4K instead
+            // of opening a 500px gap. Reshade mode keeps a fixed
+            // 170px because its host UI applies its own scaling.
+            const float slotColW = s_standaloneMode
+                ? (ImGui::CalcTextSize("TwoHandWeapon  ").x
+                   + ImGui::GetStyle().FramePadding.x * 2.0f)
+                : 170.0f;
+            ImGui::SameLine(slotColW);
 
             // --- Picker button ---
             {
@@ -1669,7 +1684,15 @@ static void draw_overlay_content()
                                   "%s  [0x%04X]##pick", pickerLabel.c_str(),
                                   m.targetItemId);
 
-                const float bw = s_standaloneMode ? 520.0f : 380.0f;
+                // Picker button width: ~32 glyphs at the live font
+                // plus padding. Display names that exceed it are
+                // truncated by ImGui's button text rendering. The
+                // previous DPI-linear value (520 * scale) ballooned
+                // to ~1360px at 4K.
+                const float bw = s_standaloneMode
+                    ? (ImGui::CalcTextSize("M").x * 32.0f
+                       + ImGui::GetStyle().FramePadding.x * 2.0f)
+                    : 380.0f;
                 ImGui::SetNextItemWidth(bw);
                 ImGui::PushStyleVar(ImGuiStyleVar_ButtonTextAlign,
                                     ImVec2(0.02f, 0.5f));
@@ -2527,10 +2550,39 @@ static void draw_overlay_content()
                     ImGui::SameLine();
                     if (ImGui::Button("Close")) ImGui::CloseCurrentPopup();
 
+                    // Per-slot dye-inject mode toggle. See
+                    // PresetSlot::dyeSparse in preset_manager.hpp
+                    // for the full semantics. Toggling reapplies
+                    // immediately so the user sees the visual
+                    // change without an extra Apply All click.
+                    if (editPreset != nullptr &&
+                        i < editPreset->slots.size())
+                    {
+                        bool sparse = editPreset->slots[i].dyeSparse;
+                        if (ImGui::Checkbox("Sparse##dye_sparse",
+                                            &sparse))
+                        {
+                            editPreset->slots[i].dyeSparse = sparse;
+                            dye_dirty().store(
+                                true, std::memory_order_release);
+                            reapply_now();
+                        }
+                        if (ImGui::IsItemHovered())
+                            ui_tooltip(
+                                "Sparse (default, matches the merchant dye UI):\n"
+                                "emit only the channels you set; engine paints\n"
+                                "the rest with its own defaults.\n"
+                                "\n"
+                                "Turn off for cross-class fake transmog where\n"
+                                "every channel needs your colour to suppress\n"
+                                "the carrier's default palette.");
+                    }
+
                     ui_text_disabled(
-                        "Tip: most items use 2-5 mods; higher numbers "
-                        "may be no-ops. Red has pure white, Lime has "
-                        "pure black.");
+                        "Tip: items typically use mods (dye slots) 1-12; "
+                        "rest no-ops.\n"
+                        "This mod cannot tell which item is dyeable or "
+                        "has many slots.");
                     ImGui::Separator();
 
                     // --- 16 mod rows, each inline-expandable ---
