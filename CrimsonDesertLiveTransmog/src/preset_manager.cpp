@@ -75,9 +75,9 @@ namespace Transmog
                     {"g",          ch.g},
                     {"b",          ch.b},
                 };
-                if (ch.material_id != 0x0001)
+                if (ch.material_id != 0xFFFF)
                     m["material"] = ch.material_id;
-                if (ch.repair_byte != 0xFF)
+                if (ch.repair_byte != 0)
                     m["repair"] = ch.repair_byte;
                 mods.push_back(std::move(m));
             }
@@ -108,8 +108,8 @@ namespace Transmog
                 ch.g = m.value("g", std::uint8_t{0});
                 ch.b = m.value("b", std::uint8_t{0});
                 ch.material_id =
-                    m.value("material", std::uint16_t{0x0001});
-                ch.repair_byte = m.value("repair", std::uint8_t{0xFF});
+                    m.value("material", std::uint16_t{0xFFFF});
+                ch.repair_byte = m.value("repair", std::uint8_t{0});
                 resolve_dye_group(ch); // populates ch.group_hash
             }
         }

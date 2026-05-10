@@ -47,7 +47,10 @@ namespace Transmog::DyeRecordInject
     ///   +8       g
     ///   +9       b
     ///   +10      0xFF
-    ///   +11      repair_byte     (0xFF=pristine, 0x7F=max wear)
+    ///   +11      repair_byte     (0=pristine, 0x7F=max wear; the
+    ///                            engine still accepts 0xFF as a
+    ///                            legacy "no override" sentinel and
+    ///                            renders it as pristine)
     ///   +13      0x04 for indices 0 and 3 (mirrors natural records)
     struct ChannelState
     {
@@ -82,14 +85,4 @@ namespace Transmog::DyeRecordInject
     /// Clear the published state. Call after the apply path
     /// completes so subsequent natural equip events go un-modified.
     void clear_slot_dye_state() noexcept;
-
-    /// Convert repair percent (0..100) to the engine's wear byte
-    /// (0..127). Calibration verified 2026-04-30: forward-truncated
-    /// linear map; 100% maps to 0x00 (sentinel "no wear override").
-    constexpr std::uint8_t pct_to_repair_byte(int pct) noexcept
-    {
-        if (pct >= 100) return 0;
-        if (pct <= 0)   return 127;
-        return static_cast<std::uint8_t>(((100 - pct) * 127) / 100);
-    }
 }

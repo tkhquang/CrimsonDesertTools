@@ -2085,13 +2085,12 @@ static void draw_overlay_content()
                         }
                 }
 
-                // Dye button: always plain "Dye" with fixed width
-                // and no background color override -- keeps text
-                // legible and rows aligned regardless of dye state.
-                // Active state is signalled by a small color-swatch
-                // chip rendered next to the button.
-                const bool dyeBtn = ImGui::Button(
-                    "Dye##dyeBtn", ImVec2(40.0f, 0.0f));
+                // Dye button: always plain "Dye" with no background
+                // color override -- keeps text legible regardless of
+                // dye state. Active state is signalled by a small
+                // color-swatch chip rendered next to the button.
+                // Auto-sized so the label fits at any font scale.
+                const bool dyeBtn = ImGui::Button("Dye##dyeBtn");
 
                 if (firstActiveCh)
                 {
@@ -2102,8 +2101,11 @@ static void draw_overlay_content()
                     ImGui::PushStyleColor(ImGuiCol_Button, sw);
                     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, sw);
                     ImGui::PushStyleColor(ImGuiCol_ButtonActive, sw);
+                    // Match the Dye button's height so the chip sits
+                    // on the row baseline at any font scale.
+                    const float chip_size = ImGui::GetFrameHeight();
                     if (ImGui::Button("##dyeSw",
-                                      ImVec2(20.0f, 20.0f)))
+                                      ImVec2(chip_size, chip_size)))
                     {
                         ImGui::OpenPopup("##dye_picker");
                     }
@@ -2234,7 +2236,7 @@ static void draw_overlay_content()
                         std::snprintf(gid, sizeof(gid),
                                       "##g%zu", g);
                         if (ImGui::Button(gid,
-                                          ImVec2(28.0f, 22.0f)))
+                                          ImVec2(32.0f, 28.0f)))
                         {
                             // string_key is the source-of-truth; hash
                             // is derived. If the group is missing
@@ -2280,7 +2282,7 @@ static void draw_overlay_content()
                                 std::snprintf(nlabel, sizeof(nlabel),
                                               "##n%u", s);
                                 if (ImGui::Button(nlabel,
-                                                  ImVec2(20.0f, 20.0f)))
+                                                  ImVec2(28.0f, 28.0f)))
                                 {
                                     ch.r = (bgra >> 16) & 0xFF;
                                     ch.g = (bgra >> 8) & 0xFF;
@@ -2322,7 +2324,7 @@ static void draw_overlay_content()
                                 std::snprintf(slabel, sizeof(slabel),
                                               "##s%u", s);
                                 if (ImGui::Button(slabel,
-                                                  ImVec2(20.0f, 20.0f)))
+                                                  ImVec2(28.0f, 28.0f)))
                                 {
                                     ch.r = (bgra >> 16) & 0xFF;
                                     ch.g = (bgra >> 8) & 0xFF;
@@ -2351,14 +2353,18 @@ static void draw_overlay_content()
                         ui_text_disabled("(pick a group above)");
                     }
 
-                    // Repair-level slider (offset +11 of dye record).
-                    int repairPct = 100 - (ch.repair_byte == 0xFF
-                        ? 0
-                        : ((ch.repair_byte * 100 + 63) / 127));
-                    if (ch.repair_byte == 0xFF) repairPct = 100;
+                    // Repair slider (offset +11 of dye record).
+                    // The engine stores wear as a 0..127 byte; 0 means
+                    // pristine, 127 means max wear. We surface the
+                    // inverse as "Repair %" so 100 = pristine and 0 =
+                    // max wear, matching the conventional reading.
+                    // 0xFF is the legacy "no override" sentinel and is
+                    // treated as 100% on read for old presets.
+                    int repairPct = (ch.repair_byte == 0xFF)
+                        ? 100
+                        : 100 - ((ch.repair_byte * 100 + 63) / 127);
                     ImGui::SetNextItemWidth(200.0f);
-                    if (ImGui::SliderInt("Repair %", &repairPct,
-                                         0, 100))
+                    if (ImGui::SliderInt("Repair %", &repairPct, 0, 100))
                     {
                         if (repairPct >= 100) ch.repair_byte = 0;
                         else if (repairPct <= 0) ch.repair_byte = 127;
@@ -2381,6 +2387,13 @@ static void draw_overlay_content()
                     namespace MPT =
                         Transmog::MaterialPaletteTable;
                     ui_text("Material template:");
+                    // Width sized to the widest two-digit label so the
+                    // "10" button is not cut off; all rows align at the
+                    // same width regardless of single- vs two-digit.
+                    const float mat_btn_w =
+                        ImGui::CalcTextSize("10").x
+                        + ImGui::GetStyle().FramePadding.x * 2.0f
+                        + 8.0f;
                     for (std::uint16_t v = 1; v <= 10; ++v)
                     {
                         if (v != 1) ImGui::SameLine();
@@ -2393,7 +2406,7 @@ static void draw_overlay_content()
                         std::snprintf(mlabel, sizeof(mlabel),
                                       "%u##m%u", v, v);
                         if (ImGui::Button(mlabel,
-                                          ImVec2(28.0f, 0.0f)))
+                                          ImVec2(mat_btn_w, 0.0f)))
                         {
                             ch.material_id = v;
                             reapply_now();
@@ -2450,8 +2463,10 @@ static void draw_overlay_content()
                         if (selected)
                             ImGui::PushStyleColor(ImGuiCol_Button,
                                 ImVec4(0.3f, 0.6f, 0.9f, 1.0f));
-                        if (ImGui::Button("Default##mFFFF",
-                                          ImVec2(56.0f, 0.0f)))
+                        // Auto-sized so the label always fits regardless
+                        // of overlay font scale; prior fixed widths
+                        // truncated the text on chunky bitmap fonts.
+                        if (ImGui::Button("Default##mFFFF"))
                         {
                             ch.material_id = 0xFFFF;
                             reapply_now();
@@ -2463,9 +2478,14 @@ static void draw_overlay_content()
                                 "0xFFFF -- engine picks the "
                                 "natural variant for this channel.");
                     }
+                    // Render the label on the left so the trailing
+                    // ImGui auto-label does not clip on the popup's
+                    // right edge in the standalone overlay.
                     int rawMat = static_cast<int>(ch.material_id);
-                    ImGui::SetNextItemWidth(160.0f);
-                    if (ImGui::InputInt("raw u16##matRaw",
+                    ui_text("Raw u16:");
+                    ImGui::SameLine();
+                    ImGui::SetNextItemWidth(140.0f);
+                    if (ImGui::InputInt("##matRaw",
                                         &rawMat, 1, 16,
                                         ImGuiInputTextFlags_CharsHexadecimal
                                         | ImGuiInputTextFlags_EnterReturnsTrue))
@@ -2523,7 +2543,11 @@ static void draw_overlay_content()
                             ImGui::PushID(static_cast<int>(k) + 5000);
 
                             // Header: chevron + "Mod K" + swatch +
-                            // summary.
+                            // summary. Width is computed from the
+                            // widest label ("v Mod 15") so all rows
+                            // align in a column regardless of font
+                            // scale; auto-size would let single-digit
+                            // rows shrink and break the column.
                             const bool expanded =
                                 s_expandedMod[i] ==
                                 static_cast<int>(k);
@@ -2531,15 +2555,25 @@ static void draw_overlay_content()
                             std::snprintf(hdr, sizeof(hdr),
                                           "%s Mod %2zu",
                                           expanded ? "v" : ">", k);
+                            const float row_btn_w =
+                                ImGui::CalcTextSize("v Mod 15").x
+                                + ImGui::GetStyle().FramePadding.x * 2.0f
+                                + 8.0f;
                             if (ImGui::Button(hdr,
-                                              ImVec2(110.0f, 0.0f)))
+                                              ImVec2(row_btn_w, 0.0f)))
                             {
                                 s_expandedMod[i] = expanded
                                     ? -1
                                     : static_cast<int>(k);
                             }
 
-                            // Color swatch (small).
+                            // Color swatch. Sized to the row button's
+                            // height so the two widgets sit on the
+                            // same baseline regardless of font scale,
+                            // and made clickable so the swatch acts
+                            // as a second hit target for expanding
+                            // the row (small fixed sizes were hard to
+                            // hit in the standalone overlay).
                             ImGui::SameLine();
                             ImVec4 sw = ch.active()
                                 ? ImVec4(ch.r / 255.0f,
@@ -2549,7 +2583,16 @@ static void draw_overlay_content()
                             ImGui::PushStyleColor(ImGuiCol_Button, sw);
                             ImGui::PushStyleColor(
                                 ImGuiCol_ButtonHovered, sw);
-                            ImGui::Button("##sw", ImVec2(20.0f, 20.0f));
+                            const float sw_size =
+                                ImGui::GetFrameHeight();
+                            if (ImGui::Button(
+                                    "##sw",
+                                    ImVec2(sw_size, sw_size)))
+                            {
+                                s_expandedMod[i] = expanded
+                                    ? -1
+                                    : static_cast<int>(k);
+                            }
                             ImGui::PopStyleColor(2);
 
                             // Summary text.
