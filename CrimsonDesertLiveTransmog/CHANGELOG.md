@@ -2,6 +2,15 @@
 
 All notable changes to the CrimsonDesertLiveTransmog mod will be documented in this file.
 
+## [0.9.1] - Capture Real Dye, Disabled-Mode Cleanup, Standalone Overlay Polish
+
+- Capture Outfit now also snapshots the live dye and material state on every captured slot, so loading a captured preset paints each item in the colours it had at capture time instead of the factory palette.
+- Toggling Live Transmog off (or hitting Clear) now correctly tears down NPC carrier visuals on slots that had no real backing item, so disabled mode no longer leaves a ghost helm or cloak painted on the actor.
+- Restoring a real item after unticking a slot, or after toggling Live Transmog off, now keeps the item's current inventory dye instead of resetting it to the factory palette.
+- New per-slot Sparse toggle in the dye picker. Sparse (default) emits only the channels you set and lets the engine paint the rest with its own defaults; turn it off when doing cross-class fake transmog so every channel uses your colour and the carrier's default palette is fully suppressed.
+- Standalone overlay font is now built at the target pixel size (sharper text on 1440p and 4K) instead of being stretched, and the window, item picker, slot label column, and picker button widths all auto-fit the live font so 4K screens no longer show wide empty bands.
+- Standalone overlay mouse clicks now use rising-edge detection over the overlay window: clicks that begin inside the game and drag onto the overlay no longer fire phantom widget events, and clicks that begin on the overlay still complete cleanly even if the mouse leaves the overlay before release.
+
 ## [0.9.0] - Dye picker
 
 - New per-slot dye picker recolors transmog armor in real time, independent of the dye on your real items.
@@ -116,6 +125,7 @@ All notable changes to the CrimsonDesertLiveTransmog mod will be documented in t
 - Modular code split: `transmog_apply` (apply/clear logic), `transmog_hooks` (VEC/BatchEquip callbacks), `transmog_worker` (debounce/load-detect/nametable threads), `shared_state` (cross-TU atomics)
 - Docs clarify ReShade is required for GUI; without it, users edit JSON manually via Capture hotkey
 
+[0.9.1]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.9.1
 [0.9.0]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.9.0
 [0.8.0]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.8.0
 [0.7.0]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.7.0
