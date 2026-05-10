@@ -316,8 +316,24 @@ namespace Transmog
         // resolutions so the UI stays readable at 1440p / 4K.
         const float dpiScale = static_cast<float>(gh) / 1080.0f;
         ImGui::StyleColorsDark();
-        ImGui::GetStyle().ScaleAllSizes(dpiScale);
-        io.FontGlobalScale = dpiScale;
+
+        // Build the default font at the target pixel size instead
+        // of stretching ImGui's 13px built-in bitmap via
+        // FontGlobalScale. The stretch path leaves glyphs blurry
+        // and breaks the row-vs-glyph ratio: rows scale via
+        // ScaleAllSizes but the bitmap font does not, which is
+        // what made the standalone overlay look thin and cramped.
+        //
+        // 14px base reads better than ImGui's default at 1080p;
+        // dpiScale lifts it linearly for 1440p / 4K. ScaleAllSizes
+        // is then driven by the font/13px ratio so padding, frame
+        // heights, and column widths stay proportional to the
+        // glyph size.
+        ImFontConfig fontCfg;
+        fontCfg.SizePixels = 14.0f * dpiScale;
+        io.Fonts->AddFontDefault(&fontCfg);
+        io.FontGlobalScale = 1.0f;
+        ImGui::GetStyle().ScaleAllSizes(fontCfg.SizePixels / 13.0f);
 
         ImGui_ImplWin32_Init(s_overlayHwnd);
         ImGui_ImplDX11_Init(s_device, s_context);
@@ -408,24 +424,31 @@ namespace Transmog
             vp.MaxDepth = 1.0f;
             s_context->RSSetViewports(1, &vp);
 
-            // Bridge mouse-button state via polling.
+            // Bridge mouse-button state into ImGui via polling.
             //
-            // The game uses SetCapture / RawInput so WM_LBUTTONDOWN
-            // and WM_LBUTTONUP route to the game window even when the
-            // cursor is over our overlay. ImGui_ImplWin32 polls cursor
-            // position via GetCursorPos as a fallback (so hover and
-            // tooltips keep working without the messages), but it does
-            // NOT poll button state -- buttons rely on the wndproc
-            // messages we never see. Without this bridge, io.MouseDown
-            // is stuck at false and every click is ignored.
+            // The game uses SetCapture / RawInput, so WM_LBUTTONDOWN
+            // and WM_LBUTTONUP both route to the game window even
+            // when the cursor is over our overlay. ImGui_ImplWin32
+            // polls cursor position via GetCursorPos as a fallback
+            // (so hover and tooltips keep working without messages)
+            // but does NOT poll button state -- buttons rely on
+            // wndproc messages we never see. Without this bridge,
+            // io.MouseDown is stuck at false and every click on the
+            // overlay is ignored.
             //
-            // We only report "down" while the cursor is over the
-            // overlay window rect; outside the rect we report "up" so
-            // a click on the game itself never fires a spurious widget
-            // event on whatever widget happened to be under the
-            // ImGui-tracked cursor coordinate.
+            // Edge-detect the press: a button only counts as down
+            // for ImGui if the up->down transition happened while
+            // the cursor was over the overlay. That suppresses two
+            // phantom-click classes:
+            //   1. The user clicks in the game with LMB held and
+            //      drags onto the overlay. Raw state is "down" the
+            //      whole time but no click was meant for our UI.
+            //   2. The user clicks on the overlay, drags out, then
+            //      releases. The latch stays "down" while dragged
+            //      out (so widget drag keeps working); release
+            //      anywhere clears the latch so ImGui sees the up
+            //      event.
             {
-                ImGuiIO &io = ImGui::GetIO();
                 POINT pt;
                 GetCursorPos(&pt);
                 RECT wr;
@@ -433,15 +456,28 @@ namespace Transmog
                 const bool overOverlay =
                     pt.x >= wr.left && pt.x < wr.right &&
                     pt.y >= wr.top  && pt.y < wr.bottom;
-                const bool lDown = overOverlay &&
-                    (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
-                const bool rDown = overOverlay &&
-                    (GetAsyncKeyState(VK_RBUTTON) & 0x8000) != 0;
-                const bool mDown = overOverlay &&
-                    (GetAsyncKeyState(VK_MBUTTON) & 0x8000) != 0;
-                io.AddMouseButtonEvent(0, lDown);
-                io.AddMouseButtonEvent(1, rDown);
-                io.AddMouseButtonEvent(2, mDown);
+
+                // Per-button latches survive across render frames.
+                // The "was" pair is the previous-frame raw state and
+                // is the basis for rising-edge detection; the
+                // "latch" pair is the cooked value forwarded to
+                // ImGui (see comment block above for the state
+                // machine).
+                static bool s_lLatch = false, s_lWas = false;
+                static bool s_rLatch = false, s_rWas = false;
+                static bool s_mLatch = false, s_mWas = false;
+                auto poll = [&](int idx, int vk, bool &latch, bool &was) -> void {
+                    const bool now = (GetAsyncKeyState(vk) & 0x8000) != 0;
+                    if (!now)
+                        latch = false;
+                    else if (!was && overOverlay)
+                        latch = true;
+                    was = now;
+                    io.AddMouseButtonEvent(idx, latch);
+                };
+                poll(0, VK_LBUTTON, s_lLatch, s_lWas);
+                poll(1, VK_RBUTTON, s_rLatch, s_rWas);
+                poll(2, VK_MBUTTON, s_mLatch, s_mWas);
             }
 
             ImGui_ImplDX11_NewFrame();

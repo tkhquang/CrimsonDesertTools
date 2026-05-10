@@ -53,11 +53,16 @@ namespace Transmog
 
     void draw_overlay()
     {
-        // Size relative to display: 33% width, 80% height, capped at 800px wide.
-        const auto &displaySize = ImGui::GetIO().DisplaySize;
-        const float w = std::min(displaySize.x * 0.33f, 1000.0f);
-        const float h = displaySize.y * 0.8f;
-        ImGui::SetNextWindowSize(ImVec2(w, h), ImGuiCond_FirstUseEver);
+        // Default size: auto-fit content on both axes. Passing 0 on
+        // an axis tells ImGui to size to content for that axis;
+        // ImGui internally clamps the result to the host viewport so
+        // tall content cannot push the window off-screen. The earlier
+        // 80% of display height was too short on 4K because the
+        // scaled padding plus all slot rows exceeded that cap, which
+        // forced a vertical scrollbar on first open even when the
+        // viewport had room. Auto-fit gives exactly the height the
+        // content needs; the user can still resize after.
+        ImGui::SetNextWindowSize(ImVec2(0.0f, 0.0f), ImGuiCond_FirstUseEver);
         if (!ImGui::Begin(k_windowTitle))
         {
             ImGui::End();
