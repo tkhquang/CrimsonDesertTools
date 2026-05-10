@@ -53,20 +53,16 @@ namespace Transmog
 
     void draw_overlay()
     {
-        // Default size: width auto-fits content, height fills 80%
-        // of the display. Passing 0 on an axis tells ImGui to size
-        // to content for that axis. ImGuiCond_FirstUseEver applies
-        // the size only on the first frame, so user resizes are
-        // preserved across subsequent frames.
-        //
-        // The previous fixed-percent width (33% capped at 1000px)
-        // left a wide empty band on 4K screens because the inner
-        // content -- driven by content-derived widths in
-        // overlay_ui.inl -- is now narrower than 1000px at typical
-        // font scales.
-        const auto &displaySize = ImGui::GetIO().DisplaySize;
-        const float h = displaySize.y * 0.8f;
-        ImGui::SetNextWindowSize(ImVec2(0.0f, h), ImGuiCond_FirstUseEver);
+        // Default size: auto-fit content on both axes. Passing 0 on
+        // an axis tells ImGui to size to content for that axis;
+        // ImGui internally clamps the result to the host viewport so
+        // tall content cannot push the window off-screen. The earlier
+        // 80% of display height was too short on 4K because the
+        // scaled padding plus all slot rows exceeded that cap, which
+        // forced a vertical scrollbar on first open even when the
+        // viewport had room. Auto-fit gives exactly the height the
+        // content needs; the user can still resize after.
+        ImGui::SetNextWindowSize(ImVec2(0.0f, 0.0f), ImGuiCond_FirstUseEver);
         if (!ImGui::Begin(k_windowTitle))
         {
             ImGui::End();
