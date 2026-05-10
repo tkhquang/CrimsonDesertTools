@@ -1,5 +1,6 @@
 #include "transmog.hpp"
 #include "aob_resolver.hpp"
+#include "dye_record_inject.hpp"
 #include "prefab_wrapper_swap.hpp"
 #include "constants.hpp"
 #include "indexed_string_table.hpp"
@@ -842,6 +843,25 @@ namespace Transmog
         }
 
         PrefabWrapperSwap::init();
+
+        // Per-slot dye-record injector. Hooks the engine's dye-copier
+        // primitive and appends fabricated ARMOR_MOD records so fake
+        // transmog items render with user-chosen colors regardless of
+        // the underlying real item.
+        DyeRecordInject::init();
+
+        // Crimson Desert has TWO independent dye layers:
+        //   1. Bench/menu UI dyeability -- gated by the
+        //      partprefabdyeslotinfo.pabgb registry. Items not in
+        //      the registry cannot be dyed at the dye bench (this is
+        //      what data-file dye-unlock mods modify).
+        //   2. Render-time dye apply -- engine reads dye records
+        //      from a publish vector at dst+120 during slotpop.
+        //      The DyeRecordInject inline detour on sub_141E019E0
+        //      injects user-chosen records here.
+        //
+        // LT operates at layer 2 only. Layer 1 is not traversed during
+        // LT's apply path, so layer-1 unlocks are not replicated here.
 
         start_load_detect_thread();
         ensure_apply_worker_started();

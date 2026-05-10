@@ -930,4 +930,145 @@ namespace Transmog
     inline constexpr const char *k_nametableItemAccessorAnchor =
         "41 56 48 83 EC 40 0F B7 39 | 48 8B 1D ?? ?? ?? ??";
 
+    // -----------------------------------------------------------------------
+    // DyeRecordInject function targets.
+    //
+    // The dye-injection module installs an inline detour on
+    // `sub_141E019E0` (DyeCopier) that, post-trampoline, calls
+    // `sub_140CADEF0` (DyeCopy) directly to APPEND 16 fabricated ARMOR_MOD
+    // records to dst+120.
+    //
+    //   DyeCopier  : sub_141E019E0 -- inline detour. Post-trampoline appends
+    //                                 16 dye records via DyeCopy primitive.
+    //   DyeCopy    : sub_140CADEF0 -- 16-byte ARMOR_MOD record copy primitive.
+    //                                 Resolved as a function pointer and
+    //                                 called directly from the detour.
+    //
+    // Per feedback_aob_cascade_ordering: each P1 below is verified unique
+    // (n=1) on v1.05.01 .text. The DyeCopy prologue alone matches 40 sites
+    // (it is the engine's universal grow-and-emplace template); P1 there is
+    // a body-shape anchor that locks onto the unique 16-byte record-copy
+    // emitter (shl rcx,4 + add rcx,[rbx] + the field-by-field byte transfer
+    // sequence). All other prologues are function-distinctive.
+    //
+    // If these break: each candidate's comment names the anchor offset
+    // backed up to function start. Re-find the function in IDA, capture the
+    // 24--40 byte window, wildcard volatile rel32 targets, and re-verify
+    // uniqueness via mcp__ida-pro-mcp__find_bytes.
+    // -----------------------------------------------------------------------
+
+    /**
+     * @brief DyeCopier (sub_141E019E0) -- per-slot dye-record copy driver.
+     *
+     * RVA 0x01E019E0 on v1.05.01. Signature
+     * `__int64(*)(dst_iteminfo, src_iteminfo)` -- copies primary fields then
+     * appends the 12-record dye vector at src+120 into dst+120 via
+     * sub_140CADEF0. DyeRecordInject installs an inline detour here to
+     * append 16 fabricated dye records post-trampoline (see
+     * `dye_copier_inline_detour` in dye_record_inject.cpp).
+     *
+     * Prologue is highly distinctive: a 5-register save run
+     * (rbp/rsi/rdi/r14/r15) followed by the field-by-field copy through the
+     * first 0x60 bytes of the iteminfo struct. No RIP-relative bytes inside
+     * the chosen anchor windows -- wildcards are not needed.
+     */
+    inline constexpr AddrCandidate k_dyeCopierCandidates[] = {
+        // P1 -- full prologue + first three field copies. The
+        // `48 8B F2 4C 8B F1` (mov rsi,rdx ; mov r14,rcx) arg-shuffle
+        // followed by the qword/word/word field copies through [rdx+0..0xA]
+        // is unique to this iteminfo-copy function. 1 hit on v1.05.01.
+        {"DyeCopier_P1_FullPrologue",
+         "48 89 5C 24 18 48 89 4C 24 08 55 56 57 41 56 41 57 "
+         "48 83 EC 20 48 8B F2 4C 8B F1 48 8B 02 48 89 01 0F B7 42 08",
+         ResolveMode::Direct, 0, 0},
+
+        // P2 -- post-shuffle anchor on the field-copy chain. Walk-back
+        // -0x15 to function start. Survives a future build that drops or
+        // reorders the early callee-save pushes -- the field-copy shape is
+        // the function-defining behaviour.
+        {"DyeCopier_P2_FieldCopyChain",
+         "48 8B F2 4C 8B F1 48 8B 02 48 89 01 0F B7 42 08 66 89 41 08 "
+         "0F B7 42 0A 66 89 41 0A 48 8B 42 10 48 89 41 10",
+         ResolveMode::Direct, -0x15, 0},
+
+        // P3 -- mid-body AVX xmm copy. The
+        // `vmovups xmm0, [rdx+28h] ; vmovups [rcx+28h], xmm0` pair followed
+        // by the `vmovsd` qword move and continued field copies is a unique
+        // SSE/AVX shape this function emits at offset +0x49. Walk-back
+        // -0x49 to function start. Anchors entirely past the prologue, so
+        // a prologue-shape shuffle does not sink P3.
+        {"DyeCopier_P3_AvxFieldCopy",
+         "C5 F8 10 42 28 C5 F8 11 41 28 C5 FB 10 4A 38 C5 FB 11 49 38 "
+         "0F B7 42 40 66 89 41 40 48 8B 42 48 48 89 41 48",
+         ResolveMode::Direct, -0x49, 0},
+    };
+
+    /**
+     * @brief DyeCopy (sub_140CADEF0) -- 16-byte ARMOR_MOD record-copy primitive.
+     *
+     * RVA 0x00CADEF0 on v1.05.01. Signature
+     * `__int64(*)(vector_t* dst, const ArmorMod16* src)` -- grows dst's
+     * 16-byte-stride array if needed, then writes one record by reading
+     * fields from `[rdx+0..0xC]`. The breakthrough detour calls this
+     * directly post-trampoline to append fabricated dye records.
+     *
+     * The function prologue is the engine's universal grow-and-emplace
+     * template (40 byte-identical instances on v1.05.01). P1 is therefore a
+     * body anchor that locks onto the unique 16-byte record-copy emitter
+     * (shl rcx,4 ; add rcx,[rbx] ; the byte-by-byte transfer of channel /
+     * R / G / B / 0xFF / repair_byte from [rdi+6..0xB] into [rcx+6..0xB]).
+     * That shape is what makes this primitive the "ARMOR_MOD writer" rather
+     * than a generic vector grow.
+     *
+     * If these break: re-anchor on the
+     * `48 C1 E1 04 ; 48 03 0B ; 89 01` triplet (shift-by-4-stride +
+     * add-base-pointer + write-hash-u32). That sequence is the function's
+     * signature behaviour; a future build is unlikely to alter it without
+     * also redesigning the ARMOR_MOD record layout.
+     */
+    inline constexpr AddrCandidate k_dyeCopyCandidates[] = {
+        // P1 -- mid-prologue + capacity-check + grow-call chain. The
+        // `8B 49 0C 8B 43 08 3B C8 77 ?? 8D 14 4D 01 00 00 00 03 D1 B9 01
+        //  00 00 00 D1 EA 3B D1 0F 42 D1 48 8B CB 3B C2 0F 47 D0 E8` chain
+        // anchors on the count/capacity load + the grow-size formula
+        // `1 + count*2`, the lower-bound clamp via `cmovb`, the upper-bound
+        // clamp via `cmova`, and the call to the underlying grow primitive.
+        // The `8B 49 0C` is `mov ecx, [rcx+0xC]` reading the count field,
+        // then the chain-into-grow reaches the unique 16-byte record copy.
+        // The `77 ??` rel8 is wildcarded (jump distance compiler-owned).
+        // 1 hit on v1.05.01 .text. Walk-back -0x10 to function start.
+        {"DyeCopy_P1_GrowChainMidProlog",
+         "8B 49 0C 8B 43 08 3B C8 77 ?? 8D 14 4D 01 00 00 00 03 D1 "
+         "B9 01 00 00 00 D1 EA 3B D1 0F 42 D1 48 8B CB 3B C2 0F 47 D0 E8 "
+         "?? ?? ?? ?? 8B 43 08 8B C8 8B 07 48 C1 E1 04 48 03 0B 89 01",
+         ResolveMode::Direct, -0x10, 0},
+
+        // P2 -- 16-byte record-copy emitter body. The `shl rcx,4 ;
+        // add rcx,[rbx] ; mov [rcx],eax` triplet computes the next-record
+        // byte address (count<<4 = 16-byte stride), then the byte-by-byte
+        // transfers fan out: word `[rdi+4..5]` -> `[rcx+4..5]`, then
+        // singles for channel (`+6`), R (`+7`), G (`+8`), B (`+9`). This
+        // shape is what makes the function the ARMOR_MOD writer. 1 hit on
+        // v1.05.01. Walk-back -0x43 to function start.
+        {"DyeCopy_P2_ArmorModRecordCopy",
+         "48 C1 E1 04 48 03 0B 89 01 0F B7 47 04 66 89 41 04 "
+         "0F B6 47 06 88 41 06 0F B6 47 07 88 41 07 "
+         "0F B6 47 08 88 41 08 0F B6 47 09 88 41 09",
+         ResolveMode::Direct, -0x43, 0},
+
+        // P3 -- tail of the byte-by-byte copy + post-write count++ + ret.
+        // The trailing field transfers (`[rdi+0xB]` -> `[rcx+0xB]`,
+        // `[rdi+0xC]` -> `[rcx+0xC]`) followed by `inc dword [rbx+8]`
+        // (count++) and the standard `pop rdi ; ret` epilogue are unique
+        // to this exact function shape. 1 hit on v1.05.01. Walk-back
+        // -0x77 to function start. The `0F B6 47 0B 88 41 0B 0F B6 47 0C
+        // 88 41 0C` is the last byte-pair of the record copy; `FF 43 08`
+        // is the count increment that proves the dst is a vector with a
+        // count field at +8.
+        {"DyeCopy_P3_TailCountInc",
+         "0F B6 47 0B 88 41 0B 0F B6 47 0C 88 41 0C "
+         "FF 43 08 48 8B 5C 24 30 48 83 C4 20 5F C3",
+         ResolveMode::Direct, -0x77, 0},
+    };
+
 } // namespace Transmog

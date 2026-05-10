@@ -10,6 +10,51 @@
 
 namespace Transmog
 {
+    /// Maximum number of ARMOR_MOD records per slot. Engine's dye
+    /// record vector at dst+120 holds up to 16 channels; most items
+    /// use 2-5, but cloak/chest can extend higher. We expose all 16
+    /// to the user; channels above the item's natural count are no-ops.
+    inline constexpr std::size_t k_dyeChannelCount = 16;
+
+    /// Per-channel dye override (cracked 2026-05-10 PM):
+    ///   group_hash = 0  -> no override for this channel
+    ///   else            -> inject ARMOR_MOD record with R/G/B at +7/+8/+9
+    /// `repair_byte = 0xFF` is the no-override sentinel.
+    /// `material_id` is the dye-template index (1..10) written at
+    /// +4..+5 of the dye record. 0xFFFF = engine default. The engine
+    /// resolves (item, channel) -> cat_code, then looks up the
+    /// template's variant for that cat_code (per
+    /// partprefabdyetexturepalleteinfo.pabgb).
+    /// `group_name` is the data-file `_stringKey` that maps to
+    /// `group_hash` (e.g. "Her_Color_Group_I"). Persisted alongside
+    /// the hash so we can recover the right group across game updates
+    /// even if Pearl Abyss renumbers the integer keys.
+    struct ChannelDye
+    {
+        std::uint32_t group_hash = 0;
+        std::uint8_t  r = 0;
+        std::uint8_t  g = 0;
+        std::uint8_t  b = 0;
+        std::uint16_t material_id = 0x0001;
+        std::uint8_t  repair_byte = 0xFF;
+        std::string   group_name; // empty = no fallback anchor
+
+        bool active() const noexcept { return group_hash != 0; }
+    };
+
+    /// Per-slot dye state. Index 0..15 maps to ARMOR_MOD record idx
+    /// at offset +6 of each 16-byte record. Sparse: most slots only
+    /// have a few channels populated.
+    using SlotDyeChannels = std::array<ChannelDye, k_dyeChannelCount>;
+
+    /// True if any channel of the given slot dye is active.
+    inline bool any_dye_active(const SlotDyeChannels &c) noexcept
+    {
+        for (const auto &ch : c)
+            if (ch.active()) return true;
+        return false;
+    }
+
     struct PresetSlot
     {
         bool active = false;
@@ -27,6 +72,9 @@ namespace Transmog
         // if the catalog isn't yet populated (boot heap walk still
         // running) the resolution retries when the catalog finishes.
         std::string prefabName;
+        // Per-channel dye overrides (16 channels max). Channels with
+        // group_hash == 0 are passed through to the engine unchanged.
+        SlotDyeChannels dye{};
     };
 
     struct Preset
@@ -143,6 +191,25 @@ namespace Transmog
         PresetManager() = default;
 
         CharacterPresets &ensure_character(const std::string &name);
+
+        // Snapshot of the active preset's dye state at the point it
+        // was last loaded or saved. Used to revert in-memory dye
+        // edits when the user switches presets without saving --
+        // dye edits are visually live (auto-apply), but the JSON
+        // commit only happens on Save. Switching/cycling presets
+        // discards uncommitted dye changes via revert_dye_snapshot.
+        // Mutable so save() can capture without losing const.
+        mutable std::array<SlotDyeChannels, k_slotCount> m_dyeSnapshot{};
+        mutable bool m_dyeSnapshotValid = false;
+
+        // Captures current active preset's dye into m_dyeSnapshot.
+        void capture_dye_snapshot() const noexcept;
+
+        // If dye_dirty() is set AND a snapshot is valid, copies the
+        // snapshot back over the active preset's dye, undoing every
+        // mutation made since the last load/save. Then clears the
+        // dirty flag. Call before switching presets.
+        void revert_active_dye_to_snapshot() noexcept;
 
         std::map<std::string, CharacterPresets> m_characters;
         std::string m_activeCharacter = "Kliff";

@@ -181,7 +181,7 @@ See the full list at the [Supported Input Names](https://github.com/tkhquang/Det
 - **NPC armor variants and damaged variants render via carrier** -- items tagged `(carrier)` in the picker use an automatic carrier swap + character-class bypass to render. Most work; a few may still produce empty slots depending on the item's internal skeleton bindings.
 - **Non-humanoid items crash** -- horse tack, pet armor, and wagon gear crash the mesh binder. The "Safe only" filter hides these by default.
 - **Wrong-slot or non-equipment items will crash** - selecting a chest piece for the helm slot, or non-armor items (dog armor, recipes, etc.) crashes the game. Safety filters prevent this by default. Do not disable them unless you know what you are doing.
-- **Dyeing is not supported yet** - transmog items use their default colors.
+- **Dye coverage varies by item** - the new dye picker drives most armor cleanly, but some pieces with custom shaders or particle layers may render the wrong shade or only partially recolor.
 - **Special-effect armor may have visual quirks** - armor with particle effects (e.g. Marni Laser Helm) may not render particles correctly. Hair may clip through some helmets. I haven't been able to make these work yet.
 - Major game updates may break the mod until a new version is released.
 - Only tested with the Steam version.

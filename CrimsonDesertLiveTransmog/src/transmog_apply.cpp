@@ -1,4 +1,5 @@
 #include "transmog_apply.hpp"
+#include "dye_record_inject.hpp"
 #include "prefab_wrapper_swap.hpp"
 #include "carrier_defaults.hpp"
 #include "item_name_table.hpp"
@@ -7,6 +8,7 @@
 #include "real_part_tear_down.hpp"
 #include "shared_state.hpp"
 #include "slot_metadata.hpp"
+#include "transmog_hooks.hpp"
 #include "transmog_map.hpp"
 #include "transmog_worker.hpp"
 
@@ -78,6 +80,107 @@ namespace Transmog
     bool needs_carrier(uint16_t itemId, const std::string &charName);
     static bool set_char_class_bypass(uintptr_t addr, uint8_t val) noexcept;
 
+    // 2026-05-09: Helper for the dye-pass-through experiment.
+    //
+    // Walks the per-actor item-instance table at *(a1+0x88)+0x08, which is
+    // the ROOT source the engine's secondary-id resolver (sub_141B2F780)
+    // searches. Returns the first non-0xFFFF u16 found at byte +0xC8 of
+    // any 208-byte record.
+    //
+    // Per sub_141B2F780 decompile:
+    //   v4 = *(QWORD*)(actor + 0x88)         // actor sub-system header
+    //   v7 = *(WORD**)(v4 + 8)               // ptr to records array
+    //   count = *(u32*)(v4 + 16)             // record count
+    //   record stride: 104 WORDs = 208 bytes
+    //   record + 200 (= 100 WORDs = +0xC8): u16 KEY (matched against query)
+    //   record + 8 (= 4 WORDs):              u16 RESULT (returned variant id)
+    //
+    // The auth table at actor+472 was the WRONG source: LT's 0xFFFF
+    // sentinel propagates into it on every apply, polluting the capture.
+    // The instance table at actor+0x88 is updated by the natural equip
+    // flow and unaffected by LT.
+    struct CaptureResult
+    {
+        uint16_t key       = 0xFFFF;
+        uint32_t recordIdx = UINT32_MAX;
+        uint16_t variant   = 0xFFFF;
+        uintptr_t records  = 0;
+    };
+
+    static CaptureResult find_existing_secondary_id_for_actor(__int64 a1) noexcept
+    {
+        CaptureResult r{};
+        if (a1 == 0)
+            return r;
+        __try
+        {
+            const auto actor = static_cast<uintptr_t>(a1);
+            const auto subSys = *reinterpret_cast<uintptr_t *>(actor + 0x88);
+            if (subSys == 0)
+                return r;
+            const auto records = *reinterpret_cast<uintptr_t *>(subSys + 0x08);
+            const auto count = *reinterpret_cast<uint32_t *>(subSys + 0x10);
+            if (records == 0 || count == 0 || count > 256)
+                return r;
+
+            r.records = records;
+            for (uint32_t i = 0; i < count; ++i)
+            {
+                const auto record = records + 208ULL * i;
+                const auto key = *reinterpret_cast<uint16_t *>(record + 0xC8);
+                const auto result = *reinterpret_cast<uint16_t *>(record + 0x08);
+                if (key != 0xFFFF && key != 0)
+                {
+                    r.key = key;
+                    r.recordIdx = i;
+                    r.variant = result;
+                    return r;
+                }
+            }
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+        }
+        return r;
+    }
+
+    // Read a specific inst-record's key + variant at runtime. Used to
+    // detect whether SlotPopulator mutates the captured record between
+    // applies (the "1-2 cycles then stops" symptom).
+    static void peek_inst_record(uintptr_t records, uint32_t idx,
+                                 uint16_t *outKey, uint16_t *outVariant) noexcept
+    {
+        *outKey = 0xFFFF;
+        *outVariant = 0xFFFF;
+        if (records == 0)
+            return;
+        __try
+        {
+            const auto record = records + 208ULL * idx;
+            *outKey = *reinterpret_cast<uint16_t *>(record + 0xC8);
+            *outVariant = *reinterpret_cast<uint16_t *>(record + 0x08);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+        }
+    }
+
+    // Read the actor's auth-table entry count for inflation tracking.
+    static uint32_t read_auth_count(__int64 a1) noexcept
+    {
+        if (a1 == 0)
+            return 0;
+        __try
+        {
+            return *reinterpret_cast<uint32_t *>(
+                static_cast<uintptr_t>(a1) + 480);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return 0;
+        }
+    }
+
     void apply_transmog(__int64 a1, uint16_t targetId)
     {
         auto slotPop = slot_populator_fn();
@@ -85,11 +188,18 @@ namespace Transmog
         if (!slotPop || !initEntry)
             return;
 
-        // Build 16-byte item data structure for SlotPopulator.
+        // Build 16-byte item data structure for SlotPopulator. Layout
+        // matches a natural-engine equip exactly:
+        //   XX YY 02 00 00 00 00 00 FF FF FF FF FF FF 00 00
+        // The engine validates the +4..+11 region as part of its
+        // dye/material-instance lookup; reordering those dwords causes
+        // the engine to fall back to default colors even when the
+        // wrapper-swap mesh is correct.
         alignas(16) uint8_t itemData[16]{};
         *reinterpret_cast<uint16_t *>(itemData + 0) = targetId;
         itemData[2] = 2;
-        *reinterpret_cast<uint32_t *>(itemData + 4) = 0xFFFFFFFF;
+        // bytes 4..7 left as 0 (zero-init)
+        *reinterpret_cast<uint32_t *>(itemData + 8) = 0xFFFFFFFF;
         *reinterpret_cast<uint16_t *>(itemData + 12) = 0xFFFF;
 
         // Build empty swap entry.
@@ -634,6 +744,34 @@ namespace Transmog
                     ? default_carrier_for_slot(tmSlot, activeChar)
                     : 0;
 
+            // Same dye plumbing as apply_all_transmog. Without this,
+            // single-slot apply (manual_apply_slot from the dye
+            // picker) bypasses the injector and the engine's natural
+            // records dominate.
+            const Preset *activePreset =
+                PresetManager::instance().active_preset();
+            const SlotDyeChannels *slotDye =
+                (activePreset && slotIdx < activePreset->slots.size())
+                    ? &activePreset->slots[slotIdx].dye
+                    : nullptr;
+            if (slotDye && any_dye_active(*slotDye))
+            {
+                DyeRecordInject::ChannelState
+                    state[DyeRecordInject::k_dyeChannelCount];
+                for (std::size_t k = 0;
+                     k < DyeRecordInject::k_dyeChannelCount; ++k)
+                {
+                    const auto &ch = (*slotDye)[k];
+                    state[k] = {ch.group_hash, ch.r, ch.g, ch.b,
+                                ch.material_id, ch.repair_byte};
+                }
+                DyeRecordInject::set_slot_dye_state(state);
+            }
+            else
+            {
+                DyeRecordInject::clear_slot_dye_state();
+            }
+
             if (useCarrier && carrierId != 0)
             {
                 logger.debug("apply_single_slot: slot={} target={:#06x} "
@@ -647,6 +785,8 @@ namespace Transmog
                              slot_name(tmSlot), targetId);
                 apply_transmog(a1, targetId);
             }
+
+            DyeRecordInject::clear_slot_dye_state();
 
             lastIds[slotIdx] = targetId;
             last_applied_carrier_ids()[slotIdx] =
@@ -1296,6 +1436,47 @@ namespace Transmog
                     ? default_carrier_for_slot(tmSlot, activeChar)
                     : 0;
 
+            // Feed the active preset's per-slot dye state into the
+            // record injector so its inline detour on sub_141E019E0
+            // appends fabricated ARMOR_MOD records to the engine's
+            // publish vector post-trampoline. The injection is
+            // independent of any real item the user wears.
+            //
+            // Bytes +7/+8/+9 of each record carry the literal RGB of
+            // the chosen shade. Channels with group_hash == 0 are
+            // inactive: the injector substitutes the first active
+            // channel's settings rather than skipping (sparse
+            // injection lets the engine's natural records dominate
+            // and the dye does not render).
+            const Preset *activePreset =
+                PresetManager::instance().active_preset();
+            const SlotDyeChannels *slotDye =
+                (activePreset && i < activePreset->slots.size())
+                    ? &activePreset->slots[i].dye
+                    : nullptr;
+            if (slotDye && any_dye_active(*slotDye))
+            {
+                static_assert(
+                    Transmog::k_dyeChannelCount ==
+                        DyeRecordInject::k_dyeChannelCount,
+                    "channel-count mismatch between preset model "
+                    "and dye injector");
+                DyeRecordInject::ChannelState
+                    state[DyeRecordInject::k_dyeChannelCount];
+                for (std::size_t k = 0;
+                     k < DyeRecordInject::k_dyeChannelCount; ++k)
+                {
+                    const auto &ch = (*slotDye)[k];
+                    state[k] = {ch.group_hash, ch.r, ch.g, ch.b,
+                                ch.material_id, ch.repair_byte};
+                }
+                DyeRecordInject::set_slot_dye_state(state);
+            }
+            else
+            {
+                DyeRecordInject::clear_slot_dye_state();
+            }
+
             if (useCarrier && carrierId != 0)
             {
                 logger.debug("Transmog APPLY (carrier): slot={}, "
@@ -1318,6 +1499,8 @@ namespace Transmog
                              i, targetId);
                 apply_transmog(a1, targetId);
             }
+
+            DyeRecordInject::clear_slot_dye_state();
             uint32_t postCount = 0;
             __try
             {

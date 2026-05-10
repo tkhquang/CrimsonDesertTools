@@ -1,6 +1,7 @@
 #include "prefab_wrapper_swap.hpp"
 #include "aob_resolver.hpp"
 #include "carrier_defaults.hpp"
+#include "dye_record_inject.hpp"
 #include "preset_manager.hpp"
 #include "shared_state.hpp"
 #include "slot_metadata.hpp"
@@ -2434,6 +2435,13 @@ namespace Transmog::PrefabWrapperSwap
         if (!s_active.load(std::memory_order_acquire))
             return;
         s_active.store(false, std::memory_order_release);
+
+        // Flush dye-injector counters before the natpipe hook tears
+        // down the swap. The injector itself is stateless across
+        // teardown (per-slot state is thread-local and consumed once
+        // per slotpop), but the counter dump helps post-mortem when
+        // diagnosing missing dye records.
+        Transmog::DyeRecordInject::restore_all();
 
         // Swap map and target-wrapper set are PRESERVED across
         // deactivate cycles so re-activation is instant (no heap
