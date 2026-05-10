@@ -408,6 +408,42 @@ namespace Transmog
             vp.MaxDepth = 1.0f;
             s_context->RSSetViewports(1, &vp);
 
+            // Bridge mouse-button state via polling.
+            //
+            // The game uses SetCapture / RawInput so WM_LBUTTONDOWN
+            // and WM_LBUTTONUP route to the game window even when the
+            // cursor is over our overlay. ImGui_ImplWin32 polls cursor
+            // position via GetCursorPos as a fallback (so hover and
+            // tooltips keep working without the messages), but it does
+            // NOT poll button state -- buttons rely on the wndproc
+            // messages we never see. Without this bridge, io.MouseDown
+            // is stuck at false and every click is ignored.
+            //
+            // We only report "down" while the cursor is over the
+            // overlay window rect; outside the rect we report "up" so
+            // a click on the game itself never fires a spurious widget
+            // event on whatever widget happened to be under the
+            // ImGui-tracked cursor coordinate.
+            {
+                ImGuiIO &io = ImGui::GetIO();
+                POINT pt;
+                GetCursorPos(&pt);
+                RECT wr;
+                GetWindowRect(s_overlayHwnd, &wr);
+                const bool overOverlay =
+                    pt.x >= wr.left && pt.x < wr.right &&
+                    pt.y >= wr.top  && pt.y < wr.bottom;
+                const bool lDown = overOverlay &&
+                    (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
+                const bool rDown = overOverlay &&
+                    (GetAsyncKeyState(VK_RBUTTON) & 0x8000) != 0;
+                const bool mDown = overOverlay &&
+                    (GetAsyncKeyState(VK_MBUTTON) & 0x8000) != 0;
+                io.AddMouseButtonEvent(0, lDown);
+                io.AddMouseButtonEvent(1, rDown);
+                io.AddMouseButtonEvent(2, mDown);
+            }
+
             ImGui_ImplDX11_NewFrame();
             ImGui_ImplWin32_NewFrame();
             ImGui::NewFrame();

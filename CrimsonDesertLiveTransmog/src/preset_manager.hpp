@@ -16,15 +16,21 @@ namespace Transmog
     /// to the user; channels above the item's natural count are no-ops.
     inline constexpr std::size_t k_dyeChannelCount = 16;
 
-    /// Per-channel dye override (cracked 2026-05-10 PM):
+    /// Per-channel dye override:
     ///   group_hash = 0  -> no override for this channel
     ///   else            -> inject ARMOR_MOD record with R/G/B at +7/+8/+9
-    /// `repair_byte = 0xFF` is the no-override sentinel.
     /// `material_id` is the dye-template index (1..10) written at
-    /// +4..+5 of the dye record. 0xFFFF = engine default. The engine
-    /// resolves (item, channel) -> cat_code, then looks up the
+    /// +4..+5 of the dye record. 0xFFFF = engine default (the engine
+    /// picks the natural variant for the item/channel combo). The
+    /// engine resolves (item, channel) -> cat_code, then looks up the
     /// template's variant for that cat_code (per
     /// partprefabdyetexturepalleteinfo.pabgb).
+    /// `repair_byte` follows the engine's wear formula
+    /// (`byte = ((100-pct)*127)/100`); 0 = pristine, 127 = max wear.
+    /// The engine still treats the legacy 0xFF as pristine, so old
+    /// presets that recorded 0xFF round-trip cleanly: the slider
+    /// reads 0xFF as 100% repair on load, and a fresh slot saves the
+    /// new 0 default instead.
     /// `group_name` is the data-file `_stringKey` that maps to
     /// `group_hash` (e.g. "Her_Color_Group_I"). Persisted alongside
     /// the hash so we can recover the right group across game updates
@@ -35,8 +41,8 @@ namespace Transmog
         std::uint8_t  r = 0;
         std::uint8_t  g = 0;
         std::uint8_t  b = 0;
-        std::uint16_t material_id = 0x0001;
-        std::uint8_t  repair_byte = 0xFF;
+        std::uint16_t material_id = 0xFFFF;
+        std::uint8_t  repair_byte = 0;
         std::string   group_name; // empty = no fallback anchor
 
         bool active() const noexcept { return group_hash != 0; }
