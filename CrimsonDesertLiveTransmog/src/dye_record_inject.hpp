@@ -14,12 +14,11 @@
 // (`sub_140CADEF0`, "DyeCopy") to APPEND fabricated ARMOR_MOD records
 // to the destination vector at `dst+120`.
 //
-// Each fabricated record encodes one channel's RGB at offsets +7/+8/+9
-// (cracked 2026-05-10 PM). Channels with `group_hash == 0` are
-// inactive: they reuse the first active channel's settings so the
-// engine sees a contiguous record block. Sparse injection (skipping
-// inactive channels) leaves the engine's natural records dominant and
-// the dye does not render.
+// Each fabricated record encodes one channel's RGB at offsets +7/+8/+9.
+// Channels with `group_hash == 0` are inactive: they reuse the first
+// active channel's settings so the engine sees a contiguous record
+// block. Sparse injection (skipping inactive channels) leaves the
+// engine's natural records dominant and the dye does not render.
 //
 // Function targets are resolved at init via patch-proof AOB cascades
 // in `aob_resolver.hpp`; raw RVAs are not used as anchors.
@@ -80,9 +79,58 @@ namespace Transmog::DyeRecordInject
     /// next DyeCopier invocation. `channels` MUST be exactly
     /// `k_dyeChannelCount` entries; thread-local because the
     /// detour runs on the same thread that publishes.
-    void set_slot_dye_state(const ChannelState *channels) noexcept;
+    ///
+    /// `sparse` toggles the per-record emission strategy:
+    /// - `false` (default, fake-transmog path): always emit
+    ///   `k_dyeChannelCount` records; channels with `group_hash == 0`
+    ///   reuse the first active channel's settings so the engine
+    ///   sees a contiguous block. Required for LT-fake meshes
+    ///   because their natural source has zero records and a
+    ///   sparse vector leaves the engine on its default palette.
+    /// - `true` (restore path): emit ONLY records whose source had
+    ///   `group_hash != 0`. Inactive channels stay absent from the
+    ///   destination vector so the engine doesn't paint mesh parts
+    ///   that the real item never colored. Use this when the
+    ///   `ChannelState` array was sourced from a real auth-table
+    ///   entry's dye vector and you want the render side to mirror
+    ///   exactly the same indices.
+    void set_slot_dye_state(const ChannelState *channels,
+                             bool sparse = false) noexcept;
 
     /// Clear the published state. Call after the apply path
     /// completes so subsequent natural equip events go un-modified.
     void clear_slot_dye_state() noexcept;
+
+    /// Read the live dye-record vector from an auth-table entry into
+    /// `out`, indexed by the in-record channel index (0..N-1). Inactive
+    /// or out-of-range channels are left zero-initialised.
+    ///
+    /// Source layout:
+    ///   entryBase + 0x78  qword  data_ptr  -- contiguous 16-byte records
+    ///   entryBase + 0x80  dword  count
+    ///   entryBase + 0x84  dword  capacity  -- ignored
+    /// Each record is the same shape this header documents above (the
+    /// engine's ARMOR_MOD format that DyeCopy emits).
+    ///
+    /// Returns the number of channels populated. `0` means nothing
+    /// usable -- either the vector is empty, the data pointer is
+    /// invalid, or every record had `group_hash == 0`.
+    ///
+    /// Caller is responsible for SEH-protecting the call when
+    /// `entryBase` is not known to be valid; the function does no
+    /// page-fault guarding of its own.
+    std::size_t read_entry_dye_records(
+        std::uintptr_t entryBase,
+        ChannelState (&out)[k_dyeChannelCount]) noexcept;
+
+    /// Trace-log a ChannelState array using a stable per-channel
+    /// format so capture-time and apply-time snapshots can be
+    /// diffed visually in the log. `source` is a short tag like
+    /// "capture" or "restore"; `slotName` identifies which LT slot
+    /// the records belong to. Channels with `group_hash == 0` are
+    /// included so the diff catches missing channels too.
+    void log_dye_snapshot(
+        const char *source,
+        const char *slotName,
+        const ChannelState (&state)[k_dyeChannelCount]) noexcept;
 }

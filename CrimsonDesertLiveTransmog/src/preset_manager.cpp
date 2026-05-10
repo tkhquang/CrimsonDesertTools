@@ -82,6 +82,13 @@ namespace Transmog
                 mods.push_back(std::move(m));
             }
             j["dye_mods"] = std::move(mods);
+            // Persist whether this dye block was sourced from a real
+            // auth-table capture (sparse inject on apply) versus
+            // user-curated picker selections (dense inject). Only
+            // emitted when there are dye_mods so unused slots stay
+            // tidy.
+            if (s.dyeSparse)
+                j["dye_sparse"] = true;
         }
         return j;
     }
@@ -112,6 +119,9 @@ namespace Transmog
                 ch.repair_byte = m.value("repair", std::uint8_t{0});
                 resolve_dye_group(ch); // populates ch.group_hash
             }
+            // Default false (dense, picker-style) when absent so older
+            // presets without the field continue to behave as before.
+            s.dyeSparse = j.value("dye_sparse", false);
         }
 
         if (s.itemName.empty())
@@ -533,6 +543,17 @@ namespace Transmog
                  ++i)
             {
                 captured.slots[i].dye = src->slots[i].dye;
+                // Carry the source slot's sparse/dense origin flag
+                // across the duplicate. capture_from_state() builds
+                // a fresh PresetSlot from slot_mappings, which has
+                // no notion of dyeSparse, so the captured slot is
+                // left at the PresetSlot default. That default does
+                // not necessarily match the source preset's mode
+                // (a captured preset uses sparse, a picker-built
+                // preset may not), so we copy the source value
+                // explicitly to keep duplicates visually identical
+                // to their origin.
+                captured.slots[i].dyeSparse = src->slots[i].dyeSparse;
             }
         }
         cp.presets.push_back(std::move(captured));
@@ -562,14 +583,20 @@ namespace Transmog
         }
 
         auto captured = capture_from_state(p->name);
-        // Dye state is not part of slot_mappings -- the picker writes
-        // it directly onto the active preset's PresetSlot::dye. The
-        // capture-from-state path would clobber those edits, so we
-        // preserve dye from the existing preset before assigning.
+        // Dye state is not part of slot_mappings; the picker writes
+        // it directly onto the active preset's PresetSlot::dye.
+        // capture_from_state() rebuilds slots from slot_mappings, so
+        // it would clobber both the dye edits AND the dyeSparse
+        // flag. Carry both forward from the existing preset so the
+        // capture_outfit -> save / "Replace" button path preserves
+        // user-curated dye and its sparse-vs-dense origin (a fresh
+        // capture_outfit sets dyeSparse=true; the dye picker leaves
+        // it whatever it already was).
         for (std::size_t i = 0;
              i < p->slots.size() && i < captured.slots.size(); ++i)
         {
             captured.slots[i].dye = p->slots[i].dye;
+            captured.slots[i].dyeSparse = p->slots[i].dyeSparse;
         }
         p->slots = captured.slots;
 

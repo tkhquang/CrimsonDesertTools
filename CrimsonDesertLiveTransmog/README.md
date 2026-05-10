@@ -237,6 +237,7 @@ Press **Numpad 0** in-game to trigger a reload after rebuilding.
 - [Omar Cornut](https://github.com/ocornut) - for Dear ImGui
 - [Frans 'Otis_Inf' Bouma](https://github.com/FransBouma) - for v1.05.00 AOB shift diagnosis
 - [SoraSkySun](https://www.nexusmods.com/profile/SoraSkySun) - for the [Crimson Desert save editor and game file parser / item data dump](https://github.com/NattKh/CRIMSON-DESERT-SAVE-EDITOR-AND-GAME-MODS)
+- [Slinky](https://www.nexusmods.com/profile/IamSlinky) - for the dye info data dump
 - Pearl Abyss - for Crimson Desert
 
 ## Changelog

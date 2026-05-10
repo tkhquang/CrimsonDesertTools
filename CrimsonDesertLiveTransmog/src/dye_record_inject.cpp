@@ -49,6 +49,12 @@ namespace Transmog::DyeRecordInject
     static thread_local ChannelState
         s_injectChannels[k_dyeChannelCount] = {};
     static thread_local bool s_injectConsumed = false;
+    // When true, the detour emits records ONLY for channels with
+    // group_hash != 0; inactive slots are skipped entirely instead
+    // of being filled with the first active channel's settings. Set
+    // by callers that mirror a real auth-table source (the restore
+    // path) where the original mesh never colored those channels.
+    static thread_local bool s_injectSparse = false;
 
     // -- Counters -----------------------------------------------------
     static std::atomic<std::uint64_t> g_dyeInjectCount{0};
@@ -142,15 +148,12 @@ namespace Transmog::DyeRecordInject
             || g_dye_copy_fn == nullptr)
             return result;
 
-        // Locate the first active channel. We always emit
-        // `k_dyeChannelCount` records (16); inactive channels reuse
-        // the first active channel's settings. This is empirical:
-        // sparse injection (skipping inactive indices) leaves the
-        // engine's natural records dominant and the dye does not
-        // render. Per-channel selective override (preserving the
-        // engine's natural record for inactive channels) requires
-        // pre-trampoline capture of the natural records and is
-        // deferred.
+        // Locate the first active channel. In dense mode this also
+        // serves as the fill value for inactive channels. In sparse
+        // mode it is only used for diagnostics (the per-record
+        // emission loop skips inactives outright in sparse mode).
+        // Either way, if no channel is active there is nothing to
+        // emit and we skip out before touching the destination.
         const ChannelState *fallback = nullptr;
         for (std::size_t i = 0; i < k_dyeChannelCount; ++i)
         {
@@ -166,12 +169,16 @@ namespace Transmog::DyeRecordInject
         // Append into the destination vector at dst+120.
         const auto target_vec = dst_struct + 120;
         bool all_ok = true;
+        std::size_t emitted = 0;
+        const bool sparse = s_injectSparse;
         for (std::size_t i = 0; i < k_dyeChannelCount && all_ok; ++i)
         {
-            const auto &channel =
-                s_injectChannels[i].group_hash != 0
-                    ? s_injectChannels[i]
-                    : *fallback;
+            const bool active = s_injectChannels[i].group_hash != 0;
+            if (!active && sparse)
+                continue;
+            const auto &channel = active
+                ? s_injectChannels[i]
+                : *fallback;
             std::uint8_t record[16];
             build_dye_record(record, i, channel.group_hash,
                              channel.r, channel.g, channel.b,
@@ -179,6 +186,8 @@ namespace Transmog::DyeRecordInject
             all_ok = seh_call_dye_copy(
                 g_dye_copy_fn, target_vec,
                 reinterpret_cast<std::uintptr_t>(record));
+            if (all_ok)
+                ++emitted;
         }
 
         s_injectConsumed = true;
@@ -186,9 +195,12 @@ namespace Transmog::DyeRecordInject
         const auto inject_count = g_dyeInjectCount.fetch_add(
             1, std::memory_order_relaxed);
         DMK::Logger::get_instance().info(
-            "[dye-inject] #{} dst+120=0x{:X} fallback_hash=0x{:08X} "
-            "rgb=({:02X},{:02X},{:02X}) ok={}",
-            inject_count, target_vec, fallback->group_hash,
+            "[dye-inject] #{} dst+120=0x{:X} mode={} emitted={}/{} "
+            "first_hash=0x{:08X} rgb=({:02X},{:02X},{:02X}) ok={}",
+            inject_count, target_vec,
+            sparse ? "sparse" : "dense",
+            emitted, k_dyeChannelCount,
+            fallback->group_hash,
             fallback->r, fallback->g, fallback->b, all_ok);
         return result;
     }
@@ -257,7 +269,8 @@ namespace Transmog::DyeRecordInject
 
     void restore_all() noexcept { log_counters(); }
 
-    void set_slot_dye_state(const ChannelState *channels) noexcept
+    void set_slot_dye_state(const ChannelState *channels,
+                             bool sparse) noexcept
     {
         bool any_active = false;
         std::uint32_t first_hash = 0;
@@ -280,6 +293,7 @@ namespace Transmog::DyeRecordInject
             }
         }
         s_injectActive = any_active;
+        s_injectSparse = sparse;
         s_injectConsumed = false;
         DMK::Logger::get_instance().info(
             "[dye-inject] state set: active_count={} firstHash=0x{:08X} "
@@ -291,5 +305,78 @@ namespace Transmog::DyeRecordInject
     {
         s_injectActive = false;
         s_injectConsumed = false;
+        s_injectSparse = false;
+    }
+
+    void log_dye_snapshot(
+        const char *source,
+        const char *slotName,
+        const ChannelState (&state)[k_dyeChannelCount]) noexcept
+    {
+        auto &logger = DMK::Logger::get_instance();
+        std::size_t active = 0;
+        for (const auto &ch : state)
+            if (ch.group_hash != 0)
+                ++active;
+        logger.trace(
+            "[dye-snapshot] src={} slot={} active_channels={}/{}",
+            source, slotName, active, k_dyeChannelCount);
+        for (std::size_t i = 0; i < k_dyeChannelCount; ++i)
+        {
+            const auto &ch = state[i];
+            if (ch.group_hash == 0)
+            {
+                logger.trace(
+                    "[dye-snapshot]   ch[{:02}] (empty)",
+                    i);
+                continue;
+            }
+            logger.trace(
+                "[dye-snapshot]   ch[{:02}] hash=0x{:08X} mat=0x{:04X} "
+                "rgb=({:02X},{:02X},{:02X}) repair=0x{:02X}",
+                i, ch.group_hash, ch.material_id,
+                ch.r, ch.g, ch.b, ch.repair_byte);
+        }
+    }
+
+    std::size_t read_entry_dye_records(
+        std::uintptr_t entryBase,
+        ChannelState (&out)[k_dyeChannelCount]) noexcept
+    {
+        for (auto &c : out)
+            c = ChannelState{};
+
+        const auto data =
+            *reinterpret_cast<std::uintptr_t *>(entryBase + 0x78);
+        auto count =
+            *reinterpret_cast<std::uint32_t *>(entryBase + 0x80);
+        if (data < 0x10000 || count == 0)
+            return 0;
+        if (count > k_dyeChannelCount)
+            count = static_cast<std::uint32_t>(k_dyeChannelCount);
+
+        std::size_t filled = 0;
+        for (std::uint32_t i = 0; i < count; ++i)
+        {
+            const auto rec = data + i * 16;
+            const auto group_hash =
+                *reinterpret_cast<std::uint32_t *>(rec + 0);
+            if (group_hash == 0)
+                continue;
+            const auto channel_idx =
+                *reinterpret_cast<std::uint8_t *>(rec + 6);
+            if (channel_idx >= k_dyeChannelCount)
+                continue;
+            out[channel_idx] = ChannelState{
+                group_hash,
+                *reinterpret_cast<std::uint8_t *>(rec + 7),  // r
+                *reinterpret_cast<std::uint8_t *>(rec + 8),  // g
+                *reinterpret_cast<std::uint8_t *>(rec + 9),  // b
+                *reinterpret_cast<std::uint16_t *>(rec + 4), // material_id
+                *reinterpret_cast<std::uint8_t *>(rec + 11), // repair_byte
+            };
+            ++filled;
+        }
+        return filled;
     }
 }

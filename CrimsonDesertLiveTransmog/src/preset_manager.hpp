@@ -81,6 +81,31 @@ namespace Transmog
         // Per-channel dye overrides (16 channels max). Channels with
         // group_hash == 0 are passed through to the engine unchanged.
         SlotDyeChannels dye{};
+        // Selects the dye-inject emission mode at apply time. Read
+        // by transmog_apply.cpp's apply paths and forwarded to
+        // `DyeRecordInject::set_slot_dye_state(state, sparse)`.
+        //
+        //   sparse (true)  -- emit ONLY channels with group_hash != 0;
+        //     inactive channels stay absent from the destination
+        //     vector so the engine paints its natural per-channel
+        //     defaults on the rest. Correct for real-item captures
+        //     and for most picker-curated dye.
+        //   dense  (false) -- emit all `k_dyeChannelCount` records,
+        //     filling inactive channels with the first active
+        //     channel's colour. Required for LT-fake / carrier
+        //     transmog where the engine has no natural records to
+        //     fall back on; without the dense fill the descriptor's
+        //     default palette wins and the fake stays uncoloured.
+        //
+        // Defaults to TRUE so freshly-captured outfits behave as
+        // sparse out of the box. The dye popup exposes a per-slot
+        // toggle for users doing cross-class fake transmog where
+        // the dense fallback is wanted.
+        //
+        // Backward compat: presets saved before this field existed
+        // load with `dye_sparse=false` (see slot_from_json) so their
+        // visuals match the dense behaviour they were saved under.
+        bool dyeSparse = true;
     };
 
     struct Preset

@@ -80,6 +80,64 @@ namespace Transmog
     bool needs_carrier(uint16_t itemId, const std::string &charName);
     static bool set_char_class_bypass(uintptr_t addr, uint8_t val) noexcept;
 
+    // Walk the auth-table for the entry whose +0xC8 slotTag matches
+    // `gameTag`, snapshot its dye-record vector, and publish via
+    // DyeRecordInject so the next apply_transmog -> SlotPopulator ->
+    // DyeCopier round-trip emits exactly those records into the
+    // render struct's dst+120. Returns true when records were
+    // published; the caller is responsible for clear_slot_dye_state
+    // after the apply pass. Used by the untick-restore branch and
+    // the toggle-off Pass B restore so real items reappear in their
+    // current inventory dye instead of the engine's factory palette.
+    static bool publish_entry_dye_for_gameslot(
+        __int64 a1, std::int16_t gameTag) noexcept
+    {
+        uintptr_t entryBase = 0;
+        __try
+        {
+            const auto entryDesc =
+                *reinterpret_cast<uintptr_t *>(a1 + k_compEntryTablePtrOffset);
+            if (entryDesc < 0x10000)
+                return false;
+            const auto entryArray =
+                *reinterpret_cast<uintptr_t *>(entryDesc + 8);
+            const auto entryCount =
+                *reinterpret_cast<uint32_t *>(entryDesc + 16);
+            for (uint32_t e = 0; e < entryCount && entryArray > 0x10000; ++e)
+            {
+                const auto base = entryArray + e * k_compEntryStride;
+                const auto sl =
+                    *reinterpret_cast<int16_t *>(base + k_compEntrySlotTagOffset);
+                if (sl == gameTag)
+                {
+                    entryBase = base;
+                    break;
+                }
+            }
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return false;
+        }
+        if (entryBase == 0)
+            return false;
+        DyeRecordInject::ChannelState
+            live[DyeRecordInject::k_dyeChannelCount];
+        if (DyeRecordInject::read_entry_dye_records(entryBase, live) == 0)
+            return false;
+        const auto tmSlot = slot_from_game_tag(gameTag);
+        DyeRecordInject::log_dye_snapshot(
+            "restore",
+            tmSlot.has_value() ? slot_name(*tmSlot) : "?",
+            live);
+        // Sparse mode: emit only the channels that the auth-table
+        // entry actually carried. Dense fill would paint mesh
+        // sub-parts (e.g. cloak facings) that the real item never
+        // colored, using the first active channel as fallback.
+        DyeRecordInject::set_slot_dye_state(live, /*sparse=*/true);
+        return true;
+    }
+
     // 2026-05-09: Helper for the dye-pass-through experiment.
     //
     // Walks the per-actor item-instance table at *(a1+0x88)+0x08, which is
@@ -99,88 +157,6 @@ namespace Transmog
     // sentinel propagates into it on every apply, polluting the capture.
     // The instance table at actor+0x88 is updated by the natural equip
     // flow and unaffected by LT.
-    struct CaptureResult
-    {
-        uint16_t key       = 0xFFFF;
-        uint32_t recordIdx = UINT32_MAX;
-        uint16_t variant   = 0xFFFF;
-        uintptr_t records  = 0;
-    };
-
-    static CaptureResult find_existing_secondary_id_for_actor(__int64 a1) noexcept
-    {
-        CaptureResult r{};
-        if (a1 == 0)
-            return r;
-        __try
-        {
-            const auto actor = static_cast<uintptr_t>(a1);
-            const auto subSys = *reinterpret_cast<uintptr_t *>(actor + 0x88);
-            if (subSys == 0)
-                return r;
-            const auto records = *reinterpret_cast<uintptr_t *>(subSys + 0x08);
-            const auto count = *reinterpret_cast<uint32_t *>(subSys + 0x10);
-            if (records == 0 || count == 0 || count > 256)
-                return r;
-
-            r.records = records;
-            for (uint32_t i = 0; i < count; ++i)
-            {
-                const auto record = records + 208ULL * i;
-                const auto key = *reinterpret_cast<uint16_t *>(record + 0xC8);
-                const auto result = *reinterpret_cast<uint16_t *>(record + 0x08);
-                if (key != 0xFFFF && key != 0)
-                {
-                    r.key = key;
-                    r.recordIdx = i;
-                    r.variant = result;
-                    return r;
-                }
-            }
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER)
-        {
-        }
-        return r;
-    }
-
-    // Read a specific inst-record's key + variant at runtime. Used to
-    // detect whether SlotPopulator mutates the captured record between
-    // applies (the "1-2 cycles then stops" symptom).
-    static void peek_inst_record(uintptr_t records, uint32_t idx,
-                                 uint16_t *outKey, uint16_t *outVariant) noexcept
-    {
-        *outKey = 0xFFFF;
-        *outVariant = 0xFFFF;
-        if (records == 0)
-            return;
-        __try
-        {
-            const auto record = records + 208ULL * idx;
-            *outKey = *reinterpret_cast<uint16_t *>(record + 0xC8);
-            *outVariant = *reinterpret_cast<uint16_t *>(record + 0x08);
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER)
-        {
-        }
-    }
-
-    // Read the actor's auth-table entry count for inflation tracking.
-    static uint32_t read_auth_count(__int64 a1) noexcept
-    {
-        if (a1 == 0)
-            return 0;
-        __try
-        {
-            return *reinterpret_cast<uint32_t *>(
-                static_cast<uintptr_t>(a1) + 480);
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER)
-        {
-            return 0;
-        }
-    }
-
     void apply_transmog(__int64 a1, uint16_t targetId)
     {
         auto slotPop = slot_populator_fn();
@@ -765,7 +741,11 @@ namespace Transmog
                     state[k] = {ch.group_hash, ch.r, ch.g, ch.b,
                                 ch.material_id, ch.repair_byte};
                 }
-                DyeRecordInject::set_slot_dye_state(state);
+                const bool sparse =
+                    activePreset != nullptr &&
+                    slotIdx < activePreset->slots.size() &&
+                    activePreset->slots[slotIdx].dyeSparse;
+                DyeRecordInject::set_slot_dye_state(state, sparse);
             }
             else
             {
@@ -859,8 +839,36 @@ namespace Transmog
     void apply_all_transmog(__int64 a1)
     {
         auto &logger = DMK::Logger::get_instance();
-        auto &mappings = slot_mappings();
+        // Local copy of slot_mappings so we can synthesize an
+        // "all-slots-cleared" view when the user has toggled LT off
+        // without mutating the persisted preset state. See the
+        // flag_enabled() block immediately below.
+        auto mappings = slot_mappings();
         auto &lastIds = last_applied_ids();
+
+        // Toggling Enabled off used to early-out of the dispatcher,
+        // which froze the cleanup pass (k_tearDownSlots loop with
+        // mappings[idx].active==false + realItemId==0 +
+        // last_applied_real_ids[idx]!=0). Stale restore meshes from
+        // a prior LT apply then leaked through the next organic
+        // radial unequip. Instead, force every mapping inactive in
+        // this local copy and let the dispatcher run as if the user
+        // had unticked every slot. The cleanup pass continues to
+        // tear down stale fakes; the apply pass writes nothing
+        // because every slot has active==false.
+        //
+        // The BE/VEC hooks (transmog_hooks.cpp) intentionally no
+        // longer gate on flag_enabled for the same reason -- they
+        // need to keep scheduling apply_all so this pass fires on
+        // every equip/unequip while disabled.
+        if (!flag_enabled().load(std::memory_order_relaxed))
+        {
+            for (auto &m : mappings)
+            {
+                m.active = false;
+                m.targetItemId = 0;
+            }
+        }
 
         // Fallback only -- see apply_single_slot_transmog comment.
         if (a1 < 0x10000 && world_system_ptr().load(std::memory_order_acquire))
@@ -1470,7 +1478,11 @@ namespace Transmog
                     state[k] = {ch.group_hash, ch.r, ch.g, ch.b,
                                 ch.material_id, ch.repair_byte};
                 }
-                DyeRecordInject::set_slot_dye_state(state);
+                const bool sparse =
+                    activePreset != nullptr &&
+                    i < activePreset->slots.size() &&
+                    activePreset->slots[i].dyeSparse;
+                DyeRecordInject::set_slot_dye_state(state, sparse);
             }
             else
             {
@@ -1535,7 +1547,18 @@ namespace Transmog
                                 "restoring real item {:#06x}",
                                 slot_name(static_cast<TransmogSlot>(i)),
                                 realId);
+                    // Snapshot the live dye records on this slot's
+                    // auth-table entry and publish via the inject
+                    // channel so apply_transmog repaints the restored
+                    // real item in the user's actual inventory dye
+                    // instead of the item's factory palette. Same
+                    // pattern as Pass B in clear_all_transmog.
+                    const auto gameTag = game_slot_from_transmog(
+                        static_cast<TransmogSlot>(i));
+                    if (!publish_entry_dye_for_gameslot(a1, gameTag))
+                        DyeRecordInject::clear_slot_dye_state();
                     apply_transmog(a1, realId);
+                    DyeRecordInject::clear_slot_dye_state();
                     ++ourWrittenCount;
                 }
                 else if (real_damaged()[i])
@@ -1720,8 +1743,7 @@ namespace Transmog
         // a fundamental limitation of runtime mesh substitution and
         // requires HAWT-style PAZ patching to fully fix. Pointer-swap
         // now stays active across applies; user clears explicitly via
-        // F10 toggle or LT's Clear button (clear_all_transmog still
-        // calls deactivate_for_clear -- that path is fast).
+        // F10 toggle or LT's Clear button.
     }
 
     void clear_all_transmog(__int64 a1)
@@ -1773,6 +1795,43 @@ namespace Transmog
         // Pass A: tear down orphan fakes.
         if (RealPartTearDown::is_ready())
         {
+            // Toggle the char-class bypass for the duration of Pass A
+            // whenever any slot remembers a carrier item. Carrier
+            // (NPC) items are loaded with the bypass patched in so
+            // their scene-graph entries are reachable from the
+            // engine's secondary-id resolver. Without flipping the
+            // bypass back on here, tear_down_by_item_id silently
+            // fails for carrier IDs and the carrier visual persists.
+            // This is the failure mode that surfaces when toggling
+            // LT off (or hitting Clear) on a slot that has no real
+            // backing item, since carrier-loaded fakes only ever
+            // entered the scene graph under the bypass.
+            //
+            // Mirrors the bypass toggle that wraps Phase A in
+            // apply_all_transmog. set_char_class_bypass is null-safe
+            // (returns false when the address is 0) so we can call
+            // it unconditionally with the resolved address.
+            bool anyCarrierTearDown = false;
+            for (std::size_t k = 0; k < k_slotCount; ++k)
+            {
+                if (prevFakeId[k] != 0 && prevCarrierId[k] != 0)
+                {
+                    anyCarrierTearDown = true;
+                    break;
+                }
+            }
+
+            const uintptr_t bypassAddr = resolved_addrs().charClassBypass;
+            bool bypassForTearDown = false;
+            if (anyCarrierTearDown)
+            {
+                bypassForTearDown =
+                    set_char_class_bypass(bypassAddr, 0xEB);
+                if (bypassForTearDown)
+                    logger.trace("[clear] charClass bypass ENABLED "
+                                 "for Pass A tear-down");
+            }
+
             for (std::size_t k = 0; k < k_slotCount; ++k)
             {
                 const auto gameTag =
@@ -1812,6 +1871,13 @@ namespace Transmog
                     fakeId,
                     gameTag);
             }
+
+            if (bypassForTearDown)
+            {
+                set_char_class_bypass(bypassAddr, 0x74);
+                logger.trace("[clear] charClass bypass RESTORED "
+                             "after Pass A tear-down");
+            }
         }
         else
         {
@@ -1846,9 +1912,36 @@ namespace Transmog
                     if (!tmSlot.has_value())
                         continue;
 
-                    logger.info("Transmog RESTORE: real item {:#06x} for slot {}",
-                                itemId, game_slot_name(gameSlot));
+                    // Snapshot the equipped item's live dye records
+                    // and re-publish via the inject channel so the
+                    // following apply_transmog -> SlotPopulator ->
+                    // DyeCopier round-trip emits them into the render
+                    // struct's dst+120. Without this, the synthesized
+                    // swapEntry passes through DyeCopier empty and
+                    // the engine resolves the slot to its factory
+                    // palette, painting toggled-off items un-dyed.
+                    DyeRecordInject::ChannelState
+                        liveDye[DyeRecordInject::k_dyeChannelCount];
+                    if (DyeRecordInject::read_entry_dye_records(base, liveDye) > 0)
+                    {
+                        DyeRecordInject::log_dye_snapshot(
+                            "restore", slot_name(*tmSlot), liveDye);
+                        // sparse: mirror exactly the source channels so
+                        // we don't paint mesh parts the real item never
+                        // colored.
+                        DyeRecordInject::set_slot_dye_state(
+                            liveDye, /*sparse=*/true);
+                    }
+                    else
+                    {
+                        DyeRecordInject::clear_slot_dye_state();
+                    }
+
+                    logger.debug("Transmog RESTORE: real item {:#06x} for slot {}",
+                                 itemId, game_slot_name(gameSlot));
                     apply_transmog(a1, itemId);
+
+                    DyeRecordInject::clear_slot_dye_state();
                 }
 
                 // Restore count to the larger of saved and live.
@@ -1865,6 +1958,24 @@ namespace Transmog
         }
 
         PartShowSuppress::clear_all_suppressed();
+
+        // Intentionally do NOT call
+        // PrefabWrapperSwap::deactivate_for_clear() here.
+        //
+        // The natpipe hook on sub_142711DF0 must stay armed
+        // (s_active=true with s_swapMap populated) so any later
+        // organic unequip / scene-graph teardown -- triggered when
+        // the user swaps gear via the radial after a Clear -- can
+        // still find and unlink the Bastier-target wrappers LT
+        // installed in parent+88. Disarming it here makes the
+        // engine search with Kliff src wrappers, miss the Bastier
+        // targets, and leak ghost meshes (the ghost-helm leak this
+        // hook was originally added to fix).
+        //
+        // The on_struct_copy hook is independently silenced after
+        // toggle-off by its in_transmog() gate, so leaving the
+        // swap map armed only matters during the engine's own
+        // cleanup walks, which is exactly when it must fire.
 
         logger.info("Transmog CLEAR: done");
         suppress_vec().store(false, std::memory_order_release);

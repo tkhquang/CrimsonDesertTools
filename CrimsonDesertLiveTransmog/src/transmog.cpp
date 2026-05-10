@@ -1,6 +1,7 @@
 #include "transmog.hpp"
 #include "aob_resolver.hpp"
 #include "dye_record_inject.hpp"
+#include "generated/dye_color_table.hpp"
 #include "prefab_wrapper_swap.hpp"
 #include "constants.hpp"
 #include "indexed_string_table.hpp"
@@ -214,6 +215,127 @@ namespace Transmog
         schedule_transmog_ms(k_manualDebounceMs);
     }
 
+    // Walks the live auth-table entry array and snapshots each
+    // LT-managed slot's dye records into the active preset's
+    // SlotDyeChannels. The auth-table's per-entry dye-record vector
+    // layout at entry+0x78 is:
+    //
+    //   +0x78  qword  data_ptr  -- heap address of contiguous
+    //                              16-byte records
+    //   +0x80  dword  count     -- number of valid records (0..N)
+    //   +0x84  dword  capacity  -- allocation cap, ignored here
+    //
+    // Each 16-byte record matches DyeRecordInject::ChannelState:
+    //   +0..3   group_hash
+    //   +4..5   material_id
+    //   +6      channel index (0..k_dyeChannelCount-1)
+    //   +7..9   R / G / B
+    //   +11     repair_byte
+    //
+    // This function is split out of capture_outfit() because it
+    // mutates std::string members (ChannelDye::group_name), which
+    // requires C++ object unwinding. MSVC's C2712 forbids that in
+    // the same function as a __try frame, and capture_outfit() has
+    // one. The caller's __try/__except therefore covers any access
+    // fault from a stale auth table here too -- we deliberately do
+    // NOT add another __try in this function.
+    //
+    // SAFETY: the raw reads of `entryArray`, `base + ...`, and the
+    // call to read_entry_dye_records() can fault if the caller
+    // hands us a stale or torn auth table. capture_outfit()'s
+    // __try/__except is the only line of defence.
+    static void capture_live_dye_into_active_preset(
+        uintptr_t entryArray, uint32_t entryCount) noexcept
+    {
+        auto &logger = DMK::Logger::get_instance();
+        auto *activePreset =
+            PresetManager::instance().active_preset_mut();
+        if (activePreset == nullptr)
+            return;
+
+        // Wipe existing dye on every LT-managed slot before the
+        // capture writes so channels that the captured item does
+        // NOT override do not retain a stale value from a previous
+        // capture or picker session.
+        for (std::size_t i = 0; i < k_slotCount; ++i)
+        {
+            if (!Transmog::slot_enabled(i))
+                continue;
+            if (i >= activePreset->slots.size())
+                continue;
+            for (auto &ch : activePreset->slots[i].dye)
+                ch = ChannelDye{};
+        }
+
+        bool any = false;
+        for (uint32_t e = 0; e < entryCount && entryArray > 0x10000; ++e)
+        {
+            auto base = entryArray + e * k_compEntryStride;
+            auto gameSlot =
+                *reinterpret_cast<int16_t *>(base + k_compEntrySlotTagOffset);
+            auto itemId =
+                *reinterpret_cast<uint16_t *>(base + k_compEntryItemIdOffset);
+            if (itemId == 0 || itemId == 0xFFFF)
+                continue;
+            auto tmSlot = slot_from_game_slot(gameSlot);
+            if (!tmSlot.has_value())
+                continue;
+            auto idx = static_cast<std::size_t>(*tmSlot);
+            if (!Transmog::slot_enabled(idx))
+                continue;
+            if (idx >= activePreset->slots.size())
+                continue;
+
+            DyeRecordInject::ChannelState
+                live[DyeRecordInject::k_dyeChannelCount];
+            const auto dyeFilled =
+                DyeRecordInject::read_entry_dye_records(base, live);
+            if (dyeFilled == 0)
+                continue;
+
+            DyeRecordInject::log_dye_snapshot(
+                "capture",
+                slot_name(*tmSlot),
+                live);
+
+            // Mark this slot as a real-item capture so the apply
+            // path emits sparse records (only the channels the
+            // item actually colours). The PresetSlot default is
+            // already `true`; we set it explicitly because a slot
+            // that was previously edited as picker-dense and is
+            // now being recaptured needs to flip back to sparse.
+            activePreset->slots[idx].dyeSparse = true;
+            auto &slotDye = activePreset->slots[idx].dye;
+            for (std::size_t k = 0;
+                 k < DyeRecordInject::k_dyeChannelCount; ++k)
+            {
+                const auto &src = live[k];
+                if (src.group_hash == 0)
+                    continue;
+                auto &dst = slotDye[k];
+                dst.group_hash = src.group_hash;
+                dst.r = src.r;
+                dst.g = src.g;
+                dst.b = src.b;
+                dst.material_id = src.material_id;
+                dst.repair_byte = src.repair_byte;
+                const auto *grp =
+                    DyeColorTable::find_group(src.group_hash);
+                if (grp != nullptr && grp->string_key != nullptr)
+                    dst.group_name = grp->string_key;
+                else
+                    dst.group_name.clear();
+            }
+            any = true;
+            logger.info(
+                "    -> {} dye channel(s) captured for {}",
+                dyeFilled, slot_name(*tmSlot));
+        }
+
+        if (any)
+            dye_dirty().store(true, std::memory_order_release);
+    }
+
     void capture_outfit()
     {
         if (!slot_populator_fn())
@@ -289,6 +411,12 @@ namespace Transmog
                     logger.info("    -> Captured as {} target", slot_name(*tmSlot));
                 }
             }
+
+            // Live dye snapshot delegated to a separate function so
+            // its std::string mutations don't conflict with this
+            // function's __try frame (MSVC C2712 forbids C++ object
+            // unwinding inside __try).
+            capture_live_dye_into_active_preset(entryArray, entryCount);
 
             logger.info("=== CAPTURE DONE: {} equipped, {} total slots ===",
                         captured, k_slotCount);
