@@ -2,6 +2,13 @@
 
 All notable changes to the CrimsonDesertLiveTransmog mod will be documented in this file.
 
+## [0.9.0] - Dye picker
+
+- New per-slot dye picker recolors transmog armor in real time, independent of the dye on your real items.
+- Fixed mouse clicks being ignored in the standalone overlay on some setups (hover already worked; clicks now follow it).
+- Standalone overlay UI tightened up: bigger color swatches, button labels no longer get clipped, and the dye popup laid out so nothing runs off the edge.
+- Fresh slots now highlight the "Default" material and show 100% repair, matching the engine's natural state.
+
 ## [0.8.0] - Expanded Slot Coverage and Body-Mesh Prefab Picker
 
 - Slot picker now covers 10 equipment slots (helm, chest, cloak, gloves, boots, necklace, lantern, glasses, mask, backpack) instead of the 5 armor slots only. Weapon, ring, earring, and bracelet slots are not yet supported.
@@ -109,6 +116,7 @@ All notable changes to the CrimsonDesertLiveTransmog mod will be documented in t
 - Modular code split: `transmog_apply` (apply/clear logic), `transmog_hooks` (VEC/BatchEquip callbacks), `transmog_worker` (debounce/load-detect/nametable threads), `shared_state` (cross-TU atomics)
 - Docs clarify ReShade is required for GUI; without it, users edit JSON manually via Capture hotkey
 
+[0.9.0]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.9.0
 [0.8.0]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.8.0
 [0.7.0]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.7.0
 [0.6.4]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.6.4
