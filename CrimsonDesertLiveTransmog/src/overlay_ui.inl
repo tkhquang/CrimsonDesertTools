@@ -990,6 +990,12 @@ static int s_renameIndex = -1;
     if (!p)
         return false;
 
+    // Dye is mutated directly on the preset, so slot_mappings cannot
+    // signal the divergence. The picker sets dye_dirty on every edit;
+    // Save / preset-switch / load clear it.
+    if (Transmog::dye_dirty().load(std::memory_order_acquire))
+        return true;
+
     const auto &mappings = Transmog::slot_mappings();
     for (std::size_t i = 0; i < Transmog::k_slotCount; ++i)
     {
@@ -2022,6 +2028,560 @@ static void draw_overlay_content()
                               " - Same family (sword<->sword, etc.):\n"
                               "   renders correctly in every pose.");
                     }
+                }
+            }
+
+            // --- Dye picker (per-slot per-mod color override) ---
+            //
+            // Cracked 2026-05-10 PM: dye record bytes +7/+8/+9 are
+            // literal R/G/B of the picked shade. Each slot has up to
+            // 16 ARMOR_MOD records (channels). The popup lists all
+            // 16 mods as inline-expandable rows; expanding a row
+            // reveals the color picker + repair slider for that
+            // mod alone. Selection writes to the active preset's
+            // PresetSlot::dye[idx]; the dispatch loop reads the
+            // 16-element array each apply.
+            //
+            // Only shown for armor slots (Helm/Chest/Cloak/Gloves/
+            // Boots). Weapons + accessories don't go through the
+            // ARMOR_MOD pipeline so the picker has nothing to drive.
+            {
+                const auto curSlot = static_cast<TransmogSlot>(i);
+                const bool isArmorSlot =
+                    curSlot == TransmogSlot::Helm ||
+                    curSlot == TransmogSlot::Chest ||
+                    curSlot == TransmogSlot::Cloak ||
+                    curSlot == TransmogSlot::Gloves ||
+                    curSlot == TransmogSlot::Boots;
+                if (!isArmorSlot)
+                {
+                    ImGui::PopID();
+                    continue;
+                }
+                using namespace Transmog::DyeColorTable;
+
+                // Pull the active preset's slot dye state. We mutate
+                // it in place; the dispatch loop reads the same
+                // memory next apply.
+                Preset *editPreset =
+                    PresetManager::instance().active_preset_mut();
+                SlotDyeChannels *slotDye =
+                    editPreset
+                        ? &editPreset->slots[i].dye
+                        : nullptr;
+
+                ImGui::SameLine();
+
+                // Find first active channel (for adjacent swatch).
+                const ChannelDye *firstActiveCh = nullptr;
+                int activeChCount = 0;
+                if (slotDye)
+                {
+                    for (const auto &c : *slotDye)
+                        if (c.active())
+                        {
+                            if (!firstActiveCh) firstActiveCh = &c;
+                            ++activeChCount;
+                        }
+                }
+
+                // Dye button: always plain "Dye" with fixed width
+                // and no background color override -- keeps text
+                // legible and rows aligned regardless of dye state.
+                // Active state is signalled by a small color-swatch
+                // chip rendered next to the button.
+                const bool dyeBtn = ImGui::Button(
+                    "Dye##dyeBtn", ImVec2(40.0f, 0.0f));
+
+                if (firstActiveCh)
+                {
+                    ImGui::SameLine(0.0f, 4.0f);
+                    ImVec4 sw(firstActiveCh->r / 255.0f,
+                              firstActiveCh->g / 255.0f,
+                              firstActiveCh->b / 255.0f, 1.0f);
+                    ImGui::PushStyleColor(ImGuiCol_Button, sw);
+                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, sw);
+                    ImGui::PushStyleColor(ImGuiCol_ButtonActive, sw);
+                    if (ImGui::Button("##dyeSw",
+                                      ImVec2(20.0f, 20.0f)))
+                    {
+                        ImGui::OpenPopup("##dye_picker");
+                    }
+                    ImGui::PopStyleColor(3);
+                    if (ImGui::IsItemHovered())
+                    {
+                        char tip[48];
+                        std::snprintf(tip, sizeof(tip),
+                                      "%d active mod%s",
+                                      activeChCount,
+                                      activeChCount == 1 ? "" : "s");
+                        ui_tooltip(tip);
+                    }
+                }
+
+                if (dyeBtn && slotDye)
+                    ImGui::OpenPopup("##dye_picker");
+
+                // 10 color groups, ordered by HSL hue (red -> rose).
+                // Anchored by `string_key` (the data file's _stringKey
+                // field). Hash + sample swatch are looked up at render
+                // time from the dye_color_table -- nothing in this UI
+                // hardcodes a `_key` integer, so the picker survives a
+                // game patch that renumbers `_key` (we just regen the
+                // dye_color_table from the new dump).
+                //
+                // Sample swatch = each group's saturated end-of-row
+                // shade (idx 18 for most groups, idx 17 for Bar_I).
+                // We pick idx 18 universally; the visual difference
+                // for Bar_I is one row of saturation, acceptable.
+                struct GroupRow {
+                    const char *string_key;
+                    const char *label; // UI-only display text
+                };
+                static constexpr GroupRow kGroupRows[] = {
+                    {"Her_Color_Group_I",   "Red"},
+                    {"Tom_Color_Group_I",   "Orange"},
+                    {"Por_Color_Group_I",   "Yellow"},
+                    {"Bar_Color_Group_I",   "Lime"},
+                    {"Cal_Color_Group_I",   "Green"},
+                    {"Kwe_Color_Group_I",   "Teal"},
+                    {"Del_Color_Group_I",   "Cyan"},
+                    {"Dem_Color_Group_III", "Blue"},
+                    {"Dem_Color_Group_II",  "Magenta"},
+                    {"Dem_Color_Group_I",   "Rose"},
+                };
+                constexpr std::uint32_t kSampleShadeIdx = 18;
+
+                // Per-slot UI state: which mod row is expanded
+                // (only one at a time; clicking a row collapses
+                // siblings). Static so it persists across frames.
+                static int s_expandedMod[k_slotCount] = {};
+                static bool s_expandedInit = false;
+                if (!s_expandedInit)
+                {
+                    for (auto &v : s_expandedMod) v = -1;
+                    s_expandedInit = true;
+                }
+
+                // Dye changes are visual-only with no side effects,
+                // so we always re-apply on edit (regardless of the
+                // global auto-apply toggle). force_apply_pending
+                // bypasses the dispatcher's no-change skip; without
+                // it a pure dye edit (item id unchanged) would never
+                // re-fire the slotpop chain. flag_enabled is set so
+                // the user sees their pick even if LT was toggled
+                // off when they opened the picker.
+                auto reapply_now = [i]()
+                {
+                    force_apply_pending()[i] = true;
+                    flag_enabled().store(true,
+                        std::memory_order_relaxed);
+                    // Mark unsaved -- picker writes dye directly into
+                    // the active preset, so a Save button check
+                    // against slot_mappings can't catch it.
+                    dye_dirty().store(true,
+                        std::memory_order_relaxed);
+                    manual_apply_slot(i);
+                };
+
+                // Helper lambda: render the picker body for one
+                // specific channel index. Used inside the expanded
+                // mod row.
+                auto draw_channel_picker = [&](std::size_t chIdx,
+                                               ChannelDye &ch)
+                {
+                    ImGui::PushID(static_cast<int>(chIdx) + 9000);
+
+                    // Group buttons row -- color swatches only,
+                    // hovering shows the family name. Selected
+                    // group gets a thin border so the user knows
+                    // which palette they're picking shades from.
+                    // Hash + sample BGRA looked up dynamically from
+                    // the data table: zero hardcoded `_key` integers
+                    // in this UI.
+                    for (std::size_t g = 0;
+                         g < std::size(kGroupRows); ++g)
+                    {
+                        if (g != 0) ImGui::SameLine();
+                        const auto &row = kGroupRows[g];
+                        const Group *grp =
+                            find_group_by_name(row.string_key);
+                        // Sample = saturated shade idx 18 (or shade 0
+                        // if group missing -- shouldn't happen on a
+                        // matched build, but guards against patch
+                        // mismatch).
+                        const std::uint32_t sampleBgra =
+                            (grp && grp->shades &&
+                             grp->shade_count > kSampleShadeIdx)
+                                ? grp->shades[kSampleShadeIdx].bgra
+                                : 0xFF888888u;
+                        const float br = ((sampleBgra >> 16) & 0xFF) / 255.0f;
+                        const float bg = ((sampleBgra >> 8) & 0xFF) / 255.0f;
+                        const float bb = ((sampleBgra) & 0xFF) / 255.0f;
+                        ImGui::PushStyleColor(ImGuiCol_Button,
+                            ImVec4(br, bg, bb, 1.0f));
+                        ImGui::PushStyleColor(ImGuiCol_ButtonHovered,
+                            ImVec4(br * 1.15f, bg * 1.15f, bb * 1.15f, 1.0f));
+                        ImGui::PushStyleColor(ImGuiCol_ButtonActive,
+                            ImVec4(br, bg, bb, 1.0f));
+                        const bool selected =
+                            !ch.group_name.empty() &&
+                            ch.group_name == row.string_key;
+                        if (selected)
+                            ImGui::PushStyleColor(ImGuiCol_Border,
+                                ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
+                        char gid[16];
+                        std::snprintf(gid, sizeof(gid),
+                                      "##g%zu", g);
+                        if (ImGui::Button(gid,
+                                          ImVec2(28.0f, 22.0f)))
+                        {
+                            // string_key is the source-of-truth; hash
+                            // is derived. If the group is missing
+                            // (patch mismatch) we leave hash at 0 and
+                            // the dye won't apply, but the picker
+                            // state is preserved.
+                            ch.group_name = row.string_key;
+                            ch.group_hash = grp ? grp->key : 0;
+                        }
+                        if (selected)
+                            ImGui::PopStyleColor();
+                        ImGui::PopStyleColor(3);
+                        if (ImGui::IsItemHovered())
+                            ui_tooltip(row.label);
+                    }
+
+                    // Shade grid for the chosen group.
+                    if (ch.group_hash != 0)
+                    {
+                        const Group *grp = find_group(ch.group_hash);
+                        if (grp != nullptr && grp->shades != nullptr)
+                        {
+                            const std::uint32_t maxIdx =
+                                grp->shade_count;
+
+                            ui_text("Neutrals:");
+                            for (std::uint32_t s = 0;
+                                 s < 9 && s < maxIdx; ++s)
+                            {
+                                const std::uint32_t bgra =
+                                    grp->shades[s].bgra;
+                                const float r = ((bgra >> 16) & 0xFF) / 255.0f;
+                                const float g2 = ((bgra >> 8) & 0xFF) / 255.0f;
+                                const float b = ((bgra) & 0xFF) / 255.0f;
+                                if (s != 0) ImGui::SameLine();
+                                ImGui::PushStyleColor(ImGuiCol_Button,
+                                    ImVec4(r, g2, b, 1.0f));
+                                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,
+                                    ImVec4(r, g2, b, 1.0f));
+                                ImGui::PushStyleColor(ImGuiCol_ButtonActive,
+                                    ImVec4(r, g2, b, 1.0f));
+                                char nlabel[16];
+                                std::snprintf(nlabel, sizeof(nlabel),
+                                              "##n%u", s);
+                                if (ImGui::Button(nlabel,
+                                                  ImVec2(20.0f, 20.0f)))
+                                {
+                                    ch.r = (bgra >> 16) & 0xFF;
+                                    ch.g = (bgra >> 8) & 0xFF;
+                                    ch.b = bgra & 0xFF;
+                                    reapply_now();
+                                }
+                                ImGui::PopStyleColor(3);
+                                if (ImGui::IsItemHovered())
+                                {
+                                    char tip[64];
+                                    std::snprintf(tip, sizeof(tip),
+                                        "shade %u  RGB=(%u,%u,%u)",
+                                        s,
+                                        (bgra >> 16) & 0xFF,
+                                        (bgra >> 8) & 0xFF,
+                                        bgra & 0xFF);
+                                    ui_tooltip(tip);
+                                }
+                            }
+
+                            ui_text("Hues:");
+                            int col = 0;
+                            for (std::uint32_t s = 9;
+                                 s < maxIdx; ++s)
+                            {
+                                const std::uint32_t bgra =
+                                    grp->shades[s].bgra;
+                                const float r = ((bgra >> 16) & 0xFF) / 255.0f;
+                                const float g2 = ((bgra >> 8) & 0xFF) / 255.0f;
+                                const float b = ((bgra) & 0xFF) / 255.0f;
+                                if (col != 0) ImGui::SameLine();
+                                ImGui::PushStyleColor(ImGuiCol_Button,
+                                    ImVec4(r, g2, b, 1.0f));
+                                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,
+                                    ImVec4(r, g2, b, 1.0f));
+                                ImGui::PushStyleColor(ImGuiCol_ButtonActive,
+                                    ImVec4(r, g2, b, 1.0f));
+                                char slabel[32];
+                                std::snprintf(slabel, sizeof(slabel),
+                                              "##s%u", s);
+                                if (ImGui::Button(slabel,
+                                                  ImVec2(20.0f, 20.0f)))
+                                {
+                                    ch.r = (bgra >> 16) & 0xFF;
+                                    ch.g = (bgra >> 8) & 0xFF;
+                                    ch.b = bgra & 0xFF;
+                                    reapply_now();
+                                }
+                                ImGui::PopStyleColor(3);
+                                if (ImGui::IsItemHovered())
+                                {
+                                    char tip[64];
+                                    std::snprintf(tip, sizeof(tip),
+                                        "shade %u  RGB=(%u,%u,%u)",
+                                        s,
+                                        (bgra >> 16) & 0xFF,
+                                        (bgra >> 8) & 0xFF,
+                                        bgra & 0xFF);
+                                    ui_tooltip(tip);
+                                }
+                                ++col;
+                                if (col >= 10) col = 0;
+                            }
+                        }
+                    }
+                    else
+                    {
+                        ui_text_disabled("(pick a group above)");
+                    }
+
+                    // Repair-level slider (offset +11 of dye record).
+                    int repairPct = 100 - (ch.repair_byte == 0xFF
+                        ? 0
+                        : ((ch.repair_byte * 100 + 63) / 127));
+                    if (ch.repair_byte == 0xFF) repairPct = 100;
+                    ImGui::SetNextItemWidth(200.0f);
+                    if (ImGui::SliderInt("Repair %", &repairPct,
+                                         0, 100))
+                    {
+                        if (repairPct >= 100) ch.repair_byte = 0;
+                        else if (repairPct <= 0) ch.repair_byte = 127;
+                        else ch.repair_byte = static_cast<std::uint8_t>(
+                            ((100 - repairPct) * 127) / 100);
+                        reapply_now();
+                    }
+
+                    // --- Material picker (template u16 at +4..+5) ---
+                    //
+                    // The dye record's u16 at +4..+5 is a TEMPLATE
+                    // INDEX (1..10) into partprefabdyetexturepalleteinfo.
+                    // Each template specifies texture variants per
+                    // cat_code slot (cat1=cloth, cat2=secondary fabric,
+                    // cat3=metal). The engine resolves each channel's
+                    // cat_code per-item and pulls the variant from the
+                    // template. So template 5 picks DIFFERENT textures
+                    // for cat_001/002/003 simultaneously, not "variant
+                    // 5 of one category."
+                    namespace MPT =
+                        Transmog::MaterialPaletteTable;
+                    ui_text("Material template:");
+                    for (std::uint16_t v = 1; v <= 10; ++v)
+                    {
+                        if (v != 1) ImGui::SameLine();
+                        const bool selected =
+                            ch.material_id == v;
+                        if (selected)
+                            ImGui::PushStyleColor(ImGuiCol_Button,
+                                ImVec4(0.3f, 0.6f, 0.9f, 1.0f));
+                        char mlabel[16];
+                        std::snprintf(mlabel, sizeof(mlabel),
+                                      "%u##m%u", v, v);
+                        if (ImGui::Button(mlabel,
+                                          ImVec2(28.0f, 0.0f)))
+                        {
+                            ch.material_id = v;
+                            reapply_now();
+                        }
+                        if (selected)
+                            ImGui::PopStyleColor();
+                        if (ImGui::IsItemHovered())
+                        {
+                            const auto *t = MPT::find(v);
+                            if (t)
+                            {
+                                char tip[512];
+                                int n = std::snprintf(
+                                    tip, sizeof(tip),
+                                    "Template %u (blend %.2f)\n",
+                                    t->idx, t->blend);
+                                for (std::size_t s = 0;
+                                     s < t->slot_count
+                                     && n < (int)sizeof(tip) - 1;
+                                     ++s)
+                                {
+                                    const auto &slot = t->slots[s];
+                                    if (slot.alias)
+                                        n += std::snprintf(
+                                            tip + n, sizeof(tip) - n,
+                                            "  cat%u %s/%s -> %u\n",
+                                            slot.cat_code,
+                                            slot.label,
+                                            slot.alias,
+                                            slot.variant);
+                                    else
+                                        n += std::snprintf(
+                                            tip + n, sizeof(tip) - n,
+                                            "  cat%u %s -> %u\n",
+                                            slot.cat_code,
+                                            slot.label,
+                                            slot.variant);
+                                }
+                                ui_tooltip(tip);
+                            }
+                            else
+                            {
+                                char tip[64];
+                                std::snprintf(tip, sizeof(tip),
+                                    "Template %u (out of range)", v);
+                                ui_tooltip(tip);
+                            }
+                        }
+                    }
+                    ImGui::SameLine();
+                    {
+                        const bool selected =
+                            ch.material_id == 0xFFFF;
+                        if (selected)
+                            ImGui::PushStyleColor(ImGuiCol_Button,
+                                ImVec4(0.3f, 0.6f, 0.9f, 1.0f));
+                        if (ImGui::Button("Default##mFFFF",
+                                          ImVec2(56.0f, 0.0f)))
+                        {
+                            ch.material_id = 0xFFFF;
+                            reapply_now();
+                        }
+                        if (selected)
+                            ImGui::PopStyleColor();
+                        if (ImGui::IsItemHovered())
+                            ui_tooltip(
+                                "0xFFFF -- engine picks the "
+                                "natural variant for this channel.");
+                    }
+                    int rawMat = static_cast<int>(ch.material_id);
+                    ImGui::SetNextItemWidth(160.0f);
+                    if (ImGui::InputInt("raw u16##matRaw",
+                                        &rawMat, 1, 16,
+                                        ImGuiInputTextFlags_CharsHexadecimal
+                                        | ImGuiInputTextFlags_EnterReturnsTrue))
+                    {
+                        if (rawMat < 0) rawMat = 0;
+                        if (rawMat > 0xFFFF) rawMat = 0xFFFF;
+                        ch.material_id =
+                            static_cast<std::uint16_t>(rawMat);
+                        reapply_now();
+                    }
+
+                    if (ImGui::Button("Clear this mod"))
+                    {
+                        ch = ChannelDye{};
+                        reapply_now();
+                    }
+
+                    ImGui::PopID();
+                };
+
+                if (ImGui::BeginPopup("##dye_picker"))
+                {
+                    // --- Top action bar ---
+                    if (ImGui::Button("Mirror Mod 0 to all"))
+                    {
+                        if (slotDye)
+                        {
+                            const auto src = (*slotDye)[0];
+                            for (auto &ch : *slotDye) ch = src;
+                            reapply_now();
+                        }
+                    }
+                    ImGui::SameLine();
+                    if (ImGui::Button("Clear all mods"))
+                    {
+                        if (slotDye) *slotDye = SlotDyeChannels{};
+                        reapply_now();
+                    }
+                    ImGui::SameLine();
+                    if (ImGui::Button("Close")) ImGui::CloseCurrentPopup();
+
+                    ui_text_disabled(
+                        "Tip: most items use 2-5 mods; higher numbers "
+                        "may be no-ops. Red has pure white, Lime has "
+                        "pure black.");
+                    ImGui::Separator();
+
+                    // --- 16 mod rows, each inline-expandable ---
+                    if (slotDye)
+                    {
+                        for (std::size_t k = 0;
+                             k < slotDye->size(); ++k)
+                        {
+                            ChannelDye &ch = (*slotDye)[k];
+                            ImGui::PushID(static_cast<int>(k) + 5000);
+
+                            // Header: chevron + "Mod K" + swatch +
+                            // summary.
+                            const bool expanded =
+                                s_expandedMod[i] ==
+                                static_cast<int>(k);
+                            char hdr[24];
+                            std::snprintf(hdr, sizeof(hdr),
+                                          "%s Mod %2zu",
+                                          expanded ? "v" : ">", k);
+                            if (ImGui::Button(hdr,
+                                              ImVec2(110.0f, 0.0f)))
+                            {
+                                s_expandedMod[i] = expanded
+                                    ? -1
+                                    : static_cast<int>(k);
+                            }
+
+                            // Color swatch (small).
+                            ImGui::SameLine();
+                            ImVec4 sw = ch.active()
+                                ? ImVec4(ch.r / 255.0f,
+                                         ch.g / 255.0f,
+                                         ch.b / 255.0f, 1.0f)
+                                : ImVec4(0.20f, 0.20f, 0.20f, 1.0f);
+                            ImGui::PushStyleColor(ImGuiCol_Button, sw);
+                            ImGui::PushStyleColor(
+                                ImGuiCol_ButtonHovered, sw);
+                            ImGui::Button("##sw", ImVec2(20.0f, 20.0f));
+                            ImGui::PopStyleColor(2);
+
+                            // Summary text.
+                            ImGui::SameLine();
+                            if (ch.active())
+                            {
+                                int repairPct = (ch.repair_byte == 0xFF)
+                                    ? 100
+                                    : 100 - ((ch.repair_byte * 100 + 63) / 127);
+                                ui_text(
+                                    "RGB=(%u,%u,%u) rep=%d%%",
+                                    ch.r, ch.g, ch.b, repairPct);
+                            }
+                            else
+                            {
+                                ui_text_disabled("(default)");
+                            }
+
+                            // Inline expanded body.
+                            if (expanded)
+                            {
+                                ImGui::Indent(20.0f);
+                                draw_channel_picker(k, ch);
+                                ImGui::Unindent(20.0f);
+                                ImGui::Separator();
+                            }
+
+                            ImGui::PopID();
+                        }
+                    }
+
+                    ImGui::EndPopup();
                 }
             }
 

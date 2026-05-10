@@ -45,6 +45,7 @@ namespace Transmog
     static std::array<bool, k_slotCount> s_realDamaged{};
     static std::array<std::uint16_t, k_slotCount> s_lastAppliedRealIds{};
     static std::atomic<bool> s_clearPending{false};
+    static std::atomic<bool> s_dyeDirty{false};
     static std::atomic<std::size_t> s_pendingSlotIndex{k_slotCount};
     static std::array<std::uint16_t, k_slotCount> s_lastAppliedCarrierIds{};
     static std::array<bool, k_slotCount> s_forceApplyPending{};
@@ -81,6 +82,7 @@ namespace Transmog
     std::array<std::uint16_t, k_slotCount> &last_applied_carrier_ids() { return s_lastAppliedCarrierIds; }
     std::array<bool, k_slotCount> &force_apply_pending() { return s_forceApplyPending; }
     std::atomic<bool> &clear_pending() { return s_clearPending; }
+    std::atomic<bool> &dye_dirty() { return s_dyeDirty; }
     std::atomic<std::size_t> &pending_slot_index() { return s_pendingSlotIndex; }
     std::atomic<std::uintptr_t> &swap_stale_comp() { return s_swapStaleComp; }
 

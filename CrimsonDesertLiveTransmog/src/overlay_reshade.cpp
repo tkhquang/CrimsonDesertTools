@@ -14,6 +14,9 @@
 
 #include "prefab_wrapper_swap.hpp"
 #include "constants.hpp"
+#include "dye_record_inject.hpp"
+#include "generated/dye_color_table.hpp"
+#include "generated/material_palette_table.hpp"
 #include "item_name_table.hpp"
 #include "preset_manager.hpp"
 #include "shared_state.hpp"

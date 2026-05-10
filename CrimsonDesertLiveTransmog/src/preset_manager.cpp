@@ -1,6 +1,7 @@
 #include "preset_manager.hpp"
 #include "prefab_wrapper_swap.hpp"
 #include "constants.hpp"
+#include "generated/dye_color_table.hpp"
 #include "item_name_table.hpp"
 #include "slot_metadata.hpp"
 #include "transmog.hpp"
@@ -16,6 +17,32 @@ using json = nlohmann::json;
 
 namespace Transmog
 {
+    // Resolve a dye channel's group by its persisted `group_name`
+    // (the data file's _stringKey, e.g. "Her_Color_Group_I").
+    // Populates `group_hash` from the running game's table. If the
+    // name is empty or no longer in the table, leaves group_hash at 0
+    // and the channel becomes inactive at injection time. Other
+    // channels of the same slot are unaffected.
+    static void resolve_dye_group(ChannelDye &ch)
+    {
+        using namespace Transmog::DyeColorTable;
+        ch.group_hash = 0; // always re-derive from the name
+
+        if (ch.group_name.empty()) return;
+
+        if (const auto *g =
+                find_group_by_name(ch.group_name.c_str()))
+        {
+            ch.group_hash = g->key;
+            return;
+        }
+
+        DMK::Logger::get_instance().warning(
+            "[preset] dye group '{}' not found in current game's "
+            "color table; dye mod dropped",
+            ch.group_name);
+    }
+
     // --- JSON serialization ---
 
     static json slot_to_json(const PresetSlot &s)
@@ -28,6 +55,34 @@ namespace Transmog
         // the common (no body-mesh override) case.
         if (!s.prefabName.empty())
             j["prefabName"] = s.prefabName;
+        // Sparse dye_mods array: emit one object per active channel
+        // only. group_hash == 0 means "no override for this channel".
+        if (any_dye_active(s.dye))
+        {
+            json mods = json::array();
+            for (std::size_t idx = 0; idx < s.dye.size(); ++idx)
+            {
+                const auto &ch = s.dye[idx];
+                if (!ch.active())
+                    continue;
+                // group_name (the data file's _stringKey) is the
+                // sole stable identifier we persist. group_hash is
+                // resolved from it at load and never written back.
+                json m{
+                    {"idx",        idx},
+                    {"group_name", ch.group_name},
+                    {"r",          ch.r},
+                    {"g",          ch.g},
+                    {"b",          ch.b},
+                };
+                if (ch.material_id != 0x0001)
+                    m["material"] = ch.material_id;
+                if (ch.repair_byte != 0xFF)
+                    m["repair"] = ch.repair_byte;
+                mods.push_back(std::move(m));
+            }
+            j["dye_mods"] = std::move(mods);
+        }
         return j;
     }
 
@@ -37,6 +92,27 @@ namespace Transmog
         s.active = j.value("active", false);
         s.itemName = j.value("itemName", std::string());
         s.prefabName = j.value("prefabName", std::string());
+
+        if (j.contains("dye_mods") && j["dye_mods"].is_array())
+        {
+            for (const auto &m : j["dye_mods"])
+            {
+                if (!m.is_object()) continue;
+                const auto idx =
+                    m.value("idx", std::size_t{k_dyeChannelCount});
+                if (idx >= s.dye.size()) continue;
+                auto &ch = s.dye[idx];
+                ch.group_name =
+                    m.value("group_name", std::string());
+                ch.r = m.value("r", std::uint8_t{0});
+                ch.g = m.value("g", std::uint8_t{0});
+                ch.b = m.value("b", std::uint8_t{0});
+                ch.material_id =
+                    m.value("material", std::uint16_t{0x0001});
+                ch.repair_byte = m.value("repair", std::uint8_t{0xFF});
+                resolve_dye_group(ch); // populates ch.group_hash
+            }
+        }
 
         if (s.itemName.empty())
             return s;
@@ -87,7 +163,8 @@ namespace Transmog
             if (!Transmog::slot_enabled(i))
                 continue;
             const bool defaultRow = !s.active && s.itemName.empty() &&
-                                    s.prefabName.empty();
+                                    s.prefabName.empty() &&
+                                    !any_dye_active(s.dye);
             if (defaultRow)
                 continue;
             slotsObj[Transmog::slot_meta(static_cast<TransmogSlot>(i))
@@ -253,6 +330,11 @@ namespace Transmog
             return false;
         }
 
+        // Just-loaded state matches disk; clear any leftover dirty
+        // signal from earlier sessions of the process and snapshot
+        // the active preset's dye as our reference baseline.
+        dye_dirty().store(false, std::memory_order_release);
+        capture_dye_snapshot();
         return true;
     }
 
@@ -288,6 +370,10 @@ namespace Transmog
 
         file << root.dump(2);
         logger.info("Presets saved to '{}'", path);
+        dye_dirty().store(false, std::memory_order_release);
+        // The just-saved state IS the new baseline -- subsequent
+        // edits become "dirty" relative to this point.
+        capture_dye_snapshot();
         return true;
     }
 
@@ -437,7 +523,19 @@ namespace Transmog
         auto &cp = ensure_character(m_activeCharacter);
         int idx = static_cast<int>(cp.presets.size());
         std::string name = "Preset " + std::to_string(idx);
-        cp.presets.push_back(capture_from_state(name));
+        auto captured = capture_from_state(name);
+        // Preserve dye from the source preset (slot_mappings does not
+        // carry dye state -- see replace_current_from_state).
+        if (auto *src = active_preset_mut())
+        {
+            for (std::size_t i = 0;
+                 i < src->slots.size() && i < captured.slots.size();
+                 ++i)
+            {
+                captured.slots[i].dye = src->slots[i].dye;
+            }
+        }
+        cp.presets.push_back(std::move(captured));
         cp.activePreset = idx;
 
         apply_to_state();
@@ -464,6 +562,15 @@ namespace Transmog
         }
 
         auto captured = capture_from_state(p->name);
+        // Dye state is not part of slot_mappings -- the picker writes
+        // it directly onto the active preset's PresetSlot::dye. The
+        // capture-from-state path would clobber those edits, so we
+        // preserve dye from the existing preset before assigning.
+        for (std::size_t i = 0;
+             i < p->slots.size() && i < captured.slots.size(); ++i)
+        {
+            captured.slots[i].dye = p->slots[i].dye;
+        }
         p->slots = captured.slots;
 
         DMK::Logger::get_instance().info("Preset replaced: '{}'", p->name);
@@ -499,14 +606,23 @@ namespace Transmog
         if (it == m_characters.end() || it->second.presets.empty())
             return;
 
+        // Discard unsaved dye edits before cycling.
+        revert_active_dye_to_snapshot();
+
         auto &cp = it->second;
         cp.activePreset = (cp.activePreset + 1) % static_cast<int>(cp.presets.size());
+        capture_dye_snapshot();
 
         DMK::Logger::get_instance().info(
             "Preset cycled to: '{}' ({}/{})",
             cp.presets[static_cast<std::size_t>(cp.activePreset)].name,
             cp.activePreset + 1, cp.presets.size());
 
+        // See set_active_preset for the rationale -- preset switch
+        // must force re-apply so dye state is rebuilt.
+        for (std::size_t i = 0; i < k_slotCount; ++i)
+            if (slot_enabled(i))
+                force_apply_pending()[i] = true;
         apply_to_state();
         save();
     }
@@ -517,17 +633,56 @@ namespace Transmog
         if (it == m_characters.end() || it->second.presets.empty())
             return;
 
+        revert_active_dye_to_snapshot();
+
         auto &cp = it->second;
         int count = static_cast<int>(cp.presets.size());
         cp.activePreset = (cp.activePreset - 1 + count) % count;
+        capture_dye_snapshot();
 
         DMK::Logger::get_instance().info(
             "Preset cycled to: '{}' ({}/{})",
             cp.presets[static_cast<std::size_t>(cp.activePreset)].name,
             cp.activePreset + 1, cp.presets.size());
 
+        for (std::size_t i = 0; i < k_slotCount; ++i)
+            if (slot_enabled(i))
+                force_apply_pending()[i] = true;
         apply_to_state();
         save();
+    }
+
+    void PresetManager::capture_dye_snapshot() const noexcept
+    {
+        const auto *p = active_preset();
+        if (!p)
+        {
+            m_dyeSnapshotValid = false;
+            return;
+        }
+        m_dyeSnapshot = {};
+        for (std::size_t i = 0;
+             i < p->slots.size() && i < m_dyeSnapshot.size(); ++i)
+        {
+            m_dyeSnapshot[i] = p->slots[i].dye;
+        }
+        m_dyeSnapshotValid = true;
+    }
+
+    void PresetManager::revert_active_dye_to_snapshot() noexcept
+    {
+        if (!m_dyeSnapshotValid) return;
+        if (!dye_dirty().load(std::memory_order_acquire)) return;
+        auto *p = active_preset_mut();
+        if (!p) return;
+        for (std::size_t i = 0;
+             i < p->slots.size() && i < m_dyeSnapshot.size(); ++i)
+        {
+            p->slots[i].dye = m_dyeSnapshot[i];
+        }
+        dye_dirty().store(false, std::memory_order_release);
+        DMK::Logger::get_instance().info(
+            "[preset] reverted unsaved dye edits on '{}'", p->name);
     }
 
     void PresetManager::set_active_preset(int index)
@@ -536,9 +691,35 @@ namespace Transmog
         if (it == m_characters.end() || it->second.presets.empty())
             return;
 
+        // Drop any unsaved dye edits on the OUTGOING active preset
+        // before we switch -- the new preset's dye state will be
+        // captured fresh below.
+        revert_active_dye_to_snapshot();
+
         auto &cp = it->second;
         cp.activePreset = std::clamp(index, 0,
                                      static_cast<int>(cp.presets.size()) - 1);
+        // Capture the NEW active preset's dye as the baseline; any
+        // future edits become "dirty" relative to this baseline.
+        capture_dye_snapshot();
+        // Switching to a different preset means we're now showing the
+        // on-disk state for that preset; nothing to save until the
+        // user edits.
+        dye_dirty().store(false, std::memory_order_release);
+        // The dispatcher's slotNeedsWork check is item-id based and
+        // doesn't notice dye state changes. When two presets share the
+        // same carrier ids (e.g. Kairos preset + a body-mesh prefab
+        // preset both built on Kairos carrier 0x1521), the dispatcher
+        // would skip the apply and leave stale dye records bleeding
+        // through. Force re-apply for every enabled slot so DyeCopier
+        // gets a fresh injection from the new preset's dye state
+        // (including the case where the new preset has no dye -- our
+        // hook then skips injection and the engine's natural records
+        // win). Cost: full slot rebuild on every preset switch, but
+        // that's already the user's intent on a switch.
+        for (std::size_t i = 0; i < k_slotCount; ++i)
+            if (slot_enabled(i))
+                force_apply_pending()[i] = true;
         apply_to_state();
     }
 

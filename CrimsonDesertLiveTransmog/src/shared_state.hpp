@@ -171,6 +171,15 @@ namespace Transmog
     /// Set by manual_clear, consumed by the worker.
     std::atomic<bool> &clear_pending();
 
+    /// True iff the active preset's dye state has been edited via the
+    /// picker since the last save / preset switch / file load. Drives
+    /// the Save button's "Save *" pending indicator. Set by the dye
+    /// picker; cleared by `PresetManager::save()` and on preset
+    /// switch / load. Dye edits write directly to the active preset
+    /// (no staging area like slot_mappings has for items), so this
+    /// flag is the only signal that something needs persisting.
+    std::atomic<bool> &dye_dirty();
+
     /// Slot index for single-slot hover-apply. k_slotCount means
     /// "apply all" (the default). Values 0..4 scope the next
     /// debounced apply to one slot only, avoiding full-gear flicker.

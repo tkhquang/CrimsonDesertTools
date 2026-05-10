@@ -93,6 +93,9 @@ set(COMMON_SOURCES
     src/part_show_suppress.cpp
     src/real_part_tear_down.cpp
     src/prefab_wrapper_swap.cpp
+    src/dye_record_inject.cpp
+    src/generated/dye_color_table.cpp
+    src/generated/material_palette_table.cpp
 )
 
 set(ASI_SOURCES
