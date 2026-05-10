@@ -247,6 +247,7 @@ Built with [url=https://github.com/tkhquang/DetourModKit]DetourModKit[/url] for 
 [*][url=https://github.com/FransBouma]Frans 'Otis_Inf' Bouma[/url] -v1.05.00 AOB shift diagnosis
 [*][url=https://www.nexusmods.com/profile/SoraSkySun]SoraSkySun[/url] -[url=https://github.com/NattKh/CRIMSON-DESERT-SAVE-EDITOR-AND-GAME-MODS]Crimson Desert save editor + game file parser / item data dump[/url]
 [*][url=https://www.nexusmods.com/profile/IamSlinky]Slinky[/url] -dye info data dump
+[*][url=https://www.nexusmods.com/profile/hz33m]hzeemr[/url] -[url=https://github.com/hzeemr/crimsonforge]crimsonforge[/url] game-file export tool
 [*]Pearl Abyss -Crimson Desert
 [/list]
 
