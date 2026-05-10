@@ -91,8 +91,15 @@ namespace Transmog
 
         __int64 ret = trampoline(a1, slotId, itemId, a4);
 
-        if (!flag_enabled().load(std::memory_order_relaxed))
-            return ret;
+        // Intentionally NO flag_enabled gate here. When the user
+        // toggles LT off we still need apply_all_transmog to fire
+        // so its stale-fake cleanup pass tears down restore meshes
+        // left over from a prior session. apply_all_transmog has
+        // its own flag_enabled handling: it force-deactivates every
+        // mapping in a local copy when disabled, so no fakes get
+        // applied while still running cleanup. Gating here would
+        // freeze the dispatcher, leaving the prior session's last
+        // fake painted on the actor until the next radial swap.
 
         if (flag_player_only().load(std::memory_order_relaxed) && !is_player_actor(a1))
             return ret;
@@ -148,8 +155,10 @@ namespace Transmog
 
         uint32_t *ret = trampoline(a1, a2, a3, a4);
 
-        if (flag_enabled().load(std::memory_order_relaxed) &&
-            (!flag_player_only().load(std::memory_order_relaxed) || is_player_actor(a1)) &&
+        // Intentionally NO flag_enabled gate; same reasoning as
+        // on_vec_impl above. apply_all_transmog gates internally
+        // and runs cleanup-only when the toggle is off.
+        if ((!flag_player_only().load(std::memory_order_relaxed) || is_player_actor(a1)) &&
             is_controlled_actor(a1))
         {
             // A save-load or zone transition routes a different a1

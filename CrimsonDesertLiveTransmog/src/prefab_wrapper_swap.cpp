@@ -2406,13 +2406,53 @@ namespace Transmog::PrefabWrapperSwap
         // cleared all selections, this deactivates cleanly.
         if (!s_orig) return;  // hook not installed -- nothing to do
 
-        // reactivate_with_selections() handles all three paths:
-        //   - has_any_selection()  -> deactivate (if needed) + rebuild + activate
-        //   - !has_any_selection() -> deactivate (if active), stay inactive
-        // It is also safe to call when already in the desired state
-        // (deactivate is idempotent; rebuild is cheap from cached
-        // catalog wrappers).
-        reactivate_with_selections();
+        // Decide between "this apply has fakes to install" and
+        // "this is a cleanup-only pass" based on `itemIds`, NOT on
+        // has_any_selection().
+        //
+        // Why: has_any_selection() reads the picker's
+        // s_selSrcIdx/s_selTgtIdx state, which only tracks the most
+        // recent dropdown choice. It is decoupled from the user's
+        // Enabled toggle and the per-slot mapping.active flags, so
+        // a cleanup-only pass (Enabled off, or every slot unticked
+        // -- both arrive here with itemIds = {0, 0, 0, 0, 0}) would
+        // still report a selection and re-arm the swap map.
+        //
+        // Re-arming during cleanup is the failure mode that leaks
+        // the original fake mesh on toggle-off: the engine's
+        // tear_down_by_item_id calls fire sub_142711DF0 with the
+        // *real* Kliff wrapper of the just-unequipped item; with
+        // the swap map armed the natpipe hook rewrites that to a
+        // Bastier target wrapper that isn't present in parent+88;
+        // the engine's unlink misses; the real-item mesh stays
+        // painted on the actor.
+        bool any_active_fake = false;
+        for (auto id : itemIds)
+        {
+            if (id != 0)
+            {
+                any_active_fake = true;
+                break;
+            }
+        }
+        if (any_active_fake)
+        {
+            // At least one fake will be installed in this pass; run
+            // the regular rebuild + activate cycle.
+            reactivate_with_selections();
+        }
+        else
+        {
+            // Cleanup-only pass. Force the swap map off so the
+            // following tear_down calls run with the natpipe hook
+            // in passthrough: engine teardown then operates on the
+            // real Kliff wrappers in parent+88 directly, with no
+            // spurious Kliff -> Bastier substitution. The swap map
+            // and target-wrapper set are preserved so a later real
+            // apply can re-arm without re-walking the heap.
+            if (s_active.load(std::memory_order_acquire))
+                deactivate_for_clear();
+        }
 
         // Record itemIds so notify_apply_finished can stash them for
         // diagnostics (preset-switch detection is no longer needed --
