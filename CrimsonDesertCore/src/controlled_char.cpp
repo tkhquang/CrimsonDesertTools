@@ -425,23 +425,88 @@ namespace CDCore
         safetyhook::MidHook s_radialSwapHook;
         std::atomic<std::uintptr_t> s_radialSwapHookAddr{0};
 
-        // SafetyHook MidHook destination. Lives at file scope (function
-        // pointer cannot be a lambda capture target). Reads the low 32
-        // bits of RAX -- the captured characterinfo key -- and stamps
-        // the pending record with a deadline 2 s in the future. Must
-        // not block, allocate, or call into anything that can re-enter
-        // SafetyHook; the body is a single atomic store pair.
+        // Outer-slot offsets used by the swap handler sub_141B04040.
+        // The MidHook decodes (ctx.rdx - party_base) against this table
+        // to recover the requested character. Distinct from the inner
+        // slot offsets used by walk_chain_seh (0x68 / 0x168 / 0x268):
+        // those reach the per-protagonist record whose +0x2C byte is
+        // the active flag, while the swap handler views each slot as a
+        // 0x100-stride aggregate with the active byte at +0x94 from the
+        // slot start (party + 0x000 + 0x94 == party + 0x68 + 0x2C,
+        // i.e. the two views address the same byte through different
+        // intermediates).
+        constexpr std::ptrdiff_t k_swapKliffOuterOffset   = 0x000;
+        constexpr std::ptrdiff_t k_swapDamianeOuterOffset = 0x100;
+        constexpr std::ptrdiff_t k_swapOongkaOuterOffset  = 0x200;
+
+        // SafetyHook MidHook destination. Lives at file scope because a
+        // function pointer cannot be a lambda capture target.
+        //
+        // Hook target: function entry of sub_141B04040, the radial-UI
+        // character-swap handler with signature
+        //   __fastcall(container *a1, slot *a2, int a3)
+        // RDX (a2) at function entry holds the requested new active
+        // slot pointer; the function subsequently clears the previous
+        // slot's +0x94 active byte and sets the new slot's +0x94 to 1.
+        // Decoding (a2 - party_base) against k_swap*OuterOffset gives
+        // the protagonist identity without involving the engine's u32
+        // characterinfo-key lookup table.
+        //
+        // Must not block, allocate, or call into anything that can
+        // re-enter SafetyHook. The body performs an SEH-isolated chain
+        // probe to resolve the live party container, a fixed-cost
+        // offset switch, and an atomic store pair to stamp the pending
+        // record consumed by the resolver hot path.
         void radial_swap_midhook(safetyhook::Context &ctx) noexcept
         {
-            // EAX = ctx.rax low 32 bits. The mid-hook lands on
-            // `mov [rbp+0x78], eax` so RAX holds the just-loaded key
-            // and is not yet shadowed by the lookup-table call.
-            const auto key =
-                static_cast<std::uint32_t>(ctx.rax & 0xFFFFFFFFu);
+            const auto new_slot_ptr =
+                static_cast<std::uintptr_t>(ctx.rdx);
+            if (new_slot_ptr < k_minValidPtr)
+            {
+                return;
+            }
+
+            const auto holder =
+                s_playerStaticHolder.load(std::memory_order_acquire);
+            if (holder < k_minValidPtr)
+            {
+                return;
+            }
+
+            const auto probe = walk_chain_seh(holder);
+            if (!probe.valid || probe.partyContainer < k_minValidPtr)
+            {
+                return;
+            }
+
+            const auto offset =
+                static_cast<std::ptrdiff_t>(
+                    new_slot_ptr - probe.partyContainer);
+            std::uint32_t key = 0;
+            switch (offset)
+            {
+                case k_swapKliffOuterOffset:
+                    key = k_keyKliff;
+                    break;
+                case k_swapDamianeOuterOffset:
+                    key = k_keyDamiane;
+                    break;
+                case k_swapOongkaOuterOffset:
+                    key = k_keyOongka;
+                    break;
+                default:
+                    // RDX did not land on a known protagonist slot
+                    // (e.g. a NPC body swap or a future protagonist
+                    // not in this table). Silently no-op so the cache
+                    // does not pollute with an out-of-range identity.
+                    return;
+            }
+
             const auto now = GetTickCount64();
-            // Order: stamp the deadline first so the resolver does not
-            // observe a fresh key with a stale deadline. The acquire
-            // load on the resolver side pairs with these releases.
+            // Stamp the deadline before the key so the resolver never
+            // observes a fresh key paired with a stale deadline. The
+            // acquire loads on the resolver side pair with these
+            // releases.
             s_pendingDeadlineMs.store(now + k_pendingKeyWindowMs,
                                       std::memory_order_release);
             s_pendingKey.store(key, std::memory_order_release);
