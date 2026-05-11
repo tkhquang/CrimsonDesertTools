@@ -2,6 +2,10 @@
 
 All notable changes to the CrimsonDesertEquipHide mod will be documented in this file.
 
+## [0.7.2] - v1.06.00 patch support
+
+- Compatibility fix for Crimson Desert game version 1.06.00. Restored radial-character swap detection so equipment hiding stays correct after switching characters.
+
 ## [0.7.1] - v1.05.00 atomic save-load fix
 
 - Fixed cases where loading a save while the mod was active could break the hide toggle until the game was restarted.
@@ -229,6 +233,7 @@ All notable changes to the CrimsonDesertEquipHide mod will be documented in this
 - Customizable part lists per category via INI configuration
 - Configurable init delay and log level
 
+[0.7.2]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/equip-hide/v0.7.2
 [0.7.1]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/equip-hide/v0.7.1
 [0.7.0]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/equip-hide/v0.7.0
 [0.6.3]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/equip-hide/v0.6.3
