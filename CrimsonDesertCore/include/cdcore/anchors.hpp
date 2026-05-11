@@ -393,193 +393,93 @@ namespace CDCore::Anchors
     };
 
     // -----------------------------------------------------------------------
-    // RadialSwapKey -- mid-body anchor inside the radial-UI character-swap
-    // handler (sub_1422019A0). At this site EAX has just been loaded with
-    // the requested characterinfo key from the radial input pointer in RSI:
+    // RadialSwapKey: function-entry anchor for the radial-UI character swap
+    // handler `sub_141B04040`. The target binary is Crimson Desert v1.06.00.
     //
-    //   ; sub_1422019A0 fragment, loads the destination key and forwards to
-    //   ; sub_141B0C2B0 which commits the new actor to User+0xD8.
-    //   8B 06              mov eax, [rsi]            ; ANCHOR
-    //   89 45 78           mov [rbp+0x78], eax       ; HOOK +2 lands here
-    //   48 8B 0D ?? ?? ?? ?? mov rcx, [rip+disp32]   ; lookup table base
-    //   48 83 C1 60        add rcx, 60h
-    //   48 8D 55 78        lea rdx, [rbp+0x78]
-    //   E8 ?? ?? ?? ??     call sub_1402FB1C0        ; hash table lookup
-    //   B9 FF FF 00 00     mov ecx, 0FFFFh           ; sentinel
-    //   48 85 C0           test rax, rax
-    //   74 05              jz <skip>
-    //   0F B7 18           movzx ebx, word ptr [rax]
-    //   EB 02              jmp +2
+    // Function shape (relative to the entry at sub_141B04040 = 0x141B04040
+    // in v1.06.00):
     //
-    // CE-verified live (v1.04.00, 2026-05-02) across four protagonist
-    // transitions: EAX = 0x01 (Kliff), 0x04 (Damiane), 0x06 (Oongka).
+    //   sub_141B04040  proc                              ; (container, new_slot, flag)
+    //   +0x00          48 89 5C 24 08      mov [rsp+8], rbx        ; non-volatile spill
+    //   +0x05          48 89 74 24 10      mov [rsp+16], rsi
+    //   +0x0A          48 89 7C 24 18      mov [rsp+24], rdi
+    //   +0x0F          55 41 54 41 55 ...  push rbp/r12/r13/r14/r15
+    //   +0x18          48 8D 6C 24 C9      lea rbp, [rsp-0x37]     ; ANCHOR (P1)
+    //   +0x1D          48 81 EC B0 00 00 00 sub rsp, 0xB0
+    //   +0x24          48 8B DA            mov rbx, rdx            ; stash new_slot
+    //   +0x27          4C 8B E9            mov r13, rcx            ; stash container
+    //   ...
+    //   +0xEC          C6 81 94 00 00 00 00 mov byte [rcx+0x94], 0 ; ANCHOR (P2)
+    //   +0xF3          48 8B 01            mov rax, [rcx]          ; deactivate old slot
+    //   +0xF6          FF 90 80 01 00 00   call [rax+0x180]
+    //   ...
+    //   +0x275         C6 83 94 00 00 00 01 mov byte [rbx+0x94], 1 ; ANCHOR (P3)
+    //   +0x27C         48 8B 03            mov rax, [rbx]          ; activate new slot
+    //   +0x27F         48 8B CB            mov rcx, rbx
+    //   +0x282         FF 90 80 01 00 00   call [rax+0x180]
     //
-    // The hook offset is +2 (the byte length of `mov eax, [rsi]`) so the
-    // mid-hook lands on the immediately-following `mov [rbp+0x78], eax`,
-    // i.e. the instruction at which the captured key is fully realised in
-    // the EAX register and not yet shadowed by the lookup-table call. EAX
-    // is the source of the captured value; reading it from the SafetyHook
-    // Context64 as `ctx.rax & 0xFFFF'FFFFu` gives the raw key.
+    // RDX (a2) at function entry holds the new active character's outer-slot
+    // pointer: party_base + 0x000 (Kliff), 0x100 (Damiane), 0x200 (Oongka).
+    // The MidHook in controlled_char.cpp reads ctx.rdx and decodes the
+    // offset against the live party container resolved via walk_chain_seh.
     //
-    // Coverage caveat: scripted cutscene auto-switches that drive the
-    // player back to Kliff do NOT pass through this handler (verified
-    // live: zero hits on a forced Kliff return). The +0x2C slot decode
-    // and the resolver's last-known-good cache cover those paths.
+    // Resolution strategy. Each candidate resolves directly to the entry
+    // address sub_141B04040 (Direct mode, dispOffset = anchor_offset_from_
+    // entry negated). SafetyHook's 5-byte JMP overwrites the first 5 bytes
+    // of the function entry (`48 89 5C 24 08`); cross-mod chaining at the
+    // JMP target lets LiveTransmog and EquipHide hold independent MidHooks
+    // against the same site. P2 / P3 anchor deep inside the function body
+    // so they remain valid after a sibling MidHook patches the entry.
     //
-    // 5-tier cascade ordered for cross-mod coordination.
-    //
-    // Cross-mod model: CrimsonDesertCore is a STATIC library, so each Logic
-    // DLL (LiveTransmog, EquipHide) carries its own copy of CDCore state and
-    // installs its own SafetyHook MidHook against this site. SafetyHook's
-    // internal chaining at the JMP-target site lets two MidHooks coexist --
-    // each consumer's trampoline runs independently on every radial swap.
-    // The price is that whichever consumer initialises FIRST overwrites the
-    // hook target's prelude bytes with the SafetyHook stub (a 5-byte JMP at
-    // match+2 plus zero or more NOP-padded partial-instruction bytes); the
-    // sibling consumer that scans SECOND no longer sees the original
-    // `89 45 78 48 8B 0D ...` shape at offset +2 through +11 of the match.
-    //
-    // Patch survival:
-    //   - SafetyHook's MidHook overwrites COMPLETE instructions starting at
-    //     the hook target. Bytes 0..1 of the match (`8B 06`, the leading
-    //     mov-eax-from-rsi) are LEFT INTACT because the hook target is at
-    //     match+2.
-    //   - Bytes match+2 through match+11 (the `89 45 78 48 8B 0D ?? ?? ?? ??`
-    //     window -- 3 bytes of `mov [rbp+0x78], eax` plus 7 bytes of
-    //     `mov rcx, [rip+disp32]`) are FULLY OVERWRITTEN by the JMP+pad.
-    //   - Bytes match+12 onward (`48 83 C1 60 48 8D 55 78 E8 ?? ?? ?? ?? B9
-    //     FF FF 00 00 48 85 C0 74 05 0F B7 18 EB 02`) are UNCHANGED -- they
-    //     sit past the displaced range and are reached only via the
-    //     SafetyHook trampoline's epilogue.
-    //
-    // P1 / P2 anchor exclusively in the post-patch-invariant tail
-    // (match+12 onward) so they match the live binary regardless of whether
-    // a sibling has already patched the prelude. dispOffset = -10 walks back
-    // from the new anchor's start (which is at original-match+12) to the
-    // hook target (at original-match+2): -10 = +2 - 12. P3 / P4 / P5 are
-    // the original prelude-anchored candidates retained for the
-    // pre-any-patch first-load case where every byte still matches; on a
-    // post-patched site they fail gracefully and the cascade falls through
-    // to P1 / P2.
-    //
-    // resolve_cascade iterates declaration order and returns first match
-    // (see scanner.cpp scan_candidates), so the post-patch-tolerant
-    // candidates MUST come first to guarantee the second consumer resolves
-    // the same hook target the first consumer already patched.
-    //
-    // The `0F B7 18 EB 02` (movzx ebx, word ptr [rax]; jmp +2) tail is the
-    // unique disambiguator: a structurally identical shape at sub_1421D5990
-    // in a different handler is followed by an index-write
-    // (`48 89 B5 28 03 00 00`) instead, so any candidate that includes
-    // bytes past the call locks onto this site exclusively.
+    // Uniqueness. Each pattern returns exactly one hit on v1.06.00 (verified
+    // via IDA find_bytes against the live binary). The mid-prologue carries
+    // a stack-frame layout magic (`lea rbp, [rsp-0x37]; sub rsp, 0xB0`)
+    // together with the swap handler's specific arg-stash sequence
+    // (`mov rbx, rdx; mov r13, rcx`), which discriminates this function
+    // from the ten-plus other functions sharing the vanilla x64 prologue.
+    // The deactivate / activate writes pair a 7-byte `mov byte ptr ...`
+    // immediate-store opcode with a 3-byte `mov rax, [rcx|rbx]` and a
+    // 6-byte vtable call, giving an instruction-stream landmark that no
+    // other function in the .text section reproduces.
     // -----------------------------------------------------------------------
     inline constexpr AddrCandidate k_radialSwapKeyCandidates[] = {
-        // P0 -- v1.05.00 full pre-patch sequence. Differences vs v1.04:
-        //   * Source register rsi -> rdi (`8B 06` -> `8B 07`).
-        //   * Sentinel emitted as `mov r14d, 0xFFFF` (41 BE ...) AFTER
-        //     the lookup call instead of `mov ecx, 0xFFFF` (B9 ...)
-        //     before it.
-        //   * Tail jmp rel8 target shifted from `EB 02` to `EB 03`.
-        // 1 unique hit on v1.05.00 at 0x1421CE795. dispOffset +2 walks
-        // forward to the same `mov [rbp+0x78], eax` hook target as the
-        // v1.04 prelude-anchored candidates.
-        {"RadialSwapKey_P0_v105_FullSequence",
-         "8B 07 89 45 78 48 8B 0D ?? ?? ?? ?? "
-         "48 83 C1 60 48 8D 55 78 E8 ?? ?? ?? ?? "
-         "41 BE FF FF 00 00 48 85 C0 74 05 0F B7 18 EB 03",
-         ResolveMode::Direct, 2, 0},
+        // P1: function-entry mid-prologue. Anchors on the unique stack
+        // layout (`lea rbp, [rsp-0x37]; sub rsp, 0xB0`) and the
+        // immediately-following arg stash (`mov rbx, rdx; mov r13, rcx`).
+        // dispOffset = -0x18 walks back from the anchor (entry + 0x18)
+        // to the function start so the resolved address is the MidHook
+        // target. Highest priority because a virgin-load first scan
+        // sees this candidate before any sibling has patched the entry.
+        {"RadialSwapKey_P1_EntryPrologue",
+         "48 8D 6C 24 C9 48 81 EC B0 00 00 00 "
+         "48 8B DA 4C 8B E9",
+         ResolveMode::Direct, -0x18, 0},
 
-        // P0b -- v1.05.00 full pre-patch with rel8 targets wildcarded.
-        // Tolerates a future build that shifts the test-jz / movzx-jmp
-        // branch distances. Same dispOffset semantics as P0.
-        {"RadialSwapKey_P0b_v105_WildcardRel8",
-         "8B 07 89 45 78 48 8B 0D ?? ?? ?? ?? "
-         "48 83 C1 60 48 8D 55 78 E8 ?? ?? ?? ?? "
-         "41 BE FF FF 00 00 48 85 C0 74 ?? 0F B7 18 EB ??",
-         ResolveMode::Direct, 2, 0},
+        // P2: deactivate-write tail. The function clears the previous
+        // slot's +0x94 active byte and then calls a vtable method on
+        // the slot's underlying engine object (`mov rax, [rcx]; call
+        // [rax+0x180]`). The 7-byte `mov byte ptr [rcx+0x94], 0` paired
+        // with the vtable call gives a 16-byte landmark that lives at
+        // entry + 0xEC, well past SafetyHook's 5-byte JMP window, so
+        // this candidate continues to resolve after a sibling has
+        // patched the prologue. dispOffset = -0xEC walks back to the
+        // function entry.
+        {"RadialSwapKey_P2_DeactivateWrite",
+         "C6 81 94 00 00 00 00 48 8B 01 FF 90 80 01 00 00",
+         ResolveMode::Direct, -0xEC, 0},
 
-        // P0c -- v1.05.00 post-patch tail. Anchors past the SafetyHook
-        // displaced window (`8B 07 89 45 78` overwritten by E9 rel32):
-        //   add rcx, 0x60; lea rdx,[rbp+0x78]; call <disp32>;
-        //   mov r14d, 0xFFFF; test rax,rax; jz +5; movzx ebx,[rax];
-        //   jmp +3.
-        // Survives a sibling MidHook install in either load order (LT
-        // before EH or EH before LT) because the prelude bytes are not
-        // part of the match. dispOffset -10 walks back to the original
-        // hook target at `89 45 78` of the prelude (semantically equal
-        // to the v1.04 post-patch walk).
-        {"RadialSwapKey_P0c_v105_PostPatchFull",
-         "48 83 C1 60 48 8D 55 78 E8 ?? ?? ?? ?? "
-         "41 BE FF FF 00 00 48 85 C0 74 05 0F B7 18 EB 03",
-         ResolveMode::Direct, -10, 0},
-
-        // P0d -- v1.05.00 post-patch with rel8 wildcards. Same -10
-        // dispOffset semantics as P0c.
-        {"RadialSwapKey_P0d_v105_PostPatchWildcardRel8",
-         "48 83 C1 60 48 8D 55 78 E8 ?? ?? ?? ?? "
-         "41 BE FF FF 00 00 48 85 C0 74 ?? 0F B7 18 EB ??",
-         ResolveMode::Direct, -10, 0},
-
-        // P1 -- v1.04.00 post-patch-invariant tail with literal rel8 jz.
-        // Anchors entirely in the bytes past the SafetyHook displaced
-        // window (match+12 onward of the original prelude shape):
-        //   add rcx, 0x60; lea rdx,[rbp+0x78]; call <disp32>;
-        //   mov ecx, 0xFFFF; test rax,rax; jz +5; movzx ebx,[rax];
-        //   jmp +2.
-        // The unique movzx-ebx + jmp-+2 tail pins this site (see comment
-        // block above for the sibling-handler disambiguator). dispOffset
-        // -10 walks back to the original hook target at match+2 of the
-        // prelude shape (= start-of-this-anchor + 2 - 12). Inert on
-        // v1.05.00 because the sentinel encoding changed from B9 to 41 BE.
-        {"RadialSwapKey_P1_PostPatchFull",
-         "48 83 C1 60 48 8D 55 78 E8 ?? ?? ?? ?? "
-         "B9 FF FF 00 00 48 85 C0 74 05 0F B7 18 EB 02",
-         ResolveMode::Direct, -10, 0},
-
-        // P2 -- same post-patch-invariant tail with the rel8 jz target
-        // wildcarded. Survives a recompile that shifts the branch
-        // distance while the surrounding instruction stream is preserved.
-        // Falls back to P1 only when an exact-byte match wins first; same
-        // dispOffset semantics.
-        {"RadialSwapKey_P2_PostPatchWildcardRel8",
-         "48 83 C1 60 48 8D 55 78 E8 ?? ?? ?? ?? "
-         "B9 FF FF 00 00 48 85 C0 74 ?? 0F B7 18 EB 02",
-         ResolveMode::Direct, -10, 0},
-
-        // P3 -- pre-patch full-prelude anchor (was P1). Matches only on a
-        // first-load scan against an unpatched site. Anchors on the full
-        // prelude (mov eax,[rsi]; mov [rbp+0x78],eax; mov rcx,[rip+disp32];
-        // add rcx,0x60; lea rdx,[rbp+0x78]; call <disp32>) followed by the
-        // unique tail (mov ecx,0xFFFF; test rax,rax; jz +5; movzx ebx,[rax];
-        // jmp +2). dispOffset +2 walks forward to the hook target. After
-        // a sibling has patched, bytes match+2..+11 differ, so this
-        // candidate fails gracefully and the cascade falls through to P1.
-        {"RadialSwapKey_P3_FullSequence",
-         "8B 06 89 45 78 48 8B 0D ?? ?? ?? ?? "
-         "48 83 C1 60 48 8D 55 78 E8 ?? ?? ?? ?? "
-         "B9 FF FF 00 00 48 85 C0 74 05 0F B7 18 EB 02",
-         ResolveMode::Direct, 2, 0},
-
-        // P4 -- pre-patch prelude with wildcarded rel8 jz target (was P2).
-        // Same first-load-only matching characteristic as P3; tolerates a
-        // future build that shifts the jz branch distance.
-        {"RadialSwapKey_P4_WildcardRel8",
-         "8B 06 89 45 78 48 8B 0D ?? ?? ?? ?? "
-         "48 83 C1 60 48 8D 55 78 E8 ?? ?? ?? ?? "
-         "B9 FF FF 00 00 48 85 C0 74 ?? 0F B7 18 EB 02",
-         ResolveMode::Direct, 2, 0},
-
-        // P5 -- minimal-tail prelude anchor (was P3). Drops the post-call
-        // test/movzx tail and ends at the `mov ecx, 0xFFFF` sentinel-load.
-        // Verified unique on v1.04.00. Last-resort first-load fallback if
-        // both P3 and P4 fail to a future tail rewrite. Also fails on a
-        // post-patched site (the prelude bytes are gone), at which point
-        // P1 / P2 carry the resolution.
-        {"RadialSwapKey_P5_MinimalTail",
-         "8B 06 89 45 78 48 8B 0D ?? ?? ?? ?? "
-         "48 83 C1 60 48 8D 55 78 E8 ?? ?? ?? ?? "
-         "B9 FF FF 00 00",
-         ResolveMode::Direct, 2, 0},
+        // P3: activate-write tail. The function then writes 1 to the
+        // new slot's +0x94 active byte and invokes the same vtable
+        // method, with an additional `mov rcx, rbx` to forward the
+        // slot pointer. Pairing the 7-byte activate store with the
+        // 3-byte arg shuffle and the 6-byte vtable call pins a 19-byte
+        // landmark at entry + 0x275. Last in the cascade because it
+        // sits deepest in the body; survives partial recompilations
+        // that perturb the prologue but preserve the slot-flag write
+        // sequence. dispOffset = -0x275 walks back to the entry.
+        {"RadialSwapKey_P3_ActivateWrite",
+         "C6 83 94 00 00 00 01 48 8B 03 48 8B CB FF 90 80 01 00 00",
+         ResolveMode::Direct, -0x275, 0},
     };
 
 } // namespace CDCore::Anchors
