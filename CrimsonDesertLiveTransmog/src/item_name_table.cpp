@@ -518,17 +518,28 @@ namespace Transmog
         case 0x05: return TransmogSlot::Chest;
         case 0x06: return TransmogSlot::Gloves;
         case 0x07: return TransmogSlot::Boots;
+        // Cloak typeCodes span multiple game versions. 0x45 and 0x46
+        // are pre-v1.06.00 values kept for backwards compatibility; 0x47
+        // is the v1.06.00+ value. The +1 shift in v1.06.00 also moved
+        // the older Bracelet code (0x47) into Cloak's range, so the
+        // accessory codes below cannot keep their pre-v1.06.00 values
+        // without colliding with Cloak.
         case 0x45:
-        case 0x46: return TransmogSlot::Cloak;
-        // Accessories
+        case 0x46:
+        case 0x47: return TransmogSlot::Cloak;
+        // Accessories. Backpack accepts both pre- and post-v1.06.00
+        // codes because 0x43 and 0x44 do not collide with any other
+        // mapping. The remaining accessory cases only accept the
+        // v1.06.00 code; older values now route to Cloak above.
         case 0x08: return TransmogSlot::Earring1; // shared with Earring2
         case 0x09: return TransmogSlot::Necklace;
         case 0x0A: return TransmogSlot::Ring1;    // shared with Ring2
         case 0x37: return TransmogSlot::Lantern;
-        case 0x43: return TransmogSlot::Backpack;
-        case 0x47: return TransmogSlot::Bracelet;
-        case 0x48: return TransmogSlot::Glasses;
-        case 0x49: return TransmogSlot::Mask;
+        case 0x43:
+        case 0x44: return TransmogSlot::Backpack;
+        case 0x48: return TransmogSlot::Bracelet;
+        case 0x49: return TransmogSlot::Glasses;
+        case 0x4A: return TransmogSlot::Mask;
         // 1H weapons -- all share MainHand (paired with OffHand)
         case 0x00:                                 // 1H sword
         case 0x01:                                 // shield (generic)
