@@ -1,3 +1,5 @@
-## v1.06.00 patch support
+## [Title for next release]
 
-- Compatibility fix for Crimson Desert game version 1.06.00. Restored radial-character swap detection so transmog stays correct after switching characters.
+- New feature
+- Bug fix
+- Improvement
