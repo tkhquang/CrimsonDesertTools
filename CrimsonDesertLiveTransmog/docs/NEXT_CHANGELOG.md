@@ -1,3 +1,5 @@
-## Fixed item picker filtering
+## [Title for next release]
 
-- Restored item picker filtering for Cloak, Bracelet, Glasses, Mask, and Backpack on v1.06.00, which renumbered their type-codes and left those pickers appearing empty under the "Exact" filter.
+- New feature
+- Bug fix
+- Improvement
