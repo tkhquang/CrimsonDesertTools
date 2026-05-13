@@ -303,11 +303,12 @@ namespace Transmog
         {
             json root = json::parse(file);
 
-            // `activeCharacter` JSON field is no longer used -- the
-            // runtime active character is driven by the live WS
-            // chain via the char-swap detector. Kept here only to
-            // silently tolerate old presets.json files that still
-            // carry it; the value is discarded.
+            // `activeCharacter` was a legacy JSON field; the
+            // controlled character is now driven entirely by the
+            // live WS chain via the char-swap detector and the
+            // editing character is session-only. Old presets.json
+            // files may still carry the field, so it is read and
+            // discarded here to avoid a "missing key" parse error.
             (void)root.value("activeCharacter", std::string{});
 
             if (root.contains("characters") && root["characters"].is_object())
@@ -361,9 +362,10 @@ namespace Transmog
         // Schema v3: slots carry only itemName (stable identifier).
         // itemId is resolved at runtime from the item catalog.
         root["version"] = 3;
-        // `activeCharacter` is intentionally NOT written -- the live
-        // controlled character drives apply at runtime, so the field
-        // would just be a stale last-viewed-UI hint.
+        // Neither the controlled character nor the editing character
+        // are serialised. Controlled is driven by the live WS chain
+        // at runtime; editing is a session-only UI affordance that
+        // resets to controlled on load.
 
         json chars = json::object();
         for (auto &[name, cp] : m_characters)
@@ -400,13 +402,83 @@ namespace Transmog
 
     const std::string &PresetManager::active_character() const
     {
-        return m_activeCharacter;
+        return m_controlledCharacter;
     }
 
     void PresetManager::set_active_character(const std::string &name)
     {
-        m_activeCharacter = name;
+        m_controlledCharacter = name;
         ensure_character(name);
+        if (!m_editingPinned)
+        {
+            // Editing follows controlled whenever the user has not
+            // explicitly pinned a different editing target. The dye
+            // snapshot is rotated here so unsaved dye edits on the
+            // outgoing character do not bleed into the incoming
+            // character's preset.
+            if (name != m_editingCharacter)
+            {
+                revert_active_dye_to_snapshot();
+                m_editingCharacter = name;
+                capture_dye_snapshot();
+            }
+        }
+        else if (name == m_editingCharacter)
+        {
+            // The player is now controlling the very character the
+            // user had pinned for editing. The pin no longer
+            // represents anything distinct, so it auto-clears.
+            m_editingPinned = false;
+        }
+    }
+
+    const std::string &PresetManager::editing_character() const
+    {
+        return m_editingCharacter;
+    }
+
+    void PresetManager::set_editing_character(const std::string &name)
+    {
+        if (name == m_editingCharacter)
+        {
+            // No-op switch: keep the pin state consistent against
+            // controlled and return without touching the snapshot.
+            m_editingPinned = (name != m_controlledCharacter);
+            ensure_character(name);
+            return;
+        }
+
+        // Switching the editing character is a larger context shift
+        // than cycling presets: drop any unsaved dye edits on the
+        // outgoing preset and capture a fresh baseline snapshot for
+        // the incoming preset. Mirrors set_active_preset().
+        revert_active_dye_to_snapshot();
+        m_editingCharacter = name;
+        ensure_character(name);
+        // Pin engages when the user picked anyone other than the
+        // controlled character; picking the controlled character is
+        // the unpin gesture from the dropdown.
+        m_editingPinned = (name != m_controlledCharacter);
+        capture_dye_snapshot();
+    }
+
+    bool PresetManager::editing_pinned() const noexcept
+    {
+        return m_editingPinned;
+    }
+
+    void PresetManager::clear_editing_pin()
+    {
+        if (m_editingCharacter != m_controlledCharacter)
+        {
+            // Drop unsaved dye edits on the outgoing preset and
+            // capture a fresh baseline for the controlled character's
+            // active preset.
+            revert_active_dye_to_snapshot();
+            m_editingCharacter = m_controlledCharacter;
+            capture_dye_snapshot();
+        }
+        m_editingPinned = false;
     }
 
     std::string PresetManager::body_kind_of(const std::string &charName) const
@@ -441,7 +513,7 @@ namespace Transmog
 
     int PresetManager::active_preset_index() const
     {
-        auto it = m_characters.find(m_activeCharacter);
+        auto it = m_characters.find(m_editingCharacter);
         if (it == m_characters.end())
             return 0;
         return it->second.activePreset;
@@ -449,7 +521,7 @@ namespace Transmog
 
     int PresetManager::preset_count() const
     {
-        auto it = m_characters.find(m_activeCharacter);
+        auto it = m_characters.find(m_editingCharacter);
         if (it == m_characters.end())
             return 0;
         return static_cast<int>(it->second.presets.size());
@@ -457,7 +529,7 @@ namespace Transmog
 
     const Preset *PresetManager::active_preset() const
     {
-        auto it = m_characters.find(m_activeCharacter);
+        auto it = m_characters.find(m_editingCharacter);
         if (it == m_characters.end() || it->second.presets.empty())
             return nullptr;
 
@@ -469,12 +541,12 @@ namespace Transmog
     const Preset *PresetManager::active_preset_of(
         const std::string &charName) const
     {
-        // Read-only sibling of active_preset() that targets an arbitrary
-        // character. Used by the body-mesh prefab picker to borrow the
-        // Kairos (default-carrier) preset's itemIds while leaving the
-        // manager's active_character untouched -- mutating active_character
-        // here would side-trigger load-detect / radial-swap state and
-        // cascade into a save.
+        // Read-only sibling of active_preset() that targets an
+        // arbitrary character. Used by the body-mesh prefab picker
+        // to borrow the Kairos (default-carrier) preset's itemIds
+        // without disturbing the controlled or editing axes -- any
+        // mutation of either field would cascade into a save and
+        // could race with the load-detect commit branch.
         auto it = m_characters.find(charName);
         if (it == m_characters.end() || it->second.presets.empty())
             return nullptr;
@@ -486,7 +558,7 @@ namespace Transmog
 
     Preset *PresetManager::active_preset_mut()
     {
-        auto it = m_characters.find(m_activeCharacter);
+        auto it = m_characters.find(m_editingCharacter);
         if (it == m_characters.end() || it->second.presets.empty())
             return nullptr;
 
@@ -498,7 +570,7 @@ namespace Transmog
     const std::vector<Preset> &PresetManager::presets() const
     {
         static const std::vector<Preset> s_empty;
-        auto it = m_characters.find(m_activeCharacter);
+        auto it = m_characters.find(m_editingCharacter);
         if (it == m_characters.end())
             return s_empty;
         return it->second.presets;
@@ -506,7 +578,7 @@ namespace Transmog
 
     void PresetManager::append_from_state()
     {
-        auto &cp = ensure_character(m_activeCharacter);
+        auto &cp = ensure_character(m_editingCharacter);
         int idx = static_cast<int>(cp.presets.size());
         std::string name = "Preset " + std::to_string(idx);
         Preset blank;
@@ -530,7 +602,7 @@ namespace Transmog
 
     void PresetManager::duplicate_current()
     {
-        auto &cp = ensure_character(m_activeCharacter);
+        auto &cp = ensure_character(m_editingCharacter);
         int idx = static_cast<int>(cp.presets.size());
         std::string name = "Preset " + std::to_string(idx);
         auto captured = capture_from_state(name);
@@ -571,7 +643,7 @@ namespace Transmog
         auto *p = active_preset_mut();
         if (!p)
         {
-            auto &cp = ensure_character(m_activeCharacter);
+            auto &cp = ensure_character(m_editingCharacter);
             int idx = static_cast<int>(cp.presets.size());
             std::string name = "Preset " + std::to_string(idx);
             cp.presets.push_back(capture_from_state(name));
@@ -606,7 +678,7 @@ namespace Transmog
 
     void PresetManager::remove_current()
     {
-        auto it = m_characters.find(m_activeCharacter);
+        auto it = m_characters.find(m_editingCharacter);
         if (it == m_characters.end() || it->second.presets.empty())
             return;
 
@@ -629,7 +701,7 @@ namespace Transmog
 
     void PresetManager::next_preset()
     {
-        auto it = m_characters.find(m_activeCharacter);
+        auto it = m_characters.find(m_editingCharacter);
         if (it == m_characters.end() || it->second.presets.empty())
             return;
 
@@ -656,7 +728,7 @@ namespace Transmog
 
     void PresetManager::prev_preset()
     {
-        auto it = m_characters.find(m_activeCharacter);
+        auto it = m_characters.find(m_editingCharacter);
         if (it == m_characters.end() || it->second.presets.empty())
             return;
 
@@ -714,7 +786,7 @@ namespace Transmog
 
     void PresetManager::set_active_preset(int index)
     {
-        auto it = m_characters.find(m_activeCharacter);
+        auto it = m_characters.find(m_editingCharacter);
         if (it == m_characters.end() || it->second.presets.empty())
             return;
 
@@ -787,15 +859,17 @@ namespace Transmog
             mappings[i].targetItemId = p->slots[i].itemId;
 
             // Body-mesh slots only persist `prefabName`; the carrier
-            // itemId is derived here from the active character's
-            // default Kliff/Damiane/Oongka plate set. This keeps the
-            // user-facing JSON clean (no spurious "Kliff_PlateArmor_*"
-            // names cluttering body-mesh-only preset entries).
+            // itemId is derived here from the controlled character's
+            // default plate set. The carrier MUST come from the live
+            // body because PWS pointer-equality matches against the
+            // wrapper that body actually emits; using the editing
+            // character's carrier here would silently no-op the swap
+            // whenever editing is pinned to a different character.
             if (mappings[i].targetItemId == 0 &&
                 !p->slots[i].prefabName.empty())
             {
                 const auto carrier = Transmog::default_carrier_for_slot(
-                    static_cast<TransmogSlot>(i), m_activeCharacter);
+                    static_cast<TransmogSlot>(i), m_controlledCharacter);
                 if (carrier != 0)
                 {
                     mappings[i].targetItemId = carrier;

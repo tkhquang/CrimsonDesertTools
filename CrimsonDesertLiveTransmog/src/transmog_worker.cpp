@@ -234,18 +234,21 @@ namespace Transmog
 
     // Apply ALWAYS targets the currently-controlled character. This
     // helper re-reads the live character via the Core resolver and,
-    // when PresetManager has a different active character cached,
-    // switches to the live one and rebuilds slot_mappings from its
-    // preset. Holds no __try block so std::string usage is fine; called
-    // from run_debounced_apply (which cannot mix __try with C++ objects).
+    // when PresetManager has a different controlled character
+    // cached, switches to the live one and rebuilds slot_mappings
+    // from its preset. Holds no __try block so std::string usage is
+    // fine; called from run_debounced_apply (which cannot mix __try
+    // with C++ objects).
+    //
+    // The editing axis is left untouched here: if the user has the
+    // overlay dropdown pinned to a different character, that pin
+    // persists across in-game character swaps and the cross-body
+    // apply remains in effect.
     //
     // Returns true when the apply may proceed, false when the caller
     // must defer (re-arm the debounce). False is returned only while
     // load_detect_thread_fn has an unfired char-swap parked in its
-    // settle window: see s_charSwapPending. Steady-state UI / state
-    // mismatches (e.g. user opened a different character's preset list
-    // in the overlay while controlling someone else) still flip inline
-    // here so the immediate apply targets the live character's preset.
+    // settle window: see s_charSwapPending.
     [[nodiscard]] static bool sync_active_char_to_live() noexcept
     {
         const std::string live = current_controlled_character_name();
@@ -298,22 +301,23 @@ namespace Transmog
         // SEH-guarded actor deref below catches a stale wrapper after
         // world reload by dropping the apply.
         //
-        // Apply ALWAYS targets the currently-controlled character.
-        // The UI's "active character" is just a view into the JSON
-        // preset list -- a user can pick Oongka in the overlay while
-        // controlling Damiane, but we still want Damiane to end up
-        // wearing Damiane's preset. The helper below syncs
-        // PresetManager + slot_mappings to the live character. Lives
-        // outside this __try-containing function so std::string
-        // destructors do not trip MSVC C2712.
+        // Apply ALWAYS targets the controlled character's body.
+        // The helper below syncs PresetManager's controlled axis +
+        // slot_mappings to the live character. It lives outside this
+        // __try-containing function so std::string destructors do
+        // not trip MSVC C2712. When the user has the overlay
+        // dropdown pinned to a different editing character, the
+        // controlled body still drives carriers and the live source
+        // wrappers; the editing character only supplies preset
+        // itemIds (cross-body apply).
         //
-        // Helper returns false while load-detect has an unfired char
-        // swap parked in its settle window. In that case the engine
-        // has not yet rotated user+0xD8 to the new body, so applying
-        // here would paint the incoming preset onto the previous
-        // body. Re-arm the debounce; the load-detect commit will both
-        // flip pm.active_character() and stamp swap_stale_comp() so
-        // the next apply lands correctly.
+        // The helper returns false while load-detect has an unfired
+        // char swap parked in its settle window. In that case the
+        // engine has not yet rotated user+0xD8 to the new body, so
+        // applying here would paint the incoming preset onto the
+        // previous body. Re-arm the debounce; the load-detect
+        // commit will both flip the controlled axis and stamp
+        // swap_stale_comp() so the next apply lands correctly.
         if (!sync_active_char_to_live())
         {
             schedule_transmog_ms(200);
