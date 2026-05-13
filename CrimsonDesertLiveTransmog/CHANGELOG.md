@@ -2,6 +2,10 @@
 
 All notable changes to the CrimsonDesertLiveTransmog mod will be documented in this file.
 
+## [0.9.4] - Cross-character preset editing
+
+- You can now pick a different character in the Character dropdown to edit (and wear) their preset on whoever you are currently controlling, with an Unpin button to snap back to following the controlled character.
+
 ## [0.9.3] - v1.06.00 patch support
 
 - Compatibility fix for Crimson Desert game version 1.06.00. Restored radial-character swap detection so transmog stays correct after switching characters.
@@ -133,6 +137,7 @@ All notable changes to the CrimsonDesertLiveTransmog mod will be documented in t
 - Modular code split: `transmog_apply` (apply/clear logic), `transmog_hooks` (VEC/BatchEquip callbacks), `transmog_worker` (debounce/load-detect/nametable threads), `shared_state` (cross-TU atomics)
 - Docs clarify ReShade is required for GUI; without it, users edit JSON manually via Capture hotkey
 
+[0.9.4]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.9.4
 [0.9.3]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.9.3
 [0.9.2]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.9.2
 [0.9.1]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.9.1
