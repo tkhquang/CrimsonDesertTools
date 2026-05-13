@@ -140,10 +140,63 @@ namespace Transmog
         bool save(const std::string &path) const;
 
         // --- Character management ---
+        //
+        // The manager tracks two distinct character identities:
+        //
+        //   controlled = the in-game character the player is currently
+        //                controlling. Drives carrier defaults, body-
+        //                mesh wrapper source resolution, and the stale-
+        //                body guard. Owned by the load-detect thread
+        //                via set_active_character().
+        //
+        //   editing    = the character whose preset list the overlay
+        //                is showing and the user is mutating. By
+        //                default it tracks `controlled`. When the user
+        //                picks a different character in the overlay
+        //                dropdown, `editing` becomes "pinned" and
+        //                stops following `controlled` until the user
+        //                unpins (manually, or by re-selecting the
+        //                controlled character). With editing pinned,
+        //                the apply pipeline reads target itemIds from
+        //                the editing character's preset while carriers
+        //                and the source body still come from the
+        //                controlled character; this is the cross-body
+        //                "wear another character's preset" path.
+        //
+        // active_character() / set_active_character() always refer to
+        // the *controlled* axis. editing_character() and friends are
+        // the UI-side API.
+        //
+        // Thread safety: both axes are written on different threads
+        // (load-detect writes controlled; the overlay render thread
+        // writes editing). PresetManager has no internal locking;
+        // callers rely on the fact that std::string assignment of a
+        // small known-size value is atomic enough in practice for the
+        // single-string read on the apply path, and that pin/unpin
+        // transitions are immediately followed by a slot_mappings
+        // reset + apply, which serialises any half-observed state.
 
         std::vector<std::string> character_names() const;
+
+        /// Returns the controlled character.
         const std::string &active_character() const;
+        /// Sets the controlled character. If editing is unpinned,
+        /// editing follows. If editing was pinned and the user has
+        /// switched to controlling the very character they had pinned
+        /// for editing, the pin auto-clears (the pin no longer
+        /// represents anything distinct).
         void set_active_character(const std::string &name);
+
+        /// Returns the character whose preset list the overlay is
+        /// editing.
+        const std::string &editing_character() const;
+        /// Sets the editing character. The pin engages whenever the
+        /// new editing character differs from controlled; selecting
+        /// the controlled character clears the pin.
+        void set_editing_character(const std::string &name);
+        bool editing_pinned() const noexcept;
+        /// Drop the pin and snap editing back to controlled.
+        void clear_editing_pin();
 
         /// Get/set the per-character body-kind override. Empty or
         /// "Auto" falls back to the hardcoded default in
@@ -243,7 +296,10 @@ namespace Transmog
         void revert_active_dye_to_snapshot() noexcept;
 
         std::map<std::string, CharacterPresets> m_characters;
-        std::string m_activeCharacter = "Kliff";
+        // See class-level comment for the controlled / editing split.
+        std::string m_controlledCharacter = "Kliff";
+        std::string m_editingCharacter    = "Kliff";
+        bool        m_editingPinned       = false;
         std::string m_filePath;
     };
 

@@ -434,8 +434,13 @@ static bool name_contains_ci(const std::string &hay, const char *needle) noexcep
     BK charBody;
     {
         const auto &pm = Transmog::PresetManager::instance();
+        // The picker filter follows the editing character: the user
+        // is populating that character's preset and wants to see
+        // items from that body's catalog. Falls back to the
+        // controlled character automatically when editing is
+        // unpinned because the two axes are identical in that state.
         const std::string ov =
-            pm.body_kind_of(pm.active_character());
+            pm.body_kind_of(pm.editing_character());
         if (ov == "Male")
             charBody = BK::Male;
         else if (ov == "Female")
@@ -445,7 +450,7 @@ static bool name_contains_ci(const std::string &hay, const char *needle) noexcep
         else // "Auto" or unrecognised
             charBody =
                 Transmog::ItemNameTable::body_kind_for_character(
-                    pm.active_character());
+                    pm.editing_character());
     }
 
     // Two-pass filter+draw. Pass 1 collects matching catalog indices;
@@ -1264,30 +1269,28 @@ static void draw_overlay_content()
             for (std::size_t i = 0; i < n; ++i)
             {
                 cstrs[i] = names[i].c_str();
-                if (names[i] == pm.active_character())
+                if (names[i] == pm.editing_character())
                     selectedIdx = static_cast<int>(i);
             }
 
-            // Character picker is READ-ONLY for now. Load-detect writes
-            // active_character on every char-swap (ActorManager+0x30
-            // byte) so manual picks get snapped back instantly. The
-            // fix is to split active_character into controlled (game-
-            // driven) and editing (UI-driven) states plus per-char
-            // actor enumeration from user+0xD0..+0x108 -- see memory
-            // note `project_per_companion_edit_deferred`. Until then
-            // the combo just shows which character load-detect
-            // currently thinks is controlled.
+            // Dropdown writes the editing character only. The pin
+            // engages automatically when editing differs from
+            // controlled; picking the controlled character clears
+            // the pin. Apply is cross-body when pinned: the
+            // controlled body wears the editing character's preset
+            // items via PWS / carrier substitution. Gendered or
+            // character-specific items may not have a renderable
+            // variant on the controlled body and silently no-op.
             ImGui::SetNextItemWidth(200.0f);
-            ImGui::BeginDisabled(true);
             if (ImGui::Combo("Character##char_picker",
                              &selectedIdx,
                              cstrs,
                              static_cast<int>(n)))
             {
                 const auto &pick = names[static_cast<std::size_t>(selectedIdx)];
-                if (pick != pm.active_character())
+                if (pick != pm.editing_character())
                 {
-                    pm.set_active_character(pick);
+                    pm.set_editing_character(pick);
                     for (auto &m : slot_mappings())
                     {
                         m.active = false;
@@ -1302,12 +1305,45 @@ static void draw_overlay_content()
                     pm.save();
                 }
             }
-            ImGui::EndDisabled();
             if (ImGui::IsItemHovered())
-                ui_tooltip("Read-only for now -- follows the character you "
-                           "control in-game. Editing another character's "
-                           "preset while controlling someone else is "
-                           "planned (see per-companion-edit memory note).");
+            {
+                if (pm.editing_pinned())
+                    ui_tooltip("Editing pinned: this character's preset is "
+                               "loaded into the slot rows, but the body on "
+                               "screen is whoever you control in-game. "
+                               "Cross-body apply -- some items (gender-"
+                               "specific, weapons) may not render. Pick "
+                               "the controlled character to unpin.");
+                else
+                    ui_tooltip("Pick a different character to edit their "
+                               "preset while controlling someone else. "
+                               "The controlled body will wear the picked "
+                               "character's preset items (cross-body "
+                               "apply -- partial coverage expected).");
+            }
+            if (pm.editing_pinned())
+            {
+                ImGui::SameLine();
+                if (ImGui::SmallButton("Unpin##char_unpin"))
+                {
+                    pm.clear_editing_pin();
+                    for (auto &m : slot_mappings())
+                    {
+                        m.active = false;
+                        m.targetItemId = 0;
+                    }
+                    pm.apply_to_state();
+                    last_applied_ids().fill(0);
+                    real_damaged().fill(false);
+                    last_applied_real_ids().fill(0);
+                    last_applied_carrier_ids().fill(0);
+                    manual_apply();
+                    pm.save();
+                }
+                if (ImGui::IsItemHovered())
+                    ui_tooltip("Drop the editing pin and follow the "
+                               "controlled character again.");
+            }
 
             // Body-kind override. Lets body-swap mod users mark e.g.
             // Kliff as Female so the picker shows the female-body-
@@ -1323,7 +1359,7 @@ static void draw_overlay_content()
                 static_cast<int>(sizeof(k_bodyItems) / sizeof(k_bodyItems[0]));
 
             const std::string currentBody =
-                pm.body_kind_of(pm.active_character());
+                pm.body_kind_of(pm.editing_character());
             int bodyIdx = 0;
             for (int i = 0; i < k_bodyCount; ++i)
             {
@@ -1340,7 +1376,7 @@ static void draw_overlay_content()
                              k_bodyItems,
                              k_bodyCount))
             {
-                pm.set_body_kind_of(pm.active_character(),
+                pm.set_body_kind_of(pm.editing_character(),
                                     k_bodyItems[bodyIdx]);
             }
             if (ImGui::IsItemHovered())
