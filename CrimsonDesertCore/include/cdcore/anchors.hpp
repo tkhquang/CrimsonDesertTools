@@ -13,9 +13,9 @@
 //     AnchorDescriptor = what the candidate anchors on
 //                        (FullPrologue, PostAlloca, BodyAnchor, ...)
 //
-// Every candidate here has been verified to return exactly one match in the
-// live v1.03.01 .text section via `mcp__cheatengine__aob_scan` (see the
-// uniqueness audit in the session log).
+// Each candidate is uniqueness-verified against the live .text section at
+// authoring time; cascades exist so partial recompilations or sibling-DLL
+// hook patches that invalidate the tightest signature still resolve.
 //
 // Authoring rules (from external/DetourModKit/docs/misc/aob-signatures.md):
 //   - Sign CODE, not DATA. Anchor on instruction semantics, not on linker
@@ -296,103 +296,6 @@ namespace CDCore::Anchors
     };
 
     // -----------------------------------------------------------------------
-    // Player -- static pointer for the server-side party-state root global.
-    //
-    // Resolves to qword_145F0D580 in the v1.04.00 .text. The dereference of
-    // that qword is a heap-allocated root object (no specific RTTI) whose
-    // chain is:
-    //
-    //   *(player_static)        -> root container
-    //   *(root  + 0x18)         -> pa::NwVirtualAsyncSession
-    //   *(nwSes + 0xA0)         -> pa::ServerUserActor
-    //   *(srvUA + 0xD0)         -> pa::ServerChildOnlyInGameActor
-    //                              (the party container)
-    //
-    // Inside the party container the three protagonist slots are inline
-    // structs at fixed offsets with stride 0x100:
-    //
-    //   party + 0x68            = Kliff slot
-    //   party + 0x168           = Damiane slot
-    //   party + 0x268           = Oongka slot
-    //
-    // Per slot the active-flag byte is at slot+0x2C (1 = currently
-    // controlled, 0 = passive). The character is identified by which slot
-    // offset, NEVER by a stored character ID. The +0x40 dword is an
-    // observability handle and is volatile; it is logged for diagnostics
-    // but not used for identity.
-    //
-    // The CE-validated state-transition table (5 transitions across radial
-    // swaps and a save-load) confirmed the invariant that exactly one slot
-    // has +0x2C == 1 while the player is in-world; zero slots are active
-    // during cutscenes / loading screens. The top three pointers in the
-    // chain (root, NwVirtualAsyncSession, ServerUserActor) stay identical
-    // across save-load; only the final party container reallocates.
-    //
-    // Why this static and not the older WorldSystem holder at +0x5F0D210:
-    // the WorldSystem chain reaches a CLIENT-side ChildOnlyInGameActor pool
-    // whose per-actor +0x50 byte was the prior identity discriminator. On
-    // v1.04.00 that byte ceased to discriminate (every protagonist reads
-    // 0x08), and actor-pool reuse made the field unstable across radial
-    // swaps. The Player static reaches the SERVER-side party state, which
-    // identifies the controlled character by slot offset (a structural
-    // invariant) instead of by a value the engine can repurpose.
-    //
-    // 3-tier cascade. Stable read sites verified unique on v1.04.00 via
-    // mcp__cheatengine__aob_scan (each returns exactly 1 hit).
-    // -----------------------------------------------------------------------
-    inline constexpr AddrCandidate k_playerStaticCandidates[] = {
-        // P1 -- the unique writer site at sub_1420D0470.
-        //   4C 89 3D <disp32>          mov [rip+disp32], r15
-        //   48 8B 8F F8 00 00 00       mov rcx, [rdi+0xF8]
-        //   41 BC 04 02 00 00          mov r12d, 0x204
-        //   48 85 C9 ??                test rcx, rcx ; jcc rel8
-        //
-        // Writer encodings on globals are typically rare (one or two per
-        // module) and the immediately-following load from [rdi+0xF8] +
-        // mov-r12d-0x204 sequence is semantically distinctive. The 0x204
-        // is a SEMANTIC constant (an initialisation tag) and is kept
-        // literal per the §2 exception; the rel8 of the trailing jcc is
-        // wildcarded because branch distance can shift.
-        {"PlayerStatic_P1_WriterSite",
-         "4C 89 3D ?? ?? ?? ?? 48 8B 8F F8 00 00 00 "
-         "41 BC 04 02 00 00 48 85 C9 ??",
-         ResolveMode::RipRelative, 3, 7},
-
-        // P2 -- read-into-r12 at sub_1420D3700+0x39.
-        //   4C 8B 25 <disp32>          mov r12, [rip+disp32]
-        //   8B D5                      mov edx, ebp
-        //   4C 8B F0                   mov r14, rax
-        //   E8 <disp32>                call <subroutine>
-        //   48 8B D8                   mov rbx, rax
-        //   48 85 C0 ??                test rax, rax ; jcc rel8
-        //
-        // The 4C 8B 25 prefix (load into r12) is uncommon; combined with
-        // the immediate mov-edx-ebp / mov-r14-rax / call / mov-rbx-rax /
-        // test-rax-rax tail it pins this single read site. Both rel32
-        // displacements are wildcarded (linker-owned).
-        {"PlayerStatic_P2_ReadIntoR12",
-         "4C 8B 25 ?? ?? ?? ?? 8B D5 4C 8B F0 "
-         "E8 ?? ?? ?? ?? 48 8B D8 48 85 C0 ??",
-         ResolveMode::RipRelative, 3, 7},
-
-        // P3 -- read-into-rcx + stack-slot test at sub_140819600+0x14F.
-        //   48 8B 0D <disp32>          mov rcx, [rip+disp32]
-        //   E8 <disp32>                call <subroutine>
-        //   83 7C 24 ?? 00             cmp dword [rsp+disp8], 0
-        //   74 ??                      jz rel8
-        //   48 8B 8E E0 00 00 00       mov rcx, [rsi+0xE0]
-        //
-        // The 48 8B 0D / E8 mov-then-call shape is common, but the tail
-        // (cmp dword [rsp+disp8], 0; jz rel8; mov rcx, [rsi+0xE0]) pins
-        // this site. 0xE0 is a game-struct ABI offset, kept literal. The
-        // stack disp8 in the cmp and the rel8 jz target are wildcarded.
-        {"PlayerStatic_P3_ReadStackTest",
-         "48 8B 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? "
-         "83 7C 24 ?? 00 74 ?? 48 8B 8E E0 00 00 00",
-         ResolveMode::RipRelative, 3, 7},
-    };
-
-    // -----------------------------------------------------------------------
     // RadialSwapKey: function-entry anchor for the radial-UI character swap
     // handler `sub_141B04040`. The target binary is Crimson Desert v1.06.00.
     //
@@ -419,9 +322,10 @@ namespace CDCore::Anchors
     //   +0x282         FF 90 80 01 00 00   call [rax+0x180]
     //
     // RDX (a2) at function entry holds the new active character's outer-slot
-    // pointer: party_base + 0x000 (Kliff), 0x100 (Damiane), 0x200 (Oongka).
-    // The MidHook in controlled_char.cpp reads ctx.rdx and decodes the
-    // offset against the live party container resolved via walk_chain_seh.
+    // pointer. CDCore's radial-swap MidHook does not read any of the args:
+    // its sole side effect is a single atomic-store of GetTickCount64() that
+    // powers `radial_swap_pending()` (used by EH and LT to disambiguate a
+    // user-initiated swap from a save-load arena rotation).
     //
     // Resolution strategy. Each candidate resolves directly to the entry
     // address sub_141B04040 (Direct mode, dispOffset = anchor_offset_from_
@@ -442,6 +346,129 @@ namespace CDCore::Anchors
     // 6-byte vtable call, giving an instruction-stream landmark that no
     // other function in the .text section reproduces.
     // -----------------------------------------------------------------------
+
+    // -----------------------------------------------------------------------
+    // FocusActorInit -- bridge-function family that interns per-protagonist
+    // focus-actor name strings into engine-owned u32 hash globals at static
+    // init. Each bridge body is identical apart from the two RIP-relative
+    // LEA targets:
+    //
+    //     41 B9 FF FF 02 00          mov  r9d, 0x2FFFF        ; table cap
+    //     48 8D 15 ?? ?? ?? ??       lea  rdx, "focus-actor-<name>"
+    //     41 B8 01 00 00 00          mov  r8d, 1              ; insert flag
+    //     48 8D 0D ?? ?? ?? ??       lea  rcx, &dword_<global>
+    //     E9 ?? ?? ?? ??             jmp  <sequential-allocator>
+    //
+    // The trailing allocator does NOT hash the string; it consults an
+    // internal table, returns the existing slot if the name was seen, or
+    // assigns the next free counter value. The published u32s are therefore
+    // session-deterministic but shift whenever a patch adds or reorders a
+    // focus-actor registration. Hash values must be AOB-discovered every
+    // session and read from RAM at query time; never bake them into code.
+    //
+    // The two `mov` immediates (0x2FFFF, 0x01) are NOT linker-owned -- they
+    // are engine-API call arguments shared by every bridge in this family.
+    // Wildcarding them would inflate matches to thousands of unrelated
+    // `mov r9d, imm; lea rdx, str` callers, swamping the disambiguator. The
+    // pattern therefore intentionally pins both literals, accepting that it
+    // matches hundreds of sibling tag-registration bridges; the per-hit
+    // string deref selects the three player-protagonist bridges by name.
+    //
+    // Resolution flow (caller-side):
+    //   1. Scan .text for `k_focusActorInitPattern` (hundreds of hits).
+    //   2. For each hit, RIP-resolve the string LEA at +9 -> bridge name.
+    //   3. Filter for "focus-actor-kliff/oongka/damian"; for those three,
+    //      RIP-resolve the dword LEA at +22 -> per-character hash global.
+    //   4. Publish the three addresses; Tier-0 character resolution reads
+    //      the dwords on every query.
+    //
+    // A single pattern + manual multi-hit walk is required because the
+    // bridge prologues are byte-for-byte identical and the standard
+    // `resolve_cascade_*` flow returns only the first hit.
+    // -----------------------------------------------------------------------
+    inline constexpr std::string_view k_focusActorInitPattern =
+        "41 B9 FF FF 02 00 48 8D 15 ?? ?? ?? ?? "
+        "41 B8 01 00 00 00 48 8D 0D ?? ?? ?? ?? E9";
+
+    // disp32 location and post-instruction RIP for the two RIP-relative
+    // LEAs inside `k_focusActorInitPattern`. Absolute address is computed
+    // as `(match + instr_end) + sign_extend_32(disp32)`.
+    inline constexpr std::ptrdiff_t k_focusActorInitStringDispOffset     = 9;
+    inline constexpr std::ptrdiff_t k_focusActorInitStringInstrEndOffset = 13;
+    inline constexpr std::ptrdiff_t k_focusActorInitDwordDispOffset      = 22;
+    inline constexpr std::ptrdiff_t k_focusActorInitDwordInstrEndOffset  = 26;
+
+    // -----------------------------------------------------------------------
+    // FocusBroadcast -- entry of the engine's per-subscriber focus-actor
+    // list mutator (`sub_14353BA60` on v1.06.00). The engine fires this
+    // function once per subscriber whenever a focus-actor hash is added to
+    // or removed from a subscriber list. Argument map at entry:
+    //
+    //     rcx = manager
+    //     rdx = remove-list
+    //     r8  = add-list
+    //     r9  = new focus-actor hash (player-character on the player
+    //           broadcast path; arbitrary NPC hash on NPC focus events)
+    //
+    // The Tier-0 character resolver hooks this site because the player
+    // broadcast fires during world-spawn -- before any mod query can run --
+    // and the hash arriving in R9 is the engine's own identity primitive,
+    // so once `k_focusActorInitPattern` has resolved the three hash globals
+    // no further chain walking is required. NPC focus events vastly
+    // outnumber player broadcasts (only ~0.2% of fires carry a player
+    // hash); the hook callback filters by hash-equality against the
+    // published globals.
+    //
+    // 2-tier cascade ordered for patch + sibling-DLL coexistence:
+    //   P1 covers a virgin-load scan when no DLL has yet patched the entry.
+    //   P2 anchors past SafetyHook's 5-byte JMP window so a sibling mod
+    //   that installed a MidHook on the entry does not prevent re-resolution
+    //   on subsequent loads.
+    // -----------------------------------------------------------------------
+    inline constexpr AddrCandidate k_focusBroadcastCandidates[] = {
+        // P1 -- function entry through the first four body instructions:
+        //
+        //     4C 89 44 24 18             mov [rsp+0x18], r8
+        //     48 89 54 24 10             mov [rsp+0x10], rdx
+        //     41 55                      push r13
+        //     48 83 EC ??                sub rsp, <frame-size>
+        //     48 8B 81 A8 00 00 00       mov rax, [rcx+0xA8]
+        //     4C 8B E9                   mov r13, rcx
+        //
+        // The two home-space stores (+0x10/+0x18 are Windows x64 ABI shadow
+        // slots for the RDX/R8 args -- canonical, not compiler-volatile),
+        // the lone `push r13` callee-save, the `mov rax, [rcx+0xA8]`
+        // indirect through a struct-stable game ABI offset (0xA8), and the
+        // `mov r13, rcx` arg stash together pin this function's prologue
+        // uniquely in the v1.06.00 .text. The `sub rsp` immediate is
+        // wildcarded because stack-frame size is one of the operands the
+        // compiler is most likely to perturb across patches.
+        {"FocusBroadcast_P1_EntryPrologue",
+         "4C 89 44 24 18 48 89 54 24 10 41 55 48 83 EC ?? "
+         "48 8B 81 A8 00 00 00 4C 8B E9",
+         ResolveMode::Direct, 0, 0},
+
+        // P2 -- post-prologue anchor at entry + 0x10:
+        //
+        //     48 8B 81 A8 00 00 00       mov rax, [rcx+0xA8]
+        //     4C 8B E9                   mov r13, rcx
+        //     48 85 C0                   test rax, rax
+        //     ?? ??                      <2-byte branch>
+        //     48 83 78 08 00             cmp qword [rax+8], 0
+        //
+        // The 2-byte branch slot is wildcarded rather than hard-coded as
+        // `74 rel8` (per aob-signatures.md the compiler may flip between
+        // `74 xx` and the 6-byte `0F 84 rel32` form across patches); the
+        // four-byte wildcard tolerates either form while preserving the
+        // surrounding 18 fixed bytes for uniqueness. dispOffset = -0x10
+        // walks back to the function entry so consumers receive the same
+        // address P1 would produce.
+        {"FocusBroadcast_P2_PostPrologueBody",
+         "48 8B 81 A8 00 00 00 4C 8B E9 48 85 C0 ?? ?? "
+         "48 83 78 08 00",
+         ResolveMode::Direct, -0x10, 0},
+    };
+
     inline constexpr AddrCandidate k_radialSwapKeyCandidates[] = {
         // P1: function-entry mid-prologue. Anchors on the unique stack
         // layout (`lea rbp, [rsp-0x37]; sub rsp, 0xB0`) and the

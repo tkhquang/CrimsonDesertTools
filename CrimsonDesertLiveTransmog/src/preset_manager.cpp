@@ -1065,12 +1065,44 @@ namespace Transmog
     void PresetManager::duplicate_current()
     {
         auto &cp = ensure_character(m_editingCharacter);
-        int idx = static_cast<int>(cp.presets.size());
+        const int idx = static_cast<int>(cp.presets.size());
+        std::string name = "Preset " + std::to_string(idx);
+
+        Preset clone;
+        clone.name = name;
+        // Pure clone of the source preset's in-memory state. Pending
+        // edits in slot_mappings are intentionally ignored so the new
+        // preset reflects what the source would look like reloaded
+        // from disk. For forking pending edits instead, use
+        // save_as_new_from_state.
+        if (const auto *src = active_preset())
+        {
+            clone.slots               = src->slots;
+            clone.swatch_overrides    = src->swatch_overrides;
+            clone.swatch_palette      = src->swatch_palette;
+            clone.swatch_slot_enabled = src->swatch_slot_enabled;
+        }
+        cp.presets.push_back(std::move(clone));
+        cp.activePreset = idx;
+
+        apply_to_state();
+
+        DMK::Logger::get_instance().info(
+            "Preset duplicated (clean clone): '{}' (index {})", name, idx);
+        save();
+    }
+
+    void PresetManager::save_as_new_from_state()
+    {
+        auto &cp = ensure_character(m_editingCharacter);
+        const int idx = static_cast<int>(cp.presets.size());
         std::string name = "Preset " + std::to_string(idx);
         auto captured = capture_from_state(name);
-        // Preserve dye from the source preset (slot_mappings does not
-        // carry dye state -- see replace_current_from_state).
-        if (auto *src = active_preset_mut())
+        // Preserve dye/swatch from the source preset. slot_mappings
+        // does not carry dye state, and dye/swatch are written in-place
+        // on the active preset by the picker, so src already reflects
+        // the user's current live state on those axes.
+        if (const auto *src = active_preset())
         {
             for (std::size_t i = 0;
                  i < src->slots.size() && i < captured.slots.size();
@@ -1078,21 +1110,16 @@ namespace Transmog
             {
                 captured.slots[i].dye = src->slots[i].dye;
                 // Carry the source slot's sparse/dense origin flag
-                // across the duplicate. capture_from_state() builds
-                // a fresh PresetSlot from slot_mappings, which has
-                // no notion of dyeSparse, so the captured slot is
-                // left at the PresetSlot default. That default does
-                // not necessarily match the source preset's mode
-                // (a captured preset uses sparse, a picker-built
-                // preset may not), so we copy the source value
-                // explicitly to keep duplicates visually identical
-                // to their origin.
+                // across the fork. capture_from_state() builds a fresh
+                // PresetSlot from slot_mappings, which has no notion of
+                // dyeSparse, so the captured slot is left at the
+                // PresetSlot default. That default does not necessarily
+                // match the source preset's mode (a captured preset
+                // uses sparse, a picker-built preset may not), so we
+                // copy the source value explicitly to keep the fork
+                // visually identical to its origin.
                 captured.slots[i].dyeSparse = src->slots[i].dyeSparse;
             }
-            // Carry ColorOverride swatch state across the duplicate
-            // so the new preset starts identical to the source
-            // (independent of dye_mods). Live SwatchTable already
-            // reflects this state -- no need to wipe/restore.
             captured.swatch_overrides    = src->swatch_overrides;
             captured.swatch_palette      = src->swatch_palette;
             captured.swatch_slot_enabled = src->swatch_slot_enabled;
@@ -1103,7 +1130,7 @@ namespace Transmog
         apply_to_state();
 
         DMK::Logger::get_instance().info(
-            "Preset duplicated: '{}' (index {})", name, idx);
+            "Preset saved as new (pending state): '{}' (index {})", name, idx);
         save();
     }
 

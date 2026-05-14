@@ -238,8 +238,8 @@ namespace EquipHide
                 orphanRestored);
         restoredCount += orphanRestored;
 
-        logger.trace("DirectWrite: {} protagonists, {} hidden, {} restored",
-                     n, hiddenCount, restoredCount);
+        logger.info("DirectWrite: {} protagonists, {} hidden, {} restored",
+                    n, hiddenCount, restoredCount);
     }
 
     void apply_direct_vis_write() noexcept

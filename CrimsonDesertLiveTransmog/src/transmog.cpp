@@ -1019,13 +1019,9 @@ namespace Transmog
         // --- Input ---
 
         // Resolve WorldSystem pointer for player detection on load and
-        // publish the same address to Core. The WorldSystem chain is the
-        // client-side reach used by load-time transmog and the per-frame
-        // body-pool walk; on v1.04.00 it no longer participates in
-        // controlled-character identification (the +0x50 byte that used
-        // to discriminate between protagonists ceased to be unique in
-        // this build). Identity decoding now consumes the player static
-        // resolved below.
+        // publish it to Core. CDCore walks this chain to reach the
+        // rotating `user+0xD8` client body pointer that powers the body
+        // learning cache and the structural Kliff anchor.
         {
             auto wsAddr = resolve_address(
                 k_worldSystemCandidates,
@@ -1045,43 +1041,11 @@ namespace Transmog
             }
         }
 
-        // Resolve the server-side player static and publish it to Core.
-        // The cascade exposes a RIP-relative load-or-store of the static
-        // qword (writer in P1, two readers in P2/P3); the resolver walks
-        // root -> NwVirtualAsyncSession (+0x18) -> ServerUserActor (+0xA0)
-        // -> ServerChildOnlyInGameActor (+0xD0) and identifies the
-        // controlled character by which fixed-offset slot inside the
-        // party container has slot+0x2C set to 1. An unresolved holder
-        // degrades the resolver to Unknown without crashing; consumer
-        // code already treats Unknown as "preserve previous identity".
-        {
-            auto playerAddr = resolve_address(
-                k_playerStaticCandidates,
-                std::size(k_playerStaticCandidates),
-                "PlayerStatic");
-            if (playerAddr)
-            {
-                logger.info("Player static at 0x{:X}", playerAddr);
-                CDCore::set_player_static_holder(playerAddr);
-            }
-            else
-            {
-                logger.warning(
-                    "PlayerStatic AOB failed -- controlled-character "
-                    "detection disabled, presets cannot route by character");
-            }
-        }
-
-        // Resolve the radial-UI swap-key capture site and install the
-        // mid-hook in Core. The hook stamps a pending characterinfo key
-        // (1 = Kliff, 4 = Damiane, 6 = Oongka) every time the radial UI
-        // commits a swap; the resolver consumes that key on the next
-        // chain walk to bind the live userActor pointer to a known
-        // character, providing deterministic identity for ghost-roster
-        // states the slot-offset decode cannot resolve. Optional
-        // feature -- failure leaves the slot-offset decode and the LKG
-        // cache as the resolver's only layers, which is the pre-fix
-        // behaviour.
+        // Resolve the radial-swap-input site and install the CDCore
+        // mid-hook. The callback stamps a monotonic timestamp consumed
+        // by `radial_swap_pending()` to distinguish a user swap from a
+        // save-load arena rotation; the character identity itself
+        // comes from the focus-broadcast hook below.
         //
         // Two-consumer (LT + EH) coordination: CrimsonDesertCore is a
         // STATIC library, so this DLL owns its own MidHook independent
@@ -1102,15 +1066,62 @@ namespace Transmog
                 if (!CDCore::install_radial_swap_hook(radialAddr))
                 {
                     logger.warning(
-                        "Radial-swap key hook install failed -- "
-                        "ghost-roster character resolution disabled");
+                        "Radial-swap input hook install failed -- "
+                        "save-load disambiguation will fall back to "
+                        "the conservative path");
                 }
             }
             else
             {
                 logger.warning(
-                    "RadialSwapKey AOB failed -- ghost-roster "
-                    "character resolution disabled");
+                    "RadialSwapKey AOB failed -- save-load "
+                    "disambiguation will fall back to the "
+                    "conservative path");
+            }
+        }
+
+        // Tier-0 controlled-character resolver: focus-actor broadcast
+        // capture. Two parts:
+        //   1) AOB-resolve the three engine-interned focus-actor hash
+        //      globals (Kliff/Oongka/Damian). The numeric handles vary
+        //      per game version so we read them from RAM each session.
+        //   2) Hook sub_14353BA60 entry. The MidHook reads ctx.r9
+        //      (the new focus handle), filters against the three
+        //      published globals, and stamps the resolved character.
+        //
+        // This layer is the canonical cold-load / save-load identity
+        // signal: the engine fires the broadcast during world-spawn
+        // before the player can interact, so the cache is populated
+        // before any mod query occurs. Failure on either step degrades
+        // gracefully to the structural-Kliff anchor + LKG cache.
+        {
+            const bool published =
+                CDCore::resolve_and_publish_focus_actor_globals();
+            if (!published)
+            {
+                logger.warning(
+                    "Focus-actor hash global resolution failed -- "
+                    "Tier-0 controlled-character signal disabled");
+            }
+
+            const auto bcastAddr = resolve_address(
+                CDCore::Anchors::k_focusBroadcastCandidates,
+                std::size(CDCore::Anchors::k_focusBroadcastCandidates),
+                "FocusBroadcast");
+            if (bcastAddr)
+            {
+                if (!CDCore::install_focus_broadcast_hook(bcastAddr))
+                {
+                    logger.warning(
+                        "Focus-broadcast hook install failed -- "
+                        "Tier-0 controlled-character signal disabled");
+                }
+            }
+            else
+            {
+                logger.warning(
+                    "FocusBroadcast AOB failed -- Tier-0 controlled-"
+                    "character signal disabled");
             }
         }
 
@@ -1190,6 +1201,11 @@ namespace Transmog
         // installed and when the matching uninstall has already run
         // from a sibling consumer.
         CDCore::uninstall_radial_swap_hook();
+
+        // Same pre-DMK_Shutdown ordering as the radial-swap teardown:
+        // tear down the focus-broadcast mid-hook before the SafetyHook
+        // pages can be touched by a late-firing engine focus event.
+        CDCore::uninstall_focus_broadcast_hook();
 
         PrefabWrapperSwap::shutdown();
 

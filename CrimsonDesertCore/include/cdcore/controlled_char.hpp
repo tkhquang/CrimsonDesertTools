@@ -6,59 +6,39 @@
 #include <string_view>
 
 // ---------------------------------------------------------------------------
-// Controlled-character resolver.
+// Controlled-character resolver -- focus-broadcast architecture.
 //
-// Walks the live server-side party-state chain on every query and identifies
-// the currently-controlled protagonist by which fixed-offset slot inside the
-// party container has its active-flag byte set.
+// Identity is decoded from the engine's own focus-actor broadcast event.
+// The engine assigns each protagonist a stable u32 hash handle at static
+// init (via "focus-actor-kliff/oongka/damian" string registration) and
+// fires `sub_14353BA60` on every focus mutation -- cold-load,
+// save-load reattach, radial swap. R9 at function entry carries the
+// new focus handle; the CDCore MidHook compares against the three
+// AOB-resolved hash globals and stamps a process-wide cache.
 //
-//   *(player_static)        -> root container
-//   *(root  + 0x18)         -> pa::NwVirtualAsyncSession
-//   *(nwSes + 0xA0)         -> pa::ServerUserActor
-//   *(srvUA + 0xD0)         -> pa::ServerChildOnlyInGameActor
-//                              (the party container)
+// Init flow (consumer is LiveTransmog or EquipHide):
+//   1. resolve_and_publish_focus_actor_globals()  -> publishes the 3
+//      hash global addresses via set_focus_actor_hash_globals().
+//   2. install_focus_broadcast_hook(addr)         -> hooks
+//      sub_14353BA60 entry. Callback writes the resolved character
+//      into the Tier-0 cache.
+//   3. install_radial_swap_hook(addr)             -> hooks
+//      sub_141B04040 entry. Callback timestamps a flag consumed
+//      by `radial_swap_pending()` (used by EquipHide to
+//      disambiguate radial swap from save-load arena rotation).
 //
-// Inside the party container the three protagonist slots are inline structs
-// at fixed offsets with stride 0x100:
-//
-//   party + 0x68            = Kliff slot
-//   party + 0x168           = Damiane slot
-//   party + 0x268           = Oongka slot
-//
-// Per slot the active-flag byte at slot+0x2C is the discriminator: exactly
-// one slot reads 1 while the player is in-world (cutscenes / loading screens
-// produce zero hot slots, which the resolver reports as Unknown). The +0x40
-// dword is an observability handle that is volatile across sessions and
-// asset rebuilds; it is logged for diagnostic correlation only and never
-// participates in identity decoding.
-//
-// Why identity is decoded by SLOT OFFSET and not by a stored character ID:
-// inside the party container the slot for a given protagonist is at a fixed
-// compile-time-known offset, which is a structural invariant of the engine
-// layout and cannot drift across actor-pool reuse, save-load reallocation,
-// or radial-menu swaps. Earlier resolver iterations decoded a per-actor
-// byte field that the engine repurposed across versions; the slot-offset
-// approach is immune to that class of regression because there is no engine
-// field whose meaning the resolver depends on.
-//
-// To absorb transient torn reads (the active-flag byte can momentarily
-// disagree across the three slots during a swap event when the engine is
-// still flipping bytes) the resolver keeps a last-known-good cache: any
-// query that returns no single-1-bit-hot slot reuses the cached value
-// instead, and the cache refreshes whenever a fresh single-bit-hot decode
-// succeeds.
-//
-// The resolver requires the consumer to publish the player static address
-// once (typically right after that mod's own AOB scan resolves it). Until
-// set_player_static_holder() has been called, every query returns Unknown.
-// This avoids duplicating the AOB scan across every consumer.
+// Body cache. As a side effect of every successful
+// current_controlled_character() resolve, the resolver stamps
+// (user+0xD8 -> character) into a learning cache consumed by
+// resolve_character_idx_for_body() and snapshot_body_cache(). The
+// cache reaches user+0xD8 via the WorldSystem chain published by
+// set_world_system_holder().
 //
 // Thread safety:
-//   - set_player_static_holder() and set_world_system_holder() are safe from
-//     any thread; later writers win, which is the intended behaviour if a
-//     consumer re-resolves on reload.
-//   - current_controlled_character() is non-blocking and SEH-guarded; safe
-//     to call from any thread including the rendering thread.
+//   - All setters (set_world_system_holder, set_focus_actor_hash_
+//     globals) are safe from any thread; later writers win.
+//   - current_controlled_character() is non-blocking and SEH-
+//     guarded; safe from any thread including the rendering thread.
 // ---------------------------------------------------------------------------
 
 namespace CDCore
@@ -66,12 +46,11 @@ namespace CDCore
     /**
      * @brief Identifies one of the three controlled playable characters.
      * @details The Unknown sentinel is returned before
-     *          set_player_static_holder() has been called, before the chain
-     *          walk yields a known identity (very early in the loading
-     *          screen, or while a cutscene zeroes every slot's active flag),
-     *          and after invalidate_controlled_character() until the next
-     *          chain walk observes one of the three known keys and refreshes
-     *          the cache.
+     *          set_focus_actor_hash_globals() has been called, before the
+     *          engine has fired its first focus-actor broadcast for the
+     *          session, and after invalidate_controlled_character() until
+     *          the next broadcast or structural Kliff body anchor
+     *          repopulates the cache.
      */
     enum class ControlledCharacter : std::uint8_t
     {
@@ -82,59 +61,37 @@ namespace CDCore
     };
 
     /**
+     * @brief Resolve the currently-controlled character.
+     * @details Reads the Tier-0 focus-broadcast cache; falls back to
+     *          the LKG cache when the broadcast has not yet fired
+     *          this session. Side-effect: stamps (user+0xD8 ->
+     *          character) into the body learning cache on every
+     *          successful resolve.
+     * @return The identified character, or
+     *         ControlledCharacter::Unknown when neither Tier-0 nor
+     *         the LKG cache holds a known value (the engine has not
+     *         yet broadcast a focus-actor change this session, or
+     *         caches were just invalidated).
+     */
+    [[nodiscard]] ControlledCharacter current_controlled_character() noexcept;
+
+    /**
+     * @brief Short display name for a controlled character.
+     */
+    [[nodiscard]] std::string_view controlled_character_name(
+        ControlledCharacter ch) noexcept;
+
+    /**
      * @brief Publish the WorldSystem holder static address to Core.
-     * @details Retained for callers that need the WorldSystem reach
-     *          (UserActor, body-pool walks, mesh-bound state). The
-     *          controlled-character resolver no longer consumes this
-     *          pointer; identification is handled via
-     *          set_player_static_holder() instead.
+     * @details Used by walk_to_controlled_body_seh() to reach the
+     *          rotating user+0xD8 client body pointer that the body
+     *          learning cache keys on.
      * @param holderAddr Absolute address of the WorldSystem holder slot
      *                   (the static qword whose dereference yields the
      *                   live WorldSystem instance pointer). Pass 0 to
      *                   clear.
      */
     void set_world_system_holder(std::uintptr_t holderAddr) noexcept;
-
-    /**
-     * @brief Publish the server-side player static address to the
-     *        controlled-character resolver.
-     * @details Both consumer mods (CrimsonDesertEquipHide and
-     *          CrimsonDesertLiveTransmog) AOB-scan for the player static
-     *          during their own init. Whichever resolves first should hand
-     *          the address to Core via this call so the resolver does not
-     *          need its own AOB scan. Subsequent calls overwrite the
-     *          previous value.
-     * @param holderAddr Absolute address of the player static slot (the
-     *                   static qword whose dereference yields the root
-     *                   container described in the file-level comment).
-     *                   Pass 0 to disable the resolver.
-     */
-    void set_player_static_holder(std::uintptr_t holderAddr) noexcept;
-
-    /**
-     * @brief Resolve the currently-controlled character.
-     * @details Walks the server-side party-state chain and reads the
-     *          active-flag byte at slot+0x2C for each of the three fixed
-     *          protagonist offsets (Kliff=0x68, Damiane=0x168,
-     *          Oongka=0x268). Returns the slot whose flag reads 1. When no
-     *          slot is hot (cutscene, loading screen) or more than one is
-     *          hot (transient torn read mid-swap), the resolver returns the
-     *          previously-cached identity instead, so transient drift does
-     *          not flap the controlled character.
-     * @return The identified character, or ControlledCharacter::Unknown
-     *         when the player static has not been published yet, when the
-     *         chain walk faults, or when neither the live decode nor the
-     *         last-known-good cache yields a known value.
-     */
-    [[nodiscard]] ControlledCharacter current_controlled_character() noexcept;
-
-    /**
-     * @brief Short display name for a controlled character.
-     * @return A static string view ("Kliff" / "Damiane" / "Oongka") or
-     *         an empty view for Unknown.
-     */
-    [[nodiscard]] std::string_view controlled_character_name(
-        ControlledCharacter ch) noexcept;
 
     /**
      * @brief Convenience wrapper that returns the live name.
@@ -157,30 +114,19 @@ namespace CDCore
      * @details Looks up @p body in the learning cache populated by
      *          current_controlled_character() each time the resolver
      *          observes a known controlled identity. Returns 0 when
-     *          the body has not yet been seen as controlled (the user
-     *          has never been that character in this session) --
-     *          callers should treat 0 as "unknown" and fall back to
-     *          the active character's mask, which is the safe
-     *          degradation.
-     *
-     *          Why a learning cache instead of a structural decode:
-     *          the v1.04.00 client body has no reachable back-reference
-     *          to its protagonist slot in the party container, and the
-     *          per-actor +0x50 byte that earlier builds used as a slot
-     *          index ceased to discriminate on this build. Observing
-     *          the controlled-body / known-character pairing each
-     *          resolver tick is the only stable mapping available from
-     *          the public game-state surface.
+     *          the body has not yet been seen as controlled this
+     *          session -- callers should treat 0 as "unknown" and
+     *          fall back to the active character's mask.
      *
      *          Cache scope: per-DLL (CDCore is statically linked into
      *          each consumer Logic DLL). Each consumer learns
      *          independently. Cleared by
-     *          invalidate_controlled_character() on save-load so dead
-     *          body pointers cannot mis-attribute a future protagonist.
-     *          Preserved across in-session radial swaps (callers should
-     *          use invalidate_swap_caches() on those transitions) since
-     *          the engine rotates user+0xD8 between existing body
-     *          pointers in the pool without reallocating bodies.
+     *          invalidate_controlled_character() on save-load.
+     *          Preserved across in-session radial swaps (callers
+     *          should use invalidate_swap_caches() on those
+     *          transitions) since the engine rotates user+0xD8
+     *          between existing body pointers in the pool without
+     *          reallocating bodies.
      *
      * @param body Pointer to a ClientChildOnlyInGameActor instance.
      * @return 1 for Kliff, 2 for Damiane, 3 for Oongka, or 0 for
@@ -227,152 +173,201 @@ namespace CDCore
         std::size_t cap) noexcept;
 
     /**
-     * @brief Install the radial-swap-key capture mid-hook at the
-     *        resolved address.
-     * @details The hook target must be the instruction immediately
-     *          following the EAX-load from the radial-UI input pointer
-     *          (the `mov [rbp+0x78], eax` at sub_1422019A0+e9 in
-     *          v1.04.00). At hook entry the low 32 bits of RAX hold the
-     *          requested characterinfo key (1 = Kliff, 4 = Damiane,
-     *          6 = Oongka). The hook stamps a short-lived process-wide
-     *          pending-key record so the next chain-walk that observes
-     *          a non-Kliff identity can attribute the user-actor pointer
-     *          to the captured key, building an actor->character cache
-     *          that the resolver consults before falling back to the
-     *          slot-offset decode.
+     * @brief Publish the three engine focus-actor hash globals to CDCore.
+     * @details The engine assigns each protagonist (Kliff/Damiane/Oongka)
+     *          a per-process u32 handle at static init. The three globals
+     *          live at fixed addresses inside the binary's writable data
+     *          section; consumers AOB-resolve those addresses (see
+     *          `CDCore::resolve_and_publish_focus_actor_globals()`) and
+     *          publish them here. The values themselves -- which differ
+     *          per game version -- are read from these addresses every
+     *          query in the focus-broadcast MidHook callback, so we
+     *          never hardcode the numeric handles.
      *
-     *          Single-owner semantics within a DLL:
-     *          - First call with a non-zero @p hookAddr: builds the
-     *            SafetyHook MidHook against that address.
-     *          - Subsequent calls with the SAME @p hookAddr: idempotent
-     *            no-op (the hook is already live at the requested site).
-     *          - Subsequent calls with a DIFFERENT non-zero @p hookAddr:
-     *            destroy the existing MidHook and rebuild against the
-     *            new address (used if an AOB re-resolution shifts the
-     *            target mid-session).
-     *          - Call with @p hookAddr == 0: tear down the MidHook so
-     *            the patched bytes return to the original instruction
-     *            sequence. Safe to call when no hook is installed.
+     *          When all three addresses are non-zero the new Tier-0
+     *          decoder in `current_controlled_character()` activates and
+     *          returns whichever character last fired the focus-actor
+     *          broadcast. Pass any address as zero to disable the layer
+     *          (the resolver falls through to the existing slot-offset
+     *          decode and the LKG cache).
      *
-     *          Cross-DLL coordination: CrimsonDesertCore is linked as a
-     *          STATIC library, so each consumer Logic DLL (LiveTransmog,
-     *          EquipHide) carries its own copy of CDCore state and its
-     *          own SafetyHook MidHook against the shared process address.
-     *          When both consumers call this function against the same
-     *          target site, SafetyHook's internal chaining lets the two
-     *          MidHooks coexist transparently -- each consumer's
-     *          trampoline runs independently on every radial swap. The
-     *          AOB cascade in cdcore/anchors.hpp k_radialSwapKeyCandidates
-     *          is ordered so the post-patch-tolerant patterns resolve
-     *          first, ensuring the second consumer to scan still finds
-     *          the same hook target the first consumer already patched.
+     *          Per-DLL state (CDCore is statically linked into each
+     *          consumer): each consumer publishes independently. A
+     *          consumer that fails to AOB-resolve still receives the
+     *          slot-offset / LKG behaviour as before.
      *
-     *          Failure modes (returns false): SafetyHook allocation
-     *          failure (ENOMEM-shaped, rare), trampoline placement
-     *          failure (target page already heavily hooked), or address
-     *          below the 64 KiB guard region. On any failure the
-     *          resolver continues to function via the slot-offset decode
-     *          and the LKG cache; only the deterministic
-     *          radial-attribution layer is missing for this consumer.
+     *          Safe to call from any thread; later writers win.
      *
-     * @param hookAddr Absolute address of the `mov [rbp+0x78], eax`
-     *                 instruction inside sub_1422019A0. The AOB cascade
-     *                 in cdcore/anchors.hpp k_radialSwapKeyCandidates
+     * @param kliffAddr Absolute address of the Kliff hash u32 global.
+     * @param oongkaAddr Absolute address of the Oongka hash u32 global.
+     * @param damianAddr Absolute address of the Damian hash u32 global.
+     */
+    void set_focus_actor_hash_globals(std::uintptr_t kliffAddr,
+                                      std::uintptr_t oongkaAddr,
+                                      std::uintptr_t damianAddr) noexcept;
+
+    /**
+     * @brief One-shot helper that AOB-resolves the three focus-actor
+     *        hash globals and publishes them via
+     *        `set_focus_actor_hash_globals()`.
+     * @details Scans .text for the three identical bridge functions
+     *          described in `CDCore::Anchors::k_focusActorInitPattern`,
+     *          dereferences each match's RIP-relative string and dword
+     *          LEAs, identifies which protagonist each bridge serves
+     *          by matching the string against
+     *          "focus-actor-kliff/oongka/damian", then publishes the
+     *          three resolved dword addresses to CDCore. Returns true
+     *          on full success (all three protagonists resolved). On
+     *          any failure (pattern mismatch, fewer than 3 hits, name
+     *          dispatch ambiguity) returns false WITHOUT calling the
+     *          setter, leaving the Tier-0 layer disabled.
+     *
+     *          Idempotent: safe to call multiple times. Each successful
+     *          call overwrites the previously published addresses (no-op
+     *          if the addresses are unchanged across calls).
+     *
+     *          Logs a single Info line on success and a Warning on
+     *          failure.
+     */
+    [[nodiscard]] bool resolve_and_publish_focus_actor_globals() noexcept;
+
+    /**
+     * @brief Install the focus-actor broadcast capture mid-hook at the
+     *        resolved address (sub_14353BA60 entry).
+     * @details The hook fires on every focus-actor list mutation
+     *          (subscription event), reads `ctx.r9` as the new focus
+     *          handle, and -- when r9 matches one of the three globals
+     *          published via `set_focus_actor_hash_globals()` --
+     *          stamps the resolved character into a process-wide cache
+     *          consumed by `current_controlled_character()`'s Tier-0
+     *          layer.
+     *
+     *          The hook is the canonical signal for cold-load and
+     *          save-load reattach because the engine fires the
+     *          broadcast during world-spawn before the player can
+     *          interact, populating the cache before any mod query
+     *          occurs. Radial swaps trigger it the same way.
+     *
+     *          ~99.8% of the broadcast firings carry NPC focus handles
+     *          in r9 (filtered out by the equality check against the
+     *          three published character globals), so the per-call
+     *          overhead is three relaxed atomic loads and three
+     *          dword compares.
+     *
+     *          Single-owner-per-DLL semantics mirror
+     *          `install_radial_swap_hook()`. Pass `hookAddr == 0` to
+     *          tear down. Failure modes match the radial-swap path.
+     *
+     * @param hookAddr Absolute address of `sub_14353BA60` entry.
+     *                 The AOB cascade in
+     *                 `cdcore/anchors.hpp::k_focusBroadcastCandidates`
      *                 resolves to this address. Pass 0 to tear down.
+     * @return true on successful install / idempotent no-op / teardown,
+     *         false on SafetyHook error.
+     */
+    bool install_focus_broadcast_hook(std::uintptr_t hookAddr) noexcept;
+
+    /**
+     * @brief Tear down the focus-broadcast mid-hook owned by this DLL.
+     * @details Equivalent to `install_focus_broadcast_hook(0)`. Safe
+     *          when no hook is installed; safe in shutdown paths.
+     *          Idempotent. Each consumer DLL owns its own MidHook;
+     *          calling this in one DLL does not affect any other
+     *          DLL's MidHook against the same process address.
+     */
+    void uninstall_focus_broadcast_hook() noexcept;
+
+    /**
+     * @brief Install the radial-swap-input mid-hook at the resolved
+     *        address (sub_141B04040 entry).
+     * @details Post-Tier-0 refactor the hook callback is a single
+     *          atomic store: it stamps a monotonic timestamp consumed
+     *          by `radial_swap_pending()`. EquipHide reads that flag
+     *          to disambiguate a user radial swap from a save-load
+     *          arena rotation (both rotate user+0xD8 between bodies
+     *          in different ways). The character identity itself
+     *          comes from the focus-broadcast hook, not this one.
+     *
+     *          Single-owner-per-DLL semantics, cross-DLL chaining,
+     *          and tear-down semantics mirror
+     *          `install_focus_broadcast_hook()`. Pass `hookAddr == 0`
+     *          to tear down. Failure modes: SafetyHook allocation /
+     *          trampoline placement failure, or address below the
+     *          64 KiB guard region. On any failure
+     *          `radial_swap_pending()` always returns false (no
+     *          stamping occurs) and EquipHide falls back to the
+     *          conservative save-load path -- still correct, slightly
+     *          more aggressive on body-cache wipes.
+     *
+     * @param hookAddr Absolute address of `sub_141B04040` entry
+     *                 (the AOB cascade in
+     *                 `cdcore/anchors.hpp::k_radialSwapKeyCandidates`
+     *                 resolves to this address). Pass 0 to tear down.
      * @return true on successful install / idempotent no-op / teardown,
      *         false on SafetyHook error.
      */
     bool install_radial_swap_hook(std::uintptr_t hookAddr) noexcept;
 
     /**
-     * @brief Tear down the radial-swap-key mid-hook owned by this DLL.
-     * @details Equivalent to install_radial_swap_hook(0). Safe to call
-     *          when no hook is installed; safe to call from shutdown
-     *          paths. Idempotent. Each consumer DLL owns its own
-     *          MidHook; calling this in one DLL does not affect any
-     *          other DLL's MidHook against the same process address.
+     * @brief Tear down the radial-swap mid-hook owned by this DLL.
+     * @details Equivalent to install_radial_swap_hook(0). Idempotent
+     *          and shutdown-safe.
      */
     void uninstall_radial_swap_hook() noexcept;
 
     /**
-     * @brief Whether a radial-swap key was stamped within the
-     *        pending-key window and has not yet been consumed by a
-     *        resolver chain walk.
-     * @details Returns true when the user has just initiated a radial
-     *          swap and the resolver has not yet caught up to publish
-     *          the new identity. Lets consumers disambiguate an
-     *          in-session protagonist swap from a save-load when both
-     *          appear as a controlled-actor pointer rotation: a swap
-     *          fired by user input has a fresh pending key; a save-load
-     *          does not.
-     *
-     *          Window matches the pending-key TTL (2 s in the current
-     *          build). Returns false outside the window, after the
-     *          resolver consumed the key, or when no key has ever been
-     *          stamped this session.
+     * @brief Whether a radial-swap input was observed within the
+     *        pending-key window.
+     * @details Returns true when the radial-swap mid-hook has fired
+     *          within the pending window (currently 2 s). Lets
+     *          consumers disambiguate an in-session protagonist swap
+     *          from a save-load when both appear as a controlled-
+     *          actor pointer rotation: a swap fired by user input
+     *          has a fresh timestamp, a save-load does not.
      *
      *          Per-DLL state (CDCore is statically linked into each
-     *          consumer): observes the pending key written by THIS
-     *          DLL's radial-swap safetyhook callback. Sibling DLLs
-     *          maintain their own copy.
+     *          consumer): observes the timestamp written by THIS
+     *          DLL's radial-swap callback.
      *
-     *          Safe to call from any thread; non-blocking (two relaxed
-     *          atomic loads + a tick comparison).
+     *          Safe to call from any thread; non-blocking (one
+     *          relaxed atomic load + a tick comparison).
      */
     [[nodiscard]] bool radial_swap_pending() noexcept;
 
     /**
-     * @brief Full world-reload invalidation. Clears the last-known-good
-     *        identity cache, the actor->character cache, the pending
-     *        radial-swap-key record, AND the body->character learning
-     *        cache.
+     * @brief Full world-reload invalidation. Clears Tier-0, LKG,
+     *        radial-swap timestamp, AND the body learning cache.
      * @details Call on world-reload transitions (save load, return to
      *          title) so the resolver does not keep returning the
      *          previous save's character while the new save is still
      *          populating the engine state. After invalidation the
-     *          resolver returns Unknown until the next chain walk observes
-     *          one of the three known keys and refreshes the cache.
+     *          resolver returns Unknown until the next focus-actor
+     *          broadcast fires.
      *
-     *          Why the body cache is flushed here: save-load reallocates
-     *          the body pool, so any cached body pointer becomes a
-     *          dangling key the engine may reuse for a different
-     *          protagonist. Mis-attribution after reload is prevented by
-     *          dropping the entire body map.
+     *          The body cache is flushed because save-load
+     *          reallocates the body pool; cached body pointers may be
+     *          reused for a different protagonist.
      *
-     *          For in-session protagonist swaps (radial menu rotation,
-     *          scripted Kliff returns) use invalidate_swap_caches()
-     *          instead -- it preserves the body cache because radial
-     *          swaps only rotate user+0xD8 between EXISTING body
-     *          pointers in the pool, leaving previously-learned
-     *          bodies still valid.
+     *          For in-session protagonist swaps (radial menu) use
+     *          invalidate_swap_caches() instead -- preserves the body
+     *          cache because radial swaps only rotate user+0xD8
+     *          between EXISTING body pointers in the pool.
      *
      *          Safe to call from any thread; non-blocking.
      */
     void invalidate_controlled_character() noexcept;
 
     /**
-     * @brief Clear the LKG identity cache, the actor->character cache,
-     *        and the pending radial-swap-key record, but preserve the
-     *        body->character learning cache.
-     * @details Use this on in-session protagonist swaps (radial menu
-     *          rotation, scripted Kliff returns). The controlled actor
-     *          pointer at user+0xD8 rotates between existing body
-     *          pointers in the pool; the body pointers themselves stay
-     *          valid for the lifetime of the session, so previously-
-     *          learned body identities remain correct after the swap.
-     *
-     *          What this clears:
-     *            - last-known-good cached identity (s_lastGoodChar)
-     *            - actor (userActor parent) -> character cache
-     *            - pending radial-swap-key record
-     *
-     *          What this preserves:
-     *            - body (user+0xD8 pointer) -> character cache
+     * @brief Clear Tier-0 cache, LKG, and the radial-swap timestamp;
+     *        preserve the body learning cache.
+     * @details Use this on in-session protagonist swaps. The
+     *          controlled actor pointer at user+0xD8 rotates between
+     *          existing body pointers in the pool; the body pointers
+     *          themselves stay valid for the lifetime of the session.
      *
      *          For full world-reload semantics use
-     *          invalidate_controlled_character() instead, which also
-     *          flushes the body cache because save-load may reuse old
-     *          body pointers for different characters.
+     *          invalidate_controlled_character() which also flushes
+     *          the body cache.
      *
      *          Safe to call from any thread; non-blocking.
      */

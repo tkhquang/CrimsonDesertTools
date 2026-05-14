@@ -210,21 +210,20 @@ namespace Transmog
 
     // True while load_detect_thread_fn has a controlled-character
     // change parked in its settle window but not yet committed. The
-    // settle-window branch is the authoritative committer: it stamps
-    // swap_stale_comp() before flipping pm.active_character() so the
-    // next apply skips writing the new preset onto the pre-rotation
-    // body.
+    // settle-window branch is the authoritative committer: it flips
+    // pm.active_character() and schedules the apply once the
+    // candidate identity holds for k_charSwapSettleMs.
     //
-    // Without this gate, sync_active_char_to_live() flips inline the
-    // moment the controlled-char probe returns the new identity, but
-    // the engine has not yet rotated user+0xD8 to the new actor. A
-    // hook-driven apply that races into run_debounced_apply during
-    // that window resolves a1 to the previous body, then writes the
-    // new character's preset onto it (e.g. save-load on Kliff that
-    // auto-toggles to Oongka leaves Kliff wearing Oongka's preset).
-    // sync_active_char_to_live consults this flag and returns false
-    // to defer; the caller re-arms the debounce until the settle
-    // commits.
+    // Without this gate, sync_active_char_to_live() would flip inline
+    // the moment the controlled-char probe returns the new identity,
+    // but the engine may not have rotated user+0xD8 to the new actor
+    // yet. A hook-driven apply that races into run_debounced_apply
+    // during that window would resolve a1 to the previous body and
+    // paint the new character's preset onto it (e.g. save-load on
+    // Kliff that auto-toggles to Oongka leaving Kliff wearing
+    // Oongka's preset). sync_active_char_to_live consults this flag
+    // and returns false to defer; the caller re-arms the debounce
+    // until the settle commits.
     static std::atomic<bool> s_charSwapPending{false};
 
     static std::mutex s_applyCvMtx;
@@ -259,10 +258,7 @@ namespace Transmog
             return true;
 
         // Defer when load_detect_thread_fn has a pending swap in
-        // flight. The settle-window branch is the authoritative
-        // committer: it stamps swap_stale_comp() before flipping so
-        // the apply does not paint the new preset onto the pre-
-        // rotation body. Convergence is bounded by the settle window
+        // flight. Convergence is bounded by the settle window
         // (k_charSwapSettleMs); the caller re-arms via a 200ms
         // schedule_transmog_ms() until then.
         if (s_charSwapPending.load(std::memory_order_acquire))
@@ -315,9 +311,8 @@ namespace Transmog
         // char swap parked in its settle window. In that case the
         // engine has not yet rotated user+0xD8 to the new body, so
         // applying here would paint the incoming preset onto the
-        // previous body. Re-arm the debounce; the load-detect
-        // commit will both flip the controlled axis and stamp
-        // swap_stale_comp() so the next apply lands correctly.
+        // previous body. Re-arm the debounce; the load-detect commit
+        // will flip the controlled axis once the candidate settles.
         if (!sync_active_char_to_live())
         {
             schedule_transmog_ms(200);
@@ -520,6 +515,46 @@ namespace Transmog
         }
     }
 
+    /** @brief SEH-isolated read of `user+0xD8` (the rotating CLIENT
+     *         body pointer that EH watches as its save-load signal).
+     *  @details Mirrors EH/player_detection.cpp:226 so LT can detect
+     *           the same X->0->Y / atomic-swap save-load transitions
+     *           EH does and clear preset_manager.active_character()
+     *           on the wipe paths. Returns 0 on any fault, on an
+     *           unresolved chain, or when the controlled body has
+     *           been published as null (engine mid-transition). */
+    static std::uintptr_t read_controlled_actor_ptr_seh() noexcept
+    {
+        const auto wsBase =
+            world_system_ptr().load(std::memory_order_acquire);
+        if (!wsBase)
+            return 0;
+        __try
+        {
+            auto ws = *reinterpret_cast<uintptr_t *>(wsBase);
+            if (ws < 0x10000)
+                return 0;
+            auto am = *reinterpret_cast<uintptr_t *>(ws + 0x30);
+            if (am < 0x10000)
+                return 0;
+            auto user = *reinterpret_cast<uintptr_t *>(am + 0x28);
+            if (user < 0x10000)
+                return 0;
+            // user+0xD8 is the CLIENT body pointer (rotates per
+            // radial swap or save-load arena allocation). Unlike
+            // the other chain reads above, we DO NOT reject 0 here
+            // because an X->0 transition is the save-load signal
+            // we want to detect.
+            auto controlled =
+                *reinterpret_cast<uintptr_t *>(user + 0xD8);
+            return controlled;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return 0;
+        }
+    }
+
     /** @brief Settle window for the character-swap detector.
      *  @details During world load the engine rotates `user+0xD8` through
      *           the party members as it wires each actor (e.g. Kliff ->
@@ -547,6 +582,15 @@ namespace Transmog
         // commits only when (now - pendingFirstSeenTick) >= settle window.
         std::string pendingCharName;
         std::uint64_t pendingFirstSeenTick = 0;
+
+        // Mirror of EH's save-load detection state. Tracks the
+        // CLIENT body pointer (user+0xD8) across ticks. An X->0
+        // transition latches s_pendingReloadInvalidation; the
+        // following 0->Y (with the flag set) OR a non-zero atomic
+        // X->Y (when the new body is absent from the body cache and
+        // no radial input was just observed) triggers the wipe.
+        std::uintptr_t prevControlledActor = 0;
+        bool pendingReloadInvalidation = false;
 
         while (!shutdown_requested().load(std::memory_order_relaxed))
         {
@@ -590,15 +634,6 @@ namespace Transmog
                         CDCore::invalidate_controlled_character();
                         prevCharName.clear();
                         pendingCharName.clear();
-                        // Save-load wipes every pending state -- any
-                        // body the swap guard had captured against the
-                        // outgoing world is by definition gone now, so
-                        // clear it. Leaving a stale value here would
-                        // suppress the first post-load apply if the new
-                        // world happened to recycle the same component
-                        // address.
-                        swap_stale_comp().store(
-                            0, std::memory_order_release);
                         // Re-populate the body-mesh prefab catalog. Save
                         // loads can rotate the AppearanceTableLoader
                         // registry's resident wrapper set as zone-/
@@ -611,6 +646,107 @@ namespace Transmog
                         PrefabWrapperSwap::populate_slot_catalogs();
                     }
                     prevUser = curUser;
+                }
+            }
+
+            // --- Save-load detected (controlled-actor signal) ---
+            //
+            // Mirrors EquipHide/player_detection.cpp:226-327. Polls
+            // user+0xD8 (the CLIENT controlled body pointer) and
+            // disambiguates three transitions:
+            //   1. X->0 : engine published null -> latch deferred wipe
+            //   2. 0->Y with flag set : world live again -> wipe
+            //   3. X->Y atomic : disambiguate via body cache + radial
+            //                    pending; treat as save-load only if
+            //                    the new body is absent from cache AND
+            //                    no radial input was just observed.
+            //
+            // On every wipe path we ALSO clear LT-local state that
+            // would otherwise route through the previously-active
+            // character's preset (preset_manager.active_character()
+            // and the prevCharName/pendingCharName settle window).
+            // This is the "On save load detected, should clear current
+            // char of LT" requirement: empty active_character()
+            // resolves to no preset -> engine vanilla items show
+            // until the next focus broadcast fires and the swap
+            // detector below repopulates the correct identity.
+            {
+                const auto controlledActor =
+                    read_controlled_actor_ptr_seh();
+                if (controlledActor != prevControlledActor)
+                {
+                    auto wipe_lt_state = [&]()
+                    {
+                        CDCore::invalidate_controlled_character();
+                        PresetManager::instance().set_active_character("");
+                        prevCharName.clear();
+                        pendingCharName.clear();
+                    };
+
+                    if (controlledActor == 0 && prevControlledActor != 0)
+                    {
+                        logger.info(
+                            "Save-load detected: controlled actor "
+                            "(0x{:X} -> 0x0); deferring full cache wipe "
+                            "until new world is live",
+                            static_cast<uint64_t>(prevControlledActor));
+                        pendingReloadInvalidation = true;
+                    }
+                    else if (controlledActor != 0 &&
+                             prevControlledActor == 0 &&
+                             pendingReloadInvalidation)
+                    {
+                        logger.info(
+                            "Save-load complete: new controlled actor "
+                            "0x{:X} -- clearing LT preset_manager "
+                            "active character + swap-scope state",
+                            static_cast<uint64_t>(controlledActor));
+                        wipe_lt_state();
+                        pendingReloadInvalidation = false;
+                    }
+                    else if (prevControlledActor != 0 &&
+                             controlledActor != 0)
+                    {
+                        // Atomic X->Y. Disambiguate via body cache +
+                        // radial pending (same heuristic as EH).
+                        std::array<CDCore::BodyCacheEntry, 3> peek;
+                        const auto peekN = CDCore::snapshot_body_cache(
+                            peek.data(), peek.size());
+                        bool inCache = false;
+                        for (std::size_t i = 0; i < peekN; ++i)
+                        {
+                            if (peek[i].body == controlledActor)
+                            {
+                                inCache = true;
+                                break;
+                            }
+                        }
+                        const bool atomicSaveLoad =
+                            peekN >= 1 && !inCache &&
+                            !CDCore::radial_swap_pending();
+
+                        if (atomicSaveLoad)
+                        {
+                            logger.info(
+                                "Save-load detected (atomic swap): "
+                                "controlled actor (0x{:X} -> 0x{:X}) "
+                                "absent from body cache (n={}, no "
+                                "pending radial) -- clearing LT "
+                                "preset_manager active character + "
+                                "swap-scope state",
+                                static_cast<uint64_t>(prevControlledActor),
+                                static_cast<uint64_t>(controlledActor),
+                                peekN);
+                            wipe_lt_state();
+                            pendingReloadInvalidation = false;
+                        }
+                        // else: normal char swap -- LT's existing
+                        // char-swap auto-detect block (below) will
+                        // pick up the identity change via Tier-0
+                        // and call set_active_character. Body cache
+                        // is preserved.
+                    }
+                    prevControlledActor = controlledActor;
                 }
             }
 
@@ -664,11 +800,7 @@ namespace Transmog
                     pendingCharName.clear();
                     // Clear BEFORE schedule_transmog_ms below so the
                     // scheduled run_debounced_apply observes the
-                    // committed flip and does not defer again. The
-                    // stale-body guard stamped further down is the
-                    // mechanism that prevents writing onto the pre-
-                    // rotation body; this flag only gates the early
-                    // race window.
+                    // committed flip and does not defer again.
                     s_charSwapPending.store(false,
                                             std::memory_order_release);
 
@@ -690,30 +822,6 @@ namespace Transmog
                         }
                         logger.info("Char swap detected: {} -> {}",
                                     oldName, liveName);
-                        // Stale-body guard. On a save-load that
-                        // reaches the swap branch (e.g. loading a
-                        // Damiane save), the engine spawns Kliff's
-                        // body first and routes the saved-character
-                        // transition through this same handler ~10s
-                        // later, but `user+0xD8` does not rotate to
-                        // the new body until several seconds AFTER
-                        // we schedule the apply. Without a guard the
-                        // apply runs while resolve_player_component()
-                        // still walks to the soon-to-be-obsolete body
-                        // (Kliff) and writes the new character's
-                        // preset onto the wrong actor. Stamp the
-                        // body we last observed so the apply entry
-                        // can short-circuit until the engine
-                        // finishes rotating; the load-detect block
-                        // below fires its own apply on the new body
-                        // once the rotation completes. Skip the
-                        // store on first-tick (prevComp == 0): no
-                        // observation has been made, so there is
-                        // nothing to mark stale.
-                        if (prevComp > 0x10000)
-                            swap_stale_comp().store(
-                                static_cast<std::uintptr_t>(prevComp),
-                                std::memory_order_release);
                         if (flag_enabled().load(std::memory_order_relaxed))
                             schedule_transmog_ms(200);
                         pm.save();
@@ -726,30 +834,14 @@ namespace Transmog
             // Detect change: new component appeared or address changed.
             if (comp > 0x10000 && comp != prevComp)
             {
-                // Resolve identity WITHOUT invalidating the LKG cache.
-                //
-                // The new resolver in CDCore walks a fresh chain every
-                // call (Player static -> party container -> per-slot
-                // active-flag bytes) and never caches a per-actor
-                // pointer that could go stale, so the historical reason
-                // for invalidating on every player_component change no
-                // longer applies.
-                //
-                // Trade-off resolved against keeping LKG: the engine
-                // rotates player_component before it commits the new
-                // active-flag byte to the server-side party container.
-                // During that window the chain reads all-zero flags and
-                // the resolver returns Unknown. Invalidating LKG here
-                // would force the auto-apply gate to defer until the
-                // engine settled, which on certain saves (Prologue,
-                // post-cutscene resume) it never does until the player
-                // takes a control action. Letting LKG persist makes the
-                // resolver fall back to the previously-controlled
-                // character through that window. The fallback is
-                // correct for save-load resuming the same identity
-                // (the dominant case) and self-corrects within one
-                // tick after the engine writes the new flag for an
-                // in-session swap.
+                // Resolve identity WITHOUT invalidating any CDCore
+                // cache. The focus-broadcast resolver stamps Tier-0
+                // on every engine focus event, so a stale read here is
+                // self-correcting within one tick. Calling
+                // invalidate_controlled_character() inline would force
+                // an Unknown window on saves whose first broadcast has
+                // not arrived yet (Prologue / post-cutscene resume),
+                // gating the auto-apply indefinitely.
                 const std::string liveChar =
                     current_controlled_character_name();
 

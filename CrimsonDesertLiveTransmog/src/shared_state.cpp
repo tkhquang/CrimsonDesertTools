@@ -50,7 +50,6 @@ namespace Transmog
     static std::atomic<std::size_t> s_pendingSlotIndex{k_slotCount};
     static std::array<std::uint16_t, k_slotCount> s_lastAppliedCarrierIds{};
     static std::array<bool, k_slotCount> s_forceApplyPending{};
-    static std::atomic<std::uintptr_t> s_swapStaleComp{0};
 
     ResolvedAddresses &resolved_addrs() { return s_resolvedAddrs; }
     std::array<SlotMapping, k_slotCount> &slot_mappings() { return s_slotMappings; }
@@ -70,11 +69,10 @@ namespace Transmog
 
     std::string current_controlled_character_name() noexcept
     {
-        // Delegates to the shared Core resolver, which walks the live
-        // WorldSystem chain to the controlled actor and decodes its
-        // identity u32s. Returns an empty string when the WorldSystem
-        // holder has not been published yet or the chain walk yields
-        // an unknown key with no cached fallback.
+        // Delegates to the shared Core resolver (focus-broadcast cache
+        // populated by sub_14353BA60's R9 hash, with LKG / structural
+        // Kliff fallbacks). Returns an empty string when the resolver
+        // has not yet observed a known identity this session.
         const auto name = CDCore::current_controlled_character_name();
         return std::string(name);
     }
@@ -86,6 +84,5 @@ namespace Transmog
     std::atomic<bool> &clear_pending() { return s_clearPending; }
     std::atomic<bool> &dye_dirty() { return s_dyeDirty; }
     std::atomic<std::size_t> &pending_slot_index() { return s_pendingSlotIndex; }
-    std::atomic<std::uintptr_t> &swap_stale_comp() { return s_swapStaleComp; }
 
 } // namespace Transmog

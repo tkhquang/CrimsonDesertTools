@@ -262,11 +262,20 @@ namespace Transmog
         /// caller can manual_apply() immediately.
         void append_from_state();
 
-        /// Append a new preset that snapshots the current slot_mappings
-        /// (active character's picker rows). Unlike append_from_state, this
-        /// preserves the currently-loaded item selections so the user can
-        /// fork-edit an existing preset without overwriting the source.
+        /// Append a new preset that is a pure clone of the active
+        /// preset's in-memory state (items, dye, swatches). Ignores any
+        /// unsaved edits in slot_mappings -- the clone reflects what the
+        /// source preset would look like if reloaded from disk. Use when
+        /// you want a clean fork to alter without touching the original.
         void duplicate_current();
+
+        /// Append a new preset that captures the current pending state
+        /// (slot_mappings + in-place dye/swatch on the active preset)
+        /// without overwriting the active preset's saved item rows.
+        /// Use to fork-save mid-edit (e.g. after picking a new helmet
+        /// on the active preset, save those edits to a new preset and
+        /// leave the source's saved rows untouched).
+        void save_as_new_from_state();
 
         /// Overwrite the active preset with current slot_mappings state.
         void replace_current_from_state();
