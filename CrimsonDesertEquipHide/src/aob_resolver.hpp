@@ -36,8 +36,6 @@ namespace EquipHide
 
     inline constexpr auto &k_worldSystemCandidates =
         CDCore::Anchors::k_worldSystemCandidates;
-    inline constexpr auto &k_playerStaticCandidates =
-        CDCore::Anchors::k_playerStaticCandidates;
     inline constexpr auto &k_mapLookupCandidates =
         CDCore::Anchors::k_mapLookupCandidates;
     inline constexpr auto &k_partAddShowCandidates =

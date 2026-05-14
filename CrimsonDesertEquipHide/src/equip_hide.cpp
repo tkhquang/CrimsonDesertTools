@@ -403,37 +403,18 @@ namespace EquipHide
             k_worldSystemCandidates, std::size(k_worldSystemCandidates),
             "WorldSystem");
 
-        // Publish the WorldSystem holder to Core. The WorldSystem chain
-        // is the client-side reach used by the per-frame body-pool walk
-        // and by other client-side state. Identity decoding no longer
-        // consumes this pointer on v1.04.00 (the discriminator byte
-        // ceased to be unique in this build); the player static
-        // resolved below feeds the controlled-character resolver
-        // instead. Idempotent across consumers: when LiveTransmog is
-        // loaded alongside, both publish the same address and the
-        // later writer wins.
+        // Publish the WorldSystem holder to Core. CDCore walks this
+        // chain to reach the rotating `user+0xD8` client body pointer
+        // that the body learning cache keys on. Idempotent across
+        // consumers: when LiveTransmog is loaded alongside, both
+        // publish the same address and the later writer wins.
         CDCore::set_world_system_holder(addrs.worldSystem);
 
-        addrs.playerStatic = resolve_address(
-            k_playerStaticCandidates, std::size(k_playerStaticCandidates),
-            "PlayerStatic");
-
-        // Publish the player static to the Core controlled-character
-        // resolver. The chain (root -> NwVirtualAsyncSession ->
-        // ServerUserActor -> ServerChildOnlyInGameActor) reaches the
-        // server-side party container, where each protagonist occupies
-        // a fixed-offset slot (Kliff=0x68, Damiane=0x168, Oongka=0x268)
-        // and the active-flag byte at slot+0x2C identifies the
-        // currently-controlled character. Idempotent with the matching
-        // publish in LiveTransmog.
-        CDCore::set_player_static_holder(addrs.playerStatic);
-
-        // Install the radial-swap-key capture mid-hook via Core. Core
-        // owns this DLL's SafetyHook instance and the per-DLL
-        // actor->character cache; EquipHide's role is to publish the
-        // resolved hook address so the controlled-character resolver
-        // gains its deterministic ghost-roster layer even when
-        // LiveTransmog is not loaded.
+        // Install the radial-swap-input capture mid-hook via Core.
+        // CDCore owns this DLL's SafetyHook instance; the callback
+        // stamps a monotonic timestamp consumed by
+        // `radial_swap_pending()` to disambiguate user radial swaps
+        // from save-load arena rotations.
         //
         // Two-consumer (EH + LT) coordination: CrimsonDesertCore is a
         // STATIC library, so this DLL owns its own MidHook independent
@@ -453,14 +434,49 @@ namespace EquipHide
             {
                 if (!CDCore::install_radial_swap_hook(radialAddr))
                     logger.warning(
-                        "Radial-swap key hook install failed -- "
-                        "ghost-roster character resolution disabled");
+                        "Radial-swap input hook install failed -- "
+                        "save-load disambiguation will fall back to "
+                        "the conservative path");
             }
             else
             {
                 logger.warning(
-                    "RadialSwapKey AOB failed -- ghost-roster "
-                    "character resolution disabled");
+                    "RadialSwapKey AOB failed -- save-load "
+                    "disambiguation will fall back to the "
+                    "conservative path");
+            }
+        }
+
+        // Tier-0 controlled-character resolver: focus-actor broadcast
+        // capture. AOB-resolve the three engine-interned focus-actor
+        // hash globals, then hook sub_14353BA60 entry to capture R9 on
+        // each broadcast. Failure on either step degrades gracefully
+        // to the structural-Kliff anchor and the LKG cache.
+        {
+            const bool published =
+                CDCore::resolve_and_publish_focus_actor_globals();
+            if (!published)
+                logger.warning(
+                    "Focus-actor hash global resolution failed -- "
+                    "Tier-0 controlled-character signal disabled");
+
+            const auto bcastAddr = resolve_address(
+                CDCore::Anchors::k_focusBroadcastCandidates,
+                std::size(CDCore::Anchors::k_focusBroadcastCandidates),
+                "FocusBroadcast");
+
+            if (bcastAddr)
+            {
+                if (!CDCore::install_focus_broadcast_hook(bcastAddr))
+                    logger.warning(
+                        "Focus-broadcast hook install failed -- "
+                        "Tier-0 controlled-character signal disabled");
+            }
+            else
+            {
+                logger.warning(
+                    "FocusBroadcast AOB failed -- Tier-0 controlled-"
+                    "character signal disabled");
             }
         }
 
@@ -801,6 +817,9 @@ namespace EquipHide
         // SafetyHook trampoline pages can be touched by a late-firing
         // game thread. Idempotent.
         CDCore::uninstall_radial_swap_hook();
+        // Same ordering: tear down the focus-broadcast mid-hook before
+        // the SafetyHook trampoline pages can be unmapped.
+        CDCore::uninstall_focus_broadcast_hook();
         logger.flush();
 
         logger.info("{} shutdown: step 5 DMK_Shutdown", MOD_NAME);

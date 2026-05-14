@@ -190,6 +190,27 @@ namespace Transmog
             return name.find(tag) != std::string::npos;
         };
 
+        // Reject UI/knowledge/icon assets that embed a real prefab as a
+        // substring (e.g.
+        // "cd_knowledgeimage_Knowledge_ItemIcon_Prefab_cd_phm_00_hel_00_0363_c"
+        // would otherwise match `_hel_` and pollute the Helm Exact
+        // list). Body-mesh prefab names are all-lowercase snake_case by
+        // engine convention -- any uppercase ASCII letter means the
+        // name is a UI / knowledge / icon asset that happens to embed
+        // an armor prefab in its identifier. Structural rather than
+        // allowlist-based so new lowercase role families (mounts,
+        // future NPC variants, etc.) keep working without a code change.
+        for (unsigned char c : name) {
+            if (c >= 'A' && c <= 'Z')
+                return std::nullopt;
+        }
+        // Real prefab names also start with the engine's `cd_` family
+        // marker. Reject anything that doesn't (cheap sanity check
+        // against accidentally-lowercased UI strings).
+        if (name.size() < 3 ||
+            name[0] != 'c' || name[1] != 'd' || name[2] != '_')
+            return std::nullopt;
+
         // Extract the first `_NN_` (two-digit) numeric role marker
         // after the `cd_<role>_` prefix. -1 when absent (NPC, t0000,
         // m0001 families). Cheap manual scan; no <regex> dependency.

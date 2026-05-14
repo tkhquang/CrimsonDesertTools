@@ -1703,18 +1703,36 @@ static void draw_overlay_content()
 
         ImGui::SameLine();
 
-        // Copy forks the current slot rows (from the active preset + any
-        // edits) into a brand-new preset so the user can tweak without
-        // overwriting the source.
+        // Copy forks the active preset's saved state into a brand-new
+        // preset, ignoring any unsaved edits in slot_mappings. Use to
+        // get a clean clone to start altering on. For forking the
+        // current pending edits, use "Save as New" instead.
         if (ImGui::Button("Copy"))
         {
             pm.duplicate_current();
             manual_apply();
         }
         if (ImGui::IsItemHovered())
-            ui_tooltip("Duplicate the current slot rows into a new "
-                       "preset, then apply it. Use after selecting a "
-                       "preset and tweaking the rows to fork it.");
+            ui_tooltip("Clone the active preset's saved state into a "
+                       "new preset (pending edits are discarded). Use "
+                       "to start altering a clean copy without touching "
+                       "the source.");
+
+        ImGui::SameLine();
+
+        // Save as New forks the current pending state (slot_mappings +
+        // in-place dye/swatch) into a new preset, leaving the active
+        // preset's saved rows untouched. Lets the user alter freely
+        // mid-edit and bottle the result up without overwriting.
+        if (ImGui::Button("Save as New"))
+        {
+            pm.save_as_new_from_state();
+            manual_apply();
+        }
+        if (ImGui::IsItemHovered())
+            ui_tooltip("Save the current pending state (including "
+                       "unsaved picks) as a new preset. The active "
+                       "preset's saved rows are left unchanged.");
 
         ImGui::SameLine();
 

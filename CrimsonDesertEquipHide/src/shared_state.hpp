@@ -16,7 +16,6 @@ namespace EquipHide
     struct ResolvedAddresses
     {
         uintptr_t worldSystem = 0;
-        uintptr_t playerStatic = 0;
         uintptr_t childActorVtbl = 0;
         uintptr_t mapLookup = 0;
         uintptr_t mapInsert = 0;
