@@ -93,7 +93,22 @@ set(COMMON_SOURCES
     src/part_show_suppress.cpp
     src/real_part_tear_down.cpp
     src/prefab_wrapper_swap.cpp
+    src/color_override/host_scope.cpp
     src/dye_record_inject.cpp
+    src/color_override/setter_substitute.cpp
+    src/color_override/color_override.cpp
+    src/color_override/color_state.cpp
+    src/color_override/color_token_table.cpp
+    src/color_override/color_token_discovery.cpp
+    src/color_override/color_token_interner_hook.cpp
+    src/color_override/color_carrier_set.cpp
+    src/color_override/color_swatch_table.cpp
+    src/color_override/color_matinst_owner.cpp
+    src/color_override/color_picker_state.cpp
+    src/color_override/color_publisher_hook.cpp
+    src/color_override/color_reinit.cpp
+    src/color_override/color_pending_overrides.cpp
+    src/color_override/matinst_probe.cpp
     src/generated/dye_color_table.cpp
     src/generated/material_palette_table.cpp
 )

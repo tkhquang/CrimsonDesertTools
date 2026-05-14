@@ -12,6 +12,11 @@
 // This file must NOT see imgui_lib's include path.  The CMakeLists.txt
 // configures this TU with the ReShade SDK include directory instead.
 
+#include "color_override/color_pending_overrides.hpp"
+#include "color_override/color_picker_state.hpp"
+#include "color_override/color_reinit.hpp"
+#include "color_override/color_swatch_table.hpp"
+#include "color_override/color_token_table.hpp"
 #include "prefab_wrapper_swap.hpp"
 #include "constants.hpp"
 #include "dye_record_inject.hpp"
@@ -34,10 +39,15 @@
 #include <reshade.hpp>
 #pragma warning(pop)
 
+#include <algorithm>
+#include <array>
 #include <cstdarg>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <map>
 #include <string>
+#include <tuple>
 #include <vector>
 
 namespace Transmog

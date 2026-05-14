@@ -1,5 +1,6 @@
 #pragma once
 
+#include "color_override/color_swatch_table.hpp"
 #include "shared_state.hpp"
 
 #include <array>
@@ -112,6 +113,42 @@ namespace Transmog
     {
         std::string name;
         std::array<PresetSlot, k_slotCount> slots{};
+
+        // ---- ColorOverride (setter-substitute) persistence -----------
+        //
+        // INDEPENDENT of `slots[].dye` -- that path drives the engine's
+        // ARMOR_MOD record copier (`DyeRecordInject`) keyed by
+        // dye-group + channel + RGB. The fields below persist the
+        // ColorOverride / SwatchTable path -- per-shader-property
+        // RGB overrides that `ColorOverride::SetterSubstitute` writes
+        // through to materials that don't go through the dye-record
+        // pipeline (monster carriers, etc.). Serialized under the
+        // separate JSON key `swatch_overrides` so the two paths
+        // can't collide on load.
+        std::array<std::vector<ColorOverride::SwatchTable::PersistEntry>,
+                   k_slotCount> swatch_overrides{};
+
+        // Captured-row palette: just the (submesh, token) identities
+        // the slot has captured, no colour values. Lets us re-seed
+        // every row the user has seen on a preset switch, even when
+        // they only picked colours for a handful. The actual default
+        // colour for each row is re-captured live by the engine via
+        // capture_default_if_unset -- no need to persist it.
+        //
+        // Serialized as:
+        //   "swatch_palette": { "Chest": { "submesh_X": ["_tok1","_tok2"] } }
+        //
+        // PersistEntry stores (submesh, token); r/g/b is unused here.
+        std::array<std::vector<ColorOverride::SwatchTable::PersistEntry>,
+                   k_slotCount> swatch_palette{};
+
+        // Per-slot master enable for ColorOverride substitution. Mirrors
+        // `ColorOverride::DyeSlot::slot_enabled`. A slot with override
+        // entries but `swatch_slot_enabled[i] == false` keeps the rows
+        // in storage but disables the substitute path -- toggling the
+        // master flag back on resumes substitution without losing the
+        // user's pixel-level picks.
+        std::array<bool, k_slotCount> swatch_slot_enabled{};
     };
 
     struct CharacterPresets
@@ -126,6 +163,12 @@ namespace Transmog
         /// picker shows the female-body-token pool. Persisted in
         /// presets.json per character.
         std::string bodyKind = "Auto";
+
+        /// Per-character UI preference for the ColorOverride dye
+        /// picker: when false (default) the section shows only the
+        /// summary "Recolor all" + "Same-default groups" rows; when
+        /// true it shows every per-shader-property swatch row.
+        bool dyeAdvancedView = false;
     };
 
     class PresetManager
@@ -294,6 +337,15 @@ namespace Transmog
         // mutation made since the last load/save. Then clears the
         // dirty flag. Call before switching presets.
         void revert_active_dye_to_snapshot() noexcept;
+
+        // Rotates the editing target from m_editingCharacter to
+        // `new_name`: snapshots outgoing preset's ColorOverride
+        // swatch state, resets the live swatch tables, revert+update+
+        // capture the dye snapshot, then restores swatches + auto-
+        // reinits slots from the incoming preset. The caller is
+        // responsible for any ensure_character / pin bookkeeping.
+        // Pre-condition: new_name != m_editingCharacter.
+        void rotate_editing_target_to(const std::string &new_name);
 
         std::map<std::string, CharacterPresets> m_characters;
         // See class-level comment for the controlled / editing split.

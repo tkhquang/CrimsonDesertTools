@@ -1,5 +1,9 @@
 #include "transmog_apply.hpp"
+#include "color_override/color_override.hpp"
+#include "color_override/color_reinit.hpp"
+#include "color_override/host_scope.hpp"
 #include "dye_record_inject.hpp"
+#include "color_override/setter_substitute.hpp"
 #include "prefab_wrapper_swap.hpp"
 #include "carrier_defaults.hpp"
 #include "item_name_table.hpp"
@@ -86,9 +90,19 @@ namespace Transmog
     // DyeCopier round-trip emits exactly those records into the
     // render struct's dst+120. Returns true when records were
     // published; the caller is responsible for clear_slot_dye_state
-    // after the apply pass. Used by the untick-restore branch and
-    // the toggle-off Pass B restore so real items reappear in their
-    // current inventory dye instead of the engine's factory palette.
+    // after the apply pass.
+    //
+    // Used ONLY by the untick-restore branch in apply_all_transmog
+    // (`!m.active && prevIds != 0`): when the user unticks a slot
+    // and the real item is coming back into view, repaint it in
+    // its current inventory dye instead of its factory palette.
+    //
+    // Fakes with no explicit preset dye flow through with their
+    // natural engine records; monster-carrier fakes whose engine
+    // source is empty render colorless. To seed preset dye for those
+    // fakes the user must explicitly call Capture Outfit (mass) or
+    // the per-slot "Sync from live" button in the dye popup, which
+    // are the only paths that mutate the active preset.
     static bool publish_entry_dye_for_gameslot(
         __int64 a1, std::int16_t gameTag) noexcept
     {
@@ -138,7 +152,7 @@ namespace Transmog
         return true;
     }
 
-    // 2026-05-09: Helper for the dye-pass-through experiment.
+    // Helper for the dye-pass-through path.
     //
     // Walks the per-actor item-instance table at *(a1+0x88)+0x08, which is
     // the ROOT source the engine's secondary-id resolver (sub_141B2F780)
@@ -205,8 +219,17 @@ namespace Transmog
             bypassApplied = set_char_class_bypass(bypassAddr, 0xEB);
 
         in_transmog().store(true, std::memory_order_relaxed);
+        // Reset the host-scope cluster so the upcoming slotPop's
+        // matInst-iter hits build a fresh player-vs-NPC histogram.
+        ColorOverride::HostScope::begin_apply_window();
+        // Open the setter-property substitute window. Any 4-byte
+        // material-property write the engine fires during slotPop
+        // will be redirected to the user's chosen RGB. Closes again
+        // immediately after so unrelated render passes aren't tinted.
+        ColorOverride::SetterSubstitute::set_apply_window(true);
         slotPop(a1, reinterpret_cast<unsigned __int16 *>(itemData),
                 reinterpret_cast<__int64>(swapEntry));
+        ColorOverride::SetterSubstitute::set_apply_window(false);
         in_transmog().store(false, std::memory_order_relaxed);
 
         if (bypassApplied)
@@ -749,9 +772,40 @@ namespace Transmog
             }
             else
             {
+                // Preset has no explicit dye for this slot -- let the
+                // engine's natural dye records for the fake itself
+                // flow through unmodified. clear_slot_dye_state()
+                // makes DyeRecordInject's post-trampoline detour
+                // skip injection, so DyeCopier's natural copy of
+                // the fake's own records wins. Monster-carrier
+                // fakes with empty engine source records will
+                // therefore render colorless; users must seed preset
+                // dye via Capture Outfit or the per-slot "Sync from
+                // live" button to colour those.
                 DyeRecordInject::clear_slot_dye_state();
             }
 
+            ColorOverride::SetterSubstitute::set_active_slot(static_cast<int>(slotIdx));
+            // Notify ColorOverride that this slot is being applied to
+            // the user-INTENDED target item. Wipes the swatch table
+            // only when the user's chosen transmog target ACTUALLY
+            // changes -- not when the resolved target temporarily
+            // flips to the carrier during an untick (which the
+            // dispatch path does).
+            //
+            // Pass the picked target when slot is active, 0 when
+            // unticked. Matches notify_transmog_target's contract:
+            // 0 = "no transmog this slot", non-zero = the fake target
+            // the user wants to wear. Wipe fires only on
+            // (non-zero last) -> (different non-zero new).
+            {
+                auto &mapping = slot_mappings()[slotIdx];
+                const std::uint32_t userIntent = mapping.active
+                    ? static_cast<std::uint32_t>(mapping.targetItemId)
+                    : 0u;
+                ColorOverride::Reinit::notify_transmog_target(
+                    static_cast<int>(slotIdx), userIntent);
+            }
             if (useCarrier && carrierId != 0)
             {
                 logger.debug("apply_single_slot: slot={} target={:#06x} "
@@ -786,7 +840,15 @@ namespace Transmog
             //  - inactive (!m.active): slot was previously controlled
             //    by us; restore the real item so it reappears.
             const bool showEmpty = m.active;
-            if (!showEmpty && (prevId != 0 || real_damaged()[slotIdx]))
+            // During a 3-pass reinit cycle, suppress the real-armor
+            // restore so the slot goes visibly empty between teardown
+            // and retick instead of flashing the real armor on every
+            // cycle.
+            const bool reinitActive =
+                ColorOverride::Reinit::is_slot_reinit_active(
+                    static_cast<int>(slotIdx));
+            if (!showEmpty && (prevId != 0 || real_damaged()[slotIdx])
+                && !reinitActive)
             {
                 if (realId != 0)
                 {
@@ -795,8 +857,17 @@ namespace Transmog
                                  slot_name(static_cast<TransmogSlot>(
                                      slotIdx)),
                                  realId);
+                    ColorOverride::SetterSubstitute::set_active_slot(
+                        static_cast<int>(slotIdx));
                     apply_transmog(a1, realId);
-                }
+                        }
+            }
+            else if (reinitActive)
+            {
+                logger.debug(
+                    "apply_single_slot: slot={} real-restore SKIPPED "
+                    "(reinit teardown -- slot goes empty by design)",
+                    slotIdx);
             }
             lastIds[slotIdx] = 0;
             last_applied_carrier_ids()[slotIdx] = 0;
@@ -1486,9 +1557,25 @@ namespace Transmog
             }
             else
             {
+                // Preset has no explicit dye -- let the engine's
+                // natural fake-item records flow. Mirrors the
+                // apply_single_slot branch above.
                 DyeRecordInject::clear_slot_dye_state();
             }
 
+            ColorOverride::SetterSubstitute::set_active_slot(static_cast<int>(i));
+            // See call site #1 (apply_single_slot) for the rationale.
+            // Pass user-intent (active ? user-chosen target : 0) so
+            // untick doesn't trigger a target-change wipe of seeded
+            // placeholders.
+            {
+                auto &mapping = slot_mappings()[i];
+                const std::uint32_t userIntent = mapping.active
+                    ? static_cast<std::uint32_t>(mapping.targetItemId)
+                    : 0u;
+                ColorOverride::Reinit::notify_transmog_target(
+                    static_cast<int>(i), userIntent);
+            }
             if (useCarrier && carrierId != 0)
             {
                 logger.debug("Transmog APPLY (carrier): slot={}, "
@@ -1553,12 +1640,26 @@ namespace Transmog
                     // real item in the user's actual inventory dye
                     // instead of the item's factory palette. Same
                     // pattern as Pass B in clear_all_transmog.
+                    //
+                    // We deliberately do NOT mirror this live dye
+                    // into the active preset here. The `!m.active`
+                    // gate above is shared with non-user-initiated
+                    // mass-reset paths (mod-disable in this same
+                    // function at the top, character switch / Unpin
+                    // / preset load / ColorOverride re-init), so
+                    // mirroring here would silently bake the real
+                    // item's dye into the preset every time the mod
+                    // is toggled off or the character is switched.
+                    // Real-dye capture into the preset is explicit
+                    // only: Capture Outfit (mass) or the per-slot
+                    // "Sync from live" button in the dye popup.
                     const auto gameTag = game_slot_from_transmog(
                         static_cast<TransmogSlot>(i));
                     if (!publish_entry_dye_for_gameslot(a1, gameTag))
                         DyeRecordInject::clear_slot_dye_state();
+                    ColorOverride::SetterSubstitute::set_active_slot(static_cast<int>(i));
                     apply_transmog(a1, realId);
-                    DyeRecordInject::clear_slot_dye_state();
+                            DyeRecordInject::clear_slot_dye_state();
                     ++ourWrittenCount;
                 }
                 else if (real_damaged()[i])
