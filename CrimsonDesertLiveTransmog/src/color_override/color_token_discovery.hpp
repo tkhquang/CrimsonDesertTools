@@ -34,6 +34,15 @@ namespace Transmog::ColorOverride::TokenSlotDiscovery
     /// the first call performs the scan.
     void run();
 
+    /// Re-run the AOB scan if fewer than `expectedMin` slots have
+    /// been discovered. Cold-start can miss registrar call sites
+    /// whose code pages haven't been committed yet; calling this
+    /// from a hot path (e.g. the setter midhook) covers the gap.
+    /// Throttled internally (~1.5 s between attempts). Becomes a
+    /// permanent no-op once two consecutive scans return the same
+    /// slot count AND that count is >= `expectedMin`.
+    void retry_if_underpopulated(std::size_t expectedMin) noexcept;
+
     /// True after `run()` has finished its scan (whether or not it
     /// discovered any slots).
     bool is_complete() noexcept;

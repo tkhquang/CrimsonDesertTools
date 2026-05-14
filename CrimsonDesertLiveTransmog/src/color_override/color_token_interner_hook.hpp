@@ -22,6 +22,13 @@ namespace Transmog::ColorOverride::InternerHook
     /// Safe to call multiple times; only the first call hooks.
     bool init() noexcept;
 
+    /// Re-walk the engine's interner entries array if our captured
+    /// set looks stale (fewer entries than the engine currently has,
+    /// or the table has been re-allocated). Throttled internally;
+    /// safe to call from a hot path. Returns the number of newly-
+    /// captured (name, token) pairs.
+    std::size_t refresh() noexcept;
+
     /// Reverse lookup: token id → property name. Returns nullptr if
     /// the token wasn't observed via the interner. The returned
     /// pointer is the engine's own .rdata string (process-lifetime

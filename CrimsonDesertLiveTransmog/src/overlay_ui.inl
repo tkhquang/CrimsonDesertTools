@@ -2402,6 +2402,16 @@ static void draw_overlay_content()
                         }
                 }
 
+                // Per-popup tab jump flags. The Dye button + square
+                // dye chip force the popup onto the Dye tab; the
+                // circular override chip forces it onto Color
+                // Override. Without this, ImGui's tab-bar remembers
+                // the last-selected tab across popup opens, so a user
+                // who visited Color Override once would re-land there
+                // when they next hit the Dye button.
+                static bool s_dyePopupJumpToColor[k_slotCount] = {};
+                static bool s_dyePopupJumpToDye[k_slotCount] = {};
+
                 // Dye button: always plain "Dye" with no background
                 // color override -- keeps text legible regardless of
                 // dye state. Active state is signalled by a small
@@ -2425,6 +2435,7 @@ static void draw_overlay_content()
                                       ImVec2(chip_size, chip_size)))
                     {
                         ImGui::OpenPopup("##dye_picker");
+                        s_dyePopupJumpToDye[i] = true;
                     }
                     ImGui::PopStyleColor(3);
                     if (ImGui::IsItemHovered())
@@ -2454,7 +2465,6 @@ static void draw_overlay_content()
                         ++overrideCount;
                     }
                 }
-                static bool s_dyePopupJumpToColor[k_slotCount] = {};
                 if (firstOv)
                 {
                     ImGui::SameLine(0.0f, 4.0f);
@@ -2490,10 +2500,94 @@ static void draw_overlay_content()
                                       overrideCount == 1 ? "" : "s");
                         ui_tooltip(tip);
                     }
+
+                    // Reload icon: manual single-pass commit-retick
+                    // for the slot's color overrides. Only shown when
+                    // at least one override is active (guarded by the
+                    // outer `if (firstOv)` block). Coalesced if a
+                    // reinit is already running.
+                    //
+                    // Drawn with ImDrawList primitives (3/4 arc +
+                    // arrowhead) rather than a font glyph because the
+                    // overlay loads only the default ImGui font
+                    // (ASCII range) -- a Unicode reload glyph would
+                    // render as a missing-glyph box.
+                    ImGui::SameLine(0.0f, 4.0f);
+                    const float reload_d = ImGui::GetFrameHeight();
+                    const ImVec2 reload_p = ImGui::GetCursorScreenPos();
+                    const bool reloadClicked = ImGui::InvisibleButton(
+                        "##coReload", ImVec2(reload_d, reload_d));
+                    const bool reloadHovered = ImGui::IsItemHovered();
+                    {
+                        ImDrawList *rl_dl = ImGui::GetWindowDrawList();
+                        const ImVec2 rl_center(
+                            reload_p.x + reload_d * 0.5f,
+                            reload_p.y + reload_d * 0.5f);
+                        const float rl_radius = reload_d * 0.32f;
+                        const float thickness = std::max(
+                            1.0f, reload_d * 0.10f);
+                        // Slightly highlight on hover so the icon
+                        // reads as interactive without needing a
+                        // background frame.
+                        const ImU32 col = ImGui::GetColorU32(
+                            reloadHovered
+                                ? ImGuiCol_Text
+                                : ImGuiCol_TextDisabled);
+                        // 3/4 arc from 45 deg (top-right) sweeping
+                        // clockwise through 315 deg (right). The gap
+                        // sits at the 0-45 deg slice where the arrow
+                        // tip points back along the circle's
+                        // tangent.
+                        constexpr float kPi = 3.14159265358979f;
+                        const float a0 = -kPi * 0.25f;          // -45
+                        const float a1 =  kPi * 1.5f;           // +270
+                        rl_dl->PathArcTo(rl_center, rl_radius, a0, a1, 24);
+                        rl_dl->PathStroke(col, ImDrawFlags_None, thickness);
+                        // Arrowhead at the arc's terminus (a0). The
+                        // tangent at angle a is (-sin(a), cos(a))
+                        // (CCW direction); since we drew CW we negate
+                        // to get the head pointing in the sweep
+                        // direction.
+                        const float ax = rl_center.x + std::cos(a0) * rl_radius;
+                        const float ay = rl_center.y + std::sin(a0) * rl_radius;
+                        const float tx = std::sin(a0);
+                        const float ty = -std::cos(a0);
+                        // Outward (radial) unit vector for the head's
+                        // perpendicular spread.
+                        const float ox = std::cos(a0);
+                        const float oy = std::sin(a0);
+                        const float head = std::max(
+                            2.0f, reload_d * 0.22f);
+                        const ImVec2 p_tip(ax + tx * head,
+                                           ay + ty * head);
+                        const ImVec2 p_in (ax - ox * head * 0.7f,
+                                           ay - oy * head * 0.7f);
+                        const ImVec2 p_out(ax + ox * head * 0.7f,
+                                           ay + oy * head * 0.7f);
+                        rl_dl->AddTriangleFilled(p_tip, p_in, p_out, col);
+                    }
+                    if (reloadHovered)
+                        ui_tooltip(
+                            "Re-tick this slot once so color\n"
+                            "overrides commit. Use if a colour\n"
+                            "edit didn't take.");
+                    if (reloadClicked
+                        && !Transmog::ColorOverride::Reinit::
+                               any_slot_reinit_active())
+                    {
+                        Transmog::flag_enabled().store(
+                            true, std::memory_order_relaxed);
+                        Transmog::ColorOverride::Reinit::
+                            schedule_color_commit_retick(
+                                static_cast<int>(i));
+                    }
                 }
 
                 if (dyeBtn && slotDye)
+                {
                     ImGui::OpenPopup("##dye_picker");
+                    s_dyePopupJumpToDye[i] = true;
+                }
 
                 // 10 color groups, ordered by HSL hue (red -> rose).
                 // Anchored by `string_key` (the data file's _stringKey
@@ -2913,7 +3007,16 @@ static void draw_overlay_content()
                     // entry point.
                     if (ImGui::BeginTabBar("##dye_tabs"))
                     {
-                    if (ImGui::BeginTabItem("Dye"))
+                    // Honor "jump to Dye tab" set by the Dye button +
+                    // square dye chip on the row. One-shot: clear
+                    // after consuming so subsequent tab clicks behave
+                    // normally.
+                    ImGuiTabItemFlags dyeTabFlags =
+                        s_dyePopupJumpToDye[i]
+                            ? ImGuiTabItemFlags_SetSelected
+                            : 0;
+                    s_dyePopupJumpToDye[i] = false;
+                    if (ImGui::BeginTabItem("Dye", nullptr, dyeTabFlags))
                     {
                     // --- Top action bar ---
                     if (ImGui::Button("Mirror Mod 0 to all"))
@@ -3178,27 +3281,22 @@ static void draw_overlay_content()
                     ImGui::EndTooltip();
                 }
 
-                // Per-slot 3-pass swatch re-init. Drives clear + apply
-                // 3 times spaced ~1s apart, then prunes any swatch row
-                // whose identity didn't appear in all 3 passes (ghost
-                // filter). Use when the swatch list is empty / stale
-                // and you'd otherwise untick-retick by hand.
+                // Per-slot single-pass swatch re-init. Drives one
+                // clear + apply cycle (~1.5s) and keeps whatever rows
+                // were captured. Use when the swatch list is empty
+                // and you'd otherwise untick-retick by hand. The
+                // legacy 3-pass ghost-filter variant
+                // (`start_slot_reinit`) is no longer wired from the
+                // UI -- one pass is enough for the common case.
                 ImGui::SameLine(0.0f, 6.0f);
                 const bool reinitActive =
                     Transmog::ColorOverride::Reinit::is_slot_reinit_active(
                         static_cast<int>(i));
                 if (reinitActive)
                 {
-                    const int rpass =
-                        Transmog::ColorOverride::Reinit::slot_reinit_pass(
-                            static_cast<int>(i));
                     ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.0f);
                     ImGui::BeginDisabled(true);
-                    char rlbl[32];
-                    std::snprintf(rlbl, sizeof(rlbl),
-                                  "Re-init %d/3##sw_reinit_busy",
-                                  rpass + 1);
-                    ImGui::SmallButton(rlbl);
+                    ImGui::SmallButton("Re-init...##sw_reinit_busy");
                     ImGui::EndDisabled();
                     ImGui::PopStyleVar();
                 }
@@ -3212,10 +3310,9 @@ static void draw_overlay_content()
                     {
                         ImGui::BeginTooltip();
                         ImGui::TextUnformatted(
-                            "Auto-cycle clear+apply 3 times (~1s each).\n"
-                            "Keeps only swatches that appear in all 3\n"
-                            "passes; drops ghosts. Use when the swatch\n"
-                            "list looks empty or has stale rows.\n\n"
+                            "Single clear + apply (~1.5s) to capture\n"
+                            "the slot's swatches. Use when the list\n"
+                            "looks empty or stale.\n\n"
                             "Replaces the manual 'untick / retick'\n"
                             "loop -- you can leave this slot alone\n"
                             "while it runs.");
@@ -3224,7 +3321,7 @@ static void draw_overlay_content()
                     if (reinitClicked)
                     {
                         flag_enabled().store(true, std::memory_order_relaxed);
-                        Transmog::ColorOverride::Reinit::start_slot_reinit(
+                        Transmog::ColorOverride::Reinit::start_slot_reinit_once(
                             static_cast<int>(i));
                     }
 

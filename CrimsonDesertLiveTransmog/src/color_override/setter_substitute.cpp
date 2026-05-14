@@ -5,6 +5,8 @@
 #include "color_picker_state.hpp"
 #include "color_state.hpp"
 #include "color_swatch_table.hpp"
+#include "color_token_discovery.hpp"
+#include "color_token_interner_hook.hpp"
 #include "color_token_table.hpp"
 #include "matinst_probe.hpp"
 #include "one_shot_log_set.hpp"
@@ -84,11 +86,52 @@ namespace Transmog::ColorOverride::SetterSubstitute
 
         OneShotLogSet<std::uint32_t, 64> g_seenTokens;
         OneShotLogSet<std::uintptr_t, 16> g_seenVtables;
+        // Diagnostic: dump the first 8 distinct property-descriptor
+        // shapes the setter sees. Lets us confirm where the real
+        // 16-bit interner token id lives in the descriptor (we
+        // currently read `*(rdx-8+0x28)` as u32, which gives -1 layer
+        // for tokens that ARE in the discovered slots -- suggesting
+        // wrong field).
+        OneShotLogSet<std::uintptr_t, 8> g_seenDescShapes;
         // First-fire-per-(slot, content_hash) dedup. Logged once per
         // distinct (slot, hash) so a new region shows up exactly one
         // time per session without drowning the hot path.
         std::array<OneShotLogSet<std::uint32_t, 32>, ::Transmog::k_slotCount>
             g_seenSlotHashes;
+
+        // SEH-guarded read of one u32 with fault-tolerance. Returns
+        // 0 on fault. Used by the descriptor dump below so a bad
+        // address in one slot doesn't abort the whole row.
+        std::uint32_t seh_read_u32(std::uintptr_t addr) noexcept
+        {
+            __try
+            {
+                return *reinterpret_cast<const std::uint32_t *>(addr);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return 0;
+            }
+        }
+
+        // Diagnostic: print the descriptor at `dst_prop` as a row of
+        // u32 at +0x00..+0x3C. Used on the first 8 distinct descriptor
+        // addresses to locate the real token-id field.
+        void log_descriptor_shape(std::uintptr_t dst_prop) noexcept
+        {
+            std::uint32_t w[16]{};
+            for (int i = 0; i < 16; ++i)
+                w[i] = seh_read_u32(dst_prop + std::uintptr_t(i) * 4);
+            DetourModKit::Logger::get_instance().debug(
+                "[dye-setter-sub] desc@{:#x}  "
+                "+00={:08X} +04={:08X} +08={:08X} +0C={:08X} "
+                "+10={:08X} +14={:08X} +18={:08X} +1C={:08X} "
+                "+20={:08X} +24={:08X} +28={:08X} +2C={:08X} "
+                "+30={:08X} +34={:08X} +38={:08X} +3C={:08X}",
+                dst_prop,
+                w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7],
+                w[8], w[9], w[10], w[11], w[12], w[13], w[14], w[15]);
+        }
 
         // SEH-guarded property token-id read.
         bool read_token_id(std::uintptr_t a2, std::uint32_t &out) noexcept
@@ -99,6 +142,11 @@ namespace Transmog::ColorOverride::SetterSubstitute
             {
                 const auto dst_prop = a2 - 8;
                 out = *reinterpret_cast<const std::uint32_t *>(dst_prop + 0x28);
+                // One-shot diagnostic: dump 16 u32s of the first 8
+                // distinct descriptor shapes. SEH-guarded helpers, so
+                // failure on any slot just yields 0 in that column.
+                if (g_seenDescShapes.insert_unique(dst_prop))
+                    log_descriptor_shape(dst_prop);
                 return true;
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
@@ -195,7 +243,7 @@ namespace Transmog::ColorOverride::SetterSubstitute
                 bool active = DyeRecordInject::
                     get_published_first_active_rgb(&r, &g, &b);
                 const auto hs = ColorOverride::HostScope::snapshot_stats();
-                DetourModKit::Logger::get_instance().debug(
+                DetourModKit::Logger::get_instance().trace(
                     "[dye-setter-sub] fires={} subs={} defs={} miss={} "
                     "noSlot={} hostRej={} "
                     "active={} rgb=({:02X},{:02X},{:02X}) "
@@ -241,6 +289,19 @@ namespace Transmog::ColorOverride::SetterSubstitute
             std::uint32_t tokId = 0;
             if (read_token_id(ctx.rdx, tokId))
             {
+                // Lazy warm-up: cold-start can leave the discovery
+                // table underpopulated (Windows lazy-commit means
+                // some registrar code pages weren't faulted in at
+                // module-init scan time) and the interner table can
+                // grow after our initial walk. Retry both when we
+                // see a token we can't classify; throttled internally
+                // so this is a cheap no-op once warmed.
+                if (ColorOverride::TokenTable::token_layer(tokId) < 0)
+                {
+                    ColorOverride::TokenSlotDiscovery::
+                        retry_if_underpopulated(33);
+                    ColorOverride::InternerHook::refresh();
+                }
                 if (g_seenTokens.insert_unique(tokId))
                 {
                     DetourModKit::Logger::get_instance().debug(
