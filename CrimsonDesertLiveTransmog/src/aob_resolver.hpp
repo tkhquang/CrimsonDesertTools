@@ -14,6 +14,7 @@
 
 #include <DetourModKit.hpp>
 
+#include <array>
 #include <cstdint>
 #include <span>
 #include <string_view>
@@ -1274,5 +1275,174 @@ namespace Transmog
          "48 8B 41 78 4D 8B C8 48 85 C0 74 66 45 33 C0 4C 8D 52",
          ResolveMode::Direct, +0x0E, 0},
     };
+
+    /**
+     * @brief ColorTokenInterner (sub_140F46680) -- shader-property name
+     *        interner. Maps an ASCII property name (e.g. "_tintColorR")
+     *        to a stable u32 token id used downstream by the dye/
+     *        material setter pipeline. Called once per property by the
+     *        TLS-guarded registrars sub_14274A3C0 and sub_142749F10.
+     *
+     * The function lives in the `.tls` section. Body is large (0x86E
+     * bytes) and includes a once-only `lock cmpxchg` guarded init path
+     * that allocates the hash table, sets the bucket-prime count
+     * (0x8E = 142) and sentinel cap (0x2FFFF), and publishes the state
+     * pointer to qword_145E15620. Subsequent calls take the table
+     * lock, look up the name, and return either the existing token or
+     * a freshly minted one.
+     *
+     * Resolution lets ColorOverride::InternerHook walk the body to
+     * locate the `qword_145E15620 = v10` store and reach the
+     * entries-array without scanning E8 trampolines through a
+     * registrar call site.
+     */
+    inline constexpr AddrCandidate k_colorTokenInternerCandidates[] = {
+        // P1 -- full Microsoft __fastcall prologue. The 4 shadow-store
+        // saves (`mov [rsp+disp8], rbx/r8d/rdx/rcx`) wildcard their
+        // disp8 home-area offsets because the prototype's argument
+        // layout is the only thing that pins them. The 7-register
+        // push run `55 56 57 41 54 41 55 41 56 41 57`
+        // (rbp/rsi/rdi/r12/r13/r14/r15) is the distinctive head:
+        // very few functions save all 7 callee-saved regs. The
+        // `lea rbp,[rsp-disp8]` frame setup and `sub rsp,imm32`
+        // stack allocation both wildcard compiler-owned sizes. The
+        // trailing `41 8B F9` (mov edi, r9d) captures the sentinel-
+        // cap argument into a saved scratch register and pins this
+        // function against any other 7-push function.
+        {"ColorTokenInterner_P1_FullPrologue",
+         "48 89 5C 24 ?? 44 89 44 24 ?? 48 89 54 24 ?? 48 89 4C 24 ?? "
+         "55 56 57 41 54 41 55 41 56 41 57 "
+         "48 8D 6C 24 ?? 48 81 EC ?? ?? ?? ?? 41 8B F9",
+         ResolveMode::Direct, 0, 0},
+
+        // P2 -- post-alloca early-exit anchor. Walks back -0x24 to
+        // reach the function start. The chain (sub rsp / mov edi,r9d
+        // / mov r12,rdx / xor ebx,ebx / mov [rcx],ebx / test rdx,rdx)
+        // is the function's argument-validation preamble: it
+        // captures the sentinel cap, mirrors the name pointer into
+        // r12, zeroes the output token (`*a1 = 0`), then tests the
+        // name pointer for null. The literal sequence `4C 8B E2 33
+        // DB 89 19 48 85 D2` (mov r12,rdx; xor ebx,ebx; mov [rcx],
+        // ebx; test rdx,rdx) is unique to this function's entry
+        // contract. Survives prologue reflows that affect the register
+        // save layout but keep the argument plumbing identical.
+        {"ColorTokenInterner_P2_PostAllocaEarlyExit",
+         "48 81 EC ?? ?? ?? ?? 41 8B F9 4C 8B E2 33 DB 89 19 48 85 D2",
+         ResolveMode::Direct, -0x24, 0},
+
+        // P3 -- deep-body cap-init magic-write anchor. Walks back
+        // -0x126 from the matched site to reach the function start.
+        // After the once-only `lock cmpxchg` init guard succeeds,
+        // the function writes a four-constant fingerprint:
+        //   C7 46 50 8E 00 00 00   mov [rsi+0x50], 0x8E   ; bucket prime
+        //   C7 46 54 FF FF 02 00   mov [rsi+0x54], 0x2FFFF; sentinel cap
+        //   BA F8 FF 2F 00         mov edx, 0x2FFFF8      ; alloc size
+        //   41 B8 10 00 00 00      mov r8d, 0x10          ; entry stride
+        // This semantic fingerprint survives wholesale prologue
+        // rewrites (e.g., a future patch swapping the fastcall ABI
+        // for a different register save list) because the constants
+        // are dictated by the interner's data-structure contract, not
+        // by compiler layout.
+        {"ColorTokenInterner_P3_CapInitMagicWrite",
+         "48 8B F3 C7 46 50 8E 00 00 00 C7 46 54 FF FF 02 00 "
+         "BA F8 FF 2F 00 41 B8 10 00 00 00",
+         ResolveMode::Direct, -0x126, 0},
+    };
+
+    /**
+     * @brief Property-registration call-site walk patterns.
+     *        Anchor the opcode run the compiler emits before every
+     *        call into the ColorTokenInterner from the TLS-guarded
+     *        registrar functions (sub_14274A3C0 for dye-mask
+     *        properties, sub_142749F10 for tint and detail
+     *        properties). Each pattern is INTENTIONALLY multi-match
+     *        (one hit per property registration); the discovery
+     *        walker enumerates every hit, decodes the `lea rdx`
+     *        displacement to read the property name, and accepts
+     *        only the entries whose strings appear in its known-
+     *        property allow-list.
+     *
+     * The shared head is the 17-byte run:
+     *
+     *   41 B9 FF FF 02 00      mov  r9d, 0x2FFFF       ; sentinel cap
+     *   ?? 8D ?? 01            lea  r8d, [reg+1]       ; REX+ModR/M
+     *                                                  ; wild; reg is
+     *                                                  ; r13 (registrar
+     *                                                  ; A) or rdi
+     *                                                  ; (registrar B)
+     *   48 8D 15 ?? ?? ?? ??   lea  rdx, [rip+name]    ; property name
+     *
+     * Followed within a few bytes by an rcx-load and an `E8 disp32`
+     * call to the interner. The three patterns below anchor on
+     * progressively wider windows of the call site; together they
+     * provide resilience against compiler reflows of any single
+     * one. The walker scans with each pattern in turn and merges
+     * the hits (dedup by decoded slot address), so a single
+     * pattern losing its shape on a future patch is tolerated as
+     * long as at least one survives.
+     *
+     * Verified hit counts on v1.06:
+     *   P1 (head only):                       2235 module-wide
+     *   P2 (head + lea-rcx-slot + call):      1512 module-wide
+     *   P3 (head + mov-rcx-reg + call):          4 module-wide
+     *
+     * P1 is the canonical superset and matches every registration
+     * site across the binary. P2 misses the first-call-per-
+     * registrar entries (which load rcx from a preloaded table-
+     * base register via `mov rcx, reg`); P3 covers exactly those
+     * first-call entries. Walking all three lets the discoverer
+     * stay correct even if P1 ever loses its shape, because the
+     * union of P2 and P3 covers the same site set as P1.
+     */
+    inline constexpr std::array<std::string_view, 3>
+        k_colorTokenRegistrarCallAobs = {{
+            // P1 -- 17-byte literal head. Anchors on the run from
+            // `mov r9d, 0x2FFFF` through `lea rdx, [name]`. The
+            // REX+ModR/M of the `lea r8d, [reg+1]` is wildcarded
+            // (the counter register differs by registrar; r13d for
+            // sub_14274A3C0, rdi for sub_142749F10).
+            "41 B9 FF FF 02 00 "
+            "?? 8D ?? 01 "
+            "48 8D 15 ?? ?? ?? ??",
+
+            // P2 -- head + lea-rcx-slot + call tail. Captures
+            // calls 2..N within each registrar (these load rcx
+            // via `lea rcx, [rip+slot]` to the current property's
+            // backing storage). Tighter than P1 and survives a
+            // future compiler reflow that changes the head shape
+            // as long as the rcx-load + call tail is preserved.
+            "41 B9 FF FF 02 00 "
+            "?? 8D ?? 01 "
+            "48 8D 15 ?? ?? ?? ?? "
+            "48 8D 0D ?? ?? ?? ?? E8",
+
+            // P3 -- head + mov-rcx-reg + call tail. Captures the
+            // first registration call per registrar function (it
+            // loads rcx from a preloaded table-base register via
+            // `mov rcx, rsi` / `mov rcx, rbx`). Only 4 module-wide
+            // hits on v1.06 -- the two registrars plus two
+            // unrelated callers that happen to share the shape
+            // (filtered by the name allow-list).
+            "41 B9 FF FF 02 00 "
+            "?? 8D ?? 01 "
+            "48 8D 15 ?? ?? ?? ?? "
+            "48 8B ?? E8",
+        }};
+
+    /// Byte width of the literal head shared by all
+    /// k_colorTokenRegistrarCallAobs candidates. The walker uses
+    /// this to step the cursor past a matched anchor before
+    /// scanning for the next hit.
+    inline constexpr std::size_t k_colorTokenRegistrarCallAobHeadLen = 17;
+
+    /// Number of walk-pattern variants in k_colorTokenRegistrarCallAobs.
+    /// Exposed as a standalone constant so dependent compile-time
+    /// expressions (std::array sizing, unrolled loops) do not have to
+    /// rebind the array through a reference before reading its extent
+    /// (MSVC declines to treat `.size()` on a `const auto&` alias as a
+    /// constant expression even when the underlying global is
+    /// `inline constexpr`).
+    inline constexpr std::size_t k_colorTokenRegistrarCallAobCount =
+        k_colorTokenRegistrarCallAobs.size();
 
 } // namespace Transmog

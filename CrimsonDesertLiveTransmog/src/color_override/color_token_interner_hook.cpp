@@ -1,5 +1,7 @@
 #include "color_token_interner_hook.hpp"
 
+#include "../aob_resolver.hpp"
+
 #include <DetourModKit.hpp>
 
 #include <Windows.h>
@@ -7,6 +9,7 @@
 
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cstring>
 #include <mutex>
 
@@ -34,6 +37,30 @@ namespace Transmog::ColorOverride::InternerHook
         std::atomic<std::size_t> g_count{0};
         std::once_flag g_initOnce;
         std::atomic<bool> g_dumped{false};
+
+        // Cached interner-state pointer location, captured at init()
+        // success. `*g_stateSlot` is the live state pointer; the
+        // engine may reallocate the hash-table backing arrays when
+        // entries grow, so refresh() reads through this each call.
+        std::atomic<std::uintptr_t> g_stateSlot{0};
+
+        // Field offset (within the state struct) that holds the
+        // entries-array pointer. The engine has shifted this between
+        // +0x40 and +0x48 across patches; init() probes both and
+        // caches whichever address actually contains valid records
+        // here so refresh() reads through the same offset.
+        std::atomic<std::ptrdiff_t> g_offEntriesArray{0x48};
+
+        // Incremental-walk cursor used by refresh(). When the engine
+        // reallocates the entries array, `g_lastEntriesBase` differs
+        // from the live base and we restart from index 0; otherwise
+        // we resume from `g_lastEntriesIdx` and only capture entries
+        // appended since the previous walk. Without this, every
+        // refresh re-walked the whole array and appended the engine's
+        // already-captured entries as duplicates, exhausting the
+        // capture cap within a few seconds on a populated scene.
+        std::atomic<std::uintptr_t> g_lastEntriesBase{0};
+        std::atomic<std::size_t>    g_lastEntriesIdx{0};
 
         // SEH-guarded reads.
         std::uint64_t safe_read_qword(std::uintptr_t addr) noexcept
@@ -80,79 +107,24 @@ namespace Transmog::ColorOverride::InternerHook
             }
         }
 
-        // SEH-guarded: scan up to 16 bytes after match for the `E8`
-        // call opcode and decode its rel32 target. Returns 0 on
-        // miss or fault.
-        std::uintptr_t decode_call_after(
-            const std::byte *match_end) noexcept
-        {
-            __try
-            {
-                for (std::size_t i = 0; i < 16; ++i)
-                {
-                    if (static_cast<std::uint8_t>(match_end[i]) ==
-                        0xE8)
-                    {
-                        const std::int32_t disp =
-                            *reinterpret_cast<const std::int32_t *>(
-                                match_end + i + 1);
-                        return reinterpret_cast<std::uintptr_t>(
-                                   match_end + i + 5) +
-                               static_cast<std::intptr_t>(disp);
-                    }
-                }
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-            }
-            return 0;
-        }
-
-        // Find sub_140F46680 (the interner) by anchoring on a
-        // registrar call site we already know how to identify.
-        // The 17-byte pattern `mov r9d, 0x2FFFF; lea r8d, [reg+1];
-        // lea rdx, [name]` is followed by `lea rcx, [slot]` (7B) OR
-        // `mov rcx, reg` (3B), then `E8 disp32` (call). The first
-        // E8 opcode in the following 16 bytes is the call to the
-        // interner.
+        // Scan the function body for the FIRST
+        // `mov [rip+disp32], REG` whose target slot lies inside the
+        // loaded module AND whose runtime value already looks like a
+        // valid heap pointer. That write is the engine's
+        // `qword_145E15620 = state` publish (in v1.06: encoded as
+        // `48 89 35 disp32` -- `mov [rip+d], rsi` -- at function
+        // offset 0x312).
         //
-        // More reliable than AOB-scanning for the interner's
-        // prologue (which collides with many other functions
-        // sharing the same Microsoft __fastcall prologue -- we saw
-        // a false-match at sub_1407959E0 in v1.06).
-        std::uintptr_t find_interner_addr(
-            const std::byte *base, std::size_t size) noexcept
-        {
-            constexpr std::string_view aob =
-                "41 B9 FF FF 02 00 "
-                "?? 8D ?? 01 "
-                "48 8D 15 ?? ?? ?? ??";
-            auto compiled = DMK::Scanner::parse_aob(aob);
-            if (!compiled) return 0;
-            const auto *m = DMK::Scanner::find_pattern(
-                base, size, *compiled);
-            if (m == nullptr) return 0;
-            return decode_call_after(m + 17);
-        }
-
-        // Scan the function body for the first `48 89 05 disp32`
-        // (mov [rip+disp32], rax) whose target lies inside the
-        // loaded module. That's the write `qword_145E15620 = v10`
-        // -- the static slot that holds the interner state pointer.
-        // 0x312 is the offset in v1.06; we widen the search window
-        // to ±0x200 around that to absorb compiler shifts in future
-        // patches.
-        // Scan for any `mov [rip+disp32], REG` writing to a module-
-        // data slot whose runtime value is a heap pointer (the
-        // interner's state). REX prefix is 0x48 (rax-r7) or 0x4C
-        // (r8-r15). ModR/M byte uses RIP-relative addressing when
-        // `(byte & 0xC7) == 0x05` (mod=00, r/m=101); the reg field
-        // (bits 3-5) can be any register, hence the mask.
+        // REX byte: 0x48 covers rax-rdi, 0x4C covers r8-r15.
+        // ModR/M:   `(byte & 0xC7) == 0x05` selects mod=00 / r/m=101
+        //           (RIP-relative addressing). The middle 3 bits hold
+        //           the source register and are wildcarded by the
+        //           mask so the scan tolerates compiler register-
+        //           allocation churn between patches.
         //
-        // Walks through the prologue + body looking for the FIRST
-        // such write whose target slot contains a valid heap
-        // pointer. In v1.06 the write is `mov [rip+disp32], rsi`
-        // (`48 89 35 disp32`) at function offset 0x312.
+        // Filtering on "slot's current value is a heap pointer"
+        // discards early-init writes to other module globals (zeros,
+        // small ints, sentinels) that share the encoding.
         std::uintptr_t find_state_slot_in_function(
             std::uintptr_t funcAddr,
             std::uintptr_t modBase,
@@ -202,9 +174,16 @@ namespace Transmog::ColorOverride::InternerHook
         }
 
         // Walk the interner's entries array and capture every
-        // (name, token) pair. Returns number captured.
+        // (name, token) pair from `startIdx` onward. Returns the
+        // number of entries captured into the global table; on
+        // return `nextIdx` is set to the array index where the walk
+        // stopped (caller persists this so subsequent walks can
+        // resume incrementally instead of re-appending the engine's
+        // already-captured prefix as duplicates).
         std::size_t walk_entries_array(
-            std::uintptr_t entriesBase) noexcept
+            std::uintptr_t entriesBase,
+            std::size_t startIdx,
+            std::size_t &nextIdx) noexcept
         {
             constexpr std::size_t k_maxWalk = 0x20000; // 128k entries
             constexpr std::ptrdiff_t k_entryStride = 32;
@@ -212,7 +191,8 @@ namespace Transmog::ColorOverride::InternerHook
             constexpr std::ptrdiff_t k_offToken = 0x18;
             std::size_t captured = 0;
             std::size_t consecutiveBad = 0;
-            for (std::size_t i = 0; i < k_maxWalk; ++i)
+            std::size_t i = startIdx;
+            for (; i < k_maxWalk; ++i)
             {
                 const auto entryAddr =
                     entriesBase + i * k_entryStride;
@@ -248,6 +228,12 @@ namespace Transmog::ColorOverride::InternerHook
                                     std::memory_order_release);
                 ++captured;
             }
+            // Walk back over the trailing run of bad entries so a
+            // future grow that fills the gap is detected next time.
+            // `consecutiveBad` is the number of consecutive misses
+            // we saw before bailing; the first "real" entry sits at
+            // `i - consecutiveBad`, so resume at that index.
+            nextIdx = (i > consecutiveBad) ? (i - consecutiveBad) : i;
             return captured;
         }
 
@@ -264,9 +250,9 @@ namespace Transmog::ColorOverride::InternerHook
                 reinterpret_cast<std::uintptr_t>(mi.lpBaseOfDll);
             const auto modSize = mi.SizeOfImage;
 
-            const auto funcAddr = find_interner_addr(
-                reinterpret_cast<const std::byte *>(mi.lpBaseOfDll),
-                modSize);
+            const auto funcAddr = Transmog::resolve_address(
+                Transmog::k_colorTokenInternerCandidates,
+                "ColorTokenInterner");
             if (funcAddr == 0)
             {
                 logger.warning(
@@ -292,27 +278,68 @@ namespace Transmog::ColorOverride::InternerHook
                     stateSlot);
                 return;
             }
-            // Per RE (decompile of sub_140F46680):
+            // State-struct field layout (decompile of sub_140F46680):
             //   state + 0x30 = num_buckets       (u32)
             //   state + 0x40 = bucket_array_ptr  (u64)
             //   state + 0x48 = entries_array_ptr (u64)
-            // Reading +0x50 by mistake aliases the sentinel-cap
-            // field (`0x2FFFF...`) and produces a garbage entries
-            // pointer that captures 0 names.
-            const auto entriesBase = safe_read_qword(stateAddr + 0x48);
+            // Live capture in v1.06 has shown the entries-array
+            // pointer landing at +0x40 in some builds and +0x48 in
+            // others (the engine appears to have shifted the field
+            // by one slot during a header rev). Probe both with a
+            // small leading-record validator and persist the chosen
+            // offset in g_offEntriesArray so refresh() reads through
+            // the same field on subsequent walks.
+            auto probe = [](std::uintptr_t base) noexcept -> std::size_t {
+                if (base < 0x10000ULL) return 0;
+                std::size_t valid = 0;
+                for (std::size_t i = 0; i < 256; ++i)
+                {
+                    const auto e = base + i * 32;
+                    const auto np = safe_read_qword(e + 0x08);
+                    const auto tk = safe_read_dword(e + 0x18);
+                    if (np < 0x10000ULL || np > 0x7FFFFFFFFFFFULL)
+                        continue;
+                    if (tk == 0 || tk > 0x100000u) continue;
+                    if (safe_is_property_name(
+                            reinterpret_cast<const char *>(np)))
+                        ++valid;
+                }
+                return valid;
+            };
+            const auto base40 = safe_read_qword(stateAddr + 0x40);
+            const auto base48 = safe_read_qword(stateAddr + 0x48);
+            const auto v40 = probe(base40);
+            const auto v48 = probe(base48);
+            logger.info(
+                "[interner-hook] probe state=0x{:X} "
+                "base40=0x{:X} valid40={} base48=0x{:X} valid48={}",
+                stateAddr, base40, v40, base48, v48);
+            const bool pick40 = (v40 >= v48 && base40 >= 0x10000ULL);
+            const auto entriesBase = pick40 ? base40 : base48;
+            const std::ptrdiff_t entriesOff = pick40 ? 0x40 : 0x48;
             if (entriesBase < 0x10000ULL)
             {
                 logger.warning(
-                    "[interner-hook] entries-array pointer at "
-                    "state+0x50 not initialised");
+                    "[interner-hook] neither state+0x40 nor +0x48 "
+                    "has a valid entries-array pointer");
                 return;
             }
-            const auto captured = walk_entries_array(entriesBase);
+            std::size_t nextIdx = 0;
+            const auto captured = walk_entries_array(
+                entriesBase, 0, nextIdx);
             logger.info(
                 "[interner-hook] func=0x{:X} stateSlot=0x{:X} "
-                "state=0x{:X} entries=0x{:X} captured={}",
+                "state=0x{:X} entries=0x{:X} off=0x{:X} captured={} "
+                "nextIdx={}",
                 funcAddr, stateSlot, stateAddr, entriesBase,
-                captured);
+                entriesOff, captured, nextIdx);
+            g_offEntriesArray.store(entriesOff,
+                                    std::memory_order_release);
+            g_lastEntriesBase.store(entriesBase,
+                                    std::memory_order_release);
+            g_lastEntriesIdx.store(nextIdx,
+                                   std::memory_order_release);
+            g_stateSlot.store(stateSlot, std::memory_order_release);
             g_dumped.store(true, std::memory_order_release);
         }
     } // namespace
@@ -321,6 +348,95 @@ namespace Transmog::ColorOverride::InternerHook
     {
         std::call_once(g_initOnce, []() { do_init(); });
         return g_dumped.load(std::memory_order_acquire);
+    }
+
+    std::size_t refresh() noexcept
+    {
+        // No hard attempt cap. Mirroring item_name_table's stability
+        // check: keep walking the engine's interner each time the
+        // setter sees an unclassified token, and only stop once two
+        // consecutive walks return the same g_count -- that means
+        // the engine has stopped interning new names. After settle
+        // this becomes a permanent no-op for the rest of the session.
+        //
+        // Throttled to ~1.5 s between walks because each walk is
+        // O(entries); the engine can have 100k+ entries in a loaded
+        // scene.
+        static std::atomic<bool> s_settled{false};
+        static std::atomic<long long> s_lastMs{0};
+        static std::atomic<bool> s_busy{false};
+        static std::atomic<std::size_t> s_lastCount{0};
+        if (s_settled.load(std::memory_order_acquire)) return 0;
+        using clock = std::chrono::steady_clock;
+        const auto nowMs = std::chrono::duration_cast<
+            std::chrono::milliseconds>(
+                clock::now().time_since_epoch()).count();
+        auto last = s_lastMs.load(std::memory_order_acquire);
+        if (last != 0 && (nowMs - last) < 1500) return 0;
+        const auto slot = g_stateSlot.load(std::memory_order_acquire);
+        if (slot == 0) return 0;
+        bool expected = false;
+        if (!s_busy.compare_exchange_strong(
+                expected, true, std::memory_order_acq_rel))
+            return 0;
+        s_lastMs.store(nowMs, std::memory_order_release);
+        const auto stateAddr = safe_read_qword(slot);
+        std::size_t added = 0;
+        if (stateAddr >= 0x10000ULL)
+        {
+            const auto entriesOff = g_offEntriesArray.load(
+                std::memory_order_acquire);
+            const auto entriesBase = safe_read_qword(
+                stateAddr + entriesOff);
+            if (entriesBase >= 0x10000ULL)
+            {
+                // Resume the walk where the previous one stopped if
+                // the engine hasn't reallocated the entries array;
+                // otherwise restart from index 0 against the new
+                // base so we capture every entry exactly once.
+                const auto cachedBase = g_lastEntriesBase.load(
+                    std::memory_order_acquire);
+                std::size_t startIdx = 0;
+                if (cachedBase == entriesBase)
+                    startIdx = g_lastEntriesIdx.load(
+                        std::memory_order_acquire);
+                const auto before = g_count.load(
+                    std::memory_order_acquire);
+                std::size_t nextIdx = startIdx;
+                walk_entries_array(entriesBase, startIdx, nextIdx);
+                const auto after = g_count.load(
+                    std::memory_order_acquire);
+                added = (after > before) ? (after - before) : 0;
+                g_lastEntriesBase.store(entriesBase,
+                                        std::memory_order_release);
+                g_lastEntriesIdx.store(nextIdx,
+                                       std::memory_order_release);
+                const auto prev = s_lastCount.exchange(
+                    after, std::memory_order_acq_rel);
+                if (added > 0)
+                {
+                    DMK::Logger::get_instance().info(
+                        "[interner-hook] refresh: entries=0x{:X} "
+                        "off=0x{:X} resumeFrom={} added={} total={} "
+                        "prev_total={} nextIdx={}",
+                        entriesBase, entriesOff, startIdx, added,
+                        after, prev, nextIdx);
+                }
+                // Two consecutive walks with the same total = the
+                // interner has stopped growing. Require a non-zero
+                // baseline so an early empty-table walk can't latch
+                // settled immediately.
+                if (after == prev && after > 0)
+                {
+                    s_settled.store(true, std::memory_order_release);
+                    DMK::Logger::get_instance().info(
+                        "[interner-hook] settled at {} captures; "
+                        "no further refreshes this session", after);
+                }
+            }
+        }
+        s_busy.store(false, std::memory_order_release);
+        return added;
     }
 
     const char *name_for_token(std::uint32_t tok) noexcept

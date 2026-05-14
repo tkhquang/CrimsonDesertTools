@@ -1,5 +1,7 @@
 #include "color_token_discovery.hpp"
 
+#include "../aob_resolver.hpp"
+
 #include <DetourModKit.hpp>
 #include <DetourModKit/scanner.hpp>
 
@@ -11,6 +13,7 @@
 #include <chrono>
 #include <cstring>
 #include <mutex>
+#include <optional>
 #include <vector>
 
 namespace DMK = DetourModKit;
@@ -181,45 +184,63 @@ namespace Transmog::ColorOverride::TokenSlotDiscovery
                 reinterpret_cast<const std::byte *>(mi.lpBaseOfDll);
             const auto size = mi.SizeOfImage;
 
-            // Registrar pattern (RE'd via IDA on sub_14274A3C0 and
-            // sub_142749F10, the two registrar functions for dye-
-            // property tokens):
+            // Walk every property-registration call site emitted by
+            // the two TLS-guarded registrars (sub_14274A3C0 and
+            // sub_142749F10). The pattern matches the 17-byte run:
             //
-            //   <zero-write>               6 or 7 bytes, decoded
+            //   <zero-write>               6 or 7 bytes; decoded
             //                              backward to get slot addr
             //   41 B9 FF FF 02 00          mov  r9d, 0x2FFFF  (6B)
             //   ?? 8D ?? 01                lea  r8d, [reg+1]  (4B)
-            //                              REX/ModR/M wildcarded -
-            //                              r13 (sub_14274A3C0) or
-            //                              rdi (sub_142749F10).
+            //                              REX/ModR/M wildcarded
+            //                              (reg is r13 for A, rdi
+            //                              for B).
             //   48 8D 15 ?? ?? ?? ??       lea  rdx, [name]   (7B)
             //   <rcx load>                 3 or 7 bytes (lea or mov)
             //   E8 ?? ?? ?? ??             call interner      (5B)
             //
-            // We anchor on the 17-byte run from `mov r9d, 0x2FFFF`
-            // through `lea rdx, [name]`. The `lea rdx` target is
-            // the property name string. The slot address is decoded
-            // from the zero-write instruction immediately PRECEDING
-            // the `mov r9d`:
+            // The `lea rdx` target is the property name string. The
+            // slot address is decoded from the zero-write instruction
+            // immediately PRECEDING the `mov r9d, 0x2FFFF` anchor:
             //
-            //   `89 3D disp32`       (6 bytes) - mov [rip+d], edi
-            //   `44 89 2D disp32`    (7 bytes) - mov [rip+d], r13d
+            //   89 3D disp32         (6B) - mov [rip+d], edi
+            //   44 89 2D disp32      (7B) - mov [rip+d], r13d
             //
             // Anchoring on the zero-write instead of `lea rcx` lets
             // us catch the first-entry-per-function case where rcx
-            // is loaded via `mov rcx, rbx`/`mov rcx, rsi` from a
+            // is loaded via `mov rcx, rbx` / `mov rcx, rsi` from a
             // preloaded table-base register. That entry is always
             // `_dyeingColorMaskR` and matters because the live game
             // emits its token id (0x2FCE).
-            constexpr std::string_view aob =
-                "41 B9 FF FF 02 00 "
-                "?? 8D ?? 01 "
-                "48 8D 15 ?? ?? ?? ??";
-            auto compiled = DMK::Scanner::parse_aob(aob);
-            if (!compiled)
+            //
+            // The pattern is intentionally non-unique: there is one
+            // match per registered property across the entire module
+            // (~2k hits on v1.06). The name-allow-list filter below
+            // accepts only the entries whose strings appear in
+            // k_known, so over-scanning is a performance concern
+            // rather than a correctness one.
+            // Compile all 3 walk patterns up front. We try each in
+            // turn over the module range; the inner accept logic
+            // dedups by slot_addr so a site matched by multiple
+            // patterns is recorded only once. Walking the union
+            // gives resilience: if a future patch reshapes one
+            // pattern's tail, the others still cover the call site.
+            const auto &aobs = Transmog::k_colorTokenRegistrarCallAobs;
+            std::array<
+                std::optional<DMK::Scanner::CompiledPattern>,
+                Transmog::k_colorTokenRegistrarCallAobCount>
+                compiledPatterns{};
+            std::size_t compiledCount = 0;
+            for (std::size_t pi = 0; pi < aobs.size(); ++pi)
+            {
+                compiledPatterns[pi] = DMK::Scanner::parse_aob(aobs[pi]);
+                if (compiledPatterns[pi]) ++compiledCount;
+            }
+            if (compiledCount == 0)
             {
                 DMK::Logger::get_instance().warning(
-                    "[token-discovery] AOB compile failed");
+                    "[token-discovery] all AOB candidates failed to "
+                    "compile");
                 g_complete.store(true, std::memory_order_release);
                 return;
             }
@@ -275,131 +296,163 @@ namespace Transmog::ColorOverride::TokenSlotDiscovery
                 }
             };
 
-            // Linear walk through the module: find_pattern returns
-            // first match in [cursor..end]; advance past it and
-            // continue.
+            // Linear walk through the module per pattern: for each
+            // compiled candidate, find_pattern returns the first
+            // match in [cursor..end]; we advance past it and
+            // continue. The accept logic dedups by slot_addr so
+            // patterns whose hit sets overlap (P1 is a superset of
+            // P2 and P3) record each unique slot exactly once.
             //
-            // The 17-byte pattern can match a large number of false
+            // The head pattern can match a large number of false
             // positives early in the binary because the wildcard
             // bytes give it some slack. Real registrar sites cluster
             // around 0x142749F00 / 0x14274A3C0, so we may need to
             // walk past several thousand false-positive matches
-            // before reaching them. Cap is set generously and the
-            // wall-clock budget remains the real safety net.
-            constexpr std::size_t k_maxIters = 50000;
+            // before reaching them. Per-pattern cap is set
+            // generously; the shared wall-clock budget across all
+            // patterns is the real safety net.
+            constexpr std::size_t k_maxItersPerPattern = 50000;
             constexpr auto k_timeBudget =
                 std::chrono::milliseconds(3000);
-            // The matched pattern is 17 bytes. The anchor we care
-            // about is the start of `41 B9 FF FF 02 00`. Advance
-            // cursor past the matched range each iteration.
-            constexpr std::size_t k_patternLen = 17;
-            const std::byte *cursor = base;
-            std::size_t bytes_left = size;
-            std::size_t hits = 0;
+            // The anchor we care about is the start of
+            // `41 B9 FF FF 02 00` (17 bytes). Advance cursor by the
+            // shared head length each iteration even if the matched
+            // pattern is longer (P2/P3 tails are not needed for
+            // overlap-prevention; their hit ranges always extend
+            // past the head and never abut another distinct site).
+            constexpr std::size_t k_patternHeadLen =
+                Transmog::k_colorTokenRegistrarCallAobHeadLen;
+
+            std::size_t totalHits = 0;
+            std::size_t totalIter = 0;
             std::size_t accepted = 0;
-            std::size_t iter = 0;
-            for (; iter < k_maxIters; ++iter)
+            bool budgetExceeded = false;
+            for (std::size_t pi = 0;
+                 pi < compiledPatterns.size() && !budgetExceeded;
+                 ++pi)
             {
-                if (clock::now() - t0 > k_timeBudget)
-                {
-                    DMK::Logger::get_instance().warning(
-                        "[token-discovery] time budget exceeded at "
-                        "iter={} hits={} (bailing)",
-                        iter, hits);
-                    break;
-                }
-                if (bytes_left < k_patternLen) break;
-                const auto *m = DMK::Scanner::find_pattern(
-                    cursor, bytes_left, *compiled);
-                if (m == nullptr) break;
-                ++hits;
+                if (!compiledPatterns[pi]) continue;
+                const auto &compiled = *compiledPatterns[pi];
 
-                const auto matchAddr =
-                    reinterpret_cast<std::uintptr_t>(m);
-
-                // Decode lea rdx target (at offset 10 in the
-                // matched run; the disp32 is 3 bytes into the lea).
-                const auto strAddr = decode_lea_rip(
-                    m + 10, 0x48, 0x8D, 0x15);
-                if (strAddr == 0)
+                const std::byte *cursor = base;
+                std::size_t bytes_left = size;
+                std::size_t patternHits = 0;
+                std::size_t iter = 0;
+                for (; iter < k_maxItersPerPattern; ++iter)
                 {
-                    cursor = m + 1;
-                    bytes_left = (base + size) - cursor;
-                    continue;
-                }
-
-                // Diagnostic trace: log first 5 match decodes (with
-                // a peek at the first 32 bytes of the candidate
-                // name string) so we can sanity-check the decode
-                // pipeline.
-                static std::atomic<std::size_t> s_traceLeft{5};
-                if (s_traceLeft.load(std::memory_order_acquire) > 0)
-                {
-                    if (s_traceLeft.fetch_sub(
-                            1, std::memory_order_acq_rel) > 0)
+                    if (clock::now() - t0 > k_timeBudget)
                     {
-                        char preview[33] = {0};
-                        peek_name_preview(strAddr, preview,
-                                          sizeof(preview));
-                        DMK::Logger::get_instance().trace(
-                            "[token-discovery] trace: site=0x{:X} "
-                            "strAddr=0x{:X} preview='{}'",
-                            matchAddr, strAddr, preview);
-                    }
-                }
-
-                // Match against known names; only proceed if a hit.
-                const KnownProp *matched_kp = nullptr;
-                for (const auto &kp : k_known)
-                {
-                    if (name_matches(strAddr, kp.name))
-                    {
-                        matched_kp = &kp;
+                        DMK::Logger::get_instance().warning(
+                            "[token-discovery] time budget exceeded "
+                            "at pattern={} iter={} hits={} (bailing)",
+                            pi, iter, patternHits);
+                        budgetExceeded = true;
                         break;
                     }
-                }
-                if (matched_kp != nullptr)
-                {
-                    const auto slotAddr = decode_zero_write_slot(m);
-                    if (slotAddr != 0)
+                    if (bytes_left < k_patternHeadLen) break;
+                    const auto *m = DMK::Scanner::find_pattern(
+                        cursor, bytes_left, compiled);
+                    if (m == nullptr) break;
+                    ++patternHits;
+
+                    const auto matchAddr =
+                        reinterpret_cast<std::uintptr_t>(m);
+
+                    // Decode `lea rdx, [rip+disp32]` target (at
+                    // offset 10 in the matched run; the disp32 is
+                    // 3 bytes into the lea).
+                    const auto strAddr = decode_lea_rip(
+                        m + 10, 0x48, 0x8D, 0x15);
+                    if (strAddr == 0)
                     {
-                        bool dup = false;
-                        for (const auto &s : g_slots)
+                        cursor = m + 1;
+                        bytes_left = (base + size) - cursor;
+                        continue;
+                    }
+
+                    // Diagnostic trace: log first 5 match decodes
+                    // across all patterns (with a peek at the first
+                    // 32 bytes of the candidate name string) so we
+                    // can sanity-check the decode pipeline.
+                    static std::atomic<std::size_t> s_traceLeft{5};
+                    if (s_traceLeft.load(
+                            std::memory_order_acquire) > 0)
+                    {
+                        if (s_traceLeft.fetch_sub(
+                                1, std::memory_order_acq_rel) > 0)
                         {
-                            if (s.slot_addr == slotAddr)
-                            {
-                                dup = true;
-                                break;
-                            }
-                        }
-                        if (!dup)
-                        {
-                            g_slots.push_back(
-                                {slotAddr, matched_kp->name,
-                                 matched_kp->layer,
-                                 matched_kp->channel});
-                            ++accepted;
-                            DMK::Logger::get_instance().info(
-                                "[token-discovery] slot=0x{:X} '{}' "
-                                "layer={} channel={} site=0x{:X}",
-                                slotAddr, matched_kp->name,
-                                matched_kp->layer,
-                                matched_kp->channel, matchAddr);
+                            char preview[33] = {0};
+                            peek_name_preview(strAddr, preview,
+                                              sizeof(preview));
+                            DMK::Logger::get_instance().trace(
+                                "[token-discovery] trace: P{} "
+                                "site=0x{:X} strAddr=0x{:X} "
+                                "preview='{}'",
+                                pi + 1, matchAddr, strAddr,
+                                preview);
                         }
                     }
-                }
 
-                cursor = m + k_patternLen;
-                bytes_left = (base + size) - cursor;
+                    // Match against known names; only proceed on a
+                    // hit. Names are short (<32 chars) so the
+                    // linear scan is cheap.
+                    const KnownProp *matched_kp = nullptr;
+                    for (const auto &kp : k_known)
+                    {
+                        if (name_matches(strAddr, kp.name))
+                        {
+                            matched_kp = &kp;
+                            break;
+                        }
+                    }
+                    if (matched_kp != nullptr)
+                    {
+                        const auto slotAddr =
+                            decode_zero_write_slot(m);
+                        if (slotAddr != 0)
+                        {
+                            bool dup = false;
+                            for (const auto &s : g_slots)
+                            {
+                                if (s.slot_addr == slotAddr)
+                                {
+                                    dup = true;
+                                    break;
+                                }
+                            }
+                            if (!dup)
+                            {
+                                g_slots.push_back(
+                                    {slotAddr, matched_kp->name,
+                                     matched_kp->layer,
+                                     matched_kp->channel});
+                                ++accepted;
+                                DMK::Logger::get_instance().trace(
+                                    "[token-discovery] slot=0x{:X} "
+                                    "'{}' layer={} channel={} "
+                                    "site=0x{:X} via P{}",
+                                    slotAddr, matched_kp->name,
+                                    matched_kp->layer,
+                                    matched_kp->channel, matchAddr,
+                                    pi + 1);
+                            }
+                        }
+                    }
+
+                    cursor = m + k_patternHeadLen;
+                    bytes_left = (base + size) - cursor;
+                }
+                totalHits += patternHits;
+                totalIter += iter;
             }
 
             const auto elapsed =
                 std::chrono::duration_cast<std::chrono::milliseconds>(
                     clock::now() - t0).count();
             DMK::Logger::get_instance().info(
-                "[token-discovery] scan complete: iter={} hits={} "
-                "slots={} elapsed_ms={}",
-                iter, hits, accepted,
+                "[token-discovery] scan complete: patterns={} "
+                "iter={} hits={} slots={} elapsed_ms={}",
+                compiledCount, totalIter, totalHits, accepted,
                 static_cast<long long>(elapsed));
             g_complete.store(true, std::memory_order_release);
         }
@@ -413,6 +466,74 @@ namespace Transmog::ColorOverride::TokenSlotDiscovery
     bool is_complete() noexcept
     {
         return g_complete.load(std::memory_order_acquire);
+    }
+
+    // Re-run the AOB scan when the live capture looks underpopulated.
+    // Cold start can miss registrar call sites whose code pages
+    // haven't been committed yet (Windows lazy commit); the engine
+    // also lazy-loads materials, so registrars that live in
+    // material-specific shader-glue routines can land in memory
+    // long after our initial init pass.
+    //
+    // No hard attempt cap. Mirroring the item_name_table catalog
+    // stability check: keep re-scanning on the hot path until two
+    // consecutive scans produce the same slot count -- THAT means
+    // the engine has stopped adding new registrars and our table
+    // has settled. After settle, this becomes a permanent no-op for
+    // the rest of the session.
+    //
+    // Throttled to ~1.5 s between attempts so we don't hammer the
+    // 600-800 ms scan in a hot loop. do_run() dedups against g_slots,
+    // so an interrupted re-scan is safe.
+    void retry_if_underpopulated(std::size_t expectedMin) noexcept
+    {
+        static std::atomic<bool> s_settled{false};
+        static std::atomic<long long> s_lastMs{0};
+        static std::atomic<bool> s_busy{false};
+        static std::atomic<std::size_t> s_lastCount{0};
+        if (s_settled.load(std::memory_order_acquire)) return;
+        using clock = std::chrono::steady_clock;
+        const auto nowMs = std::chrono::duration_cast<
+            std::chrono::milliseconds>(
+                clock::now().time_since_epoch()).count();
+        auto last = s_lastMs.load(std::memory_order_acquire);
+        if (last != 0 && (nowMs - last) < 1500) return;
+        // Single-flight guard: only one thread enters do_run at a
+        // time. Other concurrent callers see s_busy and bail.
+        bool expected = false;
+        if (!s_busy.compare_exchange_strong(
+                expected, true, std::memory_order_acq_rel))
+            return;
+        s_lastMs.store(nowMs, std::memory_order_release);
+        const auto before = g_slots.size();
+        // do_run sets g_complete=true at the end; allow re-run by
+        // resetting the flag locally (g_runOnce stays satisfied for
+        // the original call path so external `run()` callers still
+        // skip).
+        g_complete.store(false, std::memory_order_release);
+        do_run();
+        const auto after = g_slots.size();
+        const auto prev = s_lastCount.exchange(
+            after, std::memory_order_acq_rel);
+        if (after != before)
+        {
+            DMK::Logger::get_instance().info(
+                "[token-discovery] re-scan: slots {} -> {} "
+                "(prev_total={} expectedMin={})",
+                before, after, prev, expectedMin);
+        }
+        // Settle = two consecutive scans returned the same count AND
+        // we've met the expected baseline. Without the baseline gate,
+        // an early scan that finds 0 slots could "settle" immediately
+        // on the next 0-slot scan and freeze the retry permanently.
+        if (after == prev && after >= expectedMin)
+        {
+            s_settled.store(true, std::memory_order_release);
+            DMK::Logger::get_instance().info(
+                "[token-discovery] settled at {} slots; "
+                "no further re-scans this session", after);
+        }
+        s_busy.store(false, std::memory_order_release);
     }
 
     int classify_layer(std::uint32_t tok) noexcept

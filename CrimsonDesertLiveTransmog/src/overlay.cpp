@@ -34,6 +34,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cmath>
 #include <cstdarg>
 #include <cstdint>
 #include <cstdio>
