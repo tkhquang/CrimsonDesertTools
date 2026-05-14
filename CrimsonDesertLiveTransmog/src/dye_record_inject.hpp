@@ -133,4 +133,15 @@ namespace Transmog::DyeRecordInject
         const char *source,
         const char *slotName,
         const ChannelState (&state)[k_dyeChannelCount]) noexcept;
+
+    /// Read the first ACTIVE channel's RGB from the currently
+    /// published slot dye state. Returns true if the slot has any
+    /// active channel and `r/g/b` are filled; false if no inject
+    /// is active or all channels are zero. Used by
+    /// `ColorOverride::SetterSubstitute` to know what color to redirect the
+    /// engine's per-property setter to.
+    bool get_published_first_active_rgb(
+        std::uint8_t *r,
+        std::uint8_t *g,
+        std::uint8_t *b) noexcept;
 }

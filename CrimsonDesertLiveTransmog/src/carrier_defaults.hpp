@@ -57,11 +57,11 @@ namespace Transmog
         // captured via in-game item-mesh mapping.
         // ============================================================
         {
-            { "Kliff_PlateArmor_Helm",                       "cd_phm_00_hel_00_0435_d"           }, // Helm
-            { "Kliff_PlateArmor_Armor",                      "cd_phm_00_ub_00_0435"              }, // Chest
-            { "Kliff_PlateArmor_Cloak",                      "cd_phm_00_cloak_00_0435_s"         }, // Cloak
-            { "Kliff_PlateArmor_Gloves",                     "cd_phm_00_hand_00_0435"            }, // Gloves
-            { "Kliff_Plate_Boots",                           "cd_phm_00_foot_00_0435"            }, // Boots
+            { "Scovi_Fabric_Helm",                       "cd_phm_00_hel_0122"                }, // Helm
+            { "Mercenary_Leather_Armor",                      "cd_phm_00_ub_00_0054"              }, // Chest
+            { "Mercenary_Leather_Cloak",                      "cd_phm_00_cloak_00_0054_s"         }, // Cloak
+            { "Mercenary_Gloves",                     "cd_phm_00_hand_0054"               }, // Gloves
+            { "Mercenary_Leather_Boots",                           "cd_phm_00_foot_0054"               }, // Boots
             { "Hexe_Earring",                                "cd_phm_00_earring_0013_l"          }, // Earring1
             { "Ancient_People_Earring",                      "cd_phm_00_earring_0004_r"          }, // Earring2
             { "Titan_Necklace",                              "cd_phm_00_necklace_0017"           }, // Necklace
@@ -120,11 +120,11 @@ namespace Transmog
         // body-mesh hook registers all variants of the base prefab.
         // ============================================================
         {
-            { "Oongka_PlateArmor_Helm_II",                   "cd_phm_00_hel_00_0439_c"           }, // Helm
-            { "Oongka_PlateArmor_Armor_II",                  "cd_phm_00_ub_00_0439"              }, // Chest
-            { "Oongka_PlateArmor_Cloak_II",                  "cd_phm_00_cloak_00_0439_s"         }, // Cloak
-            { "Oongka_PlateArmor_Gloves_II",                 "cd_phm_00_hand_00_0439"            }, // Gloves
-            { "Oongka_PlateArmor_Boots_II",                  "cd_phm_00_foot_00_0439"            }, // Boots
+            { "Derish_Fabric_Helm",                   "cd_phm_00_hel_0050"                }, // Helm
+            { "Mercenary_Leather_Armor",                      "cd_phm_00_ub_00_0054"              }, // Chest
+            { "Mercenary_Leather_Cloak",                      "cd_phm_00_cloak_00_0054_s"         }, // Cloak
+            { "Mercenary_Gloves",                     "cd_phm_00_hand_0054"               }, // Gloves
+            { "Mercenary_Leather_Boots",                           "cd_phm_00_foot_0054"               }, // Boots
             { "Bilibili_Earring",                            "cd_phm_00_earring_0008_l_index02"  }, // Earring1
             { "WhiteHorn_Earring",                           "cd_phm_00_earring_0014_l"          }, // Earring2
             { "Bilibili_Necklace",                           "cd_phm_00_necklace_0004_index02"   }, // Necklace

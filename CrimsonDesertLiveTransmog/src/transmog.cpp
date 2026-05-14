@@ -1,6 +1,10 @@
 #include "transmog.hpp"
 #include "aob_resolver.hpp"
+#include "color_override/color_override.hpp"
+#include "color_override/color_token_table.hpp"
+#include "color_override/host_scope.hpp"
 #include "dye_record_inject.hpp"
+#include "color_override/setter_substitute.hpp"
 #include "generated/dye_color_table.hpp"
 #include "prefab_wrapper_swap.hpp"
 #include "constants.hpp"
@@ -25,9 +29,11 @@
 
 #include <Windows.h>
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <string>
+#include <thread>
 
 namespace Transmog
 {
@@ -54,6 +60,16 @@ namespace Transmog
                 set_force_standalone(val);
             },
             false);
+
+        // Experimental: master toggle for the per-shader-property
+        // ColorOverride pipeline (publisher hook, setter substitute,
+        // host-scope owner-vfunc midhooks, and the per-region color
+        // picker UI). Disabled by default; the feature relies on
+        // AOB-resolved engine entry points that may shift under a
+        // major game patch.
+        DMK::Config::register_atomic<bool>(
+            "Experimental", "ColorOverride", "Color Override",
+            flag_color_override(), false);
 
         // Auto-reload toggle. Off-by-default would force a relaunch for
         // every INI tweak; on-by-default keeps the iteration loop tight.
@@ -244,6 +260,45 @@ namespace Transmog
     // call to read_entry_dye_records() can fault if the caller
     // hands us a stale or torn auth table. capture_outfit()'s
     // __try/__except is the only line of defence.
+    // Copy a captured live-dye snapshot into a preset slot's per-
+    // channel dye state. Skips channels with `group_hash == 0`,
+    // resolves `group_name` from the static DyeColorTable so the
+    // string-key survives a renumbered hash table across patches,
+    // and flips `dyeSparse=true` so the apply path emits only the
+    // channels the source item actually colours. Returns the count
+    // of non-empty channels written. The caller owns any pre-wipe
+    // of `slotPreset.dye[]` before invoking.
+    static std::size_t apply_live_dye_to_preset_slot(
+        PresetSlot &slotPreset,
+        const DyeRecordInject::ChannelState (&live)
+            [DyeRecordInject::k_dyeChannelCount]) noexcept
+    {
+        slotPreset.dyeSparse = true;
+        std::size_t written = 0;
+        for (std::size_t k = 0;
+             k < DyeRecordInject::k_dyeChannelCount; ++k)
+        {
+            const auto &src = live[k];
+            if (src.group_hash == 0)
+                continue;
+            auto &dst = slotPreset.dye[k];
+            dst.group_hash  = src.group_hash;
+            dst.r           = src.r;
+            dst.g           = src.g;
+            dst.b           = src.b;
+            dst.material_id = src.material_id;
+            dst.repair_byte = src.repair_byte;
+            const auto *grp =
+                DyeColorTable::find_group(src.group_hash);
+            if (grp != nullptr && grp->string_key != nullptr)
+                dst.group_name = grp->string_key;
+            else
+                dst.group_name.clear();
+            ++written;
+        }
+        return written;
+    }
+
     static void capture_live_dye_into_active_preset(
         uintptr_t entryArray, uint32_t entryCount) noexcept
     {
@@ -298,34 +353,12 @@ namespace Transmog
                 slot_name(*tmSlot),
                 live);
 
-            // Mark this slot as a real-item capture so the apply
-            // path emits sparse records (only the channels the
-            // item actually colours). The PresetSlot default is
-            // already `true`; we set it explicitly because a slot
-            // that was previously edited as picker-dense and is
-            // now being recaptured needs to flip back to sparse.
-            activePreset->slots[idx].dyeSparse = true;
-            auto &slotDye = activePreset->slots[idx].dye;
-            for (std::size_t k = 0;
-                 k < DyeRecordInject::k_dyeChannelCount; ++k)
-            {
-                const auto &src = live[k];
-                if (src.group_hash == 0)
-                    continue;
-                auto &dst = slotDye[k];
-                dst.group_hash = src.group_hash;
-                dst.r = src.r;
-                dst.g = src.g;
-                dst.b = src.b;
-                dst.material_id = src.material_id;
-                dst.repair_byte = src.repair_byte;
-                const auto *grp =
-                    DyeColorTable::find_group(src.group_hash);
-                if (grp != nullptr && grp->string_key != nullptr)
-                    dst.group_name = grp->string_key;
-                else
-                    dst.group_name.clear();
-            }
+            // Real-item capture -- the apply path emits sparse
+            // records (only channels the item actually colours).
+            // A slot previously edited in picker-dense mode also
+            // flips back to sparse here.
+            apply_live_dye_to_preset_slot(
+                activePreset->slots[idx], live);
             any = true;
             logger.info(
                 "    -> {} dye channel(s) captured for {}",
@@ -488,6 +521,117 @@ namespace Transmog
         {
             logger.warning("capture_real_equipment: access fault");
         }
+    }
+
+    // SEH-walk helper for sync_live_dye_for_slot. Split into its own
+    // function because the caller mutates std::string members and
+    // MSVC C2712 forbids __try in functions that require C++ object
+    // unwinding. Returns 0 on miss or fault.
+    static uintptr_t find_auth_entry_for_game_tag(
+        __int64 a1, std::int16_t gameTag) noexcept
+    {
+        uintptr_t entryBase = 0;
+        __try
+        {
+            const auto entryDesc =
+                *reinterpret_cast<uintptr_t *>(a1 + k_compEntryTablePtrOffset);
+            if (entryDesc < 0x10000)
+                return 0;
+            const auto entryArray =
+                *reinterpret_cast<uintptr_t *>(entryDesc + 8);
+            const auto entryCount =
+                *reinterpret_cast<uint32_t *>(entryDesc + 16);
+            for (uint32_t e = 0; e < entryCount && entryArray > 0x10000; ++e)
+            {
+                const auto base = entryArray + e * k_compEntryStride;
+                const auto sl = *reinterpret_cast<int16_t *>(
+                    base + k_compEntrySlotTagOffset);
+                if (sl == gameTag)
+                {
+                    entryBase = base;
+                    break;
+                }
+            }
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return 0;
+        }
+        return entryBase;
+    }
+
+    bool sync_live_dye_for_slot(std::size_t slotIdx) noexcept
+    {
+        auto &logger = DMK::Logger::get_instance();
+        if (slotIdx >= k_slotCount)
+            return false;
+        if (!Transmog::slot_enabled(slotIdx))
+        {
+            logger.info("[dye-sync] slot {} disabled in mod config -- skipped",
+                        slotIdx);
+            return false;
+        }
+
+        auto *activePreset =
+            PresetManager::instance().active_preset_mut();
+        if (activePreset == nullptr)
+            return false;
+        if (slotIdx >= activePreset->slots.size())
+            return false;
+
+        const auto tslot = static_cast<TransmogSlot>(slotIdx);
+        const auto gameTag = game_slot_from_transmog(tslot);
+
+        const auto a1 = get_player_a1();
+        if (a1 < 0x10000)
+        {
+            logger.info("[dye-sync] player not found -- skipped");
+            return false;
+        }
+
+        const auto entryBase =
+            find_auth_entry_for_game_tag(a1, gameTag);
+        if (entryBase == 0)
+        {
+            logger.info("[dye-sync] no auth-table entry for slot {} "
+                        "(gameTag={:#x}) -- skipped",
+                        slot_name(tslot), gameTag);
+            return false;
+        }
+
+        DyeRecordInject::ChannelState
+            live[DyeRecordInject::k_dyeChannelCount];
+        const auto dyeFilled =
+            DyeRecordInject::read_entry_dye_records(entryBase, live);
+        if (dyeFilled == 0)
+        {
+            logger.info("[dye-sync] slot {} has no live dye records -- "
+                        "preset slot left untouched",
+                        slot_name(tslot));
+            return false;
+        }
+
+        DyeRecordInject::log_dye_snapshot(
+            "sync", slot_name(tslot), live);
+
+        // Wipe before writing so channels not present in `live` do
+        // not linger from a prior picker session (matches the
+        // capture_outfit per-slot pattern).
+        auto &slotPreset = activePreset->slots[slotIdx];
+        for (auto &ch : slotPreset.dye)
+            ch = ChannelDye{};
+
+        const bool any =
+            apply_live_dye_to_preset_slot(slotPreset, live) > 0;
+
+        if (any)
+        {
+            dye_dirty().store(true, std::memory_order_release);
+            logger.info(
+                "[dye-sync] slot {} captured {} channel(s) from live engine",
+                slot_name(tslot), dyeFilled);
+        }
+        return any;
     }
 
     // --- Init / Shutdown ---
@@ -978,18 +1122,32 @@ namespace Transmog
         // the underlying real item.
         DyeRecordInject::init();
 
+        // ColorOverride is a tri-hook subsystem (host-scope owner
+        // vfuncs, setter property substitute, publisher per-matInst
+        // capture). Gated behind the `[Experimental] ColorOverride`
+        // INI key so the hooks don't install on the default
+        // configuration; the picker UI keys off the same flag.
+        if (flag_color_override().load(std::memory_order_acquire))
+        {
+            ColorOverride::HostScope::init();
+            ColorOverride::SetterSubstitute::init();
+            Transmog::ColorOverride::init();
+        }
+        else
+        {
+            DMK::Logger::get_instance().info(
+                "[color-override] disabled by [Experimental] "
+                "ColorOverride=false; subsystem skipped");
+        }
+
         // Crimson Desert has TWO independent dye layers:
         //   1. Bench/menu UI dyeability -- gated by the
-        //      partprefabdyeslotinfo.pabgb registry. Items not in
-        //      the registry cannot be dyed at the dye bench (this is
-        //      what data-file dye-unlock mods modify).
-        //   2. Render-time dye apply -- engine reads dye records
-        //      from a publish vector at dst+120 during slotpop.
-        //      The DyeRecordInject inline detour on sub_141E019E0
-        //      injects user-chosen records here.
-        //
-        // LT operates at layer 2 only. Layer 1 is not traversed during
-        // LT's apply path, so layer-1 unlocks are not replicated here.
+        //      partprefabdyeslotinfo.pabgb registry. Not modified at
+        //      runtime; static PAZ overlays handle this externally.
+        //   2. Render-time dye apply -- engine reads dye records from
+        //      a publish vector at dst+120 during slotpop. The
+        //      DyeRecordInject inline detour on sub_141E019E0 (init
+        //      above) injects user-chosen records here.
 
         start_load_detect_thread();
         ensure_apply_worker_started();

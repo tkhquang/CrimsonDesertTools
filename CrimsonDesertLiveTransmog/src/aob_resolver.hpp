@@ -1071,4 +1071,210 @@ namespace Transmog
          ResolveMode::Direct, -0x77, 0},
     };
 
+    /**
+     * @brief ColorPublisher (sub_142F59370) -- per-(dst, src) matInst
+     *        publisher invoked from the matInst-list copy loop. ColorOverride
+     *        installs a MidHook here so every dst matInst exposed during
+     *        a transmog apply gets its content_hash and slot cached into
+     *        MatInstOwner / CarrierSet for the setter substitute to query.
+     *
+     * The prologue saves seven callee-saved registers (rbp, rbx, rsi,
+     * rdi, r12-r15) and frames with `lea rbp,[rsp-0x1F]; sub rsp,
+     * 0xF8`. The wide saved-reg window plus the `lea rax, [rip+disp32]`
+     * to a vtable constant make the prologue distinctive enough that
+     * a 7-instruction window matches uniquely.
+     */
+    inline constexpr AddrCandidate k_colorPublisherCandidates[] = {
+        // P1 -- full prologue. The stack-alloc imm32 (`F8 00 00 00`)
+        // is wildcarded because the frame size can shift if locals
+        // are added or removed in a patch. The trailing `48 8D 05`
+        // (lea rax, [rip+disp32]) literal leads into a vtable RIP-
+        // relative that we deliberately stop one byte before -- the
+        // disp32 itself is volatile so we don't include it. 1 unique
+        // hit on v1.06.
+        {"ColorPublisher_P1_FullPrologue",
+         "4C 89 44 24 18 48 89 54 24 10 55 53 56 57 41 54 41 55 41 56 "
+         "41 57 48 8D 6C 24 E1 48 81 EC ?? ?? ?? ?? 49 8B F8 4C 8B EA "
+         "4C 8B F9 48 8D 05",
+         ResolveMode::Direct, 0, 0},
+
+        // P2 -- post-saves frame anchor. Picks up at the `lea
+        // rbp,[rsp-0x1F]; sub rsp, ???` pair followed by the arg-
+        // reload triple (mov rdi,r8 / mov r13,rdx / mov r15,rcx).
+        // Walk-back -0x16 (22 bytes) to function start.
+        {"ColorPublisher_P2_PostSavesFrame",
+         "48 8D 6C 24 E1 48 81 EC ?? ?? ?? ?? 49 8B F8 4C 8B EA 4C 8B F9 "
+         "48 8D 05",
+         ResolveMode::Direct, -0x16, 0},
+
+        // P3 -- mid-body permutations-token canary XOR. The engine
+        // computes `(prev_canary ^ al) & 1 ^ prev_canary` and stores
+        // it back, then ORs 2 into the result. This bit-twiddle has
+        // a unique fingerprint:
+        //   movzx r10d,[rbp+X]   ; load prev canary
+        //   xor   r10b, al        ; xor with new lsb
+        //   and   r10b, 1         ; mask
+        //   xor   r10b, [rbp+X]   ; flip prev
+        //   mov   [rbp+X], r10b   ; store
+        //   movzx eax, r10b       ; reload
+        //   or    al, 2            ; mark "seen"
+        //   mov   [rbp+X], al     ; store again
+        // The disp8 frame slot reused throughout is a single byte
+        // and is kept literal because the function reuses the same
+        // local across all writes. 1 unique hit on v1.06. Walk-back
+        // -0x43 to function start.
+        {"ColorPublisher_P3_PermutCanaryXor",
+         "44 0F B6 55 AF 44 32 D0 41 80 E2 01 44 32 55 AF "
+         "44 88 55 AF 41 0F B6 C2 0C 02 88 45 AF",
+         ResolveMode::Direct, -0x43, 0},
+    };
+
+    /**
+     * @brief HostScope OwnerVfunc1 (sub_14204FD40) -- per-host owner-
+     *        container vtable slot that invokes the matInst-list copy
+     *        loop (sub_141026640) which in turn dispatches the publisher.
+     *        Mid-hooked by ColorOverride::HostScope to capture rcx (the
+     *        live owner container) for the player-vs-NPC election.
+     *
+     * The function is one of three byte-identical sibling thunks
+     * (the other two at 0x1404F1710 and 0x1428EC250 share the entire
+     * body except the inner `call rel32` disp32, which is unique per
+     * thunk and therefore unusable as a stable anchor). The only
+     * patch-stable way to single this thunk out is to anchor on the
+     * preceding function's tail epilogue + alignment padding, then
+     * walk forward into the prologue.
+     */
+    inline constexpr AddrCandidate k_hostScopeVfunc1Candidates[] = {
+        // P1 -- preceding-function epilogue + 3-byte CC alignment +
+        // full thunk prologue head. The preceding fn ends with the
+        // semantic vector pop-back sequence:
+        //   lea  eax,[rcx-1]
+        //   mov  rbp,[rsp+0x48]
+        //   mov  [rsi+8],eax        ; vec.count = vec.count - 1
+        //   add  rsp, 0x20
+        //   pop  rsi
+        //   ret
+        // followed by 3 bytes of `CC CC CC` padding and then the
+        // thunk's prologue. 1 unique hit on v1.06. Walk forward
+        // +0x14 (20 bytes) to thunk entry. Brittle if the preceding
+        // function or its padding shifts under a patch; P2 / P3 give
+        // closer-in fallbacks.
+        {"HostScopeVfunc1_P1_PrevTailPadStart",
+         "8D 41 FF 48 8B 6C 24 48 89 46 08 48 83 C4 20 5E C3 "
+         "CC CC CC "
+         "48 89 5C 24 08 48 89 6C 24 10 56 57 41 56 48 83 EC 30 "
+         "45 33 F6 49 8B F9",
+         ResolveMode::Direct, +0x14, 0},
+
+        // P2 -- shorter preceding-tail anchor starting at the
+        // `mov [rsi+8],eax` store. Drops the `lea eax,[rcx-1]` head
+        // so a patch that reuses an equivalent post-decrement pattern
+        // still matches. 1 unique hit on v1.06. Walk forward +0xC
+        // (12 bytes) to thunk entry.
+        {"HostScopeVfunc1_P2_PrevPopCountPadStart",
+         "89 46 08 48 83 C4 20 5E C3 "
+         "CC CC CC "
+         "48 89 5C 24 08 48 89 6C 24 10 56 57 41 56 48 83 EC 30 "
+         "45 33 F6 49 8B F9",
+         ResolveMode::Direct, +0x0C, 0},
+
+        // P3 -- minimal preceding-tail anchor starting at the `pop
+        // rsi; ret`. Keeps just the 3-byte padding + the deep thunk
+        // prologue (including the `test r9, r9` arg-null guard) for
+        // disambiguation. 1 unique hit on v1.06. Walk forward +0x5
+        // (5 bytes) to thunk entry.
+        {"HostScopeVfunc1_P3_PrevRetPadStart",
+         "5E C3 CC CC CC "
+         "48 89 5C 24 08 48 89 6C 24 10 56 57 41 56 48 83 EC 30 "
+         "45 33 F6 49 8B F9 49 8B E8 48 8B DA 48 8B F1 4D 85 C9",
+         ResolveMode::Direct, +0x05, 0},
+    };
+
+    /**
+     * @brief HostScope OwnerVfunc2 (sub_142050690) -- sibling per-host
+     *        owner-container vtable slot. Same role as Vfunc1 (capture
+     *        rcx as the live owner container) but with a distinct
+     *        prologue, so it admits a direct-prologue anchor without
+     *        relying on the preceding function.
+     */
+    inline constexpr AddrCandidate k_hostScopeVfunc2Candidates[] = {
+        // P1 -- full prologue. Spills 4 args (rbx, rbp, rsi, rdi),
+        // pushes r14, allocates 0x60 of stack, then loads rbx <- rdx
+        // and rdi <- rcx, zeros r14d, and tests r9b (the inline-call
+        // optimization flag arg). The combination of 4 spilled args
+        // + `41 56` push r14 + `48 83 EC 60` is what makes this
+        // prologue distinctive vs siblings; 1 unique hit on v1.06.
+        {"HostScopeVfunc2_P1_FullPrologue",
+         "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 48 89 7C 24 20 "
+         "41 56 48 83 EC 60 48 8B DA 48 8B F9 45 33 F6 45 84 C9",
+         ResolveMode::Direct, 0, 0},
+
+        // P2 -- post-arg-spill + frame setup + arg flag test. Anchors
+        // past the four 5-byte arg-home stores; the `74 6D` short jz
+        // is the early-return when the flag arg is zero. Walk-back
+        // -0x14 (20 bytes) to function start.
+        {"HostScopeVfunc2_P2_PostArgSpillFlagTest",
+         "41 56 48 83 EC 60 48 8B DA 48 8B F9 45 33 F6 45 84 C9 "
+         "74 6D 48 8D 4C 24 38 E8 ?? ?? ?? ?? 90 48 8B 74 24 38",
+         ResolveMode::Direct, -0x14, 0},
+
+        // P3 -- post first-call NOP + vtable-call into the inner
+        // copier. The `90` is a single-byte alignment NOP that the
+        // compiler emits between the `call rel32` and the next
+        // instruction; `mov rsi,[rsp+0x38]` reloads the saved
+        // argument. The `test rsi, rsi; jz` rejects null input. Walk-
+        // back -0x32 (50 bytes) to function start.
+        {"HostScopeVfunc2_P3_PostFirstCallNop",
+         "90 48 8B 74 24 38 48 85 F6 74 ?? 48 8B 07 48 8D 53 08 "
+         "48 85 DB 49 0F 44 D6 48 8B CF FF 90 20 03 00 00",
+         ResolveMode::Direct, -0x32, 0},
+    };
+
+    /**
+     * @brief PropertyByteSetter (sub_140A03810) -- 4-byte property
+     *        descriptor's BYTE-variant write path. Mid-hooked by
+     *        ColorOverride::SetterSubstitute so the engine's per-property
+     *        color writes can be redirected to user-chosen RGB values.
+     *
+     * The function tests the descriptor's callback at `[rcx+0x78]`,
+     * falls through to a 4-byte equality test when present, and tail-
+     * jumps to a downstream writer on mismatch. A sibling at sub_14091CC90
+     * shares the entire byte-compare body but reads property bytes as
+     * DWORD (`41 8B 01`) instead of byte-per-byte (`41 0F B6 01`); that
+     * single 4-byte opcode difference at offset +0x23 is the unique
+     * discriminator and is kept literal in every candidate below.
+     */
+    inline constexpr AddrCandidate k_setterByteCandidates[] = {
+        // P1 -- full prologue + first byte load. The `74 ??` rel8
+        // jumps are kept literal because their distances (`66` and
+        // `40`) form part of the unique fingerprint -- if a patch
+        // changes them the next candidate covers the case. 1 unique
+        // hit on v1.06.
+        {"SetterByte_P1_FullPrologue",
+         "48 8B 41 78 4D 8B C8 48 85 C0 74 66 45 33 C0 4C 8D 52 F8 "
+         "48 85 D2 48 63 51 70 4D 0F 44 D0 85 D2 74 40 41 0F B6 01",
+         ResolveMode::Direct, 0, 0},
+
+        // P2 -- prologue with both rel8 jz distances wildcarded.
+        // Keeps the `41 0F B6 01` byte-load discriminator literal.
+        // Survives compiler reflows that shift the jz targets without
+        // changing the body. 1 unique hit on v1.06.
+        {"SetterByte_P2_WildcardedJumpDist",
+         "48 8B 41 78 4D 8B C8 48 85 C0 74 ?? 45 33 C0 4C 8D 52 F8 "
+         "48 85 D2 48 63 51 70 4D 0F 44 D0 85 D2 74 ?? 41 0F B6 01",
+         ResolveMode::Direct, 0, 0},
+
+        // P3 -- preceding function's epilogue (movzx return-byte +
+        // 0x1060 stack restore + pop rbx + ret) + 2-byte CC padding
+        // + setter prologue head. Anchors when both P1 and P2 lose
+        // their `41 0F B6 01` discriminator (e.g., the engine merges
+        // the byte and dword setters in a future patch). Walk forward
+        // +0xE (14 bytes) to setter entry.
+        {"SetterByte_P3_PrevTailPadStart",
+         "0F B6 C3 48 81 C4 60 10 00 00 5B C3 "
+         "CC CC "
+         "48 8B 41 78 4D 8B C8 48 85 C0 74 66 45 33 C0 4C 8D 52",
+         ResolveMode::Direct, +0x0E, 0},
+    };
+
 } // namespace Transmog

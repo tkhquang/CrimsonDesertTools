@@ -100,6 +100,7 @@ Antumbra_King_Ring	Seal of Pitch-Black Darkness
 Antumbra_Leather_Boots	Antumbra Leather Boots
 Antumbra_Leather_Gloves	Ator's Will Leather Gloves
 Antumbra_Leather_Gloves_I	Antumbra Leather Gloves
+Antumbra_Picket	Antumbra Picket
 Anvil_Fort_Secret_Document	The Seal of House Serkis
 Apenzel_OneHandRapier	Fallen Kingdom's Rapier
 Apothecary_BackPack_I	Apothecary's Pack
@@ -1859,7 +1860,12 @@ Gobialthai_Leather_Gloves	Gobialta Leather Gloves
 Goblin_Boss_OneHandSword	Lightningblade of Greed
 Goblin_Director_House_Key	Overseer's House Key
 Goblin_Fight_PlateArmor_Gloves	Goblin Dueling Plate Gloves
+Goblin_Merchant_Fabric_Armor_Ⅲ	Goldleaves' Cloth Armor
+Goblin_Merchant_Fabric_Armor_Ⅳ	Nibrak Cloth Armor
 Goblin_Merchant_Fabric_Armor_V	Goldleaves' Cloth Armor
+Goblin_Merchant_Fabric_Armor_Ⅵ	Goldleaves' Cloth Armor
+Goblin_Merchant_Fabric_Cloak_Ⅳ	Goldleaves' Cloth Cloak
+Goblin_Merchant_Fabric_Cloak_Ⅵ	Goldleaves' Cloth Cloak
 Goblin_Merchant_Fabric_Helm	Goldleaf Soldier Cloth Headband
 Goblin_Merchant_PlateArmor_Gloves_I	Goblin Merchant Guild's Plate Gloves
 Goblin_Merchant_Soldier_Leather_Boots	Goldleaves' Short Leather Boots
@@ -2177,6 +2183,7 @@ Hymns_of_Dusk_Fabric_Armor_I	Musket Border Guard Standard Armor
 Hymns_of_Dusk_Leather_Armor_I	Dusksongs Leather Armor
 Hymns_of_Dusk_Leather_Boots_I	Dusksongs Leather Boots
 Hymns_of_Dusk_PlateArmor_Armor_I	Dusksongs Plate Armor
+Hymns_of_Dusk_PlateArmor_Armor_II	Hymns of Dusk PlateArmor Armor II
 Hymns_of_Dusk_PlateArmor_Gloves_I	Dusksongs Plate Gloves
 Hyosi_Arrow	Whistling Arrow
 Hysilda_Fabric_Armor	Hysilda Cloth Armor
@@ -2872,6 +2879,7 @@ Kahdet_PlateArmor_Helm	Cadet Plate Helm
 Kahsunan_Fabric_Armor	Kasunan Cloth Armor
 Kahtrahah_Fabric_Armor	Kaetra Cloth Armor
 Kahturaon_Fabric_Armor	Qaturan Cloth Armor
+Kahturaon_Fabric_Armor_II	Qaturan Cloth Armor II
 Kaiko_Leather_Boots	Caico Leather Boots
 Kailok_Fabric_Armor	Kailok's Cloth Armor
 Kairu_Leather_Boots	Caelough Leather Boots
@@ -3091,6 +3099,8 @@ Legend_GoldenCarp_Report	Sighting of the Golden Carp
 Legend_GoldenTench_Report	Golden Tench Sighting
 Legend_Golden_Coelacanth_Report	Sighting of the Golden Coelacanth
 Legend_LeeburtheShadowWolf_Report	Sighting of the Black Fang
+Legend_Macaw_Parrot_Report	Legend Macaw Parrot Report
+Legend_Machine_Eagle_Report	Legend Machine Eagle Report
 Legend_Phoenix_Wild_Report	Sighting of the Phoenix
 Legend_PureWhite_Bion_Report	Sighting of the White Bison
 Legend_PureWhite_Deer_Report	Sighting of the Snowwhite Deer
@@ -3211,6 +3221,7 @@ Likua_PlateArmor_Helm	Longia Plate Helm
 Likua_PlateArmor_Helm_I	Blacksteel Longia Plate Helm
 Limerhen_TwoHandSpear	Traitor's Spear
 Limerick_ChainMail_Armor	Lemerick Chain Mail
+Limerick_ChainMail_Armor_II	Lemerick Chain Mail II
 Liornia_Fabric_Armor	Liorna Cloth Armor
 Lipsort_OneHandTowerShield	Lifsoth Large Shield
 Litra_Leather_Gloves	Leahdra Leather Gloves
@@ -3567,6 +3578,7 @@ Mueo_PlateArmor_Armor_I	Meyer Plate Armor
 Mueo_PlateArmor_Armor_II	Meyer Plate Armor
 Mueo_PlateArmor_Armor_III	Meyer Plate Armor
 Muglah_Fabric_Armor	Mugleah Cloth Armor
+Muglah_Fabric_Armor_II	Mugleah Cloth Armor II
 Mulia_Leather_Boots	Mulia Leather Boots
 MultiArrow	Bundle of Arrows
 MultiArrow_Package_Small	Bundle of Arrows
@@ -3786,6 +3798,7 @@ Optionary_Scholar_Stone_cloak	Scholastone Cloak
 Opuntia_seed	Prickly Pear Seed
 Orange	Orange
 Orbs_Fabric_Armor	Orbus Cloth Armor
+Orbs_Fabric_Armor_I	Orbus Cloth Armor I
 Orc_Flag_I	Small Ironflame Orcs Banner Pike
 Orc_Flag_II	Medium Ironflame Orcs Banner Pike
 Orc_OneHandCannon	Orc Blaster
@@ -4105,6 +4118,8 @@ Persein_Leather_Gloves	Persein Leather Gloves
 Persein_Leather_Gloves_I	Persein Leather Gloves
 Perseus_Leather_Gloves	Perseus Leather Gloves
 Pervin_Bomb	Perwin Explosive
+Pet_Attackable_Amulet	Pet Attackable Amulet
+Pet_Huntable_Amulet	Pet Huntable Amulet
 PetArmor_Fabric_Armor_Dog	Puppy Cloth Outfit
 PetArmor_Fabric_Helm_Dog	Puppy Cloth Hat
 PetArmor_Marni_Armor	Visionette Neckerchief
@@ -4397,6 +4412,7 @@ Quest_Paper_Kwe_Terinand	Terianne's Poster
 Quest_Paper_LaserTank_Blueprint	Thunder Crusher Blueprint
 Quest_Paper_Letter	Jian's Letter
 Quest_Paper_LongleafForest_PatrolRecord	Longleaf Forest Patrol Report
+Quest_Paper_Lumberjack_Testimony	Quest Paper Lumberjack Testimony
 Quest_Paper_MarniAirship_Journal	Marni Airship Journal
 Quest_Paper_Marni_CtrafingJournal	Marni's Invention Journal
 Quest_Paper_Marnihouse_Blueprint	Biopod Blueprint found at Marni Mansion
@@ -5628,6 +5644,7 @@ Twich_Ring	Purple Scout Ring
 Twilight_Whistlers_PlateArmor_Armor_I	Twilight Messengers' Plate Armor
 Twilight_Whistlers_PlateArmor_Armor_II	Golden Free Company's Plate Armor
 Twilight_Whistlers_PlateArmor_Armor_III	Twilight Messengers' Plate Armor
+Twilight_Whistlers_PlateArmor_Armor_IV	Twilight Whistlers PlateArmor Armor IV
 Twilight_Whistlers_PlateArmor_Cloak	Twilight Messengers' Cloak
 Twilight_Whistlers_PlateArmor_Gloves	Twilight Messengers' Plate Gloves
 Twilight_Whistlers_PlateArmor_Helm_I	Twilight Messengers' Plate Helm
@@ -6240,6 +6257,7 @@ Wolf_Pursuer_Fabric_Armor	Wolf Tracker Cloth Armor
 Wolf_Pursuer_Fabric_Cloak	Wolf Tracker Cloth Cloak
 Wolf_Pursuer_Fabric_Helm	Wolf Tracker Helm
 Wolf_Pursuer_Leather_Armor	Wolf Tracker Leather Armor
+Wolf_Pursuer_Leather_Armor_II	Wolf Tracker Leather Armor II
 Wolf_Pursuer_Leather_Boots	Wolf Tracker Leather Boots
 Wolf_Pursuer_Leather_Gloves	Wolf Tracker Leather Gloves
 Wolf_Test_OneHandSword	Wolf Test OneHandSword

@@ -269,6 +269,13 @@ namespace Transmog::DyeRecordInject
 
     void restore_all() noexcept { log_counters(); }
 
+    // Cross-thread snapshot of the first active channel's RGB.
+    // The setter-substitute hook runs on the engine's render thread,
+    // which differs from the LT apply thread where the thread_local
+    // s_injectChannels is set. Atomic snapshot lets the render-side
+    // detour read the user color without TLS coupling.
+    static std::atomic<std::uint32_t> g_publishedRGB{0};
+
     void set_slot_dye_state(const ChannelState *channels,
                              bool sparse) noexcept
     {
@@ -295,10 +302,27 @@ namespace Transmog::DyeRecordInject
         s_injectActive = any_active;
         s_injectSparse = sparse;
         s_injectConsumed = false;
+
+        // Cross-thread snapshot for ColorOverride::SetterSubstitute. Bit-layout:
+        //   bits  0..7 : R
+        //   bits  8..15: G
+        //   bits 16..23: B
+        //   bit  24    : active flag
+        std::uint32_t snap = any_active
+            ? (static_cast<std::uint32_t>(first_r)
+               | (static_cast<std::uint32_t>(first_g) << 8)
+               | (static_cast<std::uint32_t>(first_b) << 16)
+               | (1u << 24))
+            : 0;
+        g_publishedRGB.store(snap, std::memory_order_release);
+
         DMK::Logger::get_instance().info(
             "[dye-inject] state set: active_count={} firstHash=0x{:08X} "
-            "firstRGB=({:02X},{:02X},{:02X})",
-            active_count, first_hash, first_r, first_g, first_b);
+            "firstRGB=({:02X},{:02X},{:02X}) snapshot=0x{:08X} "
+            "&snap={:#x}",
+            active_count, first_hash, first_r, first_g, first_b,
+            snap,
+            reinterpret_cast<std::uintptr_t>(&g_publishedRGB));
     }
 
     void clear_slot_dye_state() noexcept
@@ -306,6 +330,31 @@ namespace Transmog::DyeRecordInject
         s_injectActive = false;
         s_injectConsumed = false;
         s_injectSparse = false;
+        // NOTE: deliberately do NOT clear g_publishedRGB here.
+        // clear_slot_dye_state is called immediately after each
+        // apply_transmog completes -- the engine reads the dst+120
+        // records once during slotPop and discards them, so clearing
+        // the ARMOR_MOD inject state is fine. But the per-property
+        // setter (sub_140A03810) fires DURING RENDER frames, long
+        // after apply_transmog returned, so the ColorOverride::SetterSubstitute
+        // hook needs the RGB snapshot to persist beyond apply.
+        // The snapshot gets overwritten on the next set_slot_dye_state
+        // (preset color change) so stale state self-clears on the
+        // next apply pass.
+    }
+
+    bool get_published_first_active_rgb(
+        std::uint8_t *r,
+        std::uint8_t *g,
+        std::uint8_t *b) noexcept
+    {
+        auto snap = g_publishedRGB.load(std::memory_order_acquire);
+        if ((snap & (1u << 24)) == 0)
+            return false;
+        if (r) *r = static_cast<std::uint8_t>(snap & 0xFF);
+        if (g) *g = static_cast<std::uint8_t>((snap >> 8) & 0xFF);
+        if (b) *b = static_cast<std::uint8_t>((snap >> 16) & 0xFF);
+        return true;
     }
 
     void log_dye_snapshot(

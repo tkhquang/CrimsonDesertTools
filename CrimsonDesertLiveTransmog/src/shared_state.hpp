@@ -98,6 +98,14 @@ namespace Transmog
     std::atomic<bool> &flag_enabled();
     std::atomic<bool> &shutdown_requested();
 
+    /// Master gate for the ColorOverride subsystem (publisher hook,
+    /// setter substitute, host-scope owner-vfunc midhooks, picker
+    /// UI). False by default; enable via the `[Experimental]
+    /// ColorOverride` INI key. When false, none of the hooks are
+    /// installed and the picker UI is hidden -- the mod behaves as
+    /// it did before the ColorOverride port landed.
+    std::atomic<bool> &flag_color_override();
+
     // --- Trampoline typedefs ---
 
     // sub_14076C960: Populates slot visual data + calls VisualEquipChange.

@@ -1,8 +1,12 @@
 #include "preset_manager.hpp"
+#include "color_override/color_override.hpp"
+#include "color_override/color_reinit.hpp"
+#include "color_override/color_token_table.hpp"
 #include "prefab_wrapper_swap.hpp"
 #include "constants.hpp"
 #include "generated/dye_color_table.hpp"
 #include "item_name_table.hpp"
+#include "shared_state.hpp"
 #include "slot_metadata.hpp"
 #include "transmog.hpp"
 #include "transmog_apply.hpp"
@@ -11,6 +15,8 @@
 #include <DetourModKit.hpp>
 #include <nlohmann/json.hpp>
 
+#include <cstdio>
+#include <cstdlib>
 #include <fstream>
 
 using json = nlohmann::json;
@@ -151,6 +157,122 @@ namespace Transmog
         return s;
     }
 
+    // ---- ColorOverride swatch persistence helpers ------------------
+    //
+    // Identity: `(submesh_name, token_name)` -- stable across sessions
+    // AND patches. Independent of `dye_mods` (DyeRecordInject's
+    // ARMOR_MOD path).
+    //
+    // Two parallel JSON sections, each `{slot: {submesh: {token: [r,g,b]}}}`:
+    //
+    //   "swatch_defaults": engine-captured baselines (the asset's
+    //                      natural colour per row). Refreshed on every
+    //                      save and during Re-init Finalize. The user
+    //                      can revert to these without re-running
+    //                      Re-init.
+    //
+    //   "swatch_overrides": rows the user explicitly picked a colour
+    //                       for. ONE entry per user pick -- this
+    //                       section stays small even when the slot
+    //                       has 50+ rows in defaults.
+    //
+    // Per-row tick state on load = "is there a swatch_overrides entry
+    // matching (slot, submesh, token)?". Keeps overrides small even
+    // when the slot has many reference rows in defaults, and only
+    // user-picked rows load as ticked.
+
+    static json submeshes_to_json(
+        const std::vector<ColorOverride::SwatchTable::PersistEntry> &entries)
+    {
+        json out = json::object();
+        for (const auto &e : entries)
+        {
+            if (e.submesh_name.empty() || e.token_name.empty())
+                continue;
+            out[e.submesh_name][e.token_name] =
+                json::array({e.r, e.g, e.b});
+        }
+        return out;
+    }
+
+    // Parse a swatch_overrides node: nested {submesh: {token: [r,g,b]}}.
+    // Each leaf is a user-picked colour. Arrays shorter than 3 or
+    // non-arrays are silently ignored. Longer arrays are tolerated
+    // for forward compatibility (the first 3 elements are taken as
+    // r/g/b).
+    static void append_overrides_from_json(
+        std::vector<ColorOverride::SwatchTable::PersistEntry> &dst,
+        const json &node)
+    {
+        if (!node.is_object()) return;
+        for (auto sit = node.begin(); sit != node.end(); ++sit)
+        {
+            const std::string &submesh = sit.key();
+            const auto &tokens = sit.value();
+            if (!tokens.is_object()) continue;
+            for (auto tit = tokens.begin(); tit != tokens.end(); ++tit)
+            {
+                const std::string &tokenName = tit.key();
+                const auto &rgb = tit.value();
+                if (!rgb.is_array() || rgb.size() < 3) continue;
+                ColorOverride::SwatchTable::PersistEntry e{};
+                e.submesh_name = submesh;
+                e.token_name   = tokenName;
+                e.r = rgb[0].get<std::uint8_t>();
+                e.g = rgb[1].get<std::uint8_t>();
+                e.b = rgb[2].get<std::uint8_t>();
+                dst.push_back(std::move(e));
+            }
+        }
+    }
+
+    // Serialize the captured-row palette. Each submesh maps to a
+    // flat array of token-name strings (no RGB values). Lets the
+    // loader re-create placeholder rows for every (submesh, token)
+    // the user has seen, without bloating the JSON with default
+    // colour duplicates.
+    static json palette_to_json(
+        const std::vector<ColorOverride::SwatchTable::PersistEntry> &entries)
+    {
+        json out = json::object();
+        for (const auto &e : entries)
+        {
+            if (e.submesh_name.empty() || e.token_name.empty())
+                continue;
+            if (!out.contains(e.submesh_name))
+                out[e.submesh_name] = json::array();
+            out[e.submesh_name].push_back(e.token_name);
+        }
+        return out;
+    }
+
+    // Parse a swatch_palette node: {submesh: ["_tok1", "_tok2", ...]}.
+    static void append_palette_from_json(
+        std::vector<ColorOverride::SwatchTable::PersistEntry> &dst,
+        const json &node)
+    {
+        if (!node.is_object()) return;
+        for (auto sit = node.begin(); sit != node.end(); ++sit)
+        {
+            const std::string &submesh = sit.key();
+            const auto &tokens = sit.value();
+            if (!tokens.is_array()) continue;
+            for (const auto &tok : tokens)
+            {
+                if (!tok.is_string()) continue;
+                ColorOverride::SwatchTable::PersistEntry e{};
+                e.submesh_name = submesh;
+                e.token_name   = tok.get<std::string>();
+                dst.push_back(std::move(e));
+            }
+        }
+    }
+
+    // Forward declared so preset_from_json (above the definition)
+    // can call this helper for both object-form and legacy-array
+    // load paths.
+    static void preset_swatches_from_json(Preset &p, const json &j);
+
     // Keyed-object slot serialization. Old format was a positional
     // array (slots[0]=Helm, [1]=Chest, ...) which broke whenever the
     // TransmogSlot enum gained a row -- legacy presets shifted by
@@ -180,7 +302,64 @@ namespace Transmog
             slotsObj[Transmog::slot_meta(static_cast<TransmogSlot>(i))
                          .displayName] = slot_to_json(s);
         }
-        return json{{"name", p.name}, {"slots", slotsObj}};
+
+        json out{{"name", p.name}, {"slots", slotsObj}};
+
+        // Two parallel sections for ColorOverride state:
+        //   swatch_overrides: ONLY user-picked rows, nested
+        //     {slot: {submesh: {token: [r,g,b]}}}. One entry per
+        //     pick -- stays small even when the slot has 50+ rows.
+        //   swatch_palette:   the captured-row structure (no
+        //     values), nested {slot: {submesh: [token, token, ...]}}.
+        //     Lets the loader recreate every row the user has seen,
+        //     so untickled rows reappear in the picker on switch back.
+        json overridesObj = json::object();
+        json paletteObj   = json::object();
+        for (std::size_t i = 0; i < k_slotCount; ++i)
+        {
+            if (!Transmog::slot_enabled(i)) continue;
+            const auto &slotName =
+                Transmog::slot_meta(static_cast<TransmogSlot>(i))
+                    .displayName;
+            const auto &ovEntries = p.swatch_overrides[i];
+            if (!ovEntries.empty())
+            {
+                json submeshes = submeshes_to_json(ovEntries);
+                if (!submeshes.empty())
+                    overridesObj[slotName] = std::move(submeshes);
+            }
+            const auto &paEntries = p.swatch_palette[i];
+            if (!paEntries.empty())
+            {
+                json palette = palette_to_json(paEntries);
+                if (!palette.empty())
+                    paletteObj[slotName] = std::move(palette);
+            }
+        }
+        if (!overridesObj.empty())
+            out["swatch_overrides"] = std::move(overridesObj);
+        if (!paletteObj.empty())
+            out["swatch_palette"] = std::move(paletteObj);
+
+        // Per-slot master-enable flags. Only emit when at least one
+        // slot is true, to keep the JSON tidy for unused presets.
+        bool anyEnabled = false;
+        for (std::size_t i = 0; i < k_slotCount; ++i)
+            if (p.swatch_slot_enabled[i]) { anyEnabled = true; break; }
+        if (anyEnabled)
+        {
+            json enabledObj = json::object();
+            for (std::size_t i = 0; i < k_slotCount; ++i)
+            {
+                if (!Transmog::slot_enabled(i)) continue;
+                if (!p.swatch_slot_enabled[i]) continue;
+                enabledObj[Transmog::slot_meta(static_cast<TransmogSlot>(i))
+                               .displayName] = true;
+            }
+            out["swatch_slot_enabled"] = std::move(enabledObj);
+        }
+
+        return out;
     }
 
     static Preset preset_from_json(const json &j)
@@ -218,7 +397,8 @@ namespace Transmog
                         p.name, it.key());
                 }
             }
-            return p;
+            preset_swatches_from_json(p, j);
+            return p;  // skip legacy-array fallthrough
         }
 
         // Legacy format: positional array. Indices map directly to
@@ -235,7 +415,82 @@ namespace Transmog
                  ++i)
                 p.slots[i] = slot_from_json(slotsJ[i]);
         }
+        preset_swatches_from_json(p, j);
         return p;
+    }
+
+    // Apply the swatch_overrides + swatch_slot_enabled JSON blocks
+    // (top-level on a preset, alongside `slots`). Tolerant of both
+    // object form (keyed by slot displayName) and array form
+    // (positional by TransmogSlot index). Missing entirely = no
+    // overrides for this preset.
+    static void preset_swatches_from_json(Preset &p, const json &j)
+    {
+        if (j.contains("swatch_overrides")
+            && j["swatch_overrides"].is_object())
+        {
+            const auto &so = j["swatch_overrides"];
+            for (auto it = so.begin(); it != so.end(); ++it)
+            {
+                for (std::size_t i = 0; i < k_slotCount; ++i)
+                {
+                    if (it.key() == k_slotMetadata[i].displayName)
+                    {
+                        auto &dst = p.swatch_overrides[i];
+                        dst.clear();
+                        append_overrides_from_json(dst, it.value());
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (j.contains("swatch_palette")
+            && j["swatch_palette"].is_object())
+        {
+            const auto &sp = j["swatch_palette"];
+            for (auto it = sp.begin(); it != sp.end(); ++it)
+            {
+                for (std::size_t i = 0; i < k_slotCount; ++i)
+                {
+                    if (it.key() == k_slotMetadata[i].displayName)
+                    {
+                        auto &dst = p.swatch_palette[i];
+                        dst.clear();
+                        append_palette_from_json(dst, it.value());
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (j.contains("swatch_slot_enabled"))
+        {
+            const auto &se = j["swatch_slot_enabled"];
+            if (se.is_object())
+            {
+                for (auto it = se.begin(); it != se.end(); ++it)
+                {
+                    for (std::size_t i = 0; i < k_slotCount; ++i)
+                    {
+                        if (it.key() == k_slotMetadata[i].displayName)
+                        {
+                            p.swatch_slot_enabled[i] =
+                                it.value().is_boolean() &&
+                                it.value().get<bool>();
+                            break;
+                        }
+                    }
+                }
+            }
+            else if (se.is_array())
+            {
+                for (std::size_t i = 0;
+                     i < k_slotCount && i < se.size(); ++i)
+                    p.swatch_slot_enabled[i] =
+                        se[i].is_boolean() && se[i].get<bool>();
+            }
+        }
     }
 
     static json character_to_json(const CharacterPresets &cp)
@@ -244,11 +499,16 @@ namespace Transmog
         for (auto &p : cp.presets)
             presetsArr.push_back(preset_to_json(p));
 
-        return json{
+        json out{
             {"activePreset", cp.activePreset},
             {"presets", presetsArr},
             {"bodyKind", cp.bodyKind},
         };
+        // ColorOverride session toggle. Persisted only when true to
+        // keep the JSON tidy for fresh users.
+        if (cp.dyeAdvancedView)
+            out["dyeAdvancedView"] = true;
+        return out;
     }
 
     static CharacterPresets character_from_json(const json &j)
@@ -256,6 +516,7 @@ namespace Transmog
         CharacterPresets cp;
         cp.activePreset = j.value("activePreset", 0);
         cp.bodyKind = j.value("bodyKind", std::string("Auto"));
+        cp.dyeAdvancedView = j.value("dyeAdvancedView", false);
 
         if (j.contains("presets") && j["presets"].is_array())
         {
@@ -271,6 +532,102 @@ namespace Transmog
             cp.activePreset = 0;
 
         return cp;
+    }
+
+    // ---- Per-preset ColorOverride snapshot/restore helpers ---------
+    //
+    // Used by every preset-switch / character-switch / load path to
+    // sync `Preset::swatch_overrides` + `Preset::swatch_slot_enabled`
+    // with the live SwatchTable state. The pattern is:
+    //
+    //   snapshot_live_swatches_into(prev_preset)  // capture current
+    //   ColorOverride::reset_all()                // wipe live tables
+    //   activePreset = new                       // switch
+    //   restore_swatches_from(new_preset)         // re-seed live tables
+    //   apply_to_state()                         // push slot mappings
+    //   save()                                   // persist (this also
+    //                                            //   re-snapshots into
+    //                                            //   the new active)
+    //
+    // INDEPENDENT of dye_mods / DyeRecordInject -- that path lives in
+    // PresetSlot::dye and is untouched here.
+    // `force` is true on the explicit-save path (replace_current_from_state
+    // / Save button) where we always want to capture live state into the
+    // active preset. Default false: callers in the preset-switch path skip
+    // the capture when dye_dirty() is true, which discards pending edits
+    // on switch -- the user must click Save to commit.
+    static void snapshot_live_swatches_into(Preset &p, bool force = false)
+    {
+        if (!force
+            && dye_dirty().load(std::memory_order_acquire))
+        {
+            // Pending edits get discarded on switch. Leave
+            // `p.swatch_overrides` at its loaded baseline so a later
+            // switch BACK to this preset restores the on-disk state,
+            // not the unsaved edits.
+            return;
+        }
+        // When the ColorOverride feature is disabled the live
+        // SwatchTable is inert and its persist helpers return empty
+        // vectors. Writing those over the preset's loaded baseline
+        // would silently destroy any swatch_overrides / swatch_palette
+        // / swatch_slot_enabled entries the JSON already carries.
+        // Leave the preset's swatch fields untouched in that case so
+        // the saved data round-trips intact through "disabled"
+        // sessions.
+        if (!flag_color_override().load(std::memory_order_acquire))
+            return;
+        namespace ST = ColorOverride::SwatchTable;
+        for (std::size_t s = 0; s < k_slotCount; ++s)
+        {
+            p.swatch_overrides[s] =
+                ST::get_persistable_overrides(static_cast<int>(s));
+            p.swatch_palette[s] =
+                ST::get_persistable_palette(static_cast<int>(s));
+            p.swatch_slot_enabled[s] =
+                ST::slot_enabled_get(static_cast<int>(s));
+        }
+    }
+
+    static void restore_swatches_from(const Preset &p)
+    {
+        namespace ST = ColorOverride::SwatchTable;
+        for (std::size_t s = 0; s < k_slotCount; ++s)
+        {
+            // Queue ONLY the user-override RGB into the
+            // PendingOverrides map. The palette doesn't need
+            // queueing -- those rows get seeded directly in
+            // auto_reinit_from via populate_from_persisted.
+            if (!p.swatch_overrides[s].empty())
+                ST::restore_persisted_state(
+                    static_cast<int>(s), p.swatch_overrides[s]);
+            ST::slot_enabled_set(
+                static_cast<int>(s), p.swatch_slot_enabled[s]);
+        }
+    }
+
+    // Auto-init slots that have saved overrides:
+    // populate_from_persisted seeds placeholders from JSON. The
+    // preset-switch path already tears down + reapplies every slot,
+    // so the engine naturally re-emits setter writes -- our
+    // placeholders get promoted via lookup_or_insert's promotion
+    // pass on those writes. No need to force an extra retick here.
+    //
+    // Slots WITHOUT saved data are NOT auto-init'd here -- the
+    // user clicks Re-init manually when they want to discover a
+    // new outfit's swatches.
+    static void auto_reinit_from(const Preset &p)
+    {
+        for (std::size_t s = 0; s < k_slotCount; ++s)
+        {
+            if (p.swatch_palette[s].empty()
+                && p.swatch_overrides[s].empty())
+                continue;
+            ColorOverride::SwatchTable::populate_from_persisted(
+                static_cast<int>(s),
+                p.swatch_palette[s],
+                p.swatch_overrides[s]);
+        }
     }
 
     // --- PresetManager ---
@@ -346,6 +703,30 @@ namespace Transmog
         // the active preset's dye as our reference baseline.
         dye_dirty().store(false, std::memory_order_release);
         capture_dye_snapshot();
+
+        // Push the active preset's persisted ColorOverride swatch
+        // state into the live SwatchTable. Independent of dye_mods
+        // (which is part of slot_mappings, not SwatchTable). Safe to
+        // run before ColorOverride::init() -- restore mutates storage
+        // arrays directly and does not require hooks to be live.
+        {
+            auto it = m_characters.find(m_editingCharacter);
+            if (it != m_characters.end() && !it->second.presets.empty())
+            {
+                const auto idx = std::clamp(
+                    it->second.activePreset, 0,
+                    static_cast<int>(it->second.presets.size()) - 1);
+                const auto &preset =
+                    it->second.presets[static_cast<std::size_t>(idx)];
+                restore_swatches_from(preset);
+                // Direct-seed picker rows from saved data so user sees
+                // their colors immediately on game load -- no manual
+                // Re-init needed. Placeholders are promoted to live
+                // identity on first engine write.
+                auto_reinit_from(preset);
+            }
+        }
+
         return true;
     }
 
@@ -367,6 +748,34 @@ namespace Transmog
         // at runtime; editing is a session-only UI affordance that
         // resets to controlled on load.
 
+        // Capture the live SwatchTable into the active preset so the
+        // user's current picks land in JSON. Independent of dye_mods
+        // (which lives in PresetSlot::dye and is captured/edited via
+        // the picker UI directly).
+        //
+        // const_cast on the active preset is sound for the same
+        // reason `mutable m_dyeSnapshot` is: this is logical-const
+        // cache state -- the preset's `swatch_overrides` field is
+        // a write-through cache of the live SwatchTable, synced at
+        // save / switch / character-swap. Save remains externally
+        // const (the on-disk file is the source of truth for what
+        // the user committed; this just refreshes the in-memory
+        // copy to match what's about to be written).
+        {
+            auto it = m_characters.find(m_editingCharacter);
+            if (it != m_characters.end() && !it->second.presets.empty())
+            {
+                const auto idx = std::clamp(
+                    it->second.activePreset, 0,
+                    static_cast<int>(it->second.presets.size()) - 1);
+                auto &mutPreset = const_cast<Preset &>(
+                    it->second.presets[static_cast<std::size_t>(idx)]);
+                // force=true: save is the explicit commit path, so
+                // capture pending edits even when dye_dirty is set.
+                snapshot_live_swatches_into(mutPreset, /*force=*/true);
+            }
+        }
+
         json chars = json::object();
         for (auto &[name, cp] : m_characters)
             chars[name] = character_to_json(cp);
@@ -382,6 +791,9 @@ namespace Transmog
 
         file << root.dump(2);
         logger.info("Presets saved to '{}'", path);
+        // Diagnostic: dump the live swatch tree so the log captures
+        // exactly what was persisted alongside the JSON write event.
+        ColorOverride::SwatchTable::dump_all_slots();
         dye_dirty().store(false, std::memory_order_release);
         // The just-saved state IS the new baseline -- subsequent
         // edits become "dirty" relative to this point.
@@ -405,22 +817,65 @@ namespace Transmog
         return m_controlledCharacter;
     }
 
+    void PresetManager::rotate_editing_target_to(
+        const std::string &new_name)
+    {
+        // Snapshot OUTGOING editing character's active preset live
+        // swatches before flipping -- otherwise per-shader-property
+        // picks on the old character would be lost when switching
+        // back. dye_mods (PresetSlot::dye) is independent and
+        // managed by the dye snapshot path below.
+        auto prev = m_characters.find(m_editingCharacter);
+        if (prev != m_characters.end() && !prev->second.presets.empty())
+        {
+            const auto idx = std::clamp(
+                prev->second.activePreset, 0,
+                static_cast<int>(prev->second.presets.size()) - 1);
+            snapshot_live_swatches_into(
+                prev->second.presets[static_cast<std::size_t>(idx)]);
+        }
+        ColorOverride::reset_all();
+
+        revert_active_dye_to_snapshot();
+        m_editingCharacter = new_name;
+        ensure_character(new_name);
+        capture_dye_snapshot();
+
+        // Re-seed live SwatchTable from the NEW editing character's
+        // active preset; auto-Reinit slots with saved overrides so
+        // the locked tables re-populate.
+        auto it = m_characters.find(m_editingCharacter);
+        if (it != m_characters.end() && !it->second.presets.empty())
+        {
+            const auto idx = std::clamp(
+                it->second.activePreset, 0,
+                static_cast<int>(it->second.presets.size()) - 1);
+            const auto &preset =
+                it->second.presets[static_cast<std::size_t>(idx)];
+            restore_swatches_from(preset);
+            auto_reinit_from(preset);
+        }
+    }
+
     void PresetManager::set_active_character(const std::string &name)
     {
+        DMK::Logger::get_instance().info(
+            "[preset] set_active_character('{}') prev='{}' "
+            "(changed={})",
+            name, m_controlledCharacter,
+            m_controlledCharacter != name);
         m_controlledCharacter = name;
         ensure_character(name);
         if (!m_editingPinned)
         {
             // Editing follows controlled whenever the user has not
-            // explicitly pinned a different editing target. The dye
-            // snapshot is rotated here so unsaved dye edits on the
-            // outgoing character do not bleed into the incoming
-            // character's preset.
+            // explicitly pinned a different editing target. Rotate
+            // both the dye snapshot AND ColorOverride swatch state
+            // on the outgoing editing character so unsaved edits do
+            // not bleed into the incoming character's preset.
             if (name != m_editingCharacter)
             {
-                revert_active_dye_to_snapshot();
-                m_editingCharacter = name;
-                capture_dye_snapshot();
+                rotate_editing_target_to(name);
             }
         }
         else if (name == m_editingCharacter)
@@ -449,17 +904,14 @@ namespace Transmog
         }
 
         // Switching the editing character is a larger context shift
-        // than cycling presets: drop any unsaved dye edits on the
-        // outgoing preset and capture a fresh baseline snapshot for
-        // the incoming preset. Mirrors set_active_preset().
-        revert_active_dye_to_snapshot();
-        m_editingCharacter = name;
-        ensure_character(name);
+        // than cycling presets: rotate the dye snapshot AND the
+        // ColorOverride swatch state onto the incoming preset.
+        // Mirrors set_active_preset().
+        rotate_editing_target_to(name);
         // Pin engages when the user picked anyone other than the
         // controlled character; picking the controlled character is
         // the unpin gesture from the dropdown.
         m_editingPinned = (name != m_controlledCharacter);
-        capture_dye_snapshot();
     }
 
     bool PresetManager::editing_pinned() const noexcept
@@ -471,12 +923,9 @@ namespace Transmog
     {
         if (m_editingCharacter != m_controlledCharacter)
         {
-            // Drop unsaved dye edits on the outgoing preset and
-            // capture a fresh baseline for the controlled character's
-            // active preset.
-            revert_active_dye_to_snapshot();
-            m_editingCharacter = m_controlledCharacter;
-            capture_dye_snapshot();
+            // Rotate the dye snapshot AND the ColorOverride swatch
+            // state onto the controlled character's active preset.
+            rotate_editing_target_to(m_controlledCharacter);
         }
         m_editingPinned = false;
     }
@@ -579,6 +1028,19 @@ namespace Transmog
     void PresetManager::append_from_state()
     {
         auto &cp = ensure_character(m_editingCharacter);
+        // Snapshot the OUTGOING preset's swatches so they survive the
+        // active-index flip; then wipe live state because the new
+        // blank preset has none.
+        if (!cp.presets.empty())
+        {
+            const auto prevIdx = std::clamp(
+                cp.activePreset, 0,
+                static_cast<int>(cp.presets.size()) - 1);
+            snapshot_live_swatches_into(
+                cp.presets[static_cast<std::size_t>(prevIdx)]);
+        }
+        ColorOverride::reset_all();
+
         int idx = static_cast<int>(cp.presets.size());
         std::string name = "Preset " + std::to_string(idx);
         Preset blank;
@@ -627,6 +1089,13 @@ namespace Transmog
                 // to their origin.
                 captured.slots[i].dyeSparse = src->slots[i].dyeSparse;
             }
+            // Carry ColorOverride swatch state across the duplicate
+            // so the new preset starts identical to the source
+            // (independent of dye_mods). Live SwatchTable already
+            // reflects this state -- no need to wipe/restore.
+            captured.swatch_overrides    = src->swatch_overrides;
+            captured.swatch_palette      = src->swatch_palette;
+            captured.swatch_slot_enabled = src->swatch_slot_enabled;
         }
         cp.presets.push_back(std::move(captured));
         cp.activePreset = idx;
@@ -671,6 +1140,14 @@ namespace Transmog
             captured.slots[i].dyeSparse = p->slots[i].dyeSparse;
         }
         p->slots = captured.slots;
+        // ColorOverride swatch overrides are NOT part of
+        // slot_mappings -- snapshot the live SwatchTable so the
+        // "Replace" button persists the user's current per-shader-
+        // property picks too. `force=true` overrides the dye_dirty
+        // gate in the snapshot helper: the user explicitly asked to
+        // save, so capture pending edits even when the dirty flag
+        // is set.
+        snapshot_live_swatches_into(*p, /*force=*/true);
 
         DMK::Logger::get_instance().info("Preset replaced: '{}'", p->name);
         save();
@@ -696,6 +1173,19 @@ namespace Transmog
         else
             cp.activePreset = std::min(idx, static_cast<int>(cp.presets.size()) - 1);
 
+        // The deleted preset took its swatch state with it. Wipe the
+        // live SwatchTable so the next apply rebuilds cleanly, then
+        // restore from the new active preset (if any). Independent
+        // of dye_mods.
+        ColorOverride::reset_all();
+        if (!cp.presets.empty())
+        {
+            const auto &preset =
+                cp.presets[static_cast<std::size_t>(cp.activePreset)];
+            restore_swatches_from(preset);
+            auto_reinit_from(preset);
+        }
+
         save();
     }
 
@@ -705,12 +1195,25 @@ namespace Transmog
         if (it == m_characters.end() || it->second.presets.empty())
             return;
 
-        // Discard unsaved dye edits before cycling.
-        revert_active_dye_to_snapshot();
-
+        // Snapshot OUTGOING swatch state FIRST so the dye_dirty
+        // gate inside snapshot_live_swatches_into still sees the
+        // user's pending picks (and skips capture). The revert
+        // helper below clears dye_dirty; running it before snapshot
+        // would inadvertently auto-save unsaved swatch edits.
         auto &cp = it->second;
+        snapshot_live_swatches_into(
+            cp.presets[static_cast<std::size_t>(std::clamp(
+                cp.activePreset, 0,
+                static_cast<int>(cp.presets.size()) - 1))]);
+
+        // Discard unsaved dye-mod edits before cycling.
+        revert_active_dye_to_snapshot();
+        ColorOverride::reset_all();
+
         cp.activePreset = (cp.activePreset + 1) % static_cast<int>(cp.presets.size());
         capture_dye_snapshot();
+        restore_swatches_from(
+            cp.presets[static_cast<std::size_t>(cp.activePreset)]);
 
         DMK::Logger::get_instance().info(
             "Preset cycled to: '{}' ({}/{})",
@@ -723,6 +1226,11 @@ namespace Transmog
             if (slot_enabled(i))
                 force_apply_pending()[i] = true;
         apply_to_state();
+        // Strict-init: trigger Reinit on every slot with saved
+        // overrides so the locked tables re-populate from this
+        // preset's outfit.
+        auto_reinit_from(
+            cp.presets[static_cast<std::size_t>(cp.activePreset)]);
         save();
     }
 
@@ -732,12 +1240,22 @@ namespace Transmog
         if (it == m_characters.end() || it->second.presets.empty())
             return;
 
-        revert_active_dye_to_snapshot();
-
+        // Snapshot first so dye_dirty still gates the swatch capture
+        // (see set_active_preset for the rationale -- revert clears
+        // dye_dirty and would let unsaved swatch picks auto-save).
         auto &cp = it->second;
         int count = static_cast<int>(cp.presets.size());
+        snapshot_live_swatches_into(
+            cp.presets[static_cast<std::size_t>(std::clamp(
+                cp.activePreset, 0, count - 1))]);
+
+        revert_active_dye_to_snapshot();
+        ColorOverride::reset_all();
+
         cp.activePreset = (cp.activePreset - 1 + count) % count;
         capture_dye_snapshot();
+        restore_swatches_from(
+            cp.presets[static_cast<std::size_t>(cp.activePreset)]);
 
         DMK::Logger::get_instance().info(
             "Preset cycled to: '{}' ({}/{})",
@@ -748,6 +1266,8 @@ namespace Transmog
             if (slot_enabled(i))
                 force_apply_pending()[i] = true;
         apply_to_state();
+        auto_reinit_from(
+            cp.presets[static_cast<std::size_t>(cp.activePreset)]);
         save();
     }
 
@@ -790,17 +1310,38 @@ namespace Transmog
         if (it == m_characters.end() || it->second.presets.empty())
             return;
 
-        // Drop any unsaved dye edits on the OUTGOING active preset
-        // before we switch -- the new preset's dye state will be
-        // captured fresh below.
-        revert_active_dye_to_snapshot();
+        DMK::Logger::get_instance().info(
+            "[preset] set_active_preset(index={}) char='{}' "
+            "(prev_active={})",
+            index, m_editingCharacter, it->second.activePreset);
 
         auto &cp = it->second;
+        // Snapshot OUTGOING ColorOverride swatches BEFORE the
+        // dye-mod revert. Order matters: the snapshot helper checks
+        // dye_dirty() and skips when dirty (so unsaved swatch picks
+        // get discarded on switch); revert_active_dye_to_snapshot
+        // CLEARS dye_dirty after reverting dye-mod state, so if we
+        // ran it first the snapshot would proceed and capture the
+        // user's unsaved swatch RGB into the outgoing preset --
+        // making swatch edits effectively auto-save on every
+        // preset switch.
+        snapshot_live_swatches_into(
+            cp.presets[static_cast<std::size_t>(std::clamp(
+                cp.activePreset, 0,
+                static_cast<int>(cp.presets.size()) - 1))]);
+
+        // Now drop any unsaved dye-mod edits on the OUTGOING preset
+        // -- the new preset's dye state will be captured fresh below.
+        revert_active_dye_to_snapshot();
+        ColorOverride::reset_all();
+
         cp.activePreset = std::clamp(index, 0,
                                      static_cast<int>(cp.presets.size()) - 1);
         // Capture the NEW active preset's dye as the baseline; any
         // future edits become "dirty" relative to this baseline.
         capture_dye_snapshot();
+        restore_swatches_from(
+            cp.presets[static_cast<std::size_t>(cp.activePreset)]);
         // Switching to a different preset means we're now showing the
         // on-disk state for that preset; nothing to save until the
         // user edits.
@@ -820,6 +1361,8 @@ namespace Transmog
             if (slot_enabled(i))
                 force_apply_pending()[i] = true;
         apply_to_state();
+        auto_reinit_from(
+            cp.presets[static_cast<std::size_t>(cp.activePreset)]);
     }
 
     // --- State bridge ---
@@ -931,10 +1474,11 @@ namespace Transmog
 
         for (std::size_t i = 0; i < k_slotCount; ++i)
         {
-            // Disabled slots (multi-prefab non-armor / duplicate-tag,
-            // see slot_metadata.hpp) are WIP -- don't bloat the JSON
-            // with their current in-memory state. Leaving p.slots[i]
-            // default-constructed serializes the row as
+            // Disabled slots (multi-prefab non-armor / duplicate-tag
+            // entries, see slot_metadata.hpp) are not yet supported
+            // by the apply path. Don't bloat the JSON with their
+            // current in-memory state: leaving p.slots[i] default-
+            // constructed serializes the row as
             // `{"active":false,"itemName":""}` so the array indexing
             // stays positional but the entry is empty. Any stale data
             // from an older preset (saved before the slot was
