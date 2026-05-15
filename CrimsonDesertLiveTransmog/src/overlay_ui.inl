@@ -69,6 +69,58 @@ static void ui_tooltip(const char *text)
     ImGui::EndTooltip();
 }
 
+// Wrappers for non-variadic ImGui functions whose out-of-line COMDAT
+// copies from reshade_overlay.hpp clash with imgui_lib's strong symbols
+// at link time (LNK2005).  In the ReShade path we call the function
+// table directly, bypassing the ImGui:: name entirely; in the standalone
+// path we just forward to the real ImGui.
+#ifdef RESHADE_API_VERSION
+#define LT_IMGUI_FT  ::imgui_function_table_instance()
+static bool ui_button(const char *label, const ImVec2 &size = ImVec2(0, 0))
+{ return LT_IMGUI_FT->Button(label, size); }
+static bool ui_checkbox(const char *label, bool *v)
+{ return LT_IMGUI_FT->Checkbox(label, v); }
+static bool ui_collapsing_header(const char *label, ImGuiTreeNodeFlags flags = 0)
+{ return LT_IMGUI_FT->CollapsingHeader(label, flags); }
+static bool ui_combo(const char *label, int *current_item,
+                     const char *const items[], int items_count,
+                     int popup_max_height_in_items = -1)
+{ return LT_IMGUI_FT->Combo(label, current_item, items, items_count,
+                             popup_max_height_in_items); }
+static bool ui_input_text(const char *label, char *buf, size_t buf_size,
+                          ImGuiInputTextFlags flags = 0,
+                          ImGuiInputTextCallback callback = nullptr,
+                          void *user_data = nullptr)
+{ return LT_IMGUI_FT->InputText(label, buf, buf_size, flags, callback,
+                                 user_data); }
+static bool ui_selectable(const char *label, bool selected = false,
+                          ImGuiSelectableFlags flags = 0,
+                          const ImVec2 &size = ImVec2(0, 0))
+{ return LT_IMGUI_FT->Selectable(label, selected, flags, size); }
+#undef LT_IMGUI_FT
+#else
+static bool ui_button(const char *label, const ImVec2 &size = ImVec2(0, 0))
+{ return ImGui::Button(label, size); }
+static bool ui_checkbox(const char *label, bool *v)
+{ return ImGui::Checkbox(label, v); }
+static bool ui_collapsing_header(const char *label, ImGuiTreeNodeFlags flags = 0)
+{ return ImGui::CollapsingHeader(label, flags); }
+static bool ui_combo(const char *label, int *current_item,
+                     const char *const items[], int items_count,
+                     int popup_max_height_in_items = -1)
+{ return ImGui::Combo(label, current_item, items, items_count,
+                      popup_max_height_in_items); }
+static bool ui_input_text(const char *label, char *buf, size_t buf_size,
+                          ImGuiInputTextFlags flags = 0,
+                          ImGuiInputTextCallback callback = nullptr,
+                          void *user_data = nullptr)
+{ return ImGui::InputText(label, buf, buf_size, flags, callback, user_data); }
+static bool ui_selectable(const char *label, bool selected = false,
+                          ImGuiSelectableFlags flags = 0,
+                          const ImVec2 &size = ImVec2(0, 0))
+{ return ImGui::Selectable(label, selected, flags, size); }
+#endif
+
 // Mirror a picker-committed override into PendingOverrides so the
 // slot-agnostic substitute path in color_override/setter_substitute.cpp
 // picks up the user's edit on the next engine write. Without this,
@@ -399,15 +451,15 @@ static bool name_contains_ci(const std::string &hay, const char *needle) noexcep
         Transmog::slot_meta(slotCategory).partShowHashKey != nullptr;
     if (!ui.prefabMode)
     {
-        ImGui::Checkbox("Exact", &ui.exactFilter);
+        ui_checkbox("Exact", &ui.exactFilter);
         if (isArmorSlotPickerHeader)
         {
             ImGui::SameLine();
-            ImGui::Checkbox("Safe only", &ui.hideIncompatible);
+            ui_checkbox("Safe only", &ui.hideIncompatible);
             ImGui::SameLine();
-            ImGui::Checkbox("Hide variants", &ui.hideVariants);
+            ui_checkbox("Hide variants", &ui.hideVariants);
             ImGui::SameLine();
-            ImGui::Checkbox("Hide cross-body", &ui.hideBodyMismatch);
+            ui_checkbox("Hide cross-body", &ui.hideBodyMismatch);
             if (ImGui::IsItemHovered())
                 ui_tooltip("Hide items whose body type (male/female) "
                            "doesn't match the active character. Cross-body "
@@ -418,7 +470,7 @@ static bool name_contains_ci(const std::string &hay, const char *needle) noexcep
     {
         ui_text_disabled("Prefabs mode (cross-slot)");
         ImGui::SameLine();
-        ImGui::Checkbox("Exact##prefab_exact", &ui.prefabExactFilter);
+        ui_checkbox("Exact##prefab_exact", &ui.prefabExactFilter);
         if (ImGui::IsItemHovered())
             ui_tooltip(
                 "Limit the list to prefabs whose body-mesh family "
@@ -485,7 +537,7 @@ static bool name_contains_ci(const std::string &hay, const char *needle) noexcep
         if (slotHasCarrier)
         {
             ImGui::SameLine();
-            ImGui::Checkbox("Prefabs##picker_prefab_mode",
+            ui_checkbox("Prefabs##picker_prefab_mode",
                             &ui.prefabMode);
             if (ImGui::IsItemHovered())
                 ui_tooltip("Browse all body-mesh prefabs across every "
@@ -537,7 +589,7 @@ static bool name_contains_ci(const std::string &hay, const char *needle) noexcep
     if (!ui.prefabMode)
     {
         const bool selected = (targetItemId == 0);
-        if (ImGui::Selectable("(none -- id 0)##picker_none", selected))
+        if (ui_selectable("(none -- id 0)##picker_none", selected))
         {
             targetItemId = 0;
             committed = true;
@@ -776,7 +828,7 @@ static bool name_contains_ci(const std::string &hay, const char *needle) noexcep
         else if (usesCarrier)
             ImGui::PushStyleColor(ImGuiCol_Header,
                                   ImVec4(0.1f, 0.2f, 0.35f, 0.6f));
-        if (ImGui::Selectable(hiddenId, highlighted,
+        if (ui_selectable(hiddenId, highlighted,
                               0, ImVec2(0, twoLineH)))
         {
             targetItemId = e.id;
@@ -992,7 +1044,7 @@ static bool name_contains_ci(const std::string &hay, const char *needle) noexcep
                             "[%s] %s  (unloaded)##all_prefab_%zu",
                             natName, pe.name.c_str(), pi);
                     }
-                    if (ImGui::Selectable(pickerId))
+                    if (ui_selectable(pickerId))
                     {
                         if (!pe.is_loaded)
                             continue;
@@ -1066,7 +1118,7 @@ static bool name_contains_ci(const std::string &hay, const char *needle) noexcep
                 char clrLabel[64];
                 std::snprintf(clrLabel, sizeof(clrLabel),
                               "(clear active prefab override)##prefab_clr");
-                if (ImGui::Selectable(clrLabel))
+                if (ui_selectable(clrLabel))
                 {
                     if (outPrefabIdx) *outPrefabIdx = -2;
                     committed = true;
@@ -1378,7 +1430,7 @@ static void draw_overlay_content()
         ui_text("UI Scale:");
         ImGui::SameLine();
         ImGui::SetNextItemWidth(ImGui::GetFontSize() * 6.0f);
-        if (ImGui::Combo("##uiScale", &sel, kLabels, kCount))
+        if (ui_combo("##uiScale", &sel, kLabels, kCount))
             s_uiScale = kScales[sel];
         if (ImGui::IsItemHovered())
             ui_tooltip(
@@ -1406,7 +1458,7 @@ static void draw_overlay_content()
     // --- Global toggles ---
 
     bool enabled = flag_enabled().load(std::memory_order_relaxed);
-    if (ImGui::Checkbox("Enabled", &enabled))
+    if (ui_checkbox("Enabled", &enabled))
     {
         flag_enabled().store(enabled, std::memory_order_relaxed);
         if (enabled)
@@ -1415,7 +1467,7 @@ static void draw_overlay_content()
             manual_clear();
     }
 
-    ImGui::Checkbox("Instant Apply", &s_autoApply);
+    ui_checkbox("Instant Apply", &s_autoApply);
     if (ImGui::IsItemHovered())
         ui_tooltip("Apply changes immediately on hover, "
                    "pick, toggle, and clear -- no Apply All "
@@ -1429,7 +1481,7 @@ static void draw_overlay_content()
                    "only for now.");
 
     ImGui::SameLine();
-    ImGui::Checkbox("Keep Search Text", &s_keepSearchText);
+    ui_checkbox("Keep Search Text", &s_keepSearchText);
     if (ImGui::IsItemHovered())
         ui_tooltip("Preserve the search field when "
                    "re-opening a slot picker");
@@ -1480,7 +1532,7 @@ static void draw_overlay_content()
             // character-specific items may not have a renderable
             // variant on the controlled body and silently no-op.
             ImGui::SetNextItemWidth(200.0f);
-            if (ImGui::Combo("Character##char_picker",
+            if (ui_combo("Character##char_picker",
                              &selectedIdx,
                              cstrs,
                              static_cast<int>(n)))
@@ -1569,7 +1621,7 @@ static void draw_overlay_content()
             }
             ImGui::SameLine(0.0f, 24.0f);
             ImGui::SetNextItemWidth(140.0f);
-            if (ImGui::Combo("Body##body_kind",
+            if (ui_combo("Body##body_kind",
                              &bodyIdx,
                              k_bodyItems,
                              k_bodyCount))
@@ -1589,7 +1641,7 @@ static void draw_overlay_content()
 
     // --- Presets ---
 
-    if (ImGui::CollapsingHeader("Presets", ImGuiTreeNodeFlags_DefaultOpen))
+    if (ui_collapsing_header("Presets", ImGuiTreeNodeFlags_DefaultOpen))
     {
         auto &presetList = pm.presets();
         int activeIdx = pm.active_preset_index();
@@ -1604,7 +1656,7 @@ static void draw_overlay_content()
             if (s_renameActive && s_renameIndex == i)
             {
                 ImGui::SetNextItemWidth(140.0f);
-                if (ImGui::InputText("##rename", s_renamePresetBuf,
+                if (ui_input_text("##rename", s_renamePresetBuf,
                                      sizeof(s_renamePresetBuf),
                                      ImGuiInputTextFlags_EnterReturnsTrue))
                 {
@@ -1620,7 +1672,7 @@ static void draw_overlay_content()
                     s_renameIndex = -1;
                 }
                 ImGui::SameLine();
-                if (ImGui::Button("OK"))
+                if (ui_button("OK"))
                 {
                     pm.set_active_preset(i);
                     if (auto *p = pm.active_preset_mut())
@@ -1637,7 +1689,7 @@ static void draw_overlay_content()
                 std::snprintf(label, sizeof(label), "%s [%d]##preset",
                               presetList[static_cast<std::size_t>(i)].name.c_str(), i);
 
-                if (ImGui::Selectable(label, isActive))
+                if (ui_selectable(label, isActive))
                 {
                     // Tear down any active body-mesh prefab picks
                     // BEFORE switching presets. Otherwise the hook
@@ -1692,7 +1744,7 @@ static void draw_overlay_content()
 
         ImGui::Spacing();
 
-        if (ImGui::Button("Append"))
+        if (ui_button("Append"))
         {
             pm.append_from_state();
             manual_apply();
@@ -1707,7 +1759,7 @@ static void draw_overlay_content()
         // preset, ignoring any unsaved edits in slot_mappings. Use to
         // get a clean clone to start altering on. For forking the
         // current pending edits, use "Save as New" instead.
-        if (ImGui::Button("Copy"))
+        if (ui_button("Copy"))
         {
             pm.duplicate_current();
             manual_apply();
@@ -1724,7 +1776,7 @@ static void draw_overlay_content()
         // in-place dye/swatch) into a new preset, leaving the active
         // preset's saved rows untouched. Lets the user alter freely
         // mid-edit and bottle the result up without overwriting.
-        if (ImGui::Button("Save as New"))
+        if (ui_button("Save as New"))
         {
             pm.save_as_new_from_state();
             manual_apply();
@@ -1736,7 +1788,7 @@ static void draw_overlay_content()
 
         ImGui::SameLine();
 
-        if (ImGui::Button("Remove") && count > 0)
+        if (ui_button("Remove") && count > 0)
         {
             pm.remove_current();
             // remove_current auto-selects a neighbouring preset.
@@ -1751,7 +1803,7 @@ static void draw_overlay_content()
 
         ImGui::SameLine();
 
-        if (ImGui::Button("Prev") && count > 1)
+        if (ui_button("Prev") && count > 1)
         {
             pm.prev_preset();
             manual_apply();
@@ -1759,7 +1811,7 @@ static void draw_overlay_content()
 
         ImGui::SameLine();
 
-        if (ImGui::Button("Next") && count > 1)
+        if (ui_button("Next") && count > 1)
         {
             pm.next_preset();
             manual_apply();
@@ -1773,7 +1825,7 @@ static void draw_overlay_content()
 
     // --- Per-slot controls ---
 
-    if (ImGui::CollapsingHeader("Slot Details", ImGuiTreeNodeFlags_DefaultOpen))
+    if (ui_collapsing_header("Slot Details", ImGuiTreeNodeFlags_DefaultOpen))
     {
         auto &mappings = slot_mappings();
         const auto &table = ItemNameTable::instance();
@@ -1801,7 +1853,7 @@ static void draw_overlay_content()
                     break;
                 }
             }
-            if (ImGui::Checkbox("All", &allActive))
+            if (ui_checkbox("All", &allActive))
             {
                 for (std::size_t i = 0; i < k_slotCount; ++i)
                 {
@@ -1861,7 +1913,7 @@ static void draw_overlay_content()
 
             ImGui::PushID(static_cast<int>(i) + 100);
 
-            if (ImGui::Checkbox(slotLabel, &m.active))
+            if (ui_checkbox(slotLabel, &m.active))
             {
                 // Toggling active alone may not change the staged id
                 // -- e.g. an active-none slot (active=true, targetId=0)
@@ -1956,7 +2008,7 @@ static void draw_overlay_content()
                     ImGui::PushStyleColor(ImGuiCol_Text,
                                           ImVec4(0.30f, 0.85f, 1.00f, 1.0f));
                 }
-                if (ImGui::Button(btnLabel, ImVec2(bw, 0.0f)))
+                if (ui_button(btnLabel, ImVec2(bw, 0.0f)))
                 {
                     if (tableReady)
                     {
@@ -2168,7 +2220,7 @@ static void draw_overlay_content()
             const bool prefabActive = !ui.pickedPrefabName.empty();
             ImGui::BeginDisabled(prefabActive);
             ImGui::SetNextItemWidth(64.0f);
-            if (ImGui::InputText(
+            if (ui_input_text(
                     "##hex", ui.hexBuf, sizeof(ui.hexBuf),
                     ImGuiInputTextFlags_CharsHexadecimal |
                         ImGuiInputTextFlags_CharsUppercase))
@@ -2417,7 +2469,7 @@ static void draw_overlay_content()
                 // dye state. Active state is signalled by a small
                 // color-swatch chip rendered next to the button.
                 // Auto-sized so the label fits at any font scale.
-                const bool dyeBtn = ImGui::Button("Dye##dyeBtn");
+                const bool dyeBtn = ui_button("Dye##dyeBtn");
 
                 if (firstActiveCh)
                 {
@@ -2431,7 +2483,7 @@ static void draw_overlay_content()
                     // Match the Dye button's height so the chip sits
                     // on the row baseline at any font scale.
                     const float chip_size = ImGui::GetFrameHeight();
-                    if (ImGui::Button("##dyeSw",
+                    if (ui_button("##dyeSw",
                                       ImVec2(chip_size, chip_size)))
                     {
                         ImGui::OpenPopup("##dye_picker");
@@ -2524,7 +2576,7 @@ static void draw_overlay_content()
                             reload_p.x + reload_d * 0.5f,
                             reload_p.y + reload_d * 0.5f);
                         const float rl_radius = reload_d * 0.32f;
-                        const float thickness = std::max(
+                        const float thickness = (std::max)(
                             1.0f, reload_d * 0.10f);
                         // Slightly highlight on hover so the icon
                         // reads as interactive without needing a
@@ -2556,7 +2608,7 @@ static void draw_overlay_content()
                         // perpendicular spread.
                         const float ox = std::cos(a0);
                         const float oy = std::sin(a0);
-                        const float head = std::max(
+                        const float head = (std::max)(
                             2.0f, reload_d * 0.22f);
                         const ImVec2 p_tip(ax + tx * head,
                                            ay + ty * head);
@@ -2709,7 +2761,7 @@ static void draw_overlay_content()
                         char gid[16];
                         std::snprintf(gid, sizeof(gid),
                                       "##g%zu", g);
-                        if (ImGui::Button(gid,
+                        if (ui_button(gid,
                                           ImVec2(17.0f * pickerScale,
                                                  14.0f * pickerScale)))
                         {
@@ -2756,7 +2808,7 @@ static void draw_overlay_content()
                                 char nlabel[16];
                                 std::snprintf(nlabel, sizeof(nlabel),
                                               "##n%u", s);
-                                if (ImGui::Button(nlabel,
+                                if (ui_button(nlabel,
                                                   ImVec2(14.0f * pickerScale,
                                                          14.0f * pickerScale)))
                                 {
@@ -2799,7 +2851,7 @@ static void draw_overlay_content()
                                 char slabel[32];
                                 std::snprintf(slabel, sizeof(slabel),
                                               "##s%u", s);
-                                if (ImGui::Button(slabel,
+                                if (ui_button(slabel,
                                                   ImVec2(14.0f * pickerScale,
                                                          14.0f * pickerScale)))
                                 {
@@ -2882,7 +2934,7 @@ static void draw_overlay_content()
                         char mlabel[16];
                         std::snprintf(mlabel, sizeof(mlabel),
                                       "%u##m%u", v, v);
-                        if (ImGui::Button(mlabel,
+                        if (ui_button(mlabel,
                                           ImVec2(mat_btn_w, 0.0f)))
                         {
                             ch.material_id = v;
@@ -2943,7 +2995,7 @@ static void draw_overlay_content()
                         // Auto-sized so the label always fits regardless
                         // of overlay font scale; prior fixed widths
                         // truncated the text on chunky bitmap fonts.
-                        if (ImGui::Button("Default##mFFFF"))
+                        if (ui_button("Default##mFFFF"))
                         {
                             ch.material_id = 0xFFFF;
                             reapply_now();
@@ -2974,7 +3026,7 @@ static void draw_overlay_content()
                         reapply_now();
                     }
 
-                    if (ImGui::Button("Clear this mod"))
+                    if (ui_button("Clear this mod"))
                     {
                         ch = ChannelDye{};
                         reapply_now();
@@ -3019,7 +3071,7 @@ static void draw_overlay_content()
                     if (ImGui::BeginTabItem("Dye", nullptr, dyeTabFlags))
                     {
                     // --- Top action bar ---
-                    if (ImGui::Button("Mirror Mod 0 to all"))
+                    if (ui_button("Mirror Mod 0 to all"))
                     {
                         if (slotDye)
                         {
@@ -3029,7 +3081,7 @@ static void draw_overlay_content()
                         }
                     }
                     ImGui::SameLine();
-                    if (ImGui::Button("Clear all mods"))
+                    if (ui_button("Clear all mods"))
                     {
                         if (slotDye) *slotDye = SlotDyeChannels{};
                         reapply_now();
@@ -3045,7 +3097,7 @@ static void draw_overlay_content()
                     // the case where the slot stays bound to a fake
                     // but the underlying real item's dye changed
                     // in-game.
-                    if (ImGui::Button("Sync from live##dye_sync"))
+                    if (ui_button("Sync from live##dye_sync"))
                     {
                         if (Transmog::sync_live_dye_for_slot(i))
                             reapply_now();
@@ -3062,7 +3114,7 @@ static void draw_overlay_content()
                             "No-op if the slot has no live auth-table\n"
                             "entry (nothing equipped) or no dye records.");
                     ImGui::SameLine();
-                    if (ImGui::Button("Close")) ImGui::CloseCurrentPopup();
+                    if (ui_button("Close")) ImGui::CloseCurrentPopup();
 
                     // Per-slot dye-inject mode toggle. See
                     // PresetSlot::dyeSparse in preset_manager.hpp
@@ -3073,7 +3125,7 @@ static void draw_overlay_content()
                         i < editPreset->slots.size())
                     {
                         bool sparse = editPreset->slots[i].dyeSparse;
-                        if (ImGui::Checkbox("Sparse##dye_sparse",
+                        if (ui_checkbox("Sparse##dye_sparse",
                                             &sparse))
                         {
                             editPreset->slots[i].dyeSparse = sparse;
@@ -3125,7 +3177,7 @@ static void draw_overlay_content()
                                 ImGui::CalcTextSize("v Mod 15").x
                                 + ImGui::GetStyle().FramePadding.x * 2.0f
                                 + 8.0f;
-                            if (ImGui::Button(hdr,
+                            if (ui_button(hdr,
                                               ImVec2(row_btn_w, 0.0f)))
                             {
                                 s_expandedMod[i] = expanded
@@ -3151,7 +3203,7 @@ static void draw_overlay_content()
                                 ImGuiCol_ButtonHovered, sw);
                             const float sw_size =
                                 ImGui::GetFrameHeight();
-                            if (ImGui::Button(
+                            if (ui_button(
                                     "##sw",
                                     ImVec2(sw_size, sw_size)))
                             {
@@ -3247,7 +3299,7 @@ static void draw_overlay_content()
                         //                 toggled, then pre-fills
                         //                 user RGB and lets them edit
                         ImGui::BeginDisabled(!detectedReady);
-                        if (ImGui::Checkbox("Dye##dye_on", &dyeSlot.slot_enabled))
+                        if (ui_checkbox("Dye##dye_on", &dyeSlot.slot_enabled))
                 {
                     // The Dye master toggle gates the substitution
                     // path (dye_override.cpp: !slot_enabled →
@@ -3575,7 +3627,7 @@ static void draw_overlay_content()
                         bool active = prevActive;
                         // Bordered checkbox per UX request.
                         ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.0f);
-                        const bool toggled = ImGui::Checkbox("##sw_on", &active);
+                        const bool toggled = ui_checkbox("##sw_on", &active);
                         ImGui::PopStyleVar();
                         if (toggled)
                         {
@@ -4143,7 +4195,7 @@ static void draw_overlay_content()
                     // trees with full shader-property granularity.
                     bool advancedView =
                         Transmog::ColorOverride::dye_advanced_view_get();
-                    if (ImGui::Checkbox("Advanced view##dye_adv", &advancedView))
+                    if (ui_checkbox("Advanced view##dye_adv", &advancedView))
                     {
                         Transmog::ColorOverride::dye_advanced_view_set(advancedView);
                     }
@@ -4171,7 +4223,7 @@ static void draw_overlay_content()
                     {
                         auto &uiSlot = s_slotUI[i];
                         ImGui::SameLine();
-                        ImGui::Checkbox("Modified only##dye_mod",
+                        ui_checkbox("Modified only##dye_mod",
                                         &uiSlot.showOnlyModified);
                         if (ImGui::IsItemHovered())
                         {
@@ -4665,7 +4717,7 @@ static void draw_overlay_content()
                                     bool &linked = rstate.linkRgb[L];
                                     ImGui::PushID(L * 31 + 7);
                                     ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.0f);
-                                    ImGui::Checkbox("link##lnk", &linked);
+                                    ui_checkbox("link##lnk", &linked);
                                     ImGui::PopStyleVar();
                                     if (ImGui::IsItemHovered())
                                     {
@@ -4824,7 +4876,7 @@ static void draw_overlay_content()
         PWS::has_any_selection() && !PWS::is_catalog_populated();
 
     ImGui::BeginDisabled(catalogLoading);
-    if (ImGui::Button(pending ? "Apply All *" : "Apply All"))
+    if (ui_button(pending ? "Apply All *" : "Apply All"))
     {
         flag_enabled().store(true, std::memory_order_relaxed);
         manual_apply();
@@ -4842,7 +4894,7 @@ static void draw_overlay_content()
 
     ImGui::SameLine();
 
-    if (ImGui::Button("Clear All"))
+    if (ui_button("Clear All"))
     {
         flag_enabled().store(false, std::memory_order_relaxed);
         manual_clear();
@@ -4850,7 +4902,7 @@ static void draw_overlay_content()
 
     ImGui::SameLine();
 
-    if (ImGui::Button("Capture Outfit"))
+    if (ui_button("Capture Outfit"))
     {
         // Capture replaces the current state with the live equipped
         // outfit, so any session-only prefab picks must surrender too
@@ -4873,7 +4925,7 @@ static void draw_overlay_content()
         ImGui::PushStyleColor(ImGuiCol_ButtonActive,
                               ImVec4(1.00f, 0.60f, 0.25f, 1.0f));
     }
-    if (ImGui::Button(pendingSave ? "Save *" : "Save"))
+    if (ui_button(pendingSave ? "Save *" : "Save"))
     {
         pm.replace_current_from_state();
         pm.save();
