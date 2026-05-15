@@ -32,10 +32,16 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(nlohmann_json)
 
 # --- Dear ImGui (compiled from source -- no binary dependency) ---
+# Tag must match ReShade SDK's hardcoded function-table version
+# (imgui_function_table_19250 in external/reshade-sdk/include/reshade_overlay.hpp).
+# The SDK header is built against the upstream 'docking' branch and
+# declares slots for ImGuiDockNodeFlags / ImGuiViewport multi-window
+# APIs; the plain (non-docking) tag is missing those symbols and breaks
+# the function-table populator at compile time.
 FetchContent_Declare(
     imgui
     GIT_REPOSITORY https://github.com/ocornut/imgui.git
-    GIT_TAG        v1.91.8
+    GIT_TAG        v1.92.5-docking
     GIT_SHALLOW    TRUE
 )
 FetchContent_MakeAvailable(imgui)
@@ -87,8 +93,8 @@ set(COMMON_SOURCES
     src/transmog_apply.cpp
     src/transmog_hooks.cpp
     src/transmog_worker.cpp
-    src/overlay.cpp
     src/dx_overlay.cpp
+    src/imgui_function_table_populator.cpp  # includes external/reshade-sdk/source/imgui_function_table_19250.{hpp,cpp}
     src/preset_manager.cpp
     src/part_show_suppress.cpp
     src/real_part_tear_down.cpp
@@ -120,21 +126,37 @@ set(ASI_SOURCES
 # --- Include Directories ---
 set(COMMON_INCLUDE_DIRS
     src
+    # Lets src/imgui_function_table_populator.cpp find its vendored
+    # ReShade host-side populator pair via plain #include "imgui_function_table_19250.{hpp,cpp}".
+    external/reshade-sdk/source
 )
 
-# overlay_reshade.cpp uses ReShade SDK's imgui.h (function-table wrappers)
-# instead of imgui_lib's imgui.h (real compiled ImGui).  It is compiled as
-# a separate OBJECT library with the ReShade SDK include path and WITHOUT
-# imgui_lib's include path to avoid symbol conflicts.
-add_library(overlay_reshade_obj OBJECT src/overlay_reshade.cpp)
-target_include_directories(overlay_reshade_obj PRIVATE
+# Overlay UI + lifecycle TU group.
+#
+# overlay.cpp (lifecycle glue) and overlay_ui.cpp (the entire widget body)
+# both compile against the ReShade SDK's <imgui.h> + <reshade_overlay.hpp>,
+# so every ImGui:: call routes through imgui_function_table_instance().
+# That pointer is set by ReShade when our addon registers, or by our
+# populator (src/imgui_function_table_populator.cpp -- compiled in the
+# main target against imgui_lib) when running standalone.
+#
+# This OBJECT lib gets ONLY the ReShade SDK include path.  Adding
+# imgui_lib's include path here would let the real, non-thunk ImGui::
+# symbols leak in and produce LNK2005.
+add_library(overlay_ui_obj OBJECT
+    src/overlay.cpp
+    src/overlay_ui.cpp
+)
+target_include_directories(overlay_ui_obj PRIVATE
     src
     external/reshade-sdk/include
 )
-target_link_libraries(overlay_reshade_obj PRIVATE
+target_link_libraries(overlay_ui_obj PRIVATE
     DetourModKit
+    CrimsonDesertCore::core
+    nlohmann_json::nlohmann_json
 )
-target_compile_options(overlay_reshade_obj PRIVATE /W4)
+target_compile_options(overlay_ui_obj PRIVATE /W4)
 
 # --- Game Output Directory (dev builds) ---
 set(GAME_BIN_DIR "D:/Games/SteamLibrary/steamapps/common/Crimson Desert/bin64/plugins")
@@ -192,7 +214,7 @@ endif()
     add_library(transmog_logic SHARED
         ${COMMON_SOURCES}
         src/dev/logic_exports.cpp
-        $<TARGET_OBJECTS:overlay_reshade_obj>
+        $<TARGET_OBJECTS:overlay_ui_obj>
     )
 
     target_include_directories(transmog_logic PRIVATE ${COMMON_INCLUDE_DIRS})
@@ -276,7 +298,7 @@ else() # TRANSMOG_DEV_BUILD=OFF
 
     add_library(${PROJECT_NAME}-ASI SHARED
         ${ASI_SOURCES}
-        $<TARGET_OBJECTS:overlay_reshade_obj>
+        $<TARGET_OBJECTS:overlay_ui_obj>
     )
 
     target_include_directories(${PROJECT_NAME}-ASI PRIVATE ${COMMON_INCLUDE_DIRS})

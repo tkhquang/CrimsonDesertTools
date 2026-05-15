@@ -95,7 +95,7 @@ Launch the game. Press [b]Home[/b] to open the transmog overlay and start browsi
 [size=4]Using with ReShade[/size]
 If [url=https://reshade.me/]ReShade[/url] is installed, the mod automatically registers as a ReShade addon. Open the ReShade menu ([b]Home[/b] key) and find the [b]Transmog[/b] tab. No extra setup is needed.
 
-If you prefer the standalone overlay window instead of the ReShade tab, set [b]ForceStandaloneOverlay = true[/b] in the INI. Both the ReShade tab and the standalone window will be available.
+If you prefer the standalone overlay window instead of the ReShade tab, set [b]ForceStandaloneOverlay = true[/b] in the INI. The mod will skip ReShade registration entirely and open its own window.
 
 [size=4]Using with OptiScaler[/size]
 If you use [url=https://github.com/cdozdil/OptiScaler]OptiScaler[/url] for frame generation or upscaling:
@@ -136,7 +136,8 @@ If you run into issues, check the OptiScaler documentation for DLL naming and co
 [*]Select an item -changes stay [b]pending[/b] until you click [b]Apply All[/b]
 [*]Click [b]Apply All[/b] to commit all slot changes at once
 [*]Use [b]Append[/b] in the Presets section to create a fresh preset with every slot ticked and set to (none) -- a hide-all starting point you can fill in from the pickers
-[*]Use [b]Copy[/b] to duplicate the current preset (including any unsaved picker edits) into a new slot you can tweak without touching the source
+[*]Use [b]Copy[/b] to clone the active preset's saved state into a new slot. Unsaved picker edits are discarded so you start from a clean baseline you can tweak without touching the source
+[*]Use [b]Save as New[/b] to bottle up the current pending state (unsaved picker edits, dye, color overrides) as a brand-new preset. The active preset's saved rows stay untouched, which is the safe path when you started altering an existing preset and want to keep the new look as a separate entry
 [*][b]Save[/b] commits unsaved picker edits back into the active preset. The button turns orange with a [b]*[/b] marker and a [b][UNSAVED -- click Save][/b] banner appears in the header whenever your edits differ from the stored preset
 [*]Use [b]Prev[/b] / [b]Next[/b] to cycle through saved presets
 [*]Press [b]Home[/b] again to close the overlay
@@ -185,6 +186,16 @@ ReplaceHotkey =
 RemoveHotkey =
 NextHotkey =
 PrevHotkey =
+
+[Experimental]
+; --- Color Override ---
+; Adds a "Color Override" tab to the per-slot popup that lets you pick
+; a custom colour for each visible material region on a transmogged
+; item, including outfits the in-game dye merchant would normally refuse.
+;
+; HIGHLY EXPERIMENTAL -- disabled by default. Toggle changes take
+; effect on the next game launch.
+ColorOverride = false
 [/code]
 
 [size=4]Hotkey Format[/size]
@@ -202,6 +213,7 @@ See the full list at the [url=https://github.com/tkhquang/DetourModKit?tab=readm
 [size=5]Known Limitations[/size]
 
 [list]
+[*][b][Experimental] Color Override[/b] is off by default. Set [b]ColorOverride = true[/b] in the [b][Experimental][/b] INI section to enable a per-region color picker that paints transmog items (including outfits the in-game dye merchant refuses). Changes take effect on the next game launch. Expect rough edges.
 [*][b][Experimental] Dye support shipped as a rough POC/MVP[/b], please bear with the UX for now. Note that not every item is dyeable; applying a color to a non-dyeable slot will produce no visual change.
 [*][b]Helm visibility setting is overridden[/b] -the in-game helmet visibility setting is overridden while LT is active. Workaround: set the Helm slot in the LT picker to [b](none)[/b] to hide the helmet.
 [*][b]Protagonist switch may leave the picker on the previous character[/b] -when switching protagonists, the LT picker may continue to show the previous protagonist's name and presets, and the dropdown may not let you switch. This is a known bug under investigation.

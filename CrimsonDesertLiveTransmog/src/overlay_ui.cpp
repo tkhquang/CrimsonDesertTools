@@ -1,30 +1,68 @@
-// overlay_ui.inl -- Shared transmog overlay widget code.
+// overlay_ui.cpp -- Transmog overlay UI implementation.
 //
-// Included by both overlay.cpp (standalone D3D11 path) and
-// overlay_reshade.cpp (ReShade addon path).  Each TU provides its own
-// ImGui symbols: the standalone path links against imgui_lib while the
-// ReShade path uses the function-table wrappers from reshade.hpp.
+// Single TU compiled against the ReShade SDK's <imgui.h> (a copy of the
+// upstream v1.92.5 header) plus reshade_overlay.hpp's function-table
+// wrappers.  In this TU every `ImGui::Foo(...)` call routes through
+// `imgui_function_table_instance()` -- a pointer that is set either by
+// ReShade (when our addon registers) or by us in standalone init via
+// `lt_get_imgui_function_table()` from the populator TU.
 //
-// Everything here is static (internal linkage per TU).  Only one path
-// is active at runtime so the duplicated state is harmless (~2 KB).
-//
-// Requires the including TU to have these headers already included:
-//   imgui.h (either real or ReShade wrapper), constants.hpp,
-//   item_name_table.hpp, preset_manager.hpp, shared_state.hpp,
-//   transmog.hpp, transmog_map.hpp, <DetourModKit.hpp>,
-//   <cstdarg>, <cstdio>, <cstring>, <string>
+// One source of truth for both deployment modes; no #ifdef branching,
+// no `ui_button` LNK2005 workaround, no anonymous-namespace TU-locality
+// trick.  Public entry points (`draw_overlay`, `init_reshade_overlay`,
+// `shutdown_reshade_overlay`, `is_reshade_overlay_active`) sit at the
+// bottom of the file outside the anonymous namespace.
 
-// ImGui::Text, TextColored, TextDisabled, and SetTooltip are variadic.
-// The compiler cannot inline them, so ReShade's reshade_overlay.hpp
-// emits out-of-line COMDAT copies that conflict with imgui_lib's strong
-// symbols at link time.  These helpers call only non-variadic ImGui
-// functions (TextUnformatted, PushStyleColor) which inline correctly
-// in both the ReShade and standalone paths.
+#include "overlay.hpp"
+#include "color_override/color_pending_overrides.hpp"
+#include "color_override/color_picker_state.hpp"
+#include "color_override/color_reinit.hpp"
+#include "color_override/color_swatch_table.hpp"
+#include "color_override/color_token_table.hpp"
+#include "prefab_wrapper_swap.hpp"
+#include "constants.hpp"
+#include "dye_record_inject.hpp"
+#include "generated/dye_color_table.hpp"
+#include "generated/material_palette_table.hpp"
+#include "item_name_table.hpp"
+#include "preset_manager.hpp"
+#include "shared_state.hpp"
+#include "slot_metadata.hpp"
+#include "transmog.hpp"
+#include "transmog_apply.hpp"
+#include "transmog_map.hpp"
 
-// Anonymous namespace wraps the entire body so each including TU
-// (overlay.cpp, overlay_reshade.cpp) gets its own unique implicit
-// namespace name -- makes TU-locality explicit and silences
-// IntelliSense's cross-TU "ambiguous declaration" diagnostics.
+#include <DetourModKit.hpp>
+
+#pragma warning(push, 0)
+#include <imgui.h>                  // ReShade SDK stub (upstream v1.92.5)
+#include <reshade.hpp>              // pulls in reshade_overlay.hpp (function-table
+                                    // ImGui:: thunks + register_addon/overlay).
+                                    // Do NOT include reshade_overlay.hpp directly:
+                                    // it has no include guard, and a second include
+                                    // re-defines every inline namespace-ImGui thunk.
+#pragma warning(pop)
+
+#include <algorithm>
+#include <array>
+#include <cctype>
+#include <cmath>
+#include <cstdarg>
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
+#include <map>
+#include <string>
+#include <tuple>
+#include <vector>
+
+namespace Transmog
+{
+
+// Window title for the standalone host wrapper.  ### gives ImGui a
+// stable ID so renaming the visible title later won't lose window state.
+static constexpr const char *k_windowTitle = "Transmog###TransmogMain";
+
 namespace {
 
 static void ui_text(const char *fmt, ...)
@@ -69,36 +107,8 @@ static void ui_tooltip(const char *text)
     ImGui::EndTooltip();
 }
 
-// Wrappers for non-variadic ImGui functions whose out-of-line COMDAT
-// copies from reshade_overlay.hpp clash with imgui_lib's strong symbols
-// at link time (LNK2005).  In the ReShade path we call the function
-// table directly, bypassing the ImGui:: name entirely; in the standalone
-// path we just forward to the real ImGui.
-#ifdef RESHADE_API_VERSION
-#define LT_IMGUI_FT  ::imgui_function_table_instance()
-static bool ui_button(const char *label, const ImVec2 &size = ImVec2(0, 0))
-{ return LT_IMGUI_FT->Button(label, size); }
-static bool ui_checkbox(const char *label, bool *v)
-{ return LT_IMGUI_FT->Checkbox(label, v); }
-static bool ui_collapsing_header(const char *label, ImGuiTreeNodeFlags flags = 0)
-{ return LT_IMGUI_FT->CollapsingHeader(label, flags); }
-static bool ui_combo(const char *label, int *current_item,
-                     const char *const items[], int items_count,
-                     int popup_max_height_in_items = -1)
-{ return LT_IMGUI_FT->Combo(label, current_item, items, items_count,
-                             popup_max_height_in_items); }
-static bool ui_input_text(const char *label, char *buf, size_t buf_size,
-                          ImGuiInputTextFlags flags = 0,
-                          ImGuiInputTextCallback callback = nullptr,
-                          void *user_data = nullptr)
-{ return LT_IMGUI_FT->InputText(label, buf, buf_size, flags, callback,
-                                 user_data); }
-static bool ui_selectable(const char *label, bool selected = false,
-                          ImGuiSelectableFlags flags = 0,
-                          const ImVec2 &size = ImVec2(0, 0))
-{ return LT_IMGUI_FT->Selectable(label, selected, flags, size); }
-#undef LT_IMGUI_FT
-#else
+// Default-arg helpers preserved at call sites; the bodies forward to
+// ImGui:: directly (which in this TU is the function-table thunk).
 static bool ui_button(const char *label, const ImVec2 &size = ImVec2(0, 0))
 { return ImGui::Button(label, size); }
 static bool ui_checkbox(const char *label, bool *v)
@@ -119,7 +129,6 @@ static bool ui_selectable(const char *label, bool selected = false,
                           ImGuiSelectableFlags flags = 0,
                           const ImVec2 &size = ImVec2(0, 0))
 { return ImGui::Selectable(label, selected, flags, size); }
-#endif
 
 // Mirror a picker-committed override into PendingOverrides so the
 // slot-agnostic substitute path in color_override/setter_substitute.cpp
@@ -666,14 +675,11 @@ static bool name_contains_ci(const std::string &hay, const char *needle) noexcep
     // result sets (the catalog has more chest items than any single
     // hardcoded cap could safely truncate).
     //
-    // Do NOT replace this with ImGuiListClipper: reshade_overlay.hpp
-    // (used by overlay_reshade.cpp) does not provide inline thunks for
-    // ImGuiListClipper::Begin/End/Step. Adding any such reference pulls
-    // imgui_lib's real symbols into the link, which collides with every
-    // COMDAT ImGui:: thunk in overlay_reshade.obj (LNK2005 cascade).
-    // Any new ImGui:: symbol added in this file must already exist as
-    // an inline thunk in external/reshade-sdk/include/reshade_overlay.hpp.
-    // ~6k Selectables per popup frame is acceptable in measurement.
+    // Not using ImGuiListClipper here is a deliberate choice, not a
+    // restriction: measured ~6k Selectables per popup frame stay well
+    // inside frame budget, and the unclipped loop keeps post-loop
+    // nav-clamp logic simple (it needs the full visible count, which
+    // a clipper hides behind its internal stepping).
     //
     // s_filtered is thread_local + static so the storage is reused
     // across frames without per-frame allocation. Safe because only
@@ -4969,3 +4975,54 @@ static void draw_overlay_content()
 }
 
 } // anonymous namespace
+
+// --- Public entry points ------------------------------------------------
+
+void draw_overlay()
+{
+    // Auto-fit window so 4K screens don't crop content on first open.
+    ImGui::SetNextWindowSize(ImVec2(0.0f, 0.0f), ImGuiCond_FirstUseEver);
+    if (!ImGui::Begin(k_windowTitle))
+    {
+        ImGui::End();
+        return;
+    }
+    s_standaloneMode = true;
+    draw_overlay_content();
+    ImGui::End();
+}
+
+// --- ReShade addon path -------------------------------------------------
+
+static HMODULE s_reshadeModule = nullptr;
+static bool s_reshadeActive = false;
+
+static void draw_reshade_overlay(reshade::api::effect_runtime *)
+{
+    // Drawn directly inside the ReShade addon tab; no Begin/End wrapper.
+    draw_overlay_content();
+}
+
+bool init_reshade_overlay(HMODULE hModule)
+{
+    if (!reshade::register_addon(hModule))
+        return false;
+    reshade::register_overlay("Transmog", &draw_reshade_overlay);
+    s_reshadeModule = hModule;
+    s_reshadeActive = true;
+    return true;
+}
+
+void shutdown_reshade_overlay()
+{
+    if (!s_reshadeActive)
+        return;
+    reshade::unregister_overlay("Transmog", &draw_reshade_overlay);
+    reshade::unregister_addon(s_reshadeModule);
+    s_reshadeActive = false;
+    s_reshadeModule = nullptr;
+}
+
+bool is_reshade_overlay_active() { return s_reshadeActive; }
+
+} // namespace Transmog
