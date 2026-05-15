@@ -2,6 +2,17 @@
 
 All notable changes to the CrimsonDesertLiveTransmog mod will be documented in this file.
 
+## [0.10.0] - [Experimental] Color Override
+
+- New experimental "Color Override" picker paints transmog items (including outfits the in-game dye merchant refuses) with a custom colour per visible region.
+- Color Override is OFF by default; enable it by setting `ColorOverride = true` under a new `[Experimental]` section in the INI, then relaunch the game.
+- New per-slot "Sync from live" button captures the dye you applied to a real item in-game and stores it in the active preset for that slot.
+- Cleanup pass on the existing dye apply path so unset slots no longer silently inherit your real item's colours.
+- New "Save as New" button in the Presets section forks your pending edits into a brand-new preset without overwriting the one you started from.
+- Copy now clones the active preset's saved state only; pending picker edits are discarded so you get a clean baseline. Use "Save as New" if you want to keep your pending edits.
+- Prefab picker's Exact filter is stricter: knowledge images and other UI assets that happened to share a body-mesh name no longer leak into the list.
+- More reliable character detection on save-load and radial swap; the active preset now follows your real protagonist across reloads without needing a manual swap-and-back.
+
 ## [0.9.4] - Cross-character preset editing
 
 - You can now pick a different character in the Character dropdown to edit (and wear) their preset on whoever you are currently controlling, with an Unpin button to snap back to following the controlled character.
@@ -137,6 +148,7 @@ All notable changes to the CrimsonDesertLiveTransmog mod will be documented in t
 - Modular code split: `transmog_apply` (apply/clear logic), `transmog_hooks` (VEC/BatchEquip callbacks), `transmog_worker` (debounce/load-detect/nametable threads), `shared_state` (cross-TU atomics)
 - Docs clarify ReShade is required for GUI; without it, users edit JSON manually via Capture hotkey
 
+[0.10.0]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.10.0
 [0.9.4]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.9.4
 [0.9.3]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.9.3
 [0.9.2]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.9.2
