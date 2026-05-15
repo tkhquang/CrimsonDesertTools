@@ -146,6 +146,12 @@ set(COMMON_INCLUDE_DIRS
 add_library(overlay_ui_obj OBJECT
     src/overlay.cpp
     src/overlay_ui.cpp
+    src/overlay_ui/color_override.cpp
+    src/overlay_ui/dye_popup.cpp
+    src/overlay_ui/footer.cpp
+    src/overlay_ui/helpers.cpp
+    src/overlay_ui/item_picker_popup.cpp
+    src/overlay_ui/transmog_tab.cpp
 )
 target_include_directories(overlay_ui_obj PRIVATE
     src

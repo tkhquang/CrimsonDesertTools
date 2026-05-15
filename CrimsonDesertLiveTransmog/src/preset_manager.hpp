@@ -297,6 +297,34 @@ namespace Transmog
         /// Apply the active preset's slot data to the global slot_mappings.
         void apply_to_state() const;
 
+        /// Re-seed ColorOverride placeholder rows for slots whose saved
+        /// JSON has entries but whose live SwatchTable is still empty
+        /// for the active preset.
+        ///
+        /// Why this exists: populate_from_persisted resolves each saved
+        /// entry's token name via TokenTable::token_id_for_name, which
+        /// returns 0 until either the AOB-discovered token table or the
+        /// runtime interner hook has seen that token. On a cold game
+        /// load auto_reinit_from runs once at PresetManager::load time;
+        /// any saved tokens not yet known at that point get dropped
+        /// silently, the picker rows never seed, and the overlay's
+        /// per-slot override chip never renders (g_count stays 0). The
+        /// engine itself still applies the saved RGB through the
+        /// PendingOverrides path, so visuals are correct but the UI
+        /// looks empty until the user manually triggers a preset
+        /// switch.
+        ///
+        /// This method is the lazy retry: on every overlay frame it
+        /// re-runs populate_from_persisted for any slot whose live
+        /// table is empty but whose preset has saved entries. The
+        /// underlying populate_from_persisted is idempotent (already-
+        /// seeded entries short-circuit via find_seeded), so the call
+        /// is a no-op once every token has resolved. Cheap walk
+        /// otherwise: bounded by k_slotCount * saved-entry-count and
+        /// only touches slots that are actually waiting on token
+        /// resolution.
+        void reseed_unresolved_persisted_swatches() const;
+
         /// Look up the *active* preset for an arbitrary character without
         /// changing the manager's currently-selected character. Used by
         /// the body-mesh prefab picker to "borrow" the Kairos (default-
