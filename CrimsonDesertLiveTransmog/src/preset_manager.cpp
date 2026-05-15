@@ -580,12 +580,37 @@ namespace Transmog
         namespace ST = ColorOverride::SwatchTable;
         for (std::size_t s = 0; s < k_slotCount; ++s)
         {
-            p.swatch_overrides[s] =
-                ST::get_persistable_overrides(static_cast<int>(s));
-            p.swatch_palette[s] =
-                ST::get_persistable_palette(static_cast<int>(s));
-            p.swatch_slot_enabled[s] =
-                ST::slot_enabled_get(static_cast<int>(s));
+            auto liveOv  = ST::get_persistable_overrides(
+                static_cast<int>(s));
+            auto livePal = ST::get_persistable_palette(
+                static_cast<int>(s));
+            // Live SwatchTable can legitimately be empty for a slot
+            // even when the user has saved overrides for it:
+            //   - On cold game-load, populate_from_persisted drops
+            //     entries whose token names haven't been interned by
+            //     the engine yet (token_id_for_name returns 0). No
+            //     placeholder row gets seeded, so the live table
+            //     stays empty for that slot until either the setter
+            //     intercepts an engine write or a later retry pass
+            //     resolves the token.
+            //   - The slot may never have been equipped this session.
+            //   - The slot's apply pipeline may have skipped because
+            //     dispatcher state filtered it out.
+            // Writing the empty live vector over the preset's
+            // baseline in any of those cases silently destroys the
+            // user's saved JSON. Preserve the baseline; the live
+            // table will repopulate naturally as tokens resolve, and
+            // the next genuine edit will mark dye_dirty so a real
+            // capture proceeds via the force=true save path.
+            const bool liveEmpty   = liveOv.empty() && livePal.empty();
+            const bool savedExists = !p.swatch_overrides[s].empty()
+                                  || !p.swatch_palette[s].empty();
+            if (liveEmpty && savedExists)
+                continue;
+            p.swatch_overrides[s]    = std::move(liveOv);
+            p.swatch_palette[s]      = std::move(livePal);
+            p.swatch_slot_enabled[s] = ST::slot_enabled_get(
+                static_cast<int>(s));
         }
     }
 
@@ -1390,6 +1415,44 @@ namespace Transmog
         apply_to_state();
         auto_reinit_from(
             cp.presets[static_cast<std::size_t>(cp.activePreset)]);
+    }
+
+    void PresetManager::reseed_unresolved_persisted_swatches() const
+    {
+        if (!flag_color_override().load(std::memory_order_acquire))
+            return;
+        // While dye_dirty is set the user has uncommitted edits in
+        // flight: a per-slot Reset just cleared the live table, a
+        // checkbox toggle dropped a row, a colour pick moved RGB,
+        // etc. Re-seeding from the JSON baseline here would fight
+        // those edits and resurrect rows the user explicitly wiped.
+        // The next Save snapshots whatever live state the user
+        // committed to, so the retry only ever needs to run on a
+        // clean, just-loaded preset (dye_dirty == false). Cold-load
+        // token-resolution races still get repaired because load
+        // clears dirty before the per-frame retry begins.
+        if (dye_dirty().load(std::memory_order_acquire))
+            return;
+        const auto *p = active_preset();
+        if (!p)
+            return;
+        namespace ST = ColorOverride::SwatchTable;
+        for (std::size_t s = 0; s < k_slotCount; ++s)
+        {
+            const auto &pal = p->swatch_palette[s];
+            const auto &ovr = p->swatch_overrides[s];
+            if (pal.empty() && ovr.empty())
+                continue;
+            // Live row count is the cheap "did anything seed yet"
+            // signal. Re-firing populate_from_persisted on a slot
+            // that already has rows is a no-op for resolved entries
+            // (find_seeded short-circuits), so the only cost worth
+            // avoiding is re-walking saved vectors on slots that are
+            // already done.
+            if (ST::detected_swatch_count(static_cast<int>(s)) != 0)
+                continue;
+            ST::populate_from_persisted(static_cast<int>(s), pal, ovr);
+        }
     }
 
     // --- State bridge ---
