@@ -126,13 +126,22 @@ SOFTWARE.
 
 -------------------------------------------------------------------------
 
-ReShade
-   Author/Maintainer: crosire
+ReShade (SDK headers and host-side imgui function-table populator)
+   Author/Maintainer: crosire (Patrick Mours)
    Project URL: https://reshade.me/
    Project URL: https://github.com/crosire/reshade
-   BSD 3-Clause License
+   Vendored files: external/reshade-sdk/include/reshade*.hpp
+                   external/reshade-sdk/source/imgui_function_table_19250.hpp
+                   external/reshade-sdk/source/imgui_function_table_19250.cpp
+   SPDX-License-Identifier: BSD-3-Clause OR MIT
 
-Copyright 2014 Patrick Mours
+   The vendored files are dual-licensed; the recipient may use either
+   license.  The full BSD-3-Clause text is reproduced below.  The full
+   MIT text is reproduced in the Dear ImGui notice further down (the
+   imgui function-table populator files also carry Omar Cornut's
+   copyright, so that MIT notice covers both).
+
+Copyright (C) 2021 Patrick Mours
 
 Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the following conditions are met:

@@ -70,7 +70,7 @@ Launch the game. Press **Home** to open the transmog overlay.
 
 If [ReShade](https://reshade.me/) is installed, the mod automatically registers as a ReShade addon. Open the ReShade menu (**Home** key) and find the **Transmog** tab. No extra setup is needed.
 
-If you prefer the standalone overlay window instead of the ReShade tab, set `ForceStandaloneOverlay = true` in the INI. Both the ReShade tab and the standalone window will be available.
+If you prefer the standalone overlay window instead of the ReShade tab, set `ForceStandaloneOverlay = true` in the INI. The mod will skip ReShade registration entirely and open its own window.
 
 ### Using with OptiScaler
 
@@ -112,10 +112,11 @@ If you run into issues, check the OptiScaler documentation for DLL naming and co
 4. Select an item - changes stay **pending** until you click **Apply All**
 5. Click **Apply All** to commit all slot changes at once
 6. Use **Append** in the Presets section to create a fresh preset with every slot ticked and set to (none) -- a hide-all starting point you can fill in from the pickers
-7. Use **Copy** to duplicate the current preset (including any unsaved picker edits) into a new slot you can tweak without touching the source
-8. **Save** commits unsaved picker edits back into the active preset. The button turns orange with a `*` marker and a `[UNSAVED -- click Save]` banner appears in the header whenever your edits differ from the stored preset
-9. Use **Prev** / **Next** to cycle through saved presets
-10. Press **Home** again to close the overlay
+7. Use **Copy** to clone the active preset's saved state into a new slot. Unsaved picker edits are discarded so you start from a clean baseline you can tweak without touching the source
+8. Use **Save as New** to bottle up the current pending state (unsaved picker edits, dye, color overrides) as a brand-new preset. The active preset's saved rows stay untouched, which is the safe path when you started altering an existing preset and want to keep the new look as a separate entry
+9. **Save** commits unsaved picker edits back into the active preset. The button turns orange with a `*` marker and a `[UNSAVED -- click Save]` banner appears in the header whenever your edits differ from the stored preset
+10. Use **Prev** / **Next** to cycle through saved presets
+11. Press **Home** again to close the overlay
 
 > **Tip:** Enable **Instant Apply** in the overlay to preview items on hover without needing to click Apply All.
 
@@ -161,6 +162,16 @@ ReplaceHotkey =
 RemoveHotkey =
 NextHotkey =
 PrevHotkey =
+
+[Experimental]
+; --- Color Override ---
+; Adds a "Color Override" tab to the per-slot popup that lets you pick
+; a custom colour for each visible material region on a transmogged
+; item, including outfits the in-game dye merchant would normally refuse.
+;
+; HIGHLY EXPERIMENTAL -- disabled by default. Toggle changes take
+; effect on the next game launch.
+ColorOverride = false
 ```
 
 Presets are stored in `CrimsonDesertLiveTransmog_presets.json` (auto-generated alongside the INI).
@@ -176,6 +187,7 @@ See the full list at the [Supported Input Names](https://github.com/tkhquang/Det
 
 ## Known Limitations
 
+- **[Experimental] Color Override** is off by default. Set `ColorOverride = true` in the `[Experimental]` INI section to enable a per-region color picker that paints transmog items (including outfits the in-game dye merchant refuses). Changes take effect on the next game launch. Expect rough edges.
 - **[Experimental] Dye support shipped as a rough POC/MVP**, please bear with the UX for now. Note that not every item is dyeable; applying a color to a non-dyeable slot will produce no visual change.
 - **Helm visibility setting is overridden** - the in-game helmet visibility setting is overridden while LT is active. Workaround: set the Helm slot in the LT picker to "(none)" to hide the helmet.
 - **Protagonist switch may leave the picker on the previous character** - when switching protagonists, the LT picker may continue to show the previous protagonist's name and presets, and the dropdown may not let you switch. This is a known bug under investigation.

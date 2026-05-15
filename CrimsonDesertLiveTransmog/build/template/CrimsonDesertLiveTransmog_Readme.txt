@@ -11,7 +11,7 @@ exist. Install at your own risk.
 
 Author:   tkhquang
 Source:   https://github.com/tkhquang/CrimsonDesertTools
-Nexus:    https://www.nexusmods.com/crimsondesert/mods/25
+Nexus:    https://www.nexusmods.com/crimsondesert/mods/1056
 Issues:   https://github.com/tkhquang/CrimsonDesertTools/issues
 
 Requirements
@@ -100,4 +100,4 @@ Third-Party Notices
 -------------------
 See CrimsonDesertLiveTransmog_Acknowledgements.txt for third-party
 software licenses (SafetyHook, Zydis, SimpleIni, Dear ImGui,
-DirectXMath, ReShade addon SDK).
+DirectXMath, nlohmann/json, ReShade addon SDK).
