@@ -386,10 +386,13 @@ namespace Transmog
             while (len < bufSize - 1 && src[len] != '\0')
             {
                 const auto c = src[len];
-                // Accept printable ASCII only -- reject if we see control
-                // chars (suggests we're reading the wrong pointer).
-                if (static_cast<unsigned char>(c) < 0x20 ||
-                    static_cast<unsigned char>(c) > 0x7E)
+                // Reject control bytes (0x01..0x1F) -- they signal a
+                // misaligned heap read. Accept 0x80..0xFF: some
+                // legitimate string_keys are UTF-8 encoded (e.g. Roman
+                // numerals in Goblin_Merchant_Fabric_Armor_* use the
+                // sequence `E2 85 A2..A5`), so a printable-ASCII-only
+                // filter would silently drop them.
+                if (static_cast<unsigned char>(c) < 0x20)
                     return 0;
                 buf[len] = c;
                 ++len;

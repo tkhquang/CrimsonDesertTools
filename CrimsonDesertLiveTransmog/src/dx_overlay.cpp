@@ -14,8 +14,12 @@
 #include <d3d11.h>
 
 #include <Windows.h>
+#include <timeapi.h>
+#pragma comment(lib, "winmm.lib")
 
+#include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <cstring>
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(
@@ -122,56 +126,135 @@ namespace Transmog
         return true;
     }
 
-    // Copy the rendered texture to the DIB and composite onto the screen.
-    static void blit_to_screen()
+    // Compute the union of all non-empty draw cmd clip rects from this
+    // frame's ImDrawData, clamped to the target surface.  Returns false
+    // when ImGui drew nothing (e.g. the standalone window's Begin
+    // returned collapsed/clipped); caller falls back to full-surface.
+    static bool compute_draw_bounds(ImDrawData *dd, RECT &out)
     {
-        // GPU → staging texture.
-        s_context->CopyResource(s_stagingTex, s_rtTex);
+        if (!dd || dd->CmdListsCount == 0)
+            return false;
+        const float fW = static_cast<float>(s_width);
+        const float fH = static_cast<float>(s_height);
+        float mnx = fW, mny = fH, mxx = 0.0f, mxy = 0.0f;
+        bool any = false;
+        for (int i = 0; i < dd->CmdListsCount; ++i)
+        {
+            const ImDrawList *cl = dd->CmdLists[i];
+            for (int c = 0; c < cl->CmdBuffer.Size; ++c)
+            {
+                const ImDrawCmd &cmd = cl->CmdBuffer[c];
+                if (cmd.ElemCount == 0)
+                    continue;
+                // Paren-around-name defeats the Windows.h min/max
+                // macros for IntelliSense's parse, even when the build
+                // already has NOMINMAX defined upstream.
+                float x0 = (std::max)(0.0f, cmd.ClipRect.x);
+                float y0 = (std::max)(0.0f, cmd.ClipRect.y);
+                float x1 = (std::min)(fW,   cmd.ClipRect.z);
+                float y1 = (std::min)(fH,   cmd.ClipRect.w);
+                if (x1 <= x0 || y1 <= y0) continue;
+                if (x0 < mnx) mnx = x0;
+                if (y0 < mny) mny = y0;
+                if (x1 > mxx) mxx = x1;
+                if (y1 > mxy) mxy = y1;
+                any = true;
+            }
+        }
+        if (!any) return false;
+        out.left   = static_cast<LONG>(std::floor(mnx));
+        out.top    = static_cast<LONG>(std::floor(mny));
+        out.right  = static_cast<LONG>(std::ceil(mxx));
+        out.bottom = static_cast<LONG>(std::ceil(mxy));
+        return true;
+    }
 
-        // Map staging → CPU.
+    // Copy the rendered texture to the DIB and composite onto the screen.
+    // Only pixels inside `dirty` are CPU-touched and pushed via ULWI's
+    // prcDirty: ImGui's window typically occupies < 5% of a 4K screen,
+    // so limiting the staging readback + per-pixel premultiply + GDI
+    // composite to that region is the bulk of the standalone-overlay
+    // responsiveness win.  `dirty` must be the UNION of the previous
+    // frame's drawn rect and this frame's drawn rect so pixels the
+    // popup just vacated get cleared in the layered surface.
+    static void blit_to_screen(const RECT &dirty)
+    {
+        const LONG W = static_cast<LONG>(s_width);
+        const LONG H = static_cast<LONG>(s_height);
+        const LONG x0 = std::clamp<LONG>(dirty.left,   0, W);
+        const LONG y0 = std::clamp<LONG>(dirty.top,    0, H);
+        const LONG x1 = std::clamp<LONG>(dirty.right,  0, W);
+        const LONG y1 = std::clamp<LONG>(dirty.bottom, 0, H);
+        if (x1 <= x0 || y1 <= y0)
+            return;
+
+        // GPU → staging: only the dirty box. CopySubresourceRegion is
+        // free where CopyResource would have read the whole texture.
+        D3D11_BOX box{};
+        box.left   = static_cast<UINT>(x0);
+        box.top    = static_cast<UINT>(y0);
+        box.front  = 0;
+        box.right  = static_cast<UINT>(x1);
+        box.bottom = static_cast<UINT>(y1);
+        box.back   = 1;
+        s_context->CopySubresourceRegion(
+            s_stagingTex, 0,
+            static_cast<UINT>(x0), static_cast<UINT>(y0), 0,
+            s_rtTex, 0, &box);
+
         D3D11_MAPPED_SUBRESOURCE mapped{};
         if (FAILED(s_context->Map(s_stagingTex, 0, D3D11_MAP_READ, 0, &mapped)))
             return;
 
-        // Copy rows to DIB (pitch may differ).
         const UINT rowBytes = s_width * 4;
-        auto *src = static_cast<const uint8_t *>(mapped.pData);
-        auto *dst = static_cast<uint8_t *>(s_dibPixels);
-        for (UINT y = 0; y < s_height; ++y)
+        const UINT spanBytes = static_cast<UINT>(x1 - x0) * 4;
+        auto *srcBase = static_cast<const uint8_t *>(mapped.pData);
+        auto *dstBase = static_cast<uint8_t *>(s_dibPixels);
+        // memcpy + premultiply each dirty row in one pass.  Outside
+        // the dirty rect the DIB retains last frame's bytes; ULWI's
+        // prcDirty ignores them.
+        for (LONG y = y0; y < y1; ++y)
         {
-            memcpy(dst, src, rowBytes);
-            src += mapped.RowPitch;
-            dst += rowBytes;
+            auto *src = srcBase + static_cast<size_t>(y) * mapped.RowPitch + static_cast<size_t>(x0) * 4;
+            auto *dst = dstBase + static_cast<size_t>(y) * rowBytes + static_cast<size_t>(x0) * 4;
+            memcpy(dst, src, spanBytes);
+            for (LONG xi = 0; xi < x1 - x0; ++xi)
+            {
+                uint8_t *px = dst + xi * 4;
+                const uint8_t a = px[3];
+                if (a == 0)      { px[0] = px[1] = px[2] = 0; }
+                else if (a < 255)
+                {
+                    px[0] = static_cast<uint8_t>((px[0] * a + 127) / 255);
+                    px[1] = static_cast<uint8_t>((px[1] * a + 127) / 255);
+                    px[2] = static_cast<uint8_t>((px[2] * a + 127) / 255);
+                }
+            }
         }
         s_context->Unmap(s_stagingTex, 0);
 
-        // Premultiply alpha for UpdateLayeredWindow (expects PARGB).
-        auto *px = static_cast<uint8_t *>(s_dibPixels);
-        const UINT total = s_width * s_height;
-        for (UINT i = 0; i < total; ++i, px += 4)
-        {
-            const uint8_t a = px[3];
-            if (a == 0)      { px[0] = px[1] = px[2] = 0; }
-            else if (a < 255)
-            {
-                px[0] = static_cast<uint8_t>((px[0] * a + 127) / 255);
-                px[1] = static_cast<uint8_t>((px[1] * a + 127) / 255);
-                px[2] = static_cast<uint8_t>((px[2] * a + 127) / 255);
-            }
-        }
-
-        // Composite onto screen.
+        // Composite onto screen with a dirty-rect hint so GDI only
+        // touches the changed region of the layered surface.
         RECT gr{};
         GetWindowRect(s_gameHwnd, &gr);
         POINT ptPos = {gr.left, gr.top};
-        SIZE sz = {static_cast<LONG>(s_width), static_cast<LONG>(s_height)};
+        SIZE sz = {W, H};
         POINT ptSrc = {0, 0};
         BLENDFUNCTION blend{};
         blend.BlendOp = AC_SRC_OVER;
         blend.SourceConstantAlpha = 255;
         blend.AlphaFormat = AC_SRC_ALPHA;
-        UpdateLayeredWindow(s_overlayHwnd, nullptr, &ptPos, &sz,
-                            s_memDC, &ptSrc, 0, &blend, ULW_ALPHA);
+        RECT dirtyClamped{x0, y0, x1, y1};
+        UPDATELAYEREDWINDOWINFO ulwi{};
+        ulwi.cbSize   = sizeof(ulwi);
+        ulwi.pptDst   = &ptPos;
+        ulwi.psize    = &sz;
+        ulwi.hdcSrc   = s_memDC;
+        ulwi.pptSrc   = &ptSrc;
+        ulwi.pblend   = &blend;
+        ulwi.dwFlags  = ULW_ALPHA;
+        ulwi.prcDirty = &dirtyClamped;
+        UpdateLayeredWindowIndirect(s_overlayHwnd, &ulwi);
     }
 
     // --- Helpers ---
@@ -341,6 +424,21 @@ namespace Transmog
         s_initialised = true;
         logger.info("[dx_overlay] Overlay ready (WARP + GDI blit, no swap chain)");
 
+        // Raise the system timer resolution to 1ms so the adaptive
+        // Sleep() at the bottom of the render loop is actually honored.
+        // Without this, Sleep(4) rounds up to the default ~15.6 ms
+        // scheduler tick and the overlay caps at ~60 Hz no matter what
+        // we ask for, which is what made hover/click feel sluggish on
+        // the standalone path.  Paired timeEndPeriod() runs before the
+        // thread exits below.
+        timeBeginPeriod(1);
+
+        // Previous frame's drawn rect, so we can union it with this
+        // frame's rect and clear pixels that ImGui vacated (popup
+        // closed, tooltip dismissed, etc.) -- ULWI's prcDirty only
+        // refreshes inside the supplied rect.
+        RECT prevDirty{0, 0, 0, 0};
+
         // --- Render loop ---
         while (!s_shutdownRequested.load(std::memory_order_relaxed))
         {
@@ -448,12 +546,18 @@ namespace Transmog
             //      out (so widget drag keeps working); release
             //      anywhere clears the latch so ImGui sees the up
             //      event.
+            //
+            // `overOverlay` is hoisted out of the polling block so the
+            // adaptive-sleep code below can use it as one of the
+            // "user is interacting" signals (cursor over the overlay
+            // means we want fast frames even before they click).
+            bool overOverlay = false;
             {
                 POINT pt;
                 GetCursorPos(&pt);
                 RECT wr;
                 GetWindowRect(s_overlayHwnd, &wr);
-                const bool overOverlay =
+                overOverlay =
                     pt.x >= wr.left && pt.x < wr.right &&
                     pt.y >= wr.top  && pt.y < wr.bottom;
 
@@ -486,13 +590,67 @@ namespace Transmog
 
             draw_overlay();
 
+            // Snapshot interactivity inside the frame -- IsAnyItem*
+            // is only defined between NewFrame and EndFrame, and
+            // ImGui::Render() below calls EndFrame internally.
+            const bool uiActive =
+                ImGui::IsAnyItemActive() ||
+                ImGui::IsAnyItemHovered() ||
+                io.WantTextInput;
+
             ImGui::Render();
             ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
 
-            blit_to_screen();
+            // Tight dirty rect = union of last frame's drawn rect and
+            // this frame's drawn rect, with a small border for
+            // anti-aliased edges.  Falls back to full surface when
+            // ImGui drew nothing (collapsed window).  Bringing the
+            // staging readback + premultiply + ULWI down to that area
+            // is the bulk of the standalone responsiveness win on
+            // high-res displays.
+            RECT cur{};
+            const bool gotBounds = compute_draw_bounds(
+                ImGui::GetDrawData(), cur);
+            if (!gotBounds)
+            {
+                cur.left   = 0;
+                cur.top    = 0;
+                cur.right  = static_cast<LONG>(s_width);
+                cur.bottom = static_cast<LONG>(s_height);
+            }
+            RECT dirty = cur;
+            if (prevDirty.right > prevDirty.left &&
+                prevDirty.bottom > prevDirty.top)
+            {
+                UnionRect(&dirty, &cur, &prevDirty);
+            }
+            constexpr LONG kEdgePad = 4;
+            dirty.left   = (std::max<LONG>)(0, dirty.left   - kEdgePad);
+            dirty.top    = (std::max<LONG>)(0, dirty.top    - kEdgePad);
+            dirty.right  = (std::min<LONG>)(static_cast<LONG>(s_width),
+                                            dirty.right  + kEdgePad);
+            dirty.bottom = (std::min<LONG>)(static_cast<LONG>(s_height),
+                                            dirty.bottom + kEdgePad);
+            blit_to_screen(dirty);
+            prevDirty = cur;
 
-            Sleep(16); // ~60fps; sufficient for UI, reduces CPU/GDI load
+            // Adaptive sleep.
+            //   - Interactive (cursor over overlay, active item, hover,
+            //     text input, or cursor moved this frame): 4 ms ->
+            //     ~200 Hz cap so clicks and hovers feel native.
+            //   - Idle (overlay visible but user looking elsewhere):
+            //     33 ms -> ~30 Hz, plenty for the static UI while
+            //     keeping CPU/GDI use low.
+            // timeBeginPeriod(1) above is what lets Sleep(4) actually
+            // be 4 ms instead of rounding to a scheduler tick.
+            const bool mouseMoved =
+                io.MouseDelta.x != 0.0f || io.MouseDelta.y != 0.0f;
+            const bool interactive =
+                overOverlay || uiActive || mouseMoved;
+            Sleep(interactive ? 4 : 33);
         }
+
+        timeEndPeriod(1);
 
         // Cleanup.
         s_initialised = false;

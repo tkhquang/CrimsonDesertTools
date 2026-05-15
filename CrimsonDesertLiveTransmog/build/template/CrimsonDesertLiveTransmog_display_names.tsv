@@ -2,6 +2,18 @@ Aant_PlateArmor_Helm	Awrain Plate Helm
 Abacus	Abacus
 Abidon_Fabric_Helm	Pailunese Hat
 Abidon_Fabric_Helm_T5_QA	Abidon Fabric Helm T5 QA
+Abyss_Artifact	Abyss Artifact
+Abyss_InfiniteStat_Hp30	Vitality of the Abyss
+Abyss_InfiniteStat_Mp2	Spirit of the Abyss
+Abyss_InfiniteStat_Sp3	Breath of the Abyss
+Abyss_Surreal_Human_Fabric_Boots	Rabbit Cloth Boots
+Abyss_Surreal_Human_Leather_Armor	Rabbit Leather Coat
+Abyss_Surreal_Human_Leather_Helm	Rabbit Leather Mask
+Abyss_Surreal_Wolf_Leather_Armor	Jester Leather Coat
+Abyss_Surreal_Wolf_Leather_Cloak	Jester Leather Cloak
+Abyss_Surreal_Wolf_Leather_Gloves	Jester Leather Gloves
+Abyss_Surreal_Wolf_Leather_Helm	Jester Leather Mask
+Abyss_Surreal_Wolf_Necklace	Surreal Necklace
 AbyssGear_Epistle	White Crow's Letter
 AbyssReward_Desert_OneHandMace	Desert Hammer
 AbyssReward_Dragon_TwoHandGiantHammer	Aeserion Greathammer
@@ -18,18 +30,6 @@ AbyssReward_Titan_TwoHandSpear	Reckoning
 AbyssReward_WhiteHorn_Ring	White Horn's Ring
 AbyssRuinsCreatureCore	Abyss Cell
 AbyssStone_Seed	Abyssal Seed
-Abyss_Artifact	Abyss Artifact
-Abyss_InfiniteStat_Hp30	Vitality of the Abyss
-Abyss_InfiniteStat_Mp2	Spirit of the Abyss
-Abyss_InfiniteStat_Sp3	Breath of the Abyss
-Abyss_Surreal_Human_Fabric_Boots	Rabbit Cloth Boots
-Abyss_Surreal_Human_Leather_Armor	Rabbit Leather Coat
-Abyss_Surreal_Human_Leather_Helm	Rabbit Leather Mask
-Abyss_Surreal_Wolf_Leather_Armor	Jester Leather Coat
-Abyss_Surreal_Wolf_Leather_Cloak	Jester Leather Cloak
-Abyss_Surreal_Wolf_Leather_Gloves	Jester Leather Gloves
-Abyss_Surreal_Wolf_Leather_Helm	Jester Leather Mask
-Abyss_Surreal_Wolf_Necklace	Surreal Necklace
 Acembel_Leather_Gloves	Essembel Leather Gloves
 Acid_Spider_Poison	Acidic Spider Venom
 Acorn	Acorn
@@ -106,8 +106,8 @@ Apenzel_OneHandRapier	Fallen Kingdom's Rapier
 Apothecary_BackPack_I	Apothecary's Pack
 Apothecary_BackPack_II	Apothecary's Pack
 Apple	Apple
-AppleTree_Seed	Apple Seed
 Apple_BackPack	Apple Pack
+AppleTree_Seed	Apple Seed
 Arandhal_Fabric_Armor	Arandhal Cloth Armor
 Arcalu_PlateArmor_Armor	Arcalu Plate Armor
 Archaia_OneHandMace	Spine of the Earth
@@ -178,7 +178,7 @@ Baidan_Fabric_Helm	Baidan Cloth Headband
 Bailao_Fabric_Armor	Bailao Cloth Armor
 Bainian_Leather_Boots	Blackwing Leather Boots
 Bainian_Leather_Boots_T5_QA	Bainian Leather Boots T5 QA
-Baked_Egg	Smoked Egg
+Baked_Egg	Smoked Eggs
 Baked_Egg_Large	Satisfying Smoked Eggs
 Baked_Egg_Medium	Filling Smoked Eggs
 Baked_Egg_XLarge	Hearty Smoked Eggs
@@ -223,6 +223,8 @@ Barndid_Fabric_Armor	Bandide Cloth Armor
 Barnia_ChainMail_Boots	Varnian Chain Boots
 Barnia_Fabric_Armor	Varnia Cloth Armor
 Barnia_Fabric_Helm	Varnia Cloth Cap
+barnia_Flag_I	Small Varnian Banner Pike
+barnia_Flag_II	Medium Varnian Banner Pike
 Barnia_Leather_Gloves	Varnian Leather Gloves
 Barnia_Soldier_General_Fabric_Armor	Varnian Guard Captain's Cloth Armor
 Barnia_Soldier_General_Fabric_Cloak	Varnian Guard Captain's Cloth Cloak
@@ -233,13 +235,13 @@ Bastion_OneHandMace	Mace of Ambition
 Bastion_OneHandShield	Black Sun
 Bastion_PlateArmor_Armor	Bastier Armor
 Batangka_Leather_Armor	Batangka Leather Armor
-BattleStickyBomb	Sticky Bomb
 BattleSticky_FlowerBomb	Sticky Flower Bomb
+BattleStickyBomb	Sticky Bomb
 Battmen_Fabric_Armor	Bartmun Cloth Armor
 Batz_OneHandDagger	Kylus Dagger
+Batz_Plate_Boots	Batz Plate Boots
 Batz_PlateArmor_Gloves	Batz Plate Gloves
 Batz_PlateArmor_Gloves_I	Batz Plate Gloves I
-Batz_Plate_Boots	Batz Plate Boots
 Bayur_Fabric_Armor	The Faceless's Cloth Armor
 Bayur_Leather_Boots	Bayer Leather Boots
 Bayur_PlateArmor_Helm	Bayer Plate Helm
@@ -249,7 +251,7 @@ Bear_Bile	Bear's Gallbladder
 Bear_Chief_Leather_Helm	Boss Bear Hat
 Bear_Leather	Thick Hide
 Bear_Leather_cloak	Bear Hide Cloak
-Beastman_ChainMail_Gloves	Beastman Chain Gloves
+Beastman_ChainMail_Gloves	Beastman Chain Bracers
 Beastman_Leather_Armor	Beastman Leather Armor
 Beastman_PlateArmor_Helm	Beastman Bone Helmet
 Beastman_TwoHandSword	Savage Longsword
@@ -327,19 +329,19 @@ Birdish_Leather_Armor	Verdesh Leather Armor
 Birdish_Leather_Gloves	Verdesh Leather Gloves
 Biryghton_Leather_Gloves	Viraiton Leather Gloves
 Biryghton_OneHandMace	Wells Mace
-BismuthOre	Bismuth Ore
 Bismuth_CannonBall_Errant	Crude Bismuth Cannonball
 Bismuth_TwoHandCannon_I	Bismuth Cannon
 Bismuth_TwoHandSpear	Bismuth Spear
-BlackBear_Leather_Gloves	Black Bear Leather Gloves
-BlackOath_OneHandShield	Black Oath Shield
+BismuthOre	Bismuth Ore
 Black_Horse_Report	Sighting of Rokade
 Black_Lion_Earring	Black Lion Earring
-Blackbear_Flag_I	Small Black Bears Banner Pike
-Blackbear_Flag_II	Medium Black Bears Banner Pike
-Blackbear_Flag_IV	Black Bears Banner Pike with Tassel
+Blackbear_Flag_I	Small Black Bears' Banner Pike
+Blackbear_Flag_II	Medium Black Bears' Banner Pike
+Blackbear_Flag_IV	Black Bears' Banner Pike with Tassel
+BlackBear_Leather_Gloves	Black Bear Leather Gloves
 Blackberry	Blackberry
 Blackburn_PlateArmor_Armor	Blackburn Plate Armor
+BlackOath_OneHandShield	Black Oath Shield
 Blady_ChainMail_Armor	Blandry Chain Mail
 Blank_Book	Empty Book
 Bleann_Leather_Armor	Blin Leather Armor
@@ -354,8 +356,8 @@ Bleed_Flag_III	Medium Bleed Bandits Banner Pike
 Bloatte_Leather_Armor	Blaine Leather Armor
 BloodyFarmhouse_Book	Quarry Manager's Log
 Blowin_Leather_Armor	Bleawin Leather Armor
-BlueStone	Azurite
 Blueberry	Blueberry
+BlueStone	Azurite
 Blyan_Leather_Gloves	Blyne Leather Bracers
 BoardPaperBundle	Posters
 Boboten_Leather_Boots	Bourveten Leather Boots
@@ -370,9 +372,9 @@ Bolton_PlateArmor_Armor	Bolton Plate Armor
 Bolton_PlateArmor_Cloak	Bolton Plate Cloak
 Bolton_PlateArmor_Helm	Keredeg Plate Helm
 Bolzers_Leather_Armor	Bolzers Leather Armor
-BombSpider_CannonBall	Mine Spider Cannonball
 Bomb_Arrow	Explosive Arrow
 Bomb_Smoke	Smoke Bomb
+BombSpider_CannonBall	Mine Spider Cannonball
 BoneCollectorWagon_Book	Skull Collector's Journal
 Book_Azerian_Diary	Azerian's Journal
 Book_Battle_ATT_Alfonso	Spear Manual of House Alfonso, Vol. 2
@@ -426,7 +428,7 @@ Boss_Reward_LargeWood	Wrecked Keglord
 Boss_Reward_MasterThief	Shadow Gloves
 Boss_Reward_MerchantKing_GoldleafGuildhouse	Seal of Greed - Goldleaf Merchant Guild
 Boss_Reward_MerchantKing_SaltroadTradePost	Seal of Greed - Saltroad Trading Post
-Boss_Reward_MerchantKing_SilvermoonTroll	Seal of Greed - Silvermoon Trade Group
+Boss_Reward_MerchantKing_SilvermoonTroll	Seal of Greed - Silvermoon Trade Collective
 Boss_Reward_MiraculousRecovery	Bloodstained Blessing
 Boss_Reward_Npc01Intimacy	Mysterious Gift
 Boss_Reward_QuickLearner	Sage's Eye
@@ -436,9 +438,9 @@ Boss_Reward_StatsCrime	Chalice of Corruption
 Boss_Reward_StatsMp	T'rukan's Fighting Spirit
 Boss_Reward_StatsStamina	Dark Red Goblet
 Boss_Reward_SummonMerchant	Hologram Projector
+Boss_Reward_Supercarrot	Giant Brown Sugar Cube
 Boss_Reward_SuperSkill	Blessing of the Immortal
 Boss_Reward_SuperWeapon	Axe of the Apocalypse
-Boss_Reward_Supercarrot	Giant Brown Sugar Cube
 Boss_Reward_Survivors	The Ivory Messenger
 Boss_Reward_Tracker	Leebur's Soul
 BountyHunter_Fabric_Armor	Bounty Hunter's Cloth Armor
@@ -468,23 +470,23 @@ BountyHunter_Leather_Gloves_I	Tough Hunter's Leather Gloves
 BountyHunter_Leather_Gloves_II	Thick Hunter's Leather Gloves
 BountyHunter_Leather_Helm_I	Bounty Hunter's Scale Helm
 BountyHunter_Leather_Helm_II	Bounty Hunter's Leather Helm
-BountyHunter_PlateArmor_Gloves_I	Bounty Hunter's Plate Gloves
-BountyHunter_PlateArmor_Helm	Horned Bounty Hunter's Plate Helm
-BountyHunter_PlateArmor_Helm_I	Bounty Hunter's Plate Helm
-BountyHunter_PlateArmor_Helm_II	Crow Bounty Plate Helm
 BountyHunter_Plate_Armor	Bounty Hunter's Plate Armor
 BountyHunter_Plate_Armor_I	Bounty Hunter's Plate Armor
 BountyHunter_Plate_Armor_II	Bounty Hunter's Plate Armor
 BountyHunter_Plate_Armor_III	Bounty Hunter's Plate Armor
 BountyHunter_Plate_Boots	Bounty Hunter's Plate Boots
+BountyHunter_PlateArmor_Gloves_I	Bounty Hunter's Plate Gloves
+BountyHunter_PlateArmor_Helm	Horned Bounty Hunter's Plate Helm
+BountyHunter_PlateArmor_Helm_I	Bounty Hunter's Plate Helm
+BountyHunter_PlateArmor_Helm_II	Crow Bounty Plate Helm
 Bourgogne_OneHandMace	Sorcerer's Massage Stick
 Braised_Fish	Braised Fish
 Braised_Fish_Large	Satisfying Braised Fish
 Braised_Fish_Medium	Filling Braised Fish
-Braised_Fish_Vegetable	Braised Fish and Vegetables
-Braised_Fish_Vegetable_Large	Satisfying Braised Fish and Vegetables
-Braised_Fish_Vegetable_Medium	Filling Braised Fish and Vegetables
-Braised_Fish_Vegetable_XLarge	Hearty Braised Fish and Vegetables
+Braised_Fish_Vegetable	Braised Fish And Vegetables
+Braised_Fish_Vegetable_Large	Satisfying Braised Fish And Vegetables
+Braised_Fish_Vegetable_Medium	Filling Braised Fish And Vegetables
+Braised_Fish_Vegetable_XLarge	Hearty Braised Fish And Vegetables
 Braised_Fish_XLarge	Hearty Braised Fish
 Braised_Meat	Braised Meat
 Braised_Meat_Fish	Braised Meat and Fish
@@ -524,11 +526,13 @@ Bulga_Leather_Armor	Bulga Leather Armor
 Bullet	Bullet
 Bunce_Leather_Gloves	Bunce Leather Gloves
 Burimen_PlateArmor_Armor	Breemen Plate Armor
+burrowingtoad	Burrowing Toad
 Bydan_Fabric_Gloves	Baidan Cloth Gloves
 ByeorSeungja_Chongtong_TwoHandCannon_I	Gamma Barrel Cannon
 Cabbage	Cabbage
 CabinDeathMystery_Book	Journal at the Cabin
 Cacao	Cacao
+cacao_Seed	Cacao Seed
 Cacheco_Leather_Boots	Catcheta Leather Boots
 Cadwallon_ChainMail_Helm	Kadallon Chain Coif
 Cadwallon_Leather_Boots	Kadallon's Leather Boots
@@ -543,10 +547,10 @@ Caliburn_Engineer_Fabric_Armor_IV	Caliburn's Combat Engineer Cloth Armor
 Caliburn_Engineer_Leather_Gloves	Caliburn's Combat Engineer Leather Gloves
 Caliburn_Flag	Small Caliburn's Banner Pike
 Caliburn_Flag_I	Small Caliburn's Banner Pike
-Caliburn_Flag_II	Medium Caliburn's Banner Pike
+Caliburn_Flag_II	Medium Caliburn Banner Pike
+Caliburn_Plate_Boots	Caliburn's Plate Boots
 Caliburn_PlateArmor_Armor	Caliburn's Plate Armor
 Caliburn_PlateArmor_Gloves	Caliburn's Plate Gloves
-Caliburn_Plate_Boots	Caliburn's Plate Boots
 Caliburn_Report	Investigative Report
 Caliburn_Tolerance_OneHandPistol	Caliburn's Mercy Pistol
 Caliburn_TwoHandSword	Righteous Verdict
@@ -556,7 +560,7 @@ Calio_PlateArmor_Helm	Calio Plate Helm
 Calis_Fabric_Armor	Calis Cloth Armor
 Calphade_Contribution_Flag	Calphadean Contribution Banner Pike
 Calphade_Flag_I	Small Calphadean Banner Pike
-Calphade_Flag_II	Medium Calphadean Banner Pike
+Calphade_Flag_II	Medium Calphadean Banner Pik
 Calpris_Fabric_Helm	Calprise Cloth Cap
 Calto_Leather_Armor	Calto Leather Armor
 Caltrop_Bomb	Caltrop Explosive
@@ -600,6 +604,7 @@ Caviden_Leather_Gloves	Caviden Leather Gloves
 Caviden_Wood_OneHandShield	Sydmon Kite Shield
 Cebro_Fabric_Gloves	Serbello Cloth Gloves
 Cecilia_Kokes_OneHandMace	Acorn Mace
+centipede	Centipede
 Ceremonial_OneHandDagger	Ator's Finger
 Cernos_HorseArmor_Armor	Cernos Barding
 Ceruon_PlateArmor_Armor	Cerruan Plate Armor
@@ -639,8 +644,8 @@ Cigrymon_Plate_Boots	Sigremon Plate Boots
 Cigrymon_TwoHandAxe	Sigremon Greataxe
 Cilantro_Leather_Boots	Sillau Leather Boots
 CircusMachine_Sphere	Circus Machine Sphere
-ClaireHill_Leather_Boots	Clarille Leather Boots
 Claire_Leather_Gloves	Claire Leather Gloves
+ClaireHill_Leather_Boots	Clarille Leather Boots
 Clays_Leather_Boots	Clays Leather Boots
 Clays_Leather_Boots_I	Desert Clays Leather Boots
 Clays_Leather_Boots_II	Large Clays Leather Boots
@@ -656,6 +661,12 @@ Cog_Pack	Cogwheel
 Colatte_Leather_Armor	Colatte Leather Armor
 Colbern_Leather_Boots	Colbern Leather Boots
 Colbill_Leather_Armor_I	Colbill Leather Armor
+Collection_gemstone_lamp_0001	Icy White Processed Crystal
+Collection_gemstone_lamp_0001_index01	Twilight Processed Crystal
+Collection_gemstone_lamp_0001_index02	Lilac Processed Crystal
+Collection_gemstone_lamp_0002	Icy White Crystal
+Collection_gemstone_lamp_0002_index01	Twilight Crystal
+Collection_gemstone_lamp_0002_index02	Lilac Crystal
 Collection_Lamp_Candle_0001	Icy White Glass Lamp
 Collection_Lamp_Candle_0001_index01	Twilight Glass Lamp
 Collection_Lamp_Candle_0001_index02	Lilac Glass Lamp
@@ -836,7 +847,7 @@ Collection_Prop_Doll_0002	Fine Blue Bonnet Doll
 Collection_Prop_Doll_0003	Simple Brown Bonnet Doll
 Collection_Prop_Doll_0004	Beige Bandana Doll
 Collection_Prop_Doll_0005	Brown Dress Doll
-Collection_Prop_Doll_0006	Doll Wearing Brown Bonnet
+Collection_Prop_Doll_0006	Doll wearing Brown Bonnet
 Collection_Prop_Doll_0007	Fine Dress Doll
 Collection_Prop_Dyewater_0001	Bright Red Dye
 Collection_Prop_Dyewater_0002	Rich Red Dye
@@ -1029,18 +1040,12 @@ Collection_Prop_Trophy_0002	Trophy - Unarmed Duel
 Collection_Prop_Trophy_0003	Trophy - Wrestling Match
 Collection_Prop_Trophy_0004	Trophy - Spear Duel
 Collection_Prop_Trophy_0005	Trophy - Sword Duel
-Collection_Prop_WeaponBox_0001	Firearms Box
-Collection_Prop_WeaponBox_0002	Swords Box
-Collection_Prop_WeaponBox_0003	Weapons Box
 Collection_Prop_viewingstone_0001	Blue Dragon Scale Decorative Stone
 Collection_Prop_viewingstone_0002	Ancient's Decorative Stone
 Collection_Prop_viewingstone_0003	Red Fire Decorative Stone
-Collection_gemstone_lamp_0001	Icy White Processed Crystal
-Collection_gemstone_lamp_0001_index01	Twilight Processed Crystal
-Collection_gemstone_lamp_0001_index02	Lilac Processed Crystal
-Collection_gemstone_lamp_0002	Icy White Crystal
-Collection_gemstone_lamp_0002_index01	Twilight Crystal
-Collection_gemstone_lamp_0002_index02	Lilac Crystal
+Collection_Prop_WeaponBox_0001	Firearms Box
+Collection_Prop_WeaponBox_0002	Swords Box
+Collection_Prop_WeaponBox_0003	Weapons Box
 Colossus_Boots	Giant's Boots
 Commander_PlateArmor_Gloves	Dulone Plate Gloves
 Common_Flag_I	Double-Sided Banner Pike
@@ -1058,8 +1063,8 @@ Contribution_Hernandian	Hernandian Contribution
 Contribution_Pailunese	Pailunese Contribution
 Contribution_Tashkalpan	Tashkalp Contribution
 Cooking_Oil	Cooking Oil
+Copper_Pack	Heavy Copper Pouch
 CopperOre	Copper Ore
-Copper_Pack	Modest Copper Pouch
 Corey_Fabric_Armor	Corey Cloth Armor
 Corn	Corn
 Corn_seed	Corn Seed
@@ -1068,13 +1073,16 @@ Corvo_PlateArmor_Cloak	Icewing Plate Cloak
 Corvo_PlateArmor_Gloves	Icewing Plate Gloves
 Corvo_PlateArmor_Gloves_II	Corvo Plate Gloves
 Cotton	Cotton
+cotton_BackPack	Cotton Pack
 Cournantry_Fabric_Armor	Conentry Cloth Armor
 Cournantry_Leather_Boots	Conentry Leather Boots
 Cradbahn_Leather_Armor	Cradbahn Leather Armor
-CraftingRecipe_Demian_Leather_Armor_V	Elegant Carmine Armor Blueprint
-CraftingRecipe_Demian_Leather_Cloak_I	Elegant Carmine Cloak Blueprint
-CraftingRecipe_Demian_PlateArmor_Gloves_VI	Elegant Carmine Gloves Blueprint
-CraftingRecipe_Demian_PlateArmor_Helm_XIII	Elegant Carmine Helm Blueprint
+Crafting_Blizzard_Necklace	Blizzard Crystal Necklace
+Crafting_WhiteHorn_OneHandShield	Frostbone Shield
+CraftingRecipe_Demian_Leather_Armor_V	Crimson Banquet Armor Blueprint
+CraftingRecipe_Demian_Leather_Cloak_I	Crimson Banquet Cloak Blueprint
+CraftingRecipe_Demian_PlateArmor_Gloves_VI	Crimson Banquet Gloves Blueprint
+CraftingRecipe_Demian_PlateArmor_Helm_XIII	Crimson Banquet Helm Blueprint
 CraftingRecipe_Demian_Pure_White_Plate_Boots_II	Fluttering Radiance Plate Boots
 CraftingRecipe_Dragon_Weapon	Aeserion Gear Blueprint
 CraftingRecipe_Kuku_Golden999K	Kuku Communicative Pack Blueprint
@@ -1088,8 +1096,6 @@ CraftingRecipe_Oongka_PlateArmor_Boots_III	Belkandor Boots Blueprint
 CraftingRecipe_Oongka_PlateArmor_Cloak_III	Belkandor Cloak Blueprint
 CraftingRecipe_Oongka_PlateArmor_Gloves_III	Belkandor Gloves Blueprint
 CraftingRecipe_Oongka_PlateArmor_Helm_III	Belkandor Helm Blueprint
-Crafting_Blizzard_Necklace	Blizzard Crystal Necklace
-Crafting_WhiteHorn_OneHandShield	Frostbone Shield
 Crail_PlateArmor_Armor	Crail Plate Armor
 Crail_PlateArmor_Armor_I	Crail Plate Armor
 Criminal_DropItem	Note with a Suspicious Symbol
@@ -1099,13 +1105,13 @@ Crocodile_Skin	Sturdy Hide
 Croden_Leather_Armor	Croden Leather Armor
 Croton	Croton
 Croton_Red	Red Croton
-CrowMan_PlateArmor_Helm	Blackwing Mask
 Crow_Bell	Bells
 Crow_Bomb	Crow Bomb
 Crow_Charm	Talisman
 Crow_PlateArmor_Helm	Crow Plate Helm
 Crow_Thurible	Censer
 Crowman_Eyepatch	Crow Eyepatch
+CrowMan_PlateArmor_Helm	Blackwing Mask
 Crude_Devil_Mask	Crude Devil Mask
 Crudell_OneHandAxe	Timberham Axe
 Crudil_Leather_Boots	Crudil Leather Boots
@@ -1122,21 +1128,16 @@ Cyton_Leather_Armor	Cyton Leather Armor
 Dadnion_PlateArmor_Armor	Dardnion Plate Armor
 Daeil_Band	Axiom Bracelet
 Daibeads_Leather_Armor	Davis Leather Armor
+dain_Leather_Gloves	Dane Leather Bands
 Daine_Leather_Boots	Daine Leather Boots
 Dakahbern_Fabric_Armor	Dahkavan Cloth Armor
 Dallaban_Leather_Gloves	Dallaban Leather Gloves
-Dallabici_PlateArmor_Armor	Demeniss Honor Armor
+Dallabici_PlateArmor_Armor	Armor of Demeniss's Honor
 Dallabici_PlateArmor_Armor_I	Dalbich Plate Armor
 Dalton_Leather_Gloves	Dalton Leather Gloves
-DamianOnly_Leather_Boots_II	Low-heeled Leather Boots
-DamianOnly_Leather_Boots_III	White Bloodwind Leather Boots
-DamianOnly_Leather_Boots_IV	Autumn Banquet Leather Boots
-DamianOnly_Leather_Boots_V	Official Knight's Leather Boots
-DamianOnly_Leather_Boots_VI	Wanderer of Faith Leather Boots
-DamianOnly_Leather_Boots_VII	Leather Boots of Earth's Honor
 Damian_Daeil_Band	Damiane's Axiom Bracelet
-Damian_Demeniss_Elite_Uniform_Leather_Armor	Demenissian Elite Uniform Leather Armor
-Damian_Demeniss_Elite_Uniform_Leather_Boots	Demeniss Elite Uniform Leather Boots
+Damian_Demeniss_Elite_Uniform_Leather_Armor	Demeniss Elite Uniform Leather Armor
+Damian_Demeniss_Elite_Uniform_Leather_Boots	Demenissian Elite Uniform Leather Boots
 Damian_Demeniss_Uniform_Leather_Armor	Demenissian Uniform Leather Armor
 Damian_Demeniss_Uniform_Leather_Boots	Demenissian Uniform Leather Boots
 Damian_Demeniss_Uniform_Leather_Cloak	Demenissian Uniform Leather Cloak
@@ -1147,6 +1148,12 @@ Damian_OneHandShield_IV	Demenissian Silver-Decorated Shield
 Damian_OneHandShield_VI	Artisan's Ornamented Shield
 Damian_OneHandShield_VII	Shield of Radiance
 Damian_OneHandShield_VIII	Golden Kerria Shield
+DamianOnly_Leather_Boots_II	Low-heeled Leather Boots
+DamianOnly_Leather_Boots_III	White Bloodwind Leather Boots
+DamianOnly_Leather_Boots_IV	Autumn Banquet Leather Boots
+DamianOnly_Leather_Boots_V	Official Knight's Leather Boots
+DamianOnly_Leather_Boots_VI	Wanderer of Faith Leather Boots
+DamianOnly_Leather_Boots_VII	Leather Boots of Earth's Honor
 Danda_ChainMail_Armor	Danda Chain Mail
 Danda_Fabric_Helm	Danda Cloth Cap
 Danda_Leather_Gloves	Danda Leather Gloves
@@ -1154,13 +1161,13 @@ Danekoche_Leather_Boots	Dannoche Leather Boots
 Danid_PlateArmor_Helm	Deland Plate Helm
 Daraz_Fabric_Armor	Daraz Cloth Armor
 Darbaran_Leather_Armor	Darbaran Leather Armor
+Dark_King_Fabric_Armor	Antumbra Cloth Armor
+Dark_King_Metal_OneHandShield	Mirror of Night
+Dark_King_Plate_Boots	Antumbra Plate Boots
 DarkLeader_OneHandDagger	Dagger of Dark Pursuit
 DarkLeader_TwoHandGiantSpear	Thorn of Dark Pursuit
 DarkLeader_TwoHandSword	Vessel of Dark Pursuit
 DarkLeader_TwoHandWarHammer	Guidance of Dark Pursuit
-Dark_King_Fabric_Armor	Antumbra Cloth Armor
-Dark_King_Metal_OneHandShield	Mirror of Night
-Dark_King_Plate_Boots	Antumbra Plate Boots
 DarknessKing_PlateArmor_Armor	Plate Armor of the Shadows
 DarknessKing_PlateArmor_Boots	Plate Boots of the Shadows
 DarknessKing_PlateArmor_Cloak	Plate Cloak of the Shadows
@@ -1182,16 +1189,10 @@ Dayseorun_Leather_Armor	Derrison Leather Armor
 Dayseorun_Leather_Gloves	Derrison Leather Gloves
 Deactived_Abyss_Artifact	Faded Abyss Artifact
 Dealinger_Fabric_Armor	Dillinger Cloth Armor
-Dealinger_OneHandTowerShield	Mass-Produced Large Rekel Shield
+Dealinger_OneHandTowerShield	Mass-Produced Rekel Large Shield
 Deboros_Leather_Armor	Deboros Leather Armor
 Decoy_Human_I	Fake Silver Pouch
 Deekz_Fabric_Armor	Diggs Cloth Armor
-DeerAntler_Fruit_Tea	Antler Tea
-DeerAntler_Soup	Longhorn Soup
-DeerAntler_Soup_Large	Satisfying Longhorn Soup
-DeerAntler_Soup_Medium	Filling Longhorn Soup
-DeerAntler_Soup_XLarge	Hearty Longhorn Soup
-DeerKing_Lantern	Fancy Flame-Patterned Lantern
 Deer_Antler	Long Horn
 Deer_King_Follower_Cloak_I	Yrkabel Cloth Cloak
 Deer_King_Follower_Leather_Armor	Staglord Acolyte's Leather Armor
@@ -1207,11 +1208,19 @@ Deer_King_Metal_OneHandShield	Staglord's Shield
 Deer_King_OneHandSword	Survivor's Solitude
 Deer_Leather	Short Hair Hide
 Deer_Porter_BackPack	Deer Pack
+DeerAntler_Fruit_Tea	Antler Tea
+DeerAntler_Soup	Longhorn Soup
+DeerAntler_Soup_Large	Satisfying Longhorn Soup
+DeerAntler_Soup_Medium	Filling Longhorn Soup
+DeerAntler_Soup_XLarge	Hearty Longhorn Soup
+deerking_Flag_I	Small Staglord Banner Pike
+deerking_Flag_II	Medium Staglord Banner Pike
+DeerKing_Lantern	Fancy Flame-Patterned Lantern
 Deerking_Leather_Armor	Leather Armor of the Fallen Kingdom
 Deerking_Leather_Armor_T4_QA	Deerking Leather Armor T4 QA
 Deerking_Leather_Cloak	Leather Cloak of the Fallen Kingdom
-Deerking_PlateArmor_Gloves	Plate Gloves of the Fallen Kingdom
 Deerking_Plate_Boots	Plate Boots of the Fallen Kingdom
+Deerking_PlateArmor_Gloves	Plate Gloves of the Fallen Kingdom
 Deernil_Leather_Gloves	Delinell's Leather Gloves
 Deernil_Leather_Gloves_I	Delinell's Leather Gloves
 Deerprice_Leather_Armor	Dyrfrith Leather Armor
@@ -1275,6 +1284,12 @@ Demeniss_Soldier_Kitee_Metal_OneHandShield_I	Demenissian Shield of Valor
 Demeniss_Soldier_Kitee_Metal_OneHandShield_II	Demenissian Shield of Loyalty
 Demeniss_Soldier_Kitee_Metal_OneHandShield_III	Demenissian Shield of Obedience
 Demeniss_Soldier_OneHandTowerShield	Demenissian Soldier's Large Shield
+demenissnobility_Flag_I	Small Demenissian Noble's Banner
+demenissnobility_Flag_II	Small Demenissian Noble's Banner
+demenissnobility_Flag_III	Small Demenissian Noble's Banner
+demenissnobility_Flag_IV	Medium Demenissian Noble's Banner Pike
+demenissnobility_Flag_V	Medium Demenissian Noble's Banner Pike
+demenissnobility_Flag_VI	Medium Demenissian Noble's Banner Pike
 Demian_Earring_I	Light of the Battlefield Earring
 Demian_Fabric_Armor	Demian Fabric Armor
 Demian_Fabric_Cloak_I	Light of the Battlefield Cloth Cloak
@@ -1297,6 +1312,10 @@ Demian_Leather_Gloves_II	Leather Gloves of Earth's Honor
 Demian_Leather_Gloves_III	Autumn Banquet Leather Gloves
 Demian_Leather_Gloves_IV	Wanderer of Faith Leather Gloves
 Demian_OneHandRapier	White Wind Rapier
+Demian_Plate_Boots_III	Goldlight Plate Boots
+Demian_Plate_Boots_IV	Crimson Banquet Plate Boots
+Demian_Plate_Boots_V	Executioner of Darkness Plate Boots
+Demian_Plate_Boots_VI	Light of the Battlefield Plate Boots
 Demian_PlateArmor_Armor_II	Light of the Battlefield Plate Armor
 Demian_PlateArmor_Armor_VI	Official Knight's Plate Armor
 Demian_PlateArmor_Cloak_III	Goldlight Plate Cloak
@@ -1315,10 +1334,6 @@ Demian_PlateArmor_Helm_VII	Official Knight's Plate Helm
 Demian_PlateArmor_Helm_VIII	Light of the Battlefield Plate Helm
 Demian_PlateArmor_Helm_XI	Executioner of Darkness Plate Helm
 Demian_PlateArmor_Helm_XIII	Elegant Carmine Plate Helm
-Demian_Plate_Boots_III	Goldlight Plate Boots
-Demian_Plate_Boots_IV	Elegant Carmine Plate Boots
-Demian_Plate_Boots_V	Executioner of Darkness Plate Boots
-Demian_Plate_Boots_VI	Light of the Battlefield Plate Boots
 Demian_Pure_White_Plate_Boots_I	Radiant Plate Boots
 Demian_Pure_White_Plate_Boots_II	Fluttering Radiance Plate Boots
 Demian_Skirt_Fabric_Armor	Demian Skirt Fabric Armor
@@ -1338,20 +1353,20 @@ Derovidine_Leather_Armor	Dellovian Leather Armor
 Derrison_Fabric_Gloves	Derrison Cloth Gloves
 Desert_Abyss_Wraith_OneHandShield	Twisted Thorns
 Desert_BackPack_I	Desert Pack
-Desert_Harrier_Leather_Armor	Helms Leather Armor
-Desert_Harrier_Leather_Boots_I	Helms Leather Boots
-Desert_Harrier_Leather_Boots_II	Helms Leather Boots
+Desert_Harrier_Leather_Armor	Helms' Leather Armor
+Desert_Harrier_Leather_Boots_I	Helms' Leather Boots
+Desert_Harrier_Leather_Boots_II	Helms' Leather Boots
 Desert_Harrier_PlateArmor_Armor_I	Desert Marauder's Plate Armor
 Desert_Harrier_PlateArmor_Armor_II	Desert Marauder's Plate Armor
 Desert_Harrier_PlateArmor_Armor_III	Desert Marauder's Plate Armor
 Desert_Harrier_PlateArmor_Cloak_I	Desert Marauder's Cloak
-Desert_Harrier_PlateArmor_Gloves	Helms Plate Gloves
-Desert_Harrier_PlateArmor_Helm_II	Helms Rhinoceros Beetle Helm
-Desert_Harrier_PlateArmor_Helm_III	Helms Stag Beetle Helm
-Desert_Harrier_PlateArmor_Helm_IV	Helms Beetle Helm
-Desert_Harrier_PlateArmor_Helm_V	Helms Hornet Helm
-Desert_Harrier_PlateArmor_Helm_VI	Helms Bull Helm
-Desert_Harrier_PlateArmor_Helm_VII	Helms Bull Helm
+Desert_Harrier_PlateArmor_Gloves	The Helms' Plate Gloves
+Desert_Harrier_PlateArmor_Helm_II	Helms' Rhinoceros Beetle Helm
+Desert_Harrier_PlateArmor_Helm_III	Helms' Stag Beetle Helm
+Desert_Harrier_PlateArmor_Helm_IV	Helms' Beetle Helm
+Desert_Harrier_PlateArmor_Helm_V	Helms' Hornet Helm
+Desert_Harrier_PlateArmor_Helm_VI	Helms' Bull Helm
+Desert_Harrier_PlateArmor_Helm_VII	Helms' Bull Helm
 Desert_HorseArmor_Armor	Sahareum Barding
 Desert_HorseArmor_Helm	Sahareum Champron
 Desert_HorseArmor_Saddle	Sahareum Saddle
@@ -1374,17 +1389,17 @@ Dev_Growth_Ring_VI	Dev Growth Ring VI
 Dev_Growth_Ring_VII	Dev Growth Ring VII
 Dev_Growth_Ring_VIII	Dev Growth Ring VIII
 Dev_Growth_Ring_X	Dev Growth Ring X
-Dev_QA0	[QA] Profiling (Hernand)
-Dev_QA1	[QA] Profiling (Hernand-Demeniss 60)
-Dev_QA2	[QA] Profiling (Hernand-Demeniss 20)
-Dev_QA3	[QA] Profiling (Hernand-Demeniss 2.5)
 Dev_QA_demtodel_run	[QA] Profiling (Demeniss-Delesyia 20)
 Dev_QA_demtodel_walk	[QA] Profiling (Demeniss-Delesyia 2.5)
 Dev_QA_demtovar_run	[QA] Profiling (Demeniss-Varnia 20)
 Dev_QA_demtovar_walk	[QA] Profiling (Demeniss-Varnia 2.5)
-Dev_QA_her_loop	[QA] Repeated movement within Hernand (Speed 15)
+Dev_QA_her_loop	[QA] Repeated movement within the City of Hernand (Speed 15)
 Dev_QA_hertopail_run	[QA] Profiling (Hernand-Pailune 20)
 Dev_QA_hertopail_walk	[QA] Profiling (Hernand-Pailune 2.5)
+Dev_QA0	[QA] Profiling (Hernand)
+Dev_QA1	[QA] Profiling (Hernand-Demeniss 60)
+Dev_QA2	[QA] Profiling (Hernand-Demeniss 20)
+Dev_QA3	[QA] Profiling (Hernand-Demeniss 2.5)
 Dev_Red_Dragon_HorseArmor_Armor	Dev Red Dragon HorseArmor Armor
 Dev_Red_Dragon_HorseArmor_Helm	Dev Red Dragon HorseArmor Helm
 Dev_Red_Dragon_HorseArmor_Saddle	Dev Red Dragon HorseArmor Saddle
@@ -1413,6 +1428,7 @@ Diencia_Fabric_Boots	Diencia Cloth Boots
 Diencia_TwoHandAlebard	Lambert Halberd
 Diencia_TwoHandAxe	Iris Greataxe
 Diencia_TwoHandedWarHammer	Arlem Warhammer
+diereuben_Leather_Gloves	Dirrebin Leather Gloves
 Dikkahn_Fabric_Helm	Deccain Cloth Headband
 Diknanteu_Fabric_Armor	Decanteau Cloth Armor
 Dimfeld_Leather_Boots	Driseld Leather Boots
@@ -1445,7 +1461,6 @@ Douglas_Leather_Gloves	Blackwing Leather Gloves
 Douglas_Leather_Gloves_T5_QA	Douglas Leather Gloves T5 QA
 Doventry_Leather_Armor	Doventry Leather Armor
 Dowsampton_Leather_Armor	Dowsampton Leather Armor
-DragonSlayerLeader_OneHandCannon	Wyvern Blaster
 Dragon_Armor_01	Abyssal Dragon Armor
 Dragon_Armor_Material	Abyssal Fusion
 Dragon_Knight_Archer_PlateArmor_Gloves	Dragon Knight Archer's Plate Gloves
@@ -1463,8 +1478,11 @@ Dragon_Slayer_Leather_Boots	Flame Knight's Leather Boots
 Dragon_Slayer_Ohyoon_PlateArmor_Helm	Cassius Morten's Plate Helm
 Dragon_TwoHandAlebard	Aeserion Halberd
 Dragon_TwoHandAxe	Aeserion Greataxe
-Dragon_TwoHandSword	Aeserion Longsword
 Dragon_TwoHandedWarHammer	Aeserion Warhammer
+Dragon_TwoHandSword	Aeserion Longsword
+dragonkiller_Flag_I	Small Flame Knights Banner Pike
+dragonkiller_Flag_II	Medium Flame Knights Banner Pike
+DragonSlayerLeader_OneHandCannon	Wyvern Blaster
 Draiga_PlateArmor_Gloves	Draiga Plate Gloves
 Drakhan_OneHandMace	Drakhan Hammer
 Dreenah_Fabric_Helm	Drina Cloth Cap
@@ -1472,7 +1490,7 @@ Drheebahn_Leather_Armor	Dreban Leather Armor
 Dria_PlateArmor_Helm	Drea Plate Helm
 Drimnarrow_Fabric_Armor	Drimrow Cloth Armor
 Drivon_ChainMail_Armor	Drivon Chain Mail
-Drone_Backpack	Sandwatcher Watcher Pack
+Drone_Backpack	The Sandwatcher Watcher Pack
 Drottesel_Leather_Armor	Drossel Leather Armor
 Drug_Leather_Helm	Scarlet Blades Gas Mask
 Drug_Leather_Helm_I	Bleed Bandits' Gas Mask
@@ -1481,7 +1499,7 @@ Drumard_Leather_Gloves	Drumard Leather Gloves
 Drumfin_Fabric_Armor	Drumfin Cloth Armor
 Drunk_BlackBears_Elite_Leather_Armor	Black Bear Officer's Leather Armor
 Drunk_BlackBears_Elite_Leather_Gloves	Black Bear Officer's Leather Gloves
-Drunk_BlackBears_Flag	Small Black Bears Banner Pike
+Drunk_BlackBears_Flag	Small Black Bears' Banner Pike
 Drunk_BlackBears_Leather_Armor	Black Bear Leather Armor
 Drunk_BlackBears_Leather_Boots	Black Bear Leather Boots
 Drunk_BlackBears_Leather_Gloves	Black Bear Leather Gloves
@@ -1492,12 +1510,12 @@ Duebell_Leather_Armor	Duvelle Leather Armor
 Dueblone_Plated_Boots	Dulone Plate Boots
 Duemeniss_Fabric_Armor	Dumenis Cloth Armor
 Duemeniss_Leather_Boots	Dumas Leather Boots
-Duemeniss_PlateArmor_Gloves	Dumenis Plate Gloves
-Duemeniss_PlateArmor_Helm	Demenissian Soldier Plate Helm
-Duemeniss_PlateArmor_Helm_I	Dumenis Plate Helm
 Duemeniss_Plate_Boots	Dumenis Plate Boots
 Duemeniss_Plate_Boots_I	Blacksteel Dumenis Plate Boots
 Duemeniss_Plate_Boots_II	Dumenis Plate Boots II
+Duemeniss_PlateArmor_Gloves	Dumenis Plate Gloves
+Duemeniss_PlateArmor_Helm	Demenissian Soldier Plate Helm
+Duemeniss_PlateArmor_Helm_I	Dumenis Plate Helm
 Dueroin_Fabric_Gloves	Duroin Cloth Gloves
 Duilker_Fabric_Armor	Dwelker Cloth Armor
 Dukesan_OneHandDagger	Delesyian Dagger
@@ -1511,7 +1529,7 @@ Dunion_PlateArmor_Armor	Dunion Plate Armor
 Dunis_Leather_Gloves	Dherri Leather Gloves
 Duratti_PlateArmor_Helm	Schtump Plate Helm
 Durion_ChainMail_Armor	Durain Chain Mail
-Durion_OneHandDagger	Crow Brothers Dagger
+Durion_OneHandDagger	Crow Brothers' Dagger
 Duroar_PlateArmor_Armor	Dreer Plate Armor
 Duroar_PlateArmor_Armor_I	Dreer Plate Armor
 Dursus_Leather_Armor	Dursus Leather Armor
@@ -1528,8 +1546,6 @@ Dylanka_Fabric_Armor	Dilanka Cloth Armor
 Dyran_Fabric_Armor	Dyran Cloth Armor
 Dyrania_Fabric_Armor	Direnya Cloth Armor
 Dyrill_Leather_Armor	Dyrel Leather Armor
-EMP_BackPack	Disruptor
-EMP_TwoHandSpear	Disruptor Spear
 Earring_Tier1_I	Worn Earring
 Earring_Tier2_I	Faded Earring
 Earring_Tier3_I	Green Coral Reef Earring
@@ -1559,6 +1575,8 @@ Ellachic_Leather_Gloves	Elashe Leather Gloves
 Elliot_Leather_Armor	Elliot Leather Armor
 Elsiguo_Leather_Gloves	Ellisco Leather Bracers
 Emil_PlateArmor_Armor	Emil Plate Armor
+EMP_BackPack	Disruptor
+EMP_TwoHandSpear	Disruptor Spear
 Empty_BackPack	Empty Pack
 Empty_Bottle	Empty Bottle
 Endnion_PlateArmor_Armor	Endnion Plate Armor
@@ -1623,11 +1641,11 @@ Falcone_OneHandPistol	Falconne Pistol
 Falstaff_Fabric_Helm	Falstaff Cloth Helm
 Family_Crest_Surcoat	A Surcoat Embroidered with a Family Crest
 Fang	Fang
+Farmer_BackPack_I	Farmer's Pack
+Farmer_BackPack_II	Farmer's Pack
 FarmSlot_Expansion_1	Small Livestock Capacity Increase
 FarmSlot_Expansion_2	Medium Livestock Capacity Increase
 FarmSlot_Expansion_3	Large Livestock Capacity Increase
-Farmer_BackPack_I	Farmer's Pack
-Farmer_BackPack_II	Farmer's Pack
 Feather	Feather
 Feather_Pen	Feather Pen
 Fennel	Fennel
@@ -1644,11 +1662,11 @@ Finraysen_Leather_Armor	Finneron Leather Armor
 Fiore_Fabric_Armor	Fiore Cloth Armor
 Fiore_Fabric_Helm	Fiore Cloth Cap
 Fiore_Leather_Boots	Fiore Leather Boots
-FireFly_Lantern	Firefly Lantern
 Fire_Arrow	Fire Arrow
 Fire_Bomb	Bomb
 Fire_Boots	Fire Walk Boots
 Fire_staff_spear_TwoHandSpear	Flame Spear
+FireFly_Lantern	Firefly Lantern
 First_Artifact	The First Artifact
 Fish_BackPack_I	Angler's Pack
 Fish_BackPack_II	Angler's Pack
@@ -1683,12 +1701,12 @@ Fish_Vegetable_Porridge_XLarge	Hearty Vegetable and Seafood Porridge
 FishingRod	Fishing Rod
 FishingRod_II	Fine Fishing Rod
 FishingRod_III	Pororin Fishing Rod
-FlameThrower	Electromagnetic Flamespitter
 Flame_Knights_PlateArmor_Helm	Flame Knight's Plate Helm
 Flame_Knights_PlateArmor_Helm_I	Flame Knight's Plate Helm
+Flame_staff_spear_TwoHandSpear	Blazing Spear
 Flame_SwordMan_PlateArmor_Gloves	Flame Swordsman Plate Gloves
 Flame_SwordMan_TwoHandHammer	Greathammer of Fire
-Flame_staff_spear_TwoHandSpear	Blazing Spear
+FlameThrower	Electromagnetic Flamespitter
 FlatBasket	Wide Basket
 Flolin_BackPack	Pororin Pack
 Flolin_BackPack_FlowerDrone_I	Florindale Flower Bomb Pack
@@ -1705,8 +1723,8 @@ Food_Bass_I	Bass
 Food_Bass_II	Yellow Bass
 Food_Benjari	Threeline Grunt
 Food_Beyaz	Small Rasbora
-Food_BlackSeaBream	Blackhead Seabream
 Food_Blackbrow_Bleak	Small Blackbrow Bleak
+Food_BlackSeaBream	Blackhead Seabream
 Food_BlueCrab	Blue Crab
 Food_Burbot	Burbot
 Food_Carp	Carp
@@ -1724,8 +1742,8 @@ Food_Fish_Meat	Fish Fillet
 Food_GiantMudfish	Giant Pond Loach
 Food_GiantRedSeaBream	Giant Red Seabream
 Food_GoldCarp	Golden Carp
-Food_GoldTenchi	Golden Tench
 Food_Golden_Coelacanth	Golden Coelacanth
+Food_GoldTenchi	Golden Tench
 Food_HexeFish	Hexe Earthen Fish
 Food_Lenok	Lenok
 Food_LightCrotch	Anglerfish
@@ -1736,10 +1754,11 @@ Food_MechanicFish	Clockwork Fish
 Food_Mudfish	Pond Loach
 Food_Perch	Perch
 Food_Pikefish	Northern Pike
-Food_RedSnapper	Crimson Opaleye
 Food_Red_Seabream	Red Seabream
 Food_Red_Snapper	Opaleye
+Food_RedSnapper	Crimson Opaleye
 Food_Ricefish	Ricefish
+Food_river_Crab	Freshwater Crab
 Food_Rock_Bream	Barred Knifejaw
 Food_Sailfish	Sailfish
 Food_Salmon	Salmon
@@ -1756,14 +1775,19 @@ Food_Starfish	Starfish
 Food_Sturgeon	Sturgeon
 Food_Tenchi	Tench
 Food_Trout	Trout
-Food_river_Crab	Freshwater Crab
-ForestFairy_TwoHandedWarHammer	Shadowleaf Soul Branch
 Forest_Fairy_Leather_Armor	Forest Fae Armor
+ForestFairy_TwoHandedWarHammer	Shadowleaf Soul Branch
 Forgotten_General_TwoHandAlebard	Awakened Spirit
 Formosa_Leather_Armor	Formosa Leather Armor
+Fort_Flag_02	Gregor, the Helbred of Carnage
+Fort_Flag_03	Gregor, the Helbred of Carnage
+fort_Flag_I	Small Dusksong Banner Pike
+fort_Flag_II	Small Faceless Banner Pike
+fort_Flag_III	Small Twilight Messengers Banner Pike
+fort_Flag_IV	Medium Dusksong Banner Pike
+fort_Flag_V	Medium Faceless Banner Pike
+fort_Flag_VI	Medium Twilight Messengers Banner Pike
 FortMoru_Key	Fort Anvil Key
-Fort_Flag_02	Small Halberd of Carnage's Banner Pike
-Fort_Flag_03	Medium Halberd of Carnage's Banner Pike
 FoxBean_Flower	Dunbaria
 Freshly_Grilled_Bird	Grilled Bird Meat
 Freshly_Grilled_Bird_Large	Satisfying Grilled Bird Meat
@@ -1781,13 +1805,14 @@ Fri_PlateArmor_Armor	Prix Plate Armor
 Friendly_Legendary_Animal_Book	Black Lion Observation Log
 Friendly_Legendary_Hunter	The Legendary Hunter's Whereabouts
 Frinyl_PlateArmor_Helm	Ferenna Plate Helm
-FrontierMilitia_OneHandShield	Flame Knights Shield
-FruitTea	Fruit Tea
+frog	Poison Frog
+FrontierMilitia_OneHandShield	Flame Knight's Shield
 Fruit_Porridge	Fruit Punch
 Fruit_Porridge_Large	Satisfying Fruit Punch
 Fruit_Porridge_Medium	Filling Fruit Punch
 Fruit_Porridge_XLarge	Hearty Fruit Punch
 Fruit_Wine	Wine
+FruitTea	Fruit Tea
 Full_Course_of_Braised_Fish	Assorted Braised Fish
 Full_Course_of_Braised_Fish_Large	Satisfying Assorted Braised Fish
 Full_Course_of_Braised_Fish_Medium	Filling Assorted Braised Fish
@@ -1799,8 +1824,8 @@ Gadherish_Fabric_Armor	Gadereich Cloth Armor
 Gadherish_Fabric_Gloves	Gadereich Cloth Gloves
 Gadherish_Fabric_Helm	Gadereich Cloth Cap
 Gael_Fabric_Armor	Gael Cloth Armor
-Gaeljude_PlateArmor_Gloves	Golden Greed Plate Gloves
 Gaeljude_Plate_Boots	Golden Greed Plate Boots
+Gaeljude_PlateArmor_Gloves	Golden Greed Plate Gloves
 Gahlatain_OneHandAxe	Ring of the Earth
 Gaimeon_Leather_Gloves	Gaiman Leather Gloves
 Gainarre_OneHandAxe	Leofric Double-Headed Axe
@@ -1828,14 +1853,20 @@ Gerano_Leather_Armor	Gerano Leather Armor
 Germion_PlateArmor_Armor	Jerrinmarne Plate Armor
 Ghaltain_Fabric_Helm	Ghaltain Cloth Cap
 Ghost_TwohandSword	Invisible Longsword
-GiantBallista_Book	Pailunese Guard's Journal
 Giant_Copper_Drill	Copper Knuckledrill
 Giant_ReiGhis_TwoHandGiantAxe	Gorthak Greataxe
 Giant_Warriors_TwoHandGiantAxe	Patterned Stone Greataxe
+GiantBallista_Book	Pailunese Guard's Journal
 Gias_Leather_Armor	Giath's Leather Armor
 Gias_OneHandSword	Savage Sawblade
 Gilded_OneHandShield	Gilded Shield
 Gilded_OneHandTowerShield	Large Gilded Shield
+gimmick_tool_kinetic_barbell_0001	Kinetic Counterweight
+gimmick_tool_kinetic_barbell_0002	Kinetic Knight
+gimmick_tool_kinetic_boat_0001	Kinetic Boat
+gimmick_tool_kinetic_circle_0001	Kinetic Circle
+gimmick_tool_kinetic_dolphin_0001	Kinetic Dolphin Family
+gimmick_tool_kinetic_dolphin_0002	Kinetic Dolphin
 Ginseng_Seed	Wild Ginseng Seed
 Girrin_PlateArmor_Armor	Guilan Plate Armor
 Gladiator_Fabric_Armor	Gladiator's Cloth Armor
@@ -1847,17 +1878,17 @@ Gladiator_Fabric_Gloves_I	Gladiator Cloth Gloves
 Gladiator_Leather_Armor	Gladiator Leather Armor
 Gladiator_Leather_Boots	Troll Gladiator's Leather Boots
 Gladiator_Leather_Boots_II	Gladiator's Leather Boots
-Gladiator_PlateArmor_Gloves_I	Gladiator Plate Gloves
 Gladiator_Plate_Boots	Gladiator Plate Boots
+Gladiator_PlateArmor_Gloves_I	Gladiator Plate Gloves
 Gladiator_Stigma_TwoHandSpear	Slave Gladiator Branding Spear
 Glaville_Leather_Armor	Glaville Leather Armor
 Glosope_Leather_Armor	Glosope Leather Armor
-GlowFlower_Seed	Luminous Seed
 Glow_Fruit	Shineberry
+GlowFlower_Seed	Luminous Seed
 Goat_Horn_Potion	Mysterious Elixir
 Gobialthai_Fabric_Armor	Gobialta Cloth Armor
 Gobialthai_Leather_Gloves	Gobialta Leather Gloves
-Goblin_Boss_OneHandSword	Lightningblade of Greed
+Goblin_Boss_OneHandSword	Greedy Lightningblade
 Goblin_Director_House_Key	Overseer's House Key
 Goblin_Fight_PlateArmor_Gloves	Goblin Dueling Plate Gloves
 Goblin_Merchant_Fabric_Armor_Ⅲ	Goldleaves' Cloth Armor
@@ -1876,41 +1907,46 @@ Goblin_Pot	Goldleaf Censer
 Goblin_Pumpkin_Helm_I	Goblin Pumpkin Helm
 Godhehart_ChainMail_Gloves	Goldheart Chain Gloves
 Gohol_Leather_Boots	Gohol Leather Boots
-GoldArmor_OneHandSword	Sword of Greed
-GoldBar	Gold Bar
-GoldBar_Fake	Crude Gold Bar
-GoldOre	Gold Ore
 Gold_Apple	Golden Apple
 Gold_Armor_OneHandShield	Golden Shield
 Gold_Plating_Lantern	Shroud Lantern
-GoldenGoose_Egg	Golden Goose Egg
+GoldArmor_OneHandSword	Sword of Greed
+GoldBar	Gold Bar
+GoldBar_Fake	Crude Gold Bar
 Golden_OneHandSword	Golden Sword
 Golden_PlateArmor_Armor	Golden Greed Plate Armor
 Golden_PlateArmor_Cloak	Golden Greed Plate Cloak
 Golden_PlateArmor_Helm	Golden Greed Plate Helm
+GoldenGoose_Egg	Golden Goose Egg
+GoldOre	Gold Ore
 Goldur_Leather_Armor	Goldur Leather Armor
-Goloduan_PlateArmor_Gloves	Demenissian Elite Plate Gloves
+Goloduan_PlateArmor_Gloves	Demeniss Elite Solider Plate Gloves
 Gomel_Leather_Armor	Gomel Leather Armor
 Goorba_OneHandMace	Saltroad Mace
-GraceMansion_MetalDoor_Key	Glenbright Manor Key
-GraceMansion_RoomDoor_Key	Glenbright Manor Basement Key
 Grace_Blueprint	Cloudcart Blueprint
 Grace_Fabric_Gloves	Runae Cloth Gloves
-Grace_PlateArmor_Helm	Grace Plate Helm
 Grace_Plate_Boots	Canta Plate Boots
+Grace_PlateArmor_Helm	Grace Plate Helm
+GraceMansion_MetalDoor_Key	Glenbright Manor Key
+GraceMansion_RoomDoor_Key	Glenbright Manor Basement Key
 Grape	Grape
+grape_BackPack	Grape Pack
+grape_Seed	Grape Seed
 GraveRobber_Leather_Armor_I	Grave Robber's Leather Armor
 GraveRobber_Leather_Armor_II	Grave Robber's Leather Armor
 GraveRobber_Leather_Armor_III	Grave Robber's Leather Armor
 GraveRobber_Leather_Armor_IV	Grave Robber's Leather Armor
+graymane_Flag_I	Tiny Greymane Banner Pike
+graymane_Flag_II	Small Greymane Banner Pike
+graymane_Flag_III	Medium Greymane Banner Pike
 Graymane_Token	Greymane's Token
+Greeney_Leather_Armor	Greeney Leather Armor
+greenfrog	Tree Frog
 GreenOrc_TwoHandedWarHammer	Gorthak Warhammer
 GreenStone	Epidote
-Greeney_Leather_Armor	Greeney Leather Armor
 Gregor_OneHandShield	Khaled Shield
 Gregrick_TwoHandSword	Dewhaven Longsword
 Grenvar_HorseArmor_Armor	Grenbar Cloth Barding
-GreyWolf_OneHandBow	Grey Wolf Bow
 Greyfur_Fabric_Armor	Balder's Cloth Armor
 Greyfur_Fabric_Armor_C	Ronald's Cloth Armor
 Greyfur_Fabric_Armor_CI	Greymane Cloth Armor
@@ -1984,6 +2020,7 @@ Greyfur_Leather_Helm_II	Greymane Leather Helm
 Greyfur_Necklace	Greymane Necklace
 Greyfur_PlateArmor_Gloves_I	Darren Plate Gloves
 Greymane_Nobility_Degree_I	Greymane Signet
+GreyWolf_OneHandBow	Grey Wolf Bow
 Grilled_Big_Fish	Large Grilled Fish
 Grilled_Big_Fish_Large	Satisfying Large Grilled Fish
 Grilled_Big_Fish_Medium	Filling Large Grilled Fish
@@ -2017,8 +2054,8 @@ Grommet_Leather_Armor	Grommet Leather Armor
 Gronerd_Leather_Armor	Gronerd Leather Armor
 Groucca_Leather_Armor	Groucca Leather Armor
 Gruun_Fabric_Armor	Gruun Cloth Armor
-GuardianTree_Pear	Fruit of Life
 Guardian_PlateArmor_Armor	Guardian Plate Armor
+GuardianTree_Pear	Fruit of Life
 Guff_Leather_Armor	Guff Leather Armor
 Gun_OneHandShield	Shotgun Shield
 Gun_Powder	Gunpowder
@@ -2066,8 +2103,8 @@ Hasets_ChainMail_Armor	Hasets Chain Mail
 Hassal_Fabric_Armor	Hassal Cloth Armor
 Hazuka_Leather_Armor	Hashaka Leather Armor
 Heat_PlateArmor_Helm	Helm of Ignition
-Heavy_Copper_Pack	Full Copper Pouch
-Heavy_Silver_Pack	Overflowing Silver Pouch
+Heavy_Copper_Pack	Bulging Copper Pouch
+Heavy_Silver_Pack	Bulging Silver Pouch
 Hegeh_Leather_Gloves	Hegea Leather Gloves
 Hegeh_TwoHandAlebard	Marauder's Halberd
 Hegeh_TwoHandedWarHammer	Bonepit Warhammer
@@ -2090,10 +2127,10 @@ Hernand_Contribution_Flag	Hernandian Contribution Banner
 Hernand_Crown	Hernandian Crown
 Hernand_Flag_I	Small Hernandian Banner Pike
 Hernand_Flag_II	Medium Hernandian Banner Pike
-Hernand_GuardCaptain_Fabric_Armor	Hernandian Honor Guard Armor
-Hernand_GuardCaptain_Fabric_Cloak	Hernandian Honor Guard Cloak
-Hernand_GuardCaptain_Leather_Boots	Hernandian Honor Guard Boots
-Hernand_GuardCaptain_Leather_Gloves	Hernandian Honor Guard Gloves
+Hernand_GuardCaptain_Fabric_Armor	Hernand Ceremonial Guard Armor
+Hernand_GuardCaptain_Fabric_Cloak	Hernand Ceremonial Guard Cloak
+Hernand_GuardCaptain_Leather_Boots	Hernand Ceremonial Guard Boots
+Hernand_GuardCaptain_Leather_Gloves	Hernand Ceremonial Guard Gloves
 Hernand_HorseArmor_Armor	Hernandian Barding
 Hernand_HorseArmor_Helm	Hernandian Champron
 Hernand_HorseArmor_Saddle	Hernandian Saddle
@@ -2136,9 +2173,9 @@ Hodges_Leather_Armor	Hodges Leather Armor
 HolyWater	Holy Water
 Home_Key	Key
 Honey	Honey
+Honey_Tea	Honey Tea
 HoneyComb	Beehive
 HoneyComb_OneHandMace	Beehive Club
-Honey_Tea	Honey Tea
 Hooburn_Leather_Boots	Hauvern Leather Boots
 Hoobus_Fabric_Helm	Hubus Cloth Cap
 Hoobus_Leather_Armor	Hubus Leather Armor
@@ -2151,6 +2188,7 @@ HorseFeed_Speed_Potion	Horse Stimulant
 HorseFeed_Sugar_Beet	Sugar Beet
 HorseShoe_HorseArmor_Brass_horseshoe_II	Bronze Horseshoes
 HorseShoe_HorseArmor_Clover_Horseshoe_II	Four-Leaf Horseshoes
+HorseShoe_HorseArmor_marquel_Stirrup	Marcello Stirrups
 HorseShoe_HorseArmor_Shabby_horseshoe_II	Shabby Horseshoes
 HorseShoe_HorseArmor_Shoe	Silver Iron Horseshoes
 HorseShoe_HorseArmor_Shoe_I	Ironstone Horseshoes
@@ -2164,7 +2202,6 @@ HorseShoe_HorseArmor_Stirrup_II	Decorative Dragon Head Stirrups
 HorseShoe_HorseArmor_Stirrup_III	Gold-Decorated Stirrups
 HorseShoe_HorseArmor_Stirrup_IV	Fine Leather Stirrups
 HorseShoe_HorseArmor_Stirrup_V	Exclaire Stirrups
-HorseShoe_HorseArmor_marquel_Stirrup	Marcello Stirrups
 Hound_Flag_I	Small Hellhounds Banner Pike
 Hound_Flag_II	Medium Hellhounds Banner Pike
 Huge_TwoHandGiantAxe	Inquisitor's Greataxe
@@ -2180,16 +2217,16 @@ Hwando_TwoHandSword	Hwando
 Hyde_OneHandCrossBow	Hyde Crossbow
 Hyena_Leather_Helm	Hyena Helm
 Hymns_of_Dusk_Fabric_Armor_I	Musket Border Guard Standard Armor
-Hymns_of_Dusk_Leather_Armor_I	Dusksongs Leather Armor
-Hymns_of_Dusk_Leather_Boots_I	Dusksongs Leather Boots
-Hymns_of_Dusk_PlateArmor_Armor_I	Dusksongs Plate Armor
+Hymns_of_Dusk_Leather_Armor_I	Dusksongs' Leather Armor
+Hymns_of_Dusk_Leather_Boots_I	Dusksongs' Leather Boots
+Hymns_of_Dusk_PlateArmor_Armor_I	Dusksong's Plate Armor
 Hymns_of_Dusk_PlateArmor_Armor_II	Hymns of Dusk PlateArmor Armor II
-Hymns_of_Dusk_PlateArmor_Gloves_I	Dusksongs Plate Gloves
+Hymns_of_Dusk_PlateArmor_Gloves_I	Dusksongs' Plate Gloves
 Hyosi_Arrow	Whistling Arrow
 Hysilda_Fabric_Armor	Hysilda Cloth Armor
+Ice_Arrow	Chill Arrow
 IceStrandedShip_Book	Shipwreck Voyage Log
 IceThrower	Electromagnetic Frostspitter
-Ice_Arrow	Chill Arrow
 Ignir_TwoHandSword	Ignir
 Iguana_Rider_Leather_Boots	Iguana Rider Leather Boots
 Iguana_Rider_Leather_Cloak_III	Lizard Leather Cloak
@@ -2199,15 +2236,15 @@ Iguana_Rider_PlateArmor_Armor_III	Iguana Rider's Plate Armor
 Illinoeon_Leather_Boots	Infreen Leather Boots
 Immediate_SubLevel_AttackSpeedRate	Increased Attack Speed
 Immediate_SubLevel_Hp	Health Amplification
-Immediate_SubLevel_MoveSpeedRate	Increased Movement Speed
+Immediate_SubLevel_MoveSpeedRate	Increase Movement Speed
 Immediate_SubLevel_Mp	Spirit Amplification
 Immediate_SubLevel_Stamina	Stamina Amplification
 IncreaseSwimmingSpeed_Plate_Boots	Tidebreaker Boots
 Insect_Collect_BackPack	Kuku Insect Gatherer's Pack
-InstallationBomb	Deployable Explosive
 Installation_01_key	Valvegard Garrison Key
 Installation_02_key	Marni's Laboratorium Key
 Installation_03_key	Aeronautical Research Base Key
+InstallationBomb	Deployable Explosive
 Intacuttar_PlateArmor_Helm	Intaka Plate Helm
 Inventory_Expansion_1	Small Bag
 Inventory_Expansion_2	Medium Bag
@@ -2224,13 +2261,13 @@ Inytium_Leather_Armor	Ynitium Leather Armor
 Inytium_Leather_Boots	Ynitium Leather Boots
 Inytium_Leather_Cloak	Ynitium Leather Cloak
 Inytium_Leather_Gloves	Ynitium Leather Gloves
-IronStone	Iron Ore
 Ironfist_Boss_Knuckle	Iron Fists Gauntlet
+IronStone	Iron Ore
 Isilon_Leather_Boots	Isilon Leather Boots
 Itano_CannonBall	Itano Cannonball
 Itano_CannonBall_Errant	Crude Itano Cannonball
-ItemCatch_FishingRod	The Claw
 Item_88_Butterfly	Eighty-eight Butterfly
+Item_Abyss_Artifact_Maker	Abyss Artifact Fabricator
 Item_AbyssGear_SKill_Lv1_Box	Unidentified Abyss Gear
 Item_AbyssGear_SKill_Lv2_Box	Unidentified Abyss Gear
 Item_AbyssGear_SKill_Lv3_Box	Unidentified Abyss Gear
@@ -2238,10 +2275,8 @@ Item_AbyssGear_Special_Box	Unidentified Abyss Gear
 Item_AbyssGear_Stat_Lv1_Box	Unidentified Abyss Gear
 Item_AbyssGear_Stat_Lv2_Box	Unidentified Abyss Gear
 Item_AbyssGear_Stat_Lv3_Box	Unidentified Abyss Gear
-Item_Abyss_Artifact_Maker	Abyss Artifact Fabricator
 Item_Axolotl	Axolotl
 Item_Baby_Hedgehog	Baby Hedgehog
-Item_BackPackChocolate	Cacao Snack
 Item_Background_Breakable_Wood_230	Large Bright Table
 Item_Background_Breakable_Wood_257	Dark Pillared Side Table
 Item_Background_Breakable_Wood_280	Mechanical Clockwork Chair
@@ -2264,348 +2299,23 @@ Item_Background_Breakable_Wood_320	Timber Nightstand
 Item_Background_Breakable_Wood_323	Small Timberton Table
 Item_Background_Breakable_Wood_323_index01	Small Bright Timberton Table
 Item_Background_Breakable_Wood_363	Round Table
+Item_BackPackChocolate	Cacao Snack
 Item_BananaSpider	Yellow Garden Spider
 Item_Banded_Peacock	Banded Peacock Butterfly
 Item_Bee	Honeybee
 Item_Beetle	Beetle
 Item_Beighen_Enchant_Coin	Beighen Refinement Token
-Item_BlackTail_Flycatcher	Desert Wheatear
 Item_Black_Centipede	Black Centipede
-Item_BlueJay	Blue Jay
+Item_BlackTail_Flycatcher	Desert Wheatear
 Item_Blue_Copper	Blue Lycaenid Butterfly
 Item_Blue_Pansy_Butterfly	Southern Blue Peacock Butterfly
-Item_Bumblebee	Bumblebee
-Item_Bunting_Bird	Meadow Bunting
-Item_Butterfly	Meadow Butterfly
-Item_Camel_Cricket	Camel Cricket
-Item_Chameleon	Chameleon
-Item_Checkered_White	Checkered White Butterfly
-Item_Chocolate	Chocolate
-Item_Cockroach	Cockroach
-Item_Colias_Nastes	Green Sulphur Butterfly
-Item_Collection_Prop_Statue_0002	The Sitting Lion
-Item_Common_Buckeye	Buckeye Butterfly
-Item_Common_Green_Birdwing	Green Birdwing Butterfly
-Item_Common_Nawab	Nawab Butterfly
-Item_Crimson_Patch	Crimson Patch Butterfly
-Item_Del_Enchant_Coin	Delesyia Refinement Token
-Item_Dem_Enchant_Coin	Demeniss Refinement Token
-Item_Desert_Orange_tip	Scarlet Leafwing Butterfly
-Item_DiademSpider	Golden Silk Spider
-Item_Diana_Fritillary	Diana Fritillary Butterfly
-Item_ETC_CooltimeReduce_ATAG	A.T.A.G. Emergency Power Device
-Item_ETC_CooltimeReduce_ATAGII	A.T.A.G. Power Module
-Item_ETC_CooltimeReduce_Dragon	Dragon Claw Horn
-Item_ETC_CooltimeReduce_DragonII	Narima's Horn
-Item_Eastern_Comma	Yellow Comma Butterfly
-Item_Eastern_Tailed_Blue	Blue Tailed Butterfly
-Item_Eastern_Tiger_Swallowtail	Swallowtail
-Item_Firefly	Firefly
-Item_Fist_Damian	Ordinary Gloves
-Item_Fist_Kliff	Ordinary Gloves
-Item_Fist_Oongka	Ordinary Gloves
-Item_Flying_Squirrel	Flying Squirrel
-Item_Frilled_Lizard	Frilled-neck Lizard
-Item_Giant_Salamander	Burrowing Salamander
-Item_Gnat	Fruit Fly
-Item_GnatWide	Medium Fly
-Item_Goanna	Goanna
-Item_GrassHopper	Grasshopper
-Item_Great_Purple_Hairstreak	Great Purple Hairstreak Butterfly
-Item_Grizzled_Skipper	Grizzled Skipper Butterfly
-Item_Guava_Skipper	Guava Skipper Butterfly
-Item_Her_Enchant_Coin	Hernand Refinement Token
-Item_Hila_Lizard	Heloderma Lizard
-Item_Hornet	Hornet
-Item_House_Centipede	House Centipede
-Item_Hypaurotis_Crysalus	Violet Hairstreak Butterfly
-Item_Iguana	Iguana
-Item_Jewel_Beetle	Jewel Beetle
-Item_JijeongLeaf_Insect	Palmar Beetle
-Item_Kallima_Inachus	Orange Oakleaf Butterfly
-Item_KuKu_Small_ATAG	Small Kuku A.T.A.G.
-Item_Kuku_Egg	Kuku Bird's Egg
-Item_Kuku_Pot	Kuku Pot
-Item_Kuku_Pot_02	Enhanced Kuku Pot
-Item_Little_Metalmark	Little Metalmark Butterfly
-Item_Little_Wood_Satyr	Little Wood Satyr Butterfly
-Item_Longhorn_Beetle	Longhorn Beetle
-Item_Longtailedtit	Long-Tailed Tit
-Item_Luna_Moth	Wild Silkworm Moth
-Item_Lustrous_Copper	Red Lycaenid Butterfly
-Item_Lycaena_Phlaeas	Spotted Lycaenid Butterfly
-Item_Malachite	Malachite Butterfly
-Item_Meerkat	Meerkat
-Item_Milbert_Tortoiseshell	Flame-Bordered Butterfly
-Item_Mole	Mole
-Item_Monarch	Monarch Butterfly
-Item_Moth	Mountain Moth
-Item_Muskrat	Muskrat
-Item_Myscelia_Ethusa	Bluewing Butterfly
-Item_Neophasia_Terlooii	White Butterfly
-Item_Orange_Barred_Sulphur	Orange-Barred Sulphur Butterfly
-Item_Oriole	Black-Naped Oriole
-Item_Ornythion_Swallowtail	Ornythion Swallowtail Butterfly
-Item_Oxpecker	Yellow-Billed Oxpecker
-Item_Pailoon_Enchant_Coin	Pailune Refinement Token
-Item_Painted_Lady	Painted Lady Butterfly
-Item_Pipevine_Swallowtail	Pipevine Swallowtail Butterfly
-Item_Polydamas_Swallowtail	Polydamas Swallowtail Butterfly
-Item_Possum	Opossum
-Item_Purple_Emperor	Purple Emperor Butterfly
-Item_Rare_Collect_Chaya	Chaya
-Item_Rare_Collect_Dulse	Red Seaweed
-Item_Rare_Collect_Ensete	Enset
-Item_Rare_Collect_Kudzu	Skyroot
-Item_Rare_Collect_Mercury	Mercury
-Item_Rare_Collect_Platinum	Platinum
-Item_Rare_Collect_RazorClam	Razor Clam
-Item_Rare_Collect_RazorClam_01	Freshwater Clam
-Item_Rare_Collect_Rubber	Rubber
-Item_Rare_Collect_Stalactites	Stalactite
-Item_Rare_Collect_SulfurStone	Brimstone
-Item_Rare_Collect_Taro	Taro
-Item_Rare_Collect_amaranth	Amaranth
-Item_Rare_Collect_chlorella	Green Algae
-Item_Rare_Collect_jijeongta_leaf	Palmar Leaf
-Item_Rare_Collect_opuntia	Prickly Pear
-Item_Rat	Rat
-Item_Red_Spotted_Purple	Red-spotted Purple Butterfly
-Item_Red_Squirrel	Red Squirrel
-Item_Regal_Fritillary	Regal Fritillary Butterfly
-Item_Rhinoceros_Beetle	Rhinoceros Beetle
-Item_Ruddy_Daggerwing	Ruddy Daggerwing Butterfly
-Item_Rusty_Tipped_Page	Rusty Tipped Page Butterfly
-Item_Salamander	Salamander
-Item_Scale	Scales of Fairness and Justice
-Item_Sea_Siater	Wharf Roach
-Item_Set_A_Enhance_RestArea	Adventurer's Refinement Inventory Type A
-Item_Set_A_RestArea	Adventurer's Cooking Inventory Type A
-Item_Set_B_Enhance_RestArea	Adventurer's Refinement Inventory Type B
-Item_Set_B_RestArea	Adventurer's Cooking Inventory Type B
-Item_Set_C_Enhance_RestArea	Adventurer's Refinement Inventory Type C
-Item_Set_C_RestArea	Adventurer's Cooking Inventory Type C
-Item_Set_D_Enhance_RestArea	Adventurer's Refinement Inventory Type D
-Item_Set_D_RestArea	Adventurer's Cooking Inventory Type D
-Item_Set_E_Enhance_RestArea	Adventurer's Refinement Inventory Type E
-Item_Set_E_RestArea	Adventurer's Cooking Inventory Type E
-Item_Set_F_Enhance_RestArea	Adventurer's Refinement Inventory Type F
-Item_Silkworm_Moth	Silkworm Moth
-Item_Skill_AbyssGear_AbsoluteDefense_LV1	Piercing Bloom
-Item_Skill_AbyssGear_AbyssGrass_Immune	Abyssal Assimilation
-Item_Skill_AbyssGear_AddCriticalRateByMaterialKey_FabricArmor_LV1	Shred I
-Item_Skill_AbyssGear_AddCriticalRateByMaterialKey_FabricArmor_LV2	Shred II
-Item_Skill_AbyssGear_AddCriticalRateByMaterialKey_FabricArmor_LV3	Shred III
-Item_Skill_AbyssGear_AddCriticalRateByMaterialKey_LeatherArmor_LV1	Rend I
-Item_Skill_AbyssGear_AddCriticalRateByMaterialKey_LeatherArmor_LV2	Rend II
-Item_Skill_AbyssGear_AddCriticalRateByMaterialKey_LeatherArmor_LV3	Rend III
-Item_Skill_AbyssGear_AddCriticalRateByMaterialKey_PlateArmor_LV1	Shatter I
-Item_Skill_AbyssGear_AddCriticalRateByMaterialKey_PlateArmor_LV2	Shatter II
-Item_Skill_AbyssGear_AddCriticalRateByMaterialKey_PlateArmor_LV3	Shatter III
-Item_Skill_AbyssGear_AddFrendly_LV1	Solidarity I
-Item_Skill_AbyssGear_AddFrendly_LV2	Solidarity II
-Item_Skill_AbyssGear_AddFrendly_LV3	Solidarity III
-Item_Skill_AbyssGear_AddKillSkillLevel_LV1	Energy Drain I
-Item_Skill_AbyssGear_AddKillSkillLevel_LV2	Energy Drain II
-Item_Skill_AbyssGear_AddKillSkillLevel_LV3	Energy Drain III
-Item_Skill_AbyssGear_AddMoneyDropRate_LV1	Fortune I
-Item_Skill_AbyssGear_AddMoneyDropRate_LV2	Fortune II
-Item_Skill_AbyssGear_AddMoneyDropRate_LV3	Fortune III
-Item_Skill_AbyssGear_AdditionalThief_LV1	Ledgermain I
-Item_Skill_AbyssGear_AdditionalThief_LV2	Ledgermain II
-Item_Skill_AbyssGear_AdditionalThief_LV3	Ledgermain III
-Item_Skill_AbyssGear_Antumbra_Spear	Warden of Darkness
-Item_Skill_AbyssGear_Antumbra_TwoHandRod	Dark Crescent
-Item_Skill_AbyssGear_ArrowRain_LV1	Arrow Rain
-Item_Skill_AbyssGear_AtorDrone_LV1	Ator's Orb
-Item_Skill_AbyssGear_Attack_HPRecover_LV1	Life Transference
-Item_Skill_AbyssGear_Attack_HPRecover_LV2	Sanguine Transference
-Item_Skill_AbyssGear_Attack_MPRecover_LV1	Spirit Transference
-Item_Skill_AbyssGear_Attack_MPRecover_LV2	Verdant Transference
-Item_Skill_AbyssGear_Attack_SPRecover_LV1	Stamina Transference
-Item_Skill_AbyssGear_Attack_SPRecover_LV2	Celestial Transference
-Item_Skill_AbyssGear_Bastier	Flames of Judgment
-Item_Skill_AbyssGear_BlockAmmoConsume_LV1	Infinite Arrows I
-Item_Skill_AbyssGear_BlockAmmoConsume_LV2	Infinite Arrows II
-Item_Skill_AbyssGear_BlockAmmoConsume_LV3	Infinite Arrows III
-Item_Skill_AbyssGear_BlockAmmoConsume_Special	Greater Infinite Arrows
-Item_Skill_AbyssGear_Boss_AdditionalDamage_LV1	Malicebane I
-Item_Skill_AbyssGear_Boss_AdditionalDamage_LV2	Malicebane II
-Item_Skill_AbyssGear_Boss_AdditionalDamage_LV3	Malicebane III
-Item_Skill_AbyssGear_Boss_AdditionalDamage_Special	Greater Malicebane
-Item_Skill_AbyssGear_Catfish_BodySlam_LV1	Rising Torrent
-Item_Skill_AbyssGear_CollectDrop_Animal_LV1	Blessing of the Beast I
-Item_Skill_AbyssGear_CollectDrop_Animal_LV2	Blessing of the Beast II
-Item_Skill_AbyssGear_CollectDrop_Animal_LV3	Blessing of the Beast III
-Item_Skill_AbyssGear_CollectDrop_Log_LV1	Blessing of the Forest I
-Item_Skill_AbyssGear_CollectDrop_Log_LV2	Blessing of the Forest II
-Item_Skill_AbyssGear_CollectDrop_Log_LV3	Blessing of the Forest III
-Item_Skill_AbyssGear_CollectDrop_Ore_LV1	Blessing of the Earth I
-Item_Skill_AbyssGear_CollectDrop_Ore_LV2	Blessing of the Earth II
-Item_Skill_AbyssGear_CollectDrop_Ore_LV3	Blessing of the Earth III
-Item_Skill_AbyssGear_CollectDrop_Plant_LV1	Blessing of Nature I
-Item_Skill_AbyssGear_CollectDrop_Plant_LV2	Blessing of Nature II
-Item_Skill_AbyssGear_CollectDrop_Plant_LV3	Blessing of Nature III
-Item_Skill_AbyssGear_Combo_LV1	Relentless
-Item_Skill_AbyssGear_CommonAnimal_AdditionalDamage_LV1	Beastbane I
-Item_Skill_AbyssGear_CommonAnimal_AdditionalDamage_LV2	Beastbane II
-Item_Skill_AbyssGear_CommonAnimal_AdditionalDamage_LV3	Beastbane III
-Item_Skill_AbyssGear_CommonAnimal_AdditionalDamage_Special	Greater Beastbane
-Item_Skill_AbyssGear_CommonGolem_AdditionalDamage_LV1	Primalbane I
-Item_Skill_AbyssGear_CommonGolem_AdditionalDamage_LV2	Primalbane II
-Item_Skill_AbyssGear_CommonGolem_AdditionalDamage_LV3	Primalbane III
-Item_Skill_AbyssGear_CommonGolem_AdditionalDamage_Special	Greater Primalbane
-Item_Skill_AbyssGear_CommonHexe_AdditionalDamage_LV1	Hexebane I
-Item_Skill_AbyssGear_CommonHexe_AdditionalDamage_LV2	Hexebane II
-Item_Skill_AbyssGear_CommonHexe_AdditionalDamage_LV3	Hexebane III
-Item_Skill_AbyssGear_CommonHexe_AdditionalDamage_Special	Greater Hexebane
-Item_Skill_AbyssGear_CommonHumanoid_AdditionalDamage_LV1	Bloodbane I
-Item_Skill_AbyssGear_CommonHumanoid_AdditionalDamage_LV2	Bloodbane II
-Item_Skill_AbyssGear_CommonHumanoid_AdditionalDamage_LV3	Bloodbane III
-Item_Skill_AbyssGear_CommonHumanoid_AdditionalDamage_Special	Greater Bloodbane
-Item_Skill_AbyssGear_ContributionExp_LV1	Service I
-Item_Skill_AbyssGear_ContributionExp_LV2	Service II
-Item_Skill_AbyssGear_ContributionExp_LV3	Service III
-Item_Skill_AbyssGear_Creature_AdditionalDamage_LV1	Abyssbane I
-Item_Skill_AbyssGear_Creature_AdditionalDamage_LV2	Abyssbane II
-Item_Skill_AbyssGear_Creature_AdditionalDamage_LV3	Abyssbane III
-Item_Skill_AbyssGear_Creature_AdditionalDamage_Special	Greater Abyssbane
-Item_Skill_AbyssGear_CresecentAura_1_LV1	Crescent Moon Slash
-Item_Skill_AbyssGear_CresecentAura_2_LV1	Half Moon Slash
-Item_Skill_AbyssGear_CresecentAura_3_LV1	Fullmoon Slash
-Item_Skill_AbyssGear_CrowAttack_LV1	Crow's Pursuit
-Item_Skill_AbyssGear_CrowStorm_LV1	Crow Storm
-Item_Skill_AbyssGear_DAM_UP_RotationBash	Momentum
-Item_Skill_AbyssGear_DarkChase_LV1	Greysoul Howling
-Item_Skill_AbyssGear_DarkenRobe_LV1	Wound of Darkness
-Item_Skill_AbyssGear_DogClaw_LV1	Hound's Claws
-Item_Skill_AbyssGear_EnergyBurst_LV1	Kinetic Burst
-Item_Skill_AbyssGear_EnlightenmentWave_LV1	Karmic Pulse
-Item_Skill_AbyssGear_EquipDropRate_LV1	Disarm I
-Item_Skill_AbyssGear_EquipDropRate_LV2	Disarm II
-Item_Skill_AbyssGear_EquipDropRate_LV3	Disarm III
-Item_Skill_AbyssGear_Equip_AddHorseExp_LV1	Equestrian I
-Item_Skill_AbyssGear_Equip_AddHorseExp_LV2	Equestrian II
-Item_Skill_AbyssGear_Equip_AddHorseExp_LV3	Equestrian III
-Item_Skill_AbyssGear_Equip_AddPetFriendly_LV1	Companionship I
-Item_Skill_AbyssGear_Equip_AddPetFriendly_LV2	Companionship II
-Item_Skill_AbyssGear_Equip_AddPetFriendly_LV3	Companionship III
-Item_Skill_AbyssGear_FireBreath_LV1	Volcanic Eruption
-Item_Skill_AbyssGear_FlashCombo_LV1	Slashing Reeds
-Item_Skill_AbyssGear_FoodSkillLevelUp_LV1	Gourmet I
-Item_Skill_AbyssGear_FoodSkillLevelUp_LV2	Gourmet II
-Item_Skill_AbyssGear_FoodSkillLevelUp_LV3	Gourmet III
-Item_Skill_AbyssGear_Forgotten_General	Judgment of the Soul
-Item_Skill_AbyssGear_FrostBreath_LV1	Frost Hail
-Item_Skill_AbyssGear_FrostDeath_LV1	Shattering Frost
-Item_Skill_AbyssGear_FrostSpike_LV1	Frost Spike
-Item_Skill_AbyssGear_Hyena_PoisonImmune	Heart of the Serpent
-Item_Skill_AbyssGear_Immune_Bismuth	Heart of Stone
-Item_Skill_AbyssGear_ImpBoss	Howling of Chaos
-Item_Skill_AbyssGear_Karanda	Pillar of Wind
-Item_Skill_AbyssGear_LanFord	Parting Gift
-Item_Skill_AbyssGear_LandMash_LV1	Groundsurge
-Item_Skill_AbyssGear_Leebur	Shadow Claw
-Item_Skill_AbyssGear_LightningBreath_LV1	Orbs of Lightning
-Item_Skill_AbyssGear_LightningStab_LV1	Storm Fang
-Item_Skill_AbyssGear_Machine_AdditionalDamage_LV1	Steelbane I
-Item_Skill_AbyssGear_Machine_AdditionalDamage_LV2	Steelbane II
-Item_Skill_AbyssGear_Machine_AdditionalDamage_LV3	Steelbane III
-Item_Skill_AbyssGear_Machine_AdditionalDamage_Special	Greater Steelbane
-Item_Skill_AbyssGear_Merrick	Order from Above
-Item_Skill_AbyssGear_Muscan	The Showstopper
-Item_Skill_AbyssGear_Ogre	Colossal Might
-Item_Skill_AbyssGear_PhantomStab_LV1	Abyssal Rays
-Item_Skill_AbyssGear_Praevus	Ancient Wrath
-Item_Skill_AbyssGear_Primus	Ancient Reckoning
-Item_Skill_AbyssGear_Priscus	Ancient Retribution
-Item_Skill_AbyssGear_QueenSpider	Queen's Fangs
-Item_Skill_AbyssGear_ReduceCraftMaterial_LV1	Efficiency I
-Item_Skill_AbyssGear_ReduceCraftMaterial_LV2	Efficiency II
-Item_Skill_AbyssGear_ReduceCraftMaterial_LV3	Efficiency III
-Item_Skill_AbyssGear_Skevald	Putrid Touch
-Item_Skill_AbyssGear_SkillPointExp_LV1	Aptitude I
-Item_Skill_AbyssGear_SkillPointExp_LV2	Aptitude II
-Item_Skill_AbyssGear_SkillPointExp_LV3	Aptitude III
-Item_Skill_AbyssGear_SmashStorm_LV1	Tempest of Destruction
-Item_Skill_AbyssGear_SoulStrike_LV1	Spirit's Judgment
-Item_Skill_AbyssGear_SwordAura_LV1	Wind Slash
-Item_Skill_AbyssGear_TarandusWarrior_WarHammer	Earthrending Strike
-Item_Skill_AbyssGear_Titan	Lightning God's Affliction
-Item_Sleepy_Orange	Sleepy Scarlet Butterfly
-Item_Snail	Snail
-Item_Snow_Chipmunk	Snowfield Chipmunk
-Item_Snowy_Plover	Kentish Plover
-Item_Sparrow	Sparrow
-Item_Spicebush_Swallowtail	Spicebush Swallowtail Butterfly
-Item_Squirrel	Chipmunk
-Item_Stag_Beetle	Stag Beetle
-Item_Stat_AbyssGear_ADR_LV1	Aegis I
-Item_Stat_AbyssGear_ADR_LV2	Aegis II
-Item_Stat_AbyssGear_ADR_LV3	Aegis III
-Item_Stat_AbyssGear_AttackSpeedRate_LV1	Swift I
-Item_Stat_AbyssGear_AttackSpeedRate_LV2	Swift II
-Item_Stat_AbyssGear_AttackSpeedRate_LV3	Swift III
-Item_Stat_AbyssGear_AttackSpeedRate_Special	Greater Swift
-Item_Stat_AbyssGear_ClimbSpeedRate_LV1	Ascent I
-Item_Stat_AbyssGear_ClimbSpeedRate_LV2	Ascent II
-Item_Stat_AbyssGear_ClimbSpeedRate_LV3	Ascent III
-Item_Stat_AbyssGear_CriticalRate_LV1	Insight I
-Item_Stat_AbyssGear_CriticalRate_LV2	Insight II
-Item_Stat_AbyssGear_CriticalRate_LV3	Insight III
-Item_Stat_AbyssGear_CriticalRate_Special	Greater Insight
-Item_Stat_AbyssGear_DDD_LV1	Destruction I
-Item_Stat_AbyssGear_DDD_LV2	Destruction II
-Item_Stat_AbyssGear_DDD_LV3	Destruction III
-Item_Stat_AbyssGear_DDD_Special	Greater Destruction
-Item_Stat_AbyssGear_DPV_LV1	Fortification I
-Item_Stat_AbyssGear_DPV_LV2	Fortification II
-Item_Stat_AbyssGear_DPV_LV3	Fortification III
-Item_Stat_AbyssGear_ElectricityResistance_LV1	Shockward I
-Item_Stat_AbyssGear_ElectricityResistance_LV2	Shockward II
-Item_Stat_AbyssGear_ElectricityResistance_LV3	Shockward III
-Item_Stat_AbyssGear_ElectricityResistance_Special	Greater Shockward
-Item_Stat_AbyssGear_FireResistance_LV1	Flameward I
-Item_Stat_AbyssGear_FireResistance_LV2	Flameward II
-Item_Stat_AbyssGear_FireResistance_LV3	Flameward III
-Item_Stat_AbyssGear_FireResistance_Special	Greater Flameward
-Item_Stat_AbyssGear_GuardPVRate_LV1	Fortitude I
-Item_Stat_AbyssGear_GuardPVRate_LV2	Fortitude II
-Item_Stat_AbyssGear_GuardPVRate_LV3	Fortitude III
-Item_Stat_AbyssGear_HpRegen_LV1	Vitality I
-Item_Stat_AbyssGear_HpRegen_LV2	Vitality II
-Item_Stat_AbyssGear_HpRegen_LV3	Vitality III
-Item_Stat_AbyssGear_IceResistance_LV1	Frostward I
-Item_Stat_AbyssGear_IceResistance_LV2	Frostward II
-Item_Stat_AbyssGear_IceResistance_LV3	Frostward III
-Item_Stat_AbyssGear_IceResistance_Special	Greater Frostward
-Item_Stat_AbyssGear_MoveSpeedRate_LV1	Haste I
-Item_Stat_AbyssGear_MoveSpeedRate_LV2	Haste II
-Item_Stat_AbyssGear_MoveSpeedRate_LV3	Haste III
-Item_Stat_AbyssGear_MpRegen_LV1	Composure I
-Item_Stat_AbyssGear_MpRegen_LV2	Composure II
-Item_Stat_AbyssGear_MpRegen_LV3	Composure III
-Item_Stat_AbyssGear_StaminaRegen_LV1	Vigor I
-Item_Stat_AbyssGear_StaminaRegen_LV2	Vigor II
-Item_Stat_AbyssGear_StaminaRegen_LV3	Vigor III
-Item_Stat_AbyssGear_SwimSpeedRate_LV1	Surge I
-Item_Stat_AbyssGear_SwimSpeedRate_LV2	Surge II
-Item_Stat_AbyssGear_SwimSpeedRate_LV3	Surge III
-Item_Theona_Checkerspot	Theona Checkerspot Butterfly
-Item_Tiger_Mimic_Queen	Tiger Mimic Queen Butterfly
-Item_Tomaso_Enchant_Coin	Tommaso Refinement Token
-Item_Varnia_Enchant_Coin	Varnia Refinement Token
-Item_Viceroy	Commander Butterfly
-Item_WaterStrider	Water Strider
-Item_WhiteWing_Flycatcher	White-winged Redstart
-Item_White_M_Hairstreak	White Streaked butterfly
-Item_White_Peacock	White Peacock Butterfly
-Item_Wood_Pecker	Three-Toed Woodpecker
-Item_Zebra_Heliconian	Zebra Longwing Butterfly
-Item_Zebra_Swallowtail	Zebra Swallowtail
+Item_BlueJay	Blue Jay
 Item_bookcase_0001	Whitesand Bookshelf
 Item_bookcase_02	Dark Timberton Bookshelf
 Item_bookcase_02_index01	Bright Timberton Bookshelf
+Item_Bumblebee	Bumblebee
+Item_Bunting_Bird	Meadow Bunting
+Item_Butterfly	Meadow Butterfly
 Item_cabinet_0001	Whitesand Gold Display Cabinet
 Item_cabinet_0002	Small Whitesand Cabinet
 Item_cabinet_0003	Whitesand Display Cabinet
@@ -2623,6 +2333,7 @@ Item_cabinet_15	Delesyian Metal Lock Cabinet
 Item_cabinet_19	Royal Gold Display Cabinet
 Item_cabinet_19_index01	Sacred Gold Display Cabinet
 Item_cabinet_23	Small Crest Drawer
+Item_Camel_Cricket	Camel Cricket
 Item_cd_ex_dpf_flowerpot_16_housing	Palm Tree Pot
 Item_cd_ex_dpf_flowerpot_21_housing	Small Wooden Flower Pot
 Item_cd_ex_dpf_flowerpot_23_housing	Laurel Pot
@@ -2630,15 +2341,30 @@ Item_cd_ex_dpf_flowerpot_24_housing	Large Alocasia Pot
 Item_cd_ex_dpf_flowerpot_37_housing	Desert Cactus Pot
 Item_cd_ex_dpf_flowerpot_61_housing	Apple Tree Pot
 Item_cd_lamp_hanger_legendanimal_0002	Twisted Nightmare Lamp
+Item_Chameleon	Chameleon
+Item_Checkered_White	Checkered White Butterfly
+Item_Chocolate	Chocolate
 Item_closet_01	Large Dark Timberton Wardrobe
 Item_closet_01_index01	Large Bright Timberton Wardrobe
 Item_closet_02	Timberham Wardrobe
+Item_Cockroach	Cockroach
+Item_Colias_Nastes	Green Sulphur Butterfly
+Item_Collection_Prop_Statue_0002	The Sitting Lion
+Item_Common_Buckeye	Buckeye Butterfly
+Item_Common_Green_Birdwing	Green Birdwing Butterfly
+Item_Common_Nawab	Nawab Butterfly
 Item_craft_medicine_01_housing	Cauldron
+Item_Crimson_Patch	Crimson Patch Butterfly
+Item_Del_Enchant_Coin	Delesyia Refinement Token
+Item_Dem_Enchant_Coin	Demeniss Refinement Token
+Item_Desert_Orange_tip	Scarlet Leafwing Butterfly
 Item_dff_luxuryfurniture_bed_0001	Whitesand Bed
 Item_dff_luxuryfurniture_bed_01	Cozy Bed
 Item_dff_luxuryfurniture_bed_02	Crimson Bed
 Item_dff_luxuryfurniture_bed_03	White Bed
 Item_dff_luxuryfurniture_bed_04	Lord's Bed
+Item_DiademSpider	Golden Silk Spider
+Item_Diana_Fritillary	Diana Fritillary Butterfly
 Item_dragonfly	Dragonfly
 Item_dresser_0001	Whitesand Drawer
 Item_dresser_01	Crest Drawer
@@ -2646,7 +2372,21 @@ Item_dresser_01_index01	Timberton Drawer
 Item_dresser_03	Dark Timberton Cabinet
 Item_dresser_03_index01	Bright Timberton Cabinet
 Item_dresser_04	Timberham Drawer
-Item_gimmick_abyss_quest_kuku_seal_01	Magnetic Power Core
+Item_Eastern_Comma	Yellow Comma Butterfly
+Item_Eastern_Tailed_Blue	Blue Tailed Butterfly
+Item_Eastern_Tiger_Swallowtail	Swallowtail
+Item_ETC_CooltimeReduce_ATAG	A.T.A.G. Emergency Power Device
+Item_ETC_CooltimeReduce_ATAGII	A.T.A.G. Power Module
+Item_ETC_CooltimeReduce_Dragon	Dragon Claw Horn
+Item_ETC_CooltimeReduce_DragonII	Narima's Horn
+Item_Firefly	Firefly
+Item_Fist_Damian	Ordinary Gloves
+Item_Fist_Kliff	Ordinary Gloves
+Item_Fist_Oongka	Ordinary Gloves
+Item_Flying_Squirrel	Flying Squirrel
+Item_Frilled_Lizard	Frilled-neck Lizard
+Item_Giant_Salamander	Burrowing Salamander
+Item_gimmick_abyss_quest_kuku_seal_01	Magnetic Power Source
 Item_gimmick_abysscore_0001	Abyss Cell: No. 1
 Item_gimmick_abysscore_0002	Abyss Cell: No. 2
 Item_gimmick_abyssruins_useartifact_01_attach_part	Abyss Transporter
@@ -2741,7 +2481,7 @@ Item_gimmick_puzzle_antumbra_tokamak_01_parts04_index04	Fusion Reactor Core: XIV
 Item_gimmick_puzzle_antumbra_tokamak_01_parts20	Core of Penitence
 Item_gimmick_puzzle_antumbra_tokamak_01_parts21	Core of Renunciation
 Item_gimmick_puzzle_antumbra_tokamak_01_parts22	Core of Expiation
-Item_gimmick_puzzle_antumbra_tokamak_01_parts23	Core of Oblation
+Item_gimmick_puzzle_antumbra_tokamak_01_parts23	Core of Transgression
 Item_gimmick_puzzle_antumbra_tokamak_02_parts01_index01	Fusion Reactor Core: XXI-I
 Item_gimmick_puzzle_antumbra_tokamak_02_parts01_index03	Fusion Reactor Core: XXI-III
 Item_gimmick_puzzle_antumbra_tokamak_02_parts01_index04	Fusion Reactor Core: XXI-IV
@@ -2817,13 +2557,310 @@ Item_gimmick_puzzle_antumbra_tokamak_parts16	Fusion Reactor Core: XVI
 Item_gimmick_resourcestorage_0001	Sturdy Gatherables Chest
 Item_gimmick_snake_boss_scales_01	Aeserion's Scale
 Item_gimmick_tumbleweed_0001	Tumbleweed
+Item_Gnat	Fruit Fly
+Item_GnatWide	Medium Fly
+Item_Goanna	Goanna
+Item_GrassHopper	Grasshopper
+Item_Great_Purple_Hairstreak	Great Purple Hairstreak Butterfly
+Item_Grizzled_Skipper	Grizzled Skipper Butterfly
+Item_Guava_Skipper	Guava Skipper Butterfly
+Item_Her_Enchant_Coin	Hernand Refinement Token
+Item_Hila_Lizard	Heloderma Lizard
+Item_Hornet	Hornet
+Item_House_Centipede	House Centipede
+Item_Hypaurotis_Crysalus	Violet Hairstreak Butterfly
+Item_Iguana	Iguana
 Item_in_dff_bed_06	Dark Timberham Bed
 Item_in_dff_bed_06_dem	Bright Timberham Bed
+Item_Jewel_Beetle	Jewel Beetle
+Item_JijeongLeaf_Insect	Palmar Beetle
+Item_Kallima_Inachus	Orange Oakleaf Butterfly
+Item_Kuku_Egg	Kuku Bird's Egg
+Item_Kuku_Pot	Kuku Pot
+Item_Kuku_Pot_02	Enhanced Kuku Pot
+Item_KuKu_Small_ATAG	Small Kuku A.T.A.G.
+Item_Little_Metalmark	Little Metalmark Butterfly
+Item_Little_Wood_Satyr	Little Wood Satyr Butterfly
+Item_Longhorn_Beetle	Longhorn Beetle
+Item_Longtailedtit	Long-Tailed Tit
+Item_Luna_Moth	Wild Silkworm Moth
+Item_Lustrous_Copper	Red Lycaenid Butterfly
+Item_Lycaena_Phlaeas	Spotted Lycaenid Butterfly
+Item_Malachite	Malachite Butterfly
+Item_Meerkat	Meerkat
+Item_Milbert_Tortoiseshell	Flame-Bordered Butterfly
+Item_Mole	Mole
+Item_Monarch	Monarch Butterfly
+Item_Moth	Mountain Moth
+Item_Muskrat	Muskrat
+Item_Myscelia_Ethusa	Bluewing Butterfly
+Item_Neophasia_Terlooii	White Butterfly
+Item_Orange_Barred_Sulphur	Orange-Barred Sulphur Butterfly
+Item_Oriole	Black-Naped Oriole
+Item_Ornythion_Swallowtail	Ornythion Swallowtail Butterfly
+Item_Oxpecker	Yellow-Billed Oxpecker
+Item_Pailoon_Enchant_Coin	Pailune Refinement Token
+Item_Painted_Lady	Painted Lady Butterfly
+Item_Pipevine_Swallowtail	Pipevine Swallowtail Butterfly
+Item_Polydamas_Swallowtail	Polydamas Swallowtail Butterfly
+Item_Possum	Opossum
+Item_Purple_Emperor	Purple Emperor Butterfly
 Item_puzzle_troll_lake_pillar_01_part_01	Kharonso Ruins Pillar: No. 1
 Item_puzzle_troll_lake_pillar_02_part_01	Kharonso Ruins Pillar: No. 2
 Item_puzzle_troll_lake_pillar_03_part_01	Kharonso Ruins Pillar: No. 3
 Item_puzzle_troll_lake_pillar_04_part_01	Kharonso Ruins Pillar: No. 4
+Item_Rare_Collect_amaranth	Amaranth
+Item_Rare_Collect_Chaya	Chaya
+Item_Rare_Collect_chlorella	Green Algae
+Item_Rare_Collect_Dulse	Red Seaweed
+Item_Rare_Collect_Ensete	Enset
+Item_Rare_Collect_jijeongta_leaf	Palmar Leaf
+Item_Rare_Collect_Kudzu	Skyroot
+Item_Rare_Collect_Mercury	Mercury
+Item_Rare_Collect_opuntia	Prickly Pear
+Item_Rare_Collect_Platinum	Platinum
+Item_Rare_Collect_RazorClam	Razor Clam
+Item_Rare_Collect_RazorClam_01	Freshwater Clam
+Item_Rare_Collect_Rubber	Rubber
+Item_Rare_Collect_Stalactites	Stalactite
+Item_Rare_Collect_SulfurStone	Brimstone
+Item_Rare_Collect_Taro	Taro
+Item_Rat	Rat
+Item_Red_Spotted_Purple	Red-spotted Purple Butterfly
+Item_Red_Squirrel	Red Squirrel
+Item_Regal_Fritillary	Regal Fritillary Butterfly
+Item_Rhinoceros_Beetle	Rhinoceros Beetle
+Item_Ruddy_Daggerwing	Ruddy Daggerwing Butterfly
+Item_Rusty_Tipped_Page	Rusty Tipped Page Butterfly
+Item_Salamander	Salamander
+Item_Scale	Scales of Fairness and Justice
+Item_Sea_Siater	Wharf Roach
+Item_Set_A_Enhance_RestArea	Adventurer's Refinement Inventory Type A
+Item_Set_A_RestArea	Adventurer's Cooking Inventory Type A
+Item_Set_B_Enhance_RestArea	Adventurer's Refinement Inventory Type B
+Item_Set_B_RestArea	Adventurer's Cooking Inventory Type B
+Item_Set_C_Enhance_RestArea	Adventurer's Refinement Inventory Type C
+Item_Set_C_RestArea	Adventurer's Cooking Inventory Type C
+Item_Set_D_Enhance_RestArea	Adventurer's Refinement Inventory Type D
+Item_Set_D_RestArea	Adventurer's Cooking Inventory Type D
+Item_Set_E_Enhance_RestArea	Adventurer's Refinement Inventory Type E
+Item_Set_E_RestArea	Adventurer's Cooking Inventory Type E
+Item_Set_F_Enhance_RestArea	Adventurer's Refinement Inventory Type F
+Item_Silkworm_Moth	Silkworm Moth
+Item_Skill_AbyssGear_AbsoluteDefense_LV1	Piercing Bloom
+Item_Skill_AbyssGear_AbyssGrass_Immune	Abyssal Assimilation
+Item_Skill_AbyssGear_AddCriticalRateByMaterialKey_FabricArmor_LV1	Shred I
+Item_Skill_AbyssGear_AddCriticalRateByMaterialKey_FabricArmor_LV2	Shred II
+Item_Skill_AbyssGear_AddCriticalRateByMaterialKey_FabricArmor_LV3	Shred III
+Item_Skill_AbyssGear_AddCriticalRateByMaterialKey_LeatherArmor_LV1	Rend I
+Item_Skill_AbyssGear_AddCriticalRateByMaterialKey_LeatherArmor_LV2	Rend II
+Item_Skill_AbyssGear_AddCriticalRateByMaterialKey_LeatherArmor_LV3	Rend III
+Item_Skill_AbyssGear_AddCriticalRateByMaterialKey_PlateArmor_LV1	Shatter I
+Item_Skill_AbyssGear_AddCriticalRateByMaterialKey_PlateArmor_LV2	Shatter II
+Item_Skill_AbyssGear_AddCriticalRateByMaterialKey_PlateArmor_LV3	Shatter III
+Item_Skill_AbyssGear_AddFrendly_LV1	Solidarity I
+Item_Skill_AbyssGear_AddFrendly_LV2	Solidarity II
+Item_Skill_AbyssGear_AddFrendly_LV3	Solidarity III
+Item_Skill_AbyssGear_AdditionalThief_LV1	Ledgermain I
+Item_Skill_AbyssGear_AdditionalThief_LV2	Ledgermain II
+Item_Skill_AbyssGear_AdditionalThief_LV3	Ledgermain III
+Item_Skill_AbyssGear_AddKillSkillLevel_LV1	Energy Drain I
+Item_Skill_AbyssGear_AddKillSkillLevel_LV2	Energy Drain II
+Item_Skill_AbyssGear_AddKillSkillLevel_LV3	Energy Drain III
+Item_Skill_AbyssGear_AddMoneyDropRate_LV1	Fortune I
+Item_Skill_AbyssGear_AddMoneyDropRate_LV2	Fortune II
+Item_Skill_AbyssGear_AddMoneyDropRate_LV3	Fortune III
+Item_Skill_AbyssGear_Antumbra_Spear	Warden of Darkness
+Item_Skill_AbyssGear_Antumbra_TwoHandRod	Dark Crescent
+Item_Skill_AbyssGear_ArrowRain_LV1	Arrow Rain
+Item_Skill_AbyssGear_AtorDrone_LV1	Ator's Orb
+Item_Skill_AbyssGear_Attack_HPRecover_LV1	Life Transference
+Item_Skill_AbyssGear_Attack_HPRecover_LV2	Sanguine Transference
+Item_Skill_AbyssGear_Attack_MPRecover_LV1	Spirit Transference
+Item_Skill_AbyssGear_Attack_MPRecover_LV2	Verdant Transference
+Item_Skill_AbyssGear_Attack_SPRecover_LV1	Stamina Transference
+Item_Skill_AbyssGear_Attack_SPRecover_LV2	Celestial Transference
+Item_Skill_AbyssGear_Bastier	Flames of Judgment
+Item_Skill_AbyssGear_BlockAmmoConsume_LV1	Infinite Arrows I
+Item_Skill_AbyssGear_BlockAmmoConsume_LV2	Infinite Arrows II
+Item_Skill_AbyssGear_BlockAmmoConsume_LV3	Infinite Arrows III
+Item_Skill_AbyssGear_BlockAmmoConsume_Special	Greater Infinite Arrows
+Item_Skill_AbyssGear_Boss_AdditionalDamage_LV1	Malicebane I
+Item_Skill_AbyssGear_Boss_AdditionalDamage_LV2	Malicebane II
+Item_Skill_AbyssGear_Boss_AdditionalDamage_LV3	Malicebane III
+Item_Skill_AbyssGear_Boss_AdditionalDamage_Special	Greater Malicebane
+Item_Skill_AbyssGear_Catfish_BodySlam_LV1	Rising Torrent
+Item_Skill_AbyssGear_CollectDrop_Animal_LV1	Blessing of the Beast I
+Item_Skill_AbyssGear_CollectDrop_Animal_LV2	Blessing of the Beast II
+Item_Skill_AbyssGear_CollectDrop_Animal_LV3	Blessing of the Beast III
+Item_Skill_AbyssGear_CollectDrop_Log_LV1	Blessing of the Forest I
+Item_Skill_AbyssGear_CollectDrop_Log_LV2	Blessing of the Forest II
+Item_Skill_AbyssGear_CollectDrop_Log_LV3	Blessing of the Forest III
+Item_Skill_AbyssGear_CollectDrop_Ore_LV1	Blessing of the Earth I
+Item_Skill_AbyssGear_CollectDrop_Ore_LV2	Blessing of the Earth II
+Item_Skill_AbyssGear_CollectDrop_Ore_LV3	Blessing of the Earth III
+Item_Skill_AbyssGear_CollectDrop_Plant_LV1	Blessing of Nature I
+Item_Skill_AbyssGear_CollectDrop_Plant_LV2	Blessing of Nature II
+Item_Skill_AbyssGear_CollectDrop_Plant_LV3	Blessing of Nature III
+Item_Skill_AbyssGear_Combo_LV1	Relentless
+Item_Skill_AbyssGear_CommonAnimal_AdditionalDamage_LV1	Beastbane I
+Item_Skill_AbyssGear_CommonAnimal_AdditionalDamage_LV2	Beastbane II
+Item_Skill_AbyssGear_CommonAnimal_AdditionalDamage_LV3	Beastbane III
+Item_Skill_AbyssGear_CommonAnimal_AdditionalDamage_Special	Greater Beastbane
+Item_Skill_AbyssGear_CommonGolem_AdditionalDamage_LV1	Primalbane I
+Item_Skill_AbyssGear_CommonGolem_AdditionalDamage_LV2	Primalbane II
+Item_Skill_AbyssGear_CommonGolem_AdditionalDamage_LV3	Primalbane III
+Item_Skill_AbyssGear_CommonGolem_AdditionalDamage_Special	Greater Primalbane
+Item_Skill_AbyssGear_CommonHexe_AdditionalDamage_LV1	Hexebane I
+Item_Skill_AbyssGear_CommonHexe_AdditionalDamage_LV2	Hexebane II
+Item_Skill_AbyssGear_CommonHexe_AdditionalDamage_LV3	Hexebane III
+Item_Skill_AbyssGear_CommonHexe_AdditionalDamage_Special	Greater Hexebane
+Item_Skill_AbyssGear_CommonHumanoid_AdditionalDamage_LV1	Bloodbane I
+Item_Skill_AbyssGear_CommonHumanoid_AdditionalDamage_LV2	Bloodbane II
+Item_Skill_AbyssGear_CommonHumanoid_AdditionalDamage_LV3	Bloodbane III
+Item_Skill_AbyssGear_CommonHumanoid_AdditionalDamage_Special	Greater Bloodbane
+Item_Skill_AbyssGear_ContributionExp_LV1	Service I
+Item_Skill_AbyssGear_ContributionExp_LV2	Service II
+Item_Skill_AbyssGear_ContributionExp_LV3	Service III
+Item_Skill_AbyssGear_Creature_AdditionalDamage_LV1	Abyssbane I
+Item_Skill_AbyssGear_Creature_AdditionalDamage_LV2	Abyssbane II
+Item_Skill_AbyssGear_Creature_AdditionalDamage_LV3	Abyssbane III
+Item_Skill_AbyssGear_Creature_AdditionalDamage_Special	Greater Abyssbane
+Item_Skill_AbyssGear_CresecentAura_1_LV1	Crescent Moon Slash
+Item_Skill_AbyssGear_CresecentAura_2_LV1	Half Moon Slash
+Item_Skill_AbyssGear_CresecentAura_3_LV1	Fullmoon Slash
+Item_Skill_AbyssGear_CrowAttack_LV1	Crow's Pursuit
+Item_Skill_AbyssGear_CrowStorm_LV1	Crow Storm
+Item_Skill_AbyssGear_DAM_UP_RotationBash	Momentum
+Item_Skill_AbyssGear_DarkChase_LV1	Greysoul Howling
+Item_Skill_AbyssGear_DarkenRobe_LV1	Wound of Darkness
+Item_Skill_AbyssGear_DogClaw_LV1	Hound's Claws
+Item_Skill_AbyssGear_EnergyBurst_LV1	Kinetic Burst
+Item_Skill_AbyssGear_EnlightenmentWave_LV1	Karmic Pulse
+Item_Skill_AbyssGear_Equip_AddHorseExp_LV1	Equestrian I
+Item_Skill_AbyssGear_Equip_AddHorseExp_LV2	Equestrian II
+Item_Skill_AbyssGear_Equip_AddHorseExp_LV3	Equestrian III
+Item_Skill_AbyssGear_Equip_AddPetFriendly_LV1	Companionship I
+Item_Skill_AbyssGear_Equip_AddPetFriendly_LV2	Companionship II
+Item_Skill_AbyssGear_Equip_AddPetFriendly_LV3	Companionship III
+Item_Skill_AbyssGear_EquipDropRate_LV1	Disarm I
+Item_Skill_AbyssGear_EquipDropRate_LV2	Disarm II
+Item_Skill_AbyssGear_EquipDropRate_LV3	Disarm III
+Item_Skill_AbyssGear_FireBreath_LV1	Volcanic Eruption
+Item_Skill_AbyssGear_FlashCombo_LV1	Slashing Reeds
+Item_Skill_AbyssGear_FoodSkillLevelUp_LV1	Gourmet I
+Item_Skill_AbyssGear_FoodSkillLevelUp_LV2	Gourmet II
+Item_Skill_AbyssGear_FoodSkillLevelUp_LV3	Gourmet III
+Item_Skill_AbyssGear_Forgotten_General	Judgment of the Soul
+Item_Skill_AbyssGear_FrostBreath_LV1	Frost Hail
+Item_Skill_AbyssGear_FrostDeath_LV1	Shattering Frost
+Item_Skill_AbyssGear_FrostSpike_LV1	Frost Spike
+Item_Skill_AbyssGear_Hyena_PoisonImmune	Heart of the Serpent
+Item_Skill_AbyssGear_Immune_Bismuth	Heart of Stone
+Item_Skill_AbyssGear_ImpBoss	Howling of Chaos
+Item_Skill_AbyssGear_Karanda	Pillar of Wind
+Item_Skill_AbyssGear_LandMash_LV1	Groundsurge
+Item_Skill_AbyssGear_LanFord	Parting Gift
+Item_Skill_AbyssGear_Leebur	Shadow Claw
+Item_Skill_AbyssGear_LightningBreath_LV1	Orbs of Lightning
+Item_Skill_AbyssGear_LightningStab_LV1	Storm Fang
+Item_Skill_AbyssGear_Machine_AdditionalDamage_LV1	Steelbane I
+Item_Skill_AbyssGear_Machine_AdditionalDamage_LV2	Steelbane II
+Item_Skill_AbyssGear_Machine_AdditionalDamage_LV3	Steelbane III
+Item_Skill_AbyssGear_Machine_AdditionalDamage_Special	Greater Steelbane
+Item_Skill_AbyssGear_Merrick	Order from Above
+Item_Skill_AbyssGear_Muscan	The Showstopper
+Item_Skill_AbyssGear_Ogre	Colossal Might
+Item_Skill_AbyssGear_PhantomStab_LV1	Abyssal Rays
+Item_Skill_AbyssGear_Praevus	Ancient Wrath
+Item_Skill_AbyssGear_Primus	Ancient Reckoning
+Item_Skill_AbyssGear_Priscus	Ancient Retribution
+Item_Skill_AbyssGear_QueenSpider	Queen's Fangs
+Item_Skill_AbyssGear_ReduceCraftMaterial_LV1	Efficiency I
+Item_Skill_AbyssGear_ReduceCraftMaterial_LV2	Efficiency II
+Item_Skill_AbyssGear_ReduceCraftMaterial_LV3	Efficiency III
+Item_Skill_AbyssGear_Skevald	Putrid Touch
+Item_Skill_AbyssGear_SkillPointExp_LV1	Aptitude I
+Item_Skill_AbyssGear_SkillPointExp_LV2	Aptitude II
+Item_Skill_AbyssGear_SkillPointExp_LV3	Aptitude III
+Item_Skill_AbyssGear_SmashStorm_LV1	Tempest of Destruction
+Item_Skill_AbyssGear_SoulStrike_LV1	Spirit's Judgment
+Item_Skill_AbyssGear_SwordAura_LV1	Wind Slash
+Item_Skill_AbyssGear_TarandusWarrior_WarHammer	Earthrending Strike
+Item_Skill_AbyssGear_Titan	Lightning God's Affliction
+Item_Sleepy_Orange	Sleepy Scarlet Butterfly
+Item_Snail	Snail
+Item_Snow_Chipmunk	Snowfield Chipmunk
+Item_Snowy_Plover	Kentish Plover
+Item_Sparrow	Sparrow
+Item_Spicebush_Swallowtail	Spicebush Swallowtail Butterfly
+Item_Squirrel	Chipmunk
+Item_Stag_Beetle	Stag Beetle
+Item_Stat_AbyssGear_ADR_LV1	Aegis I
+Item_Stat_AbyssGear_ADR_LV2	Aegis II
+Item_Stat_AbyssGear_ADR_LV3	Aegis III
+Item_Stat_AbyssGear_AttackSpeedRate_LV1	Swift I
+Item_Stat_AbyssGear_AttackSpeedRate_LV2	Swift II
+Item_Stat_AbyssGear_AttackSpeedRate_LV3	Swift III
+Item_Stat_AbyssGear_AttackSpeedRate_Special	Greater Swift
+Item_Stat_AbyssGear_ClimbSpeedRate_LV1	Ascent I
+Item_Stat_AbyssGear_ClimbSpeedRate_LV2	Ascent II
+Item_Stat_AbyssGear_ClimbSpeedRate_LV3	Ascent III
+Item_Stat_AbyssGear_CriticalRate_LV1	Insight I
+Item_Stat_AbyssGear_CriticalRate_LV2	Insight II
+Item_Stat_AbyssGear_CriticalRate_LV3	Insight III
+Item_Stat_AbyssGear_CriticalRate_Special	Greater Insight
+Item_Stat_AbyssGear_DDD_LV1	Destruction I
+Item_Stat_AbyssGear_DDD_LV2	Destruction II
+Item_Stat_AbyssGear_DDD_LV3	Destruction III
+Item_Stat_AbyssGear_DDD_Special	Greater Destruction
+Item_Stat_AbyssGear_DPV_LV1	Fortification I
+Item_Stat_AbyssGear_DPV_LV2	Fortification II
+Item_Stat_AbyssGear_DPV_LV3	Fortification III
+Item_Stat_AbyssGear_ElectricityResistance_LV1	Shockward I
+Item_Stat_AbyssGear_ElectricityResistance_LV2	Shockward II
+Item_Stat_AbyssGear_ElectricityResistance_LV3	Shockward III
+Item_Stat_AbyssGear_ElectricityResistance_Special	Greater Shockward
+Item_Stat_AbyssGear_FireResistance_LV1	Flameward I
+Item_Stat_AbyssGear_FireResistance_LV2	Flameward II
+Item_Stat_AbyssGear_FireResistance_LV3	Flameward III
+Item_Stat_AbyssGear_FireResistance_Special	Greater Flameward
+Item_Stat_AbyssGear_GuardPVRate_LV1	Fortitude I
+Item_Stat_AbyssGear_GuardPVRate_LV2	Fortitude II
+Item_Stat_AbyssGear_GuardPVRate_LV3	Fortitude III
+Item_Stat_AbyssGear_HpRegen_LV1	Vitality I
+Item_Stat_AbyssGear_HpRegen_LV2	Vitality II
+Item_Stat_AbyssGear_HpRegen_LV3	Vitality III
+Item_Stat_AbyssGear_IceResistance_LV1	Frostward I
+Item_Stat_AbyssGear_IceResistance_LV2	Frostward II
+Item_Stat_AbyssGear_IceResistance_LV3	Frostward III
+Item_Stat_AbyssGear_IceResistance_Special	Greater Frostward
+Item_Stat_AbyssGear_MoveSpeedRate_LV1	Haste I
+Item_Stat_AbyssGear_MoveSpeedRate_LV2	Haste II
+Item_Stat_AbyssGear_MoveSpeedRate_LV3	Haste III
+Item_Stat_AbyssGear_MpRegen_LV1	Composure I
+Item_Stat_AbyssGear_MpRegen_LV2	Composure II
+Item_Stat_AbyssGear_MpRegen_LV3	Composure III
+Item_Stat_AbyssGear_StaminaRegen_LV1	Vigor I
+Item_Stat_AbyssGear_StaminaRegen_LV2	Vigor II
+Item_Stat_AbyssGear_StaminaRegen_LV3	Vigor III
+Item_Stat_AbyssGear_SwimSpeedRate_LV1	Surge I
+Item_Stat_AbyssGear_SwimSpeedRate_LV2	Surge II
+Item_Stat_AbyssGear_SwimSpeedRate_LV3	Surge III
+Item_Theona_Checkerspot	Theona Checkerspot Butterfly
+Item_Tiger_Mimic_Queen	Tiger Mimic Queen Butterfly
+Item_Tomaso_Enchant_Coin	Tommaso Refinement Token
 Item_troll_academy_Core	Dimensional Fusion Experimental Power Core
+Item_Varnia_Enchant_Coin	Varnia Refinement Token
+Item_Viceroy	Commander Butterfly
+Item_WaterStrider	Water Strider
+Item_White_M_Hairstreak	White Streaked butterfly
+Item_White_Peacock	White Peacock Butterfly
+Item_WhiteWing_Flycatcher	White-winged Redstart
+Item_Wood_Pecker	Three-Toed Woodpecker
+Item_Zebra_Heliconian	Zebra Longwing Butterfly
+Item_Zebra_Swallowtail	Zebra Swallowtail
+ItemCatch_FishingRod	The Claw
 Itemgimmick_lamp_side_candle_0001	Icy White Twin Wall Lamp
 Itemgimmick_lamp_side_candle_0001_index01	Twilight Twin Wall Lamp
 Itemgimmick_lamp_side_candle_0001_index02	Lilac Twin Wall Lamp
@@ -2865,12 +2902,12 @@ Johnnycolo_Leather_Armor	Janiklo Leather Armor
 Johnnycolo_Leather_Gloves	Janiklo Leather Gloves
 Joseph_PlateArmor_Armor	Yosef Plate Armor
 Juden_Fabric_Armor	Juden Cloth Armor
+Judge_Plate_Boots	Inquisitor's Plate Boots
 Judge_PlateArmor_Armor	Inquisitor's Plate Armor
 Judge_PlateArmor_Gloves	Inquisitor's Plate Gloves
-Judge_Plate_Boots	Inquisitor's Plate Boots
 Judge_TwoHandSpear	Alfonso Spear
 Juman_Leather_Boots	Juman Leather Boots
-JumpUp_Boots	Kuku Breeze-Step Boots
+JumpUp_Boots	Kuku Breeze-step Boots
 Kadel_Leather_Gloves	Rheigis Leather Gloves
 Kadel_OneHandMace	Kadel Mace
 Kahbokahn_Fabric_Armor	Kavokin Cloth Armor
@@ -2930,8 +2967,8 @@ Ketlan_ChainMail_Armor	Ketlan Chain Mail
 Khadiac_TwoHandAxe	Troll Hook Greataxe
 Khadiac_TwoHandSpear	Kylus Spear
 Khadion_TwoHandAlebard	Gilliam Halberd
-Khadion_TwoHandSword	Iris Longsword
 Khadion_TwoHandedWarHammer	Arlen Warhammer
+Khadion_TwoHandSword	Iris Longsword
 Khalbydan_Fabric_Armor	Khalbdan Cloth Armor
 Khalbydan_Leather_Gloves	Khalbdan Leather Gloves
 Khanoa_OneHandBow	Sydmon Bow
@@ -2945,6 +2982,9 @@ Kimbap	Battered Harvest Roll
 Kimbap_Large	Satisfying Battered Harvest Roll
 Kimbap_Medium	Filling Battered Harvest Roll
 Kimbap_XLarge	Hearty Battered Harvest Roll
+king_LostPeople_PlateArmor_Armor	Frostcursed Plate Armor
+king_LostPeople_PlateArmor_Armor_Upgrade	Kuku Cold-Resistant Armor
+king_LostPeople_PlateArmor_Cloak	Frostcursed Plate Cloak
 Kinloch_PlateArmor_Armor	Kinloch Plate Armor
 Kinloch_PlateArmor_Armor_I	Kinloch Plate Armor
 Kinov_Fabric_Armor	Keanoff Cloth Armor
@@ -2956,12 +2996,12 @@ Kitee_OneHandShield	Kite Shield
 Kliff_Earring	Greymane's Earring
 Kliff_Glasses	Master Du's Circlet
 Kliff_Mask	Mask
-Kliff_OneHandShotgun	Pailunese Shotgun
+Kliff_OneHandShotgun	Pailune Shotgun
+Kliff_Plate_Boots	Kairos Plate Boots
 Kliff_PlateArmor_Armor	Kairos Plate Armor
 Kliff_PlateArmor_Cloak	Kairos Cloak
 Kliff_PlateArmor_Gloves	Kairos Plate Gloves
 Kliff_PlateArmor_Helm	Kairos Plate Helm
-Kliff_Plate_Boots	Kairos Plate Boots
 Knight_King_OneHandSword	Knightlord's Sword
 Knowledge_PlateArmor_Helm	Helm of Knowledge
 Konkhar_Fabric_Armor	Concarr Cloth Armor
@@ -2969,7 +3009,7 @@ Kordaav_Leather_Armor	Kordaav Leather Armor
 Kordaav_Leather_Gloves	Kordaav Leather Gloves
 Kordaav_OneHandMace	Kordaav Mace
 Korean_PlateArmor_Armor	Corinne Plate Armor
-Kramer_TwoHandHammer	Helms Greathammer
+Kramer_TwoHandHammer	The Helms Greathammer
 Kriella_Fabric_Armor	Kriella Cloth Armor
 Kriella_Fabric_Gloves	Kriella Cloth Gloves
 Kritha_HorseArmor_Armor	Calphadean Barding
@@ -2978,22 +3018,22 @@ Kritha_HorseArmor_Saddle	Exclaire Saddle
 Kritha_HorseArmor_Stirrup	Calphadean Stirrups
 Ktan_Fabric_Armor	Kithan Cloth Armor
 Ktian_Fabric_Armor	Ketian Cloth Armor
-KuKu_Bismuth_TwoHandSpear	Kuku Bismuth Spear
-KuKu_EMP_TwoHandSpear	Kuku Disruptor Spear
-KuKu_Fire_staff_spear_TwoHandSpear	Kuku Flame Spear
-KuKu_Golden999K	Kuku Transmission 999K Pack
-KuKu_Lightning_TwoHandSpear	Kuku Lightning Spear
-KuKu_Pot_TwoHandSpear	Kuku Spear
-KuKu_Wind_TwoHandSpear	Kuku Propeller Spear
 Kudzu_seed	Skyroot Seed
 Kukan_PlateArmor_Armor	Coogan Plate Armor
 Kukan_PlateArmor_Armor_I	Blacksteel Coogan Plate Armor
+KuKu_Bismuth_TwoHandSpear	Kuku Bismuth Spear
 Kuku_Drone_Backpack	Kuku Watcher Pack
-Kuku_EMP_Enhance_BackPack	Kuku Enhanced Disruptor
+Kuku_EMP_Enhance_BackPack	Kuku Advanced Disruptor
+KuKu_EMP_TwoHandSpear	Kuku Disruptor Spear
+KuKu_Fire_staff_spear_TwoHandSpear	Kuku Flame Spear
 Kuku_FlameThrower	Kuku Flamespitter
+KuKu_Golden999K	Kuku Transmission 999K Pack
 Kuku_IceThrower	Kuku Frostspitter
+KuKu_Lightning_TwoHandSpear	Kuku Lightning Spear
 Kuku_LightningThrower	Kuku Boltspitter
 Kuku_Pot_BackPack	Kuku Pack
+KuKu_Pot_TwoHandSpear	Kuku Spear
+KuKu_Wind_TwoHandSpear	Kuku Propeller Spear
 Kuku_YamatoCannon_TwoHandSpear	Kuku Laser Cannon Spear
 Kunan_PlateArmor_Armor	Kunan Plate Armor
 Kunan_PlateArmor_Armor_I	Kunan Plate Armor
@@ -3095,9 +3135,9 @@ Leeksia_OneHandSword	Dekarr Sword
 Legend_Black_Lion_Report	Sighting of the Black Lion
 Legend_Coelacanth_Report	Sighting of the Coelacanth
 Legend_Giant_Bull_Report	Giant White Bison Sighting
+Legend_Golden_Coelacanth_Report	Sighting of the Golden Coelacanth
 Legend_GoldenCarp_Report	Sighting of the Golden Carp
 Legend_GoldenTench_Report	Golden Tench Sighting
-Legend_Golden_Coelacanth_Report	Sighting of the Golden Coelacanth
 Legend_LeeburtheShadowWolf_Report	Sighting of the Black Fang
 Legend_Macaw_Parrot_Report	Legend Macaw Parrot Report
 Legend_Machine_Eagle_Report	Legend Machine Eagle Report
@@ -3107,7 +3147,7 @@ Legend_PureWhite_Deer_Report	Sighting of the Snowwhite Deer
 Legend_Redriver_hog_Report	Sighting of the Red River Hog
 Legend_SilverFangs_Report	Sighting of the Silver Fang
 Legend_Vined_Deer_Report	Sighting of the Vine Deer
-Legend_White_Bear_Wild_Report	Sighting of the White Bear
+Legend_White_Bear_Wild_Report	Sighting of the Hoarfrost White Bear
 Legend_White_Crocodile_Report	Sighting of the White-Scaled Crocodile
 Legend_White_Lion_Report	Sighting of the White Lion
 Legend_White_Moose_Report	Sighting of the White Moose
@@ -3122,8 +3162,8 @@ Legendary_Animal_Redriver_hog	Chalice of Devouring
 Legendary_Animal_Vined_Deer	Aged Branch
 Legendary_Animal_White_Moose	Beckoning Forest
 Legendary_Animal_White_Stag	The Beholder
-Legendary_Antumbra_TwoHandGiantBastard	Darkbringer
 Legendary_Antumbra_TwoHandedWarHammer	Antumbra's Eye
+Legendary_Antumbra_TwoHandGiantBastard	Darkbringer
 Legendary_BridieGu_TwoHandGiantAxe	Wheel of the Last Toll
 Legendary_Caliburn_OneHandRapier	Royal Oath
 Legendary_CaptainGoblin_OneHandAxe	Double-Headed Axe of Greed
@@ -3131,13 +3171,14 @@ Legendary_CrimsonScorpion_TwoHandHammer	Rune-Engraved Rock
 Legendary_Deer_Leather_Gloves	Counterweight Leather Gloves
 Legendary_Deer_Leather_Gloves_T4_QA	Legendary Deer Leather Gloves T4 QA
 Legendary_DemenisMusket_OneHandMusket	Demenissian Hero's Musket
-Legendary_DragonSlayer_OneHandSword	Nazk Sword
 Legendary_Dragon_OneHandSword	Aeserion Sword
 Legendary_Dragon_TwoHandGiantSpear	Aeserion Spear
+Legendary_DragonSlayer_OneHandSword	Nazk Sword
 Legendary_GoldStar_OneHandCannon	Golden Fire
 Legendary_HexeMarie_Earring	Earring of Dark Magic
 Legendary_Kings_OneHandDagger	King's Dagger
 Legendary_Korea_OneHandBow	Noble Man's Bow
+Legendary_Marni_OneHandCannon	Blaster No. 8
 Legendary_MarniDragon_OneHandCannon	Mechanical Clockwork Blaster
 Legendary_MarniGolem_Plate_Armor	Frozen Heart Plate Armor
 Legendary_MarniGolem_Plate_Boots	Frozen Heart Plate Boots
@@ -3145,7 +3186,6 @@ Legendary_MarniGolem_Plate_Cloak	Frozen Heart Plate Cloak
 Legendary_MarniRegion_OneHandMace	Marni Devotee's Mace
 Legendary_MarniTank_OneHandCannon	Marni Tank Blaster
 Legendary_MarniTank_OneHandShield	Delesyian Ornamental Shield
-Legendary_Marni_OneHandCannon	Blaster No. 8
 Legendary_Moonhead_01_TwoHandGiantSpear	Diverging Moon
 Legendary_Moonhead_02_TwoHandGiantSpear	Circling Moon
 Legendary_Moonhead_TwoHandGiantSpear	Grasping Moon
@@ -3163,8 +3203,8 @@ Legendary_WhiteHorn_OneHandSword	Chillfallen Sword
 Legendary_WhiteWolf_Leather_Helm	Silver Fang Helm
 Leinstead_OneHandSword	Glenmore Sword
 Lekia_Leather_Boots	Regglia Leather Boots
-Lekia_PlateArmor_Helm	Rekhia Plate Helm
 Lekia_Plate_Boots	Unyielding Warrior's Plate Boots
+Lekia_PlateArmor_Helm	Rekhia Plate Helm
 Lentils	Lentils
 Leone_OneHandRapier	Leonne Rapier
 Leontain_Leather_Boots	Leontyne Leather Boots
@@ -3177,7 +3217,7 @@ Letter_Elimores_Secret	Countess Azerian's Letter
 Letter_Go_To_ScolaStone	Alustin's Letter
 Letter_TraderLetter	Undelivered Trader's Letter
 Letter_Valgash	Valgash's Letter
-Letter_Visione_MotherLetter	Letter from a Mother
+Letter_Visione_MotherLetter	Letter from Mother
 Letter_Wolfmolar_Mountain_WifeLetter	A Wife's Letter
 Levibb_Fabric_Armor	Ruvib Cloth Armor
 Liberry_OneHandRapier	Liberre Rapier
@@ -3185,7 +3225,6 @@ License_Operation_HernandBank	Personal Strongbox Permit
 Lickla_PlateArmor_Armor	Ricla Plate Armor
 Liculu_Leather_Gloves	Ricrau Leather Gloves
 Licuna_Leather_Boots	Leguna Leather Boots
-LightSaber_TwoHandSword	LightSaber TwoHandSword
 Light_Arrowhead_Fabric_Armor_I	Blinding Arrows Scout's Cloth Armor
 Light_Arrowhead_Fabric_Armor_II	Blinding Arrows Scout's Cloth Armor
 Light_Arrowhead_Fabric_Armor_III	Blinding Arrows Scout's Cloth Armor
@@ -3211,14 +3250,16 @@ Light_Arrowhead_Leather_Boots_II	Blinding Arrow's Leather Boots
 Light_Arrowhead_Leather_Gloves	Blinding Arrow's Leather Gloves
 Light_Of_Giant_Lantern	Shiny Blue Sea Lantern
 Light_Thorn_OneHandTowerShield	Rekel Large Spiked Shield
-LightningThrower	Electromagnetic Boltspitter
-Lightning_Arrow	Blitz Arrow
+Lightning_Arrow	Blitz Attack Arrow
 Lightning_TwoHandSpear	Lightning Spear
+LightningThrower	Electromagnetic Boltspitter
+LightSaber_TwoHandSword	LightSaber TwoHandSword
 Ligtning_TwoHandHammer_I	Lightning Greathammer
 Likarz_Fabric_Armor	Rikkas Cloth Armor
 Likenin_Leather_Gloves	Lennigen Leather Gloves
 Likua_PlateArmor_Helm	Longia Plate Helm
 Likua_PlateArmor_Helm_I	Blacksteel Longia Plate Helm
+lilian_Leather_Boots	Lilian Leather Boots
 Limerhen_TwoHandSpear	Traitor's Spear
 Limerick_ChainMail_Armor	Lemerick Chain Mail
 Limerick_ChainMail_Armor_II	Lemerick Chain Mail II
@@ -3233,7 +3274,7 @@ Logger_BackPack_I	Woodcutter's Pack
 Logger_BackPack_II	Woodcutter's Pack
 Logger_BackPack_III	Woodcutter's Pack
 Logger_BackPack_IV	Woodcutter's Pack
-Londel_Leather_Boots	Scorchflame Leather Boots
+Londel_Leather_Boots	Embersteps Leather Boots
 Londel_Leather_Gloves	Rondel Leather Gloves
 Londel_Leather_Helm	Rondel Leather Helm
 Londel_PlateArmor_Gloves	Scorchflame Plate Gloves
@@ -3242,7 +3283,7 @@ LongBeak_OneHandSword	Varnian Sword
 Lopelun_OneHandMusket	Bekker Musket
 LostLetter_Bartholomew	Priest Ordination Recommendation Letter
 LostLetter_Berdo	Letter to a Comrade
-LostLetter_Burk	Letter from Mom
+LostLetter_Burk	Letter from a Mom
 LostLetter_Castiel	Letter with Smudged Words
 LostLetter_Eirik	Sawdust-Stained Letter
 LostLetter_Food_Trader_1	Periodic Report
@@ -3306,11 +3347,11 @@ Lunosier_Fabric_Armor	Pailunese Attire
 Lunosier_Fabric_Cloak	Pailunese Cloak
 Lunpherd_Leather_Armor	Lunpherd Leather Armor
 Lunther_PlateArmor_Gloves	Luthor Plate Gloves
+Luon_Plate_Boots	Luon Plate Boots
 Luon_PlateArmor_Armor	Luon Plate Armor
 Luon_PlateArmor_Cloak	Luon Plate Cloak
 Luon_PlateArmor_Gloves	Luon Plate Gloves
 Luon_PlateArmor_Helm	Luon Plate Helm
-Luon_Plate_Boots	Luon Plate Boots
 Luon_TwoHandAlebard	Golden Vanguard
 Lusek_Giant_TwoHandGiantBastard	Lusec Greatsword
 Lutia_Leather_Boots	Lutia Leather Boots
@@ -3339,8 +3380,8 @@ Maeve_Leather_Gloves	Maeve Leather Gloves
 Maeve_OneHandAxe	Maeve Axe
 Maeve_OneHandMace	Marching Baton
 MagicBullet	Magic Bullet
-MagicBullet_DarkBall	Dark Magic Bullet
 MagicBullet_Dark_IceSpear	Dark Ice Spear Magic Bullet
+MagicBullet_DarkBall	Dark Magic Bullet
 MagicBullet_Electric	Lightning Magic Bullet
 MagicBullet_Fire	Fire Magic Bullet
 MagicBullet_Ice	Ice Magic Bullet
@@ -3368,13 +3409,6 @@ Mark_PlateArmor_Armor	Marc Plate Armor
 Markman_PlateArmor_Armor	Markman Plate Armor
 Markna_Leather_Gloves	Markna Leather Gloves
 Markris_Plate_Boots	Marcris Plate Boots
-MarniDragon_DemenissLetter	Caliburn's Orders
-MarniDragon_GoldenStar	Golden Star Blueprint
-MarniDragon_MarniRen	Careful Observation of H.A.L.L.
-MarniDragon_Visione	The Features of the Visione
-MarniMachineDrill	Marni Drill Component
-MarniMachineLaser	Marni Laser Component
-MarniTower_Key	Spire of Clockwork Key
 Marni_ChainMail_Boots	Marni's Chain Boots
 Marni_ChainMail_Gloves	Marni's Chain Gloves
 Marni_Devotee_PlateArmor_Helm	Visione
@@ -3383,6 +3417,8 @@ Marni_Devotee_PlateArmor_Helm_II	Guard Visione
 Marni_Devotee_PlateArmor_Helm_III	Military Visione
 Marni_Devotee_PlateArmor_Helm_IV	Prototype Visione
 Marni_Fabric_Armor	Marni's Cloth Armor
+marni_Flag_I	Small Marni Banner Pike
+marni_Flag_II	Medium Marni Banner Pike
 Marni_HorseArmor_Armor	Exclaire Barding
 Marni_HorseArmor_Helm	Wells Military Champron
 Marni_HorseArmor_Stirrup	Marni Stirrups
@@ -3392,17 +3428,24 @@ Marni_MachineFish_Report	Sighting of the Clockwork Fish
 Marni_MachineKnight_TwoHandSpear	Electro-Mecha Spear
 Marni_MachineKnight_TwoHandSword	Electro-Mecha Longsword
 Marni_Special_CannonBall	Disruptor Cannonball
+MarniDragon_DemenissLetter	Caliburn's Orders
+MarniDragon_GoldenStar	Golden Star Blueprint
+MarniDragon_MarniRen	Careful Observation of H.A.L.L.
+MarniDragon_Visione	The Features of the Visione
+MarniMachineDrill	Marni Drill Component
+MarniMachineLaser	Marni Laser Component
+MarniTower_Key	Spire of Clockwork Key
 Marozzo_OneHandRapier	Elemore Rapier
 Marqueeluon_Fabric_Armor	Maquealon Cloth Armor
 Marthana_Leather_Armor	Matana Leather Armor
-MartialArts_Secret_Manual	Secret Book of Unknown Source
+MartialArts_Secret_Manual	A secret book of unknown source.
 Martin_Leather_Boots	Martin's Leather Boots
 Martindue_Fabric_Armor	Marindo Cloth Armor
 Martins_Leather_Boots	Matrinne Leather Boots
 Mask_Liberator_TwoHandedWarHammer	Oblivion of the Past
-MastKey_Gloves	MastKey Gloves
-MasterDoo_Scroll	Master Du's Message
 Master_Key	Master Key
+MasterDoo_Scroll	Master Du's Message
+MastKey_Gloves	MastKey Gloves
 Masty_PlateArmor_Gloves	Masti Plate Gloves
 Mataka_Leather_Boots	Matahka Leather Boots
 Matar_Leather_Boots	Matar Leather Boots
@@ -3461,10 +3504,10 @@ Meat_Sanjeok	Meat Skewers
 Meat_Sanjeok_Large	Satisfying Meat Skewers
 Meat_Sanjeok_Medium	Filling Meat Skewers
 Meat_Sanjeok_XLarge	Hearty Meat Skewers
-Meat_Vegetable_Porridge	Meat and Vegetable Porridge
-Meat_Vegetable_Porridge_Large	Satisfying Meat and Vegetable Porridge
-Meat_Vegetable_Porridge_Medium	Filling Meat and Vegetable Porridge
-Meat_Vegetable_Porridge_XLarge	Hearty Meat and Vegetable Porridge
+Meat_Vegetable_Porridge	Meat And Vegetable Porridge
+Meat_Vegetable_Porridge_Large	Satisfying Meat And Vegetable Porridge
+Meat_Vegetable_Porridge_Medium	Filling Meat And Vegetable Porridge
+Meat_Vegetable_Porridge_XLarge	Hearty Meat And Vegetable Porridge
 Mechlin_Leather_Gloves	Mechlin Leather Gloves
 Medikit_BackPack_I	Healer's Pack
 Medikit_BackPack_II	Healer's Pack
@@ -3481,6 +3524,7 @@ Melvin_Leather_Helm	Melvin Leather Helm
 Memo_ButlerLeftMemo	A Butler's Note
 Memo_CabinLeftMemo	Note in the Cabin
 Memo_Judgment	Warning of Judgment
+Memo_lightningstriketree	Lightning-struck Tree
 Memo_Proceedings	Supply Delivery Log
 Memo_RuinedChapel	Mysterious Note
 Memo_SebastianMemo	Mapmaker's Note
@@ -3496,7 +3540,6 @@ Memo_Serkis_Piece_1	Piece from Oakenshield Manor
 Memo_Serkis_Piece_2	Piece from Lioncrest Watchtower
 Memo_Serkis_Piece_3	Piece from Duskwood
 Memo_Serkis_Piece_4	Piece from St. Halssius
-Memo_lightningstriketree	Lightning-struck Tree
 Meravan_Fabric_Armor	Meravan Cloth Armor
 Meravan_Fabric_Helm	Meravan Cloth Cap
 Meravan_Leather_Boots	Meravan Leather Boots
@@ -3529,10 +3572,10 @@ Mine_BackPack_I	Quarrier's Pack
 Mine_BackPack_II	Quarrier's Pack
 Miner_PlateArmor_Helm	Miner's Lantern Hat
 Minigame_OneHandBow	Competition Wooden Bow
-Minigame_OneHandMusket	Competition Musket
+Minigame_OneHandMusket	Competition Muskett
 Minigame_OneHandShield	Competition Shield
 Minigame_OneHandSword	Competition Sword
-Minigame_TwoHandSpear	Competition Spear
+Minigame_TwoHandSpear	Tournament Spear
 Mining_Drill	Mining Knuckledrill
 Mintuan_Fabric_Armor	Minnutan Cloth Armor
 Mjordin_Lantern	Flame Lantern
@@ -3548,13 +3591,16 @@ Money_Camp_Money	Camp Funds
 Money_Camp_Stone	Camp Stone
 Money_Camp_Weapon	Camp Weapons
 Money_Camp_Wood	Camp Timber
-Money_Copper	Silver
+Money_Copper	Copper
 Money_Kuku_MachineBug	Clockwork Insect
 Money_Pearl	Pearl
 Monita_OneHandTowerShield	Balton Large Shield
 Montellanico_Leather_Armor	Montlanico Leather Armor
 Monterima_Fabric_Armor	Monterima Cloth Armor
 Moon_Blade_TwoHandSword	Woldo
+Moonhead_Plate_Boots	Half Moon Reaper Plate Boots
+Moonhead_Plate_Boots_Full	Full Moon Reaper Plate Boots
+Moonhead_Plate_Boots_Waning	New Moon Reaper Plate Boots
 Moonhead_PlateArmor_Armor	Half Moon Reaper Plate Armor
 Moonhead_PlateArmor_Armor_Full	Full Moon Reaper Plate Armor
 Moonhead_PlateArmor_Armor_Waning	New Moon Reaper Plate Armor
@@ -3562,9 +3608,6 @@ Moonhead_PlateArmor_Gloves	Lunar Reapers' Plate Gloves
 Moonhead_PlateArmor_Helm	Half Moon Reaper Plate Helm
 Moonhead_PlateArmor_Helm_Full	Full Moon Reaper Plate Helm
 Moonhead_PlateArmor_Helm_Waning	New Moon Reaper Plate Helm
-Moonhead_Plate_Boots	Half Moon Reaper Plate Boots
-Moonhead_Plate_Boots_Full	Full Moon Reaper Plate Boots
-Moonhead_Plate_Boots_Waning	New Moon Reaper Plate Boots
 Morgren_Fabric_Armor	Morgren Cloth Armor
 Mornington_Fabric_Gloves	Mornington Cloth Gloves
 Mornington_Leather_Boots	Mornington Leather Boots
@@ -3592,6 +3635,8 @@ Muscan_Ghost_Fist	Muskan's Upper Body Clone
 Muscan_Ghost_Fist_I	Muskan's Lower Body Clone
 Muscan_PlateArmor_Armor	Muskan Armor
 Muscan_PlateArmor_Gloves	Combat God's Plate Gloves
+musket_Flag_I	Small Musket of Demeniss Banner Pike
+musket_Flag_II	Medium Musket of Demeniss Banner Pike
 Mynein_OneHandRapier	Gilliam Rapier
 Myrenenn_Fabric_Armor	Myrnen Cloth Armor
 Mysterm_Leather_Boots	Mistum Leather Boots
@@ -3622,9 +3667,6 @@ Nevin_Leather_Boots	Nevin Leather Boots
 Nickna_Leather_Boots	Northern Fighter's Leather Boots
 Nihrutte_Leather_Armor	Nehrut Leather Armor
 Nihrutte_Leather_Boots	Nehrut Leather Shoes
-NoName_Wiseman_Leather_Armor	Nameless Sage's Leather Armor
-NoName_Wiseman_Leather_Cloak	Nameless Sage's Leather Cloak
-NoName_Wiseman_Leather_Gloves_I	Nameless Sage's Leather Gloves
 Noble_Fabric_Armor	Noble Cloth Armor
 Noble_Leather_Helm	Noble's Hat
 Noble_Retainer_Leather_Gloves	Noble Private Soldier's Leather Gloves
@@ -3645,6 +3687,9 @@ Noble_Retainer_PlateArmor_Armor_XIV	Private Soldier's Plate Armor
 Noble_Retainer_PlateArmor_Armor_XV	Private Soldier's Plate Armor
 Nocburn_Leather_Gloves	Nocburn Leather Gloves
 Noname_OneHandDagger	Varnian Dagger
+NoName_Wiseman_Leather_Armor	Nameless Sage's Leather Armor
+NoName_Wiseman_Leather_Cloak	Nameless Sage's Leather Cloak
+NoName_Wiseman_Leather_Gloves_I	Nameless Sage's Leather Gloves
 Norman_Leather_Boots	Norman Leather Boots
 Norswitch_Leather_Armor	Norswich Leather Armor
 North_Mercenary_Fabric_Cloak_I	Jackal Cloth Cloak
@@ -3665,9 +3710,9 @@ NoticePaper_Circus_DontMissIt	[Demeniss Poster] - Invitation to the Demeniss Cir
 NoticePaper_Finale_Byron	Warning Written in Blood
 NoticePaper_Finale_Calphade	Letter of Gratitude from Calphade
 NoticePaper_Finale_DarkKing	News of Beloth, the Darksworn's Defeat
-NoticePaper_Finale_GoblinSandfang	News of the Sandfang Marauders' Defeat
+NoticePaper_Finale_GoblinSandfang	News of Sandfang Marauders' Defeat
 NoticePaper_Finale_HyenabossSkevald	News of Skevald the Carrion King's Defeat
-NoticePaper_Finale_LeeburtheShadowWolf	News of the Black Fang's Defeat
+NoticePaper_Finale_LeeburtheShadowWolf	News of the Black Fangs' Defeat
 NoticePaper_Finale_Muscan	News of the Bonepit
 NoticePaper_Finale_SkullKnight	News of Skull Knight's Demise
 NoticePaper_Finale_Timberton	Harris's Letter
@@ -3729,7 +3774,6 @@ Nureumjeok_XLarge	Hearty Mixed Skewers
 Nusiran_Fabric_Armor	Nuslan Cloth Armor
 Nusiran_Leather_Armor	Nuslan Leather Armor
 Nysron_Fabric_Armor	Neslan Cloth Armor
-OOngka_Daeil_Band	Oongka's Axiom Bracelet
 Oakleyman_PlateArmor_Armor	Oakley Plate Armor
 Oakten_Leather_Boots	Oakten Leather Boots
 Oathring_OneHandShield	Oath Ring Shield
@@ -3737,14 +3781,14 @@ Oats	Oats
 Obit_Leather_Boots	Orbit Leather Boots
 Odori_Fabric_Armor	Odorrey Cloth Armor
 Oharah_Leather_Armor	Ohara Leather Armor
-Oil_Barrel	Oil Barrel
+Oil_Barrel	Oil Canister
 Oil_Sprayer_BackPack	Lubricant Sprayer
 Old_HorseArmor_Saddle	Shabby Horse Saddle
 Old_Kliff_OneHandSword	Fated Shadow
+Old_Kliff_Plate_Boots	Goyen's Plate Boots
 Old_Kliff_PlateArmor_Armor	Goyen's Plate Armor
 Old_Kliff_PlateArmor_Cloak	Goyen's Cloak
 Old_Kliff_PlateArmor_Gloves	Goyen's Plate Gloves
-Old_Kliff_Plate_Boots	Goyen's Plate Boots
 Old_Necklace	Worn Necklace
 Old_Ring	Worn Ring
 Old_Wood_Doll_II	Old Wooden Doll
@@ -3756,6 +3800,8 @@ Onion	Onion
 Oongka_Basic_Leather_Armor	Ashen Wolf's Leather Armor
 Oongka_Basic_Leather_Cloak	Ashen Wolf's Leather Cloak
 Oongka_Basic_Leather_Gloves	Ashen Wolf's Leather Gloves
+OOngka_Daeil_Band	Oongka's Axiom Bracelet
+Oongka_Plate_Glove	Brass Warden's Plate Gloves
 Oongka_PlateArmor_Armor_II	Valortread Plate Armor
 Oongka_PlateArmor_Armor_III	Belkandor Plate Armor
 Oongka_PlateArmor_Boots_II	Valortread Plate Boots
@@ -3766,7 +3812,6 @@ Oongka_PlateArmor_Gloves_II	Valortread Plate Gloves
 Oongka_PlateArmor_Gloves_III	Belkandor Plate Gloves
 Oongka_PlateArmor_Helm_II	Valortread Plate Helm
 Oongka_PlateArmor_Helm_III	Belkandor Plate Helm
-Oongka_Plate_Glove	Brass Warden's Plate Gloves
 Oongka_Rocket_BackPack	Kuku Rocket Pack
 Oongka_Rocket_Helm	KuKu Rocket Helmet - Equipped by Default
 Ophenber_PlateArmor_Helm	Offenberg Plate Helm
@@ -3788,31 +3833,34 @@ Optionary_Ent_Helm	Shadowleaf Helm
 Optionary_Florin_Cloth	Pororin Cloth Attire
 Optionary_Hernand_Party_Cloak	Hernandian Banquet Cloak
 Optionary_Hernand_Party_Cloth	Hernandian Attire
+Optionary_Monk_cloak	St. Halssius Priest's Cloak
 Optionary_Monk_Cloth	St. Halssius Priest Attire
 Optionary_Monk_Necklace	Saint's Necklace
-Optionary_Monk_cloak	St. Halssius Priest's Cloak
 Optionary_NonSlip_Boots	Stirrups of the Open Sky
 Optionary_NonSlip_Gloves	Reins of Open Sky
-Optionary_Scholar_Stone_Cloth	Scholastone Uniform
 Optionary_Scholar_Stone_cloak	Scholastone Cloak
+Optionary_Scholar_Stone_Cloth	Scholastone Uniform
 Opuntia_seed	Prickly Pear Seed
 Orange	Orange
+orange_BackPack	Orange Pack
+orange_Seed	Orange Seed
 Orbs_Fabric_Armor	Orbus Cloth Armor
 Orbs_Fabric_Armor_I	Orbus Cloth Armor I
-Orc_Flag_I	Small Ironflame Orcs Banner Pike
-Orc_Flag_II	Medium Ironflame Orcs Banner Pike
+Orc_Flag_I	Small Ironflame Orcs' Banner Pike
+Orc_Flag_II	Medium Ironflame Orcs' Banner Pike
 Orc_OneHandCannon	Orc Blaster
 Orc_Warrior_OneHandMace	Octarr's Legacy
+orchids_BackPack	Dendrobium Orchid Pack
 OrcuMer_Fabric_Armor	Trukan Cloth Armor
 OrcuMer_Fabric_Boots	Trukan Cloth Boots
 OrcuMer_Fabric_Cloak	Trukan Cloth Cloak
 OrcuMer_Fabric_Gloves	Trukan Cloth Gloves
+Orcumer_Helm	Wooden Mask of Lost Justice
+OrcuMer_Plate_Boots	Odeck's Protector Plate Boots
 OrcuMer_PlateArmor_Armor	Odeck's Protector Plate Armor
 OrcuMer_PlateArmor_Cloak	Odeck's Protector Plate Cloak
 OrcuMer_PlateArmor_Gloves	Odeck's Protector Plate Gloves
 OrcuMer_PlateArmor_Helm	Odeck's Protector Plate Helm
-OrcuMer_Plate_Boots	Odeck's Protector Plate Boots
-Orcumer_Helm	Wooden Mask of Lost Justice
 Orient_Monk_BackPack	Eastern Monk Pack
 Orjekel_HorseArmor_Armor	Varnian Barding
 Orjekel_HorseArmor_Helm	Varnian Champron
@@ -3834,6 +3882,8 @@ Owls_of_the_Mist_PlateArmor_Helm	Mistcloaked Owl Plate Helm
 Owls_of_the_Mist_PlateArmor_Helm_II	Mistcloaked Owl Plate Helm
 Paijal_PlateArmor_Helm	Paizel Bone Helm
 Pail_Cup_Oath	Pailunese Chalice of Oaths
+pailloon_Flag_I	Small Pailunese Banner Pike
+pailloon_Flag_II	Medium Pailunese Banner Pike
 Pailoon_OneHandMace	Savage Woodland Spirit Killer
 Pailune_Contribution_Flag	Pailunese Contribution Banner Pike
 Pailune_Necklace	Blue Fang Necklace
@@ -3906,15 +3956,15 @@ Pantafe_Fabric_Armor	Pantafe Cloth Armor
 Paper_Adelina	Adrina's Note
 Paper_Adelina_1	Adrina's Note
 Paper_Adelina_I	Carpenter's Note
-Paper_Adelina_II	Training Field Note
-Paper_Adelina_II_1	Training Field Note
 Paper_Adelina_I_1	Carpenter's Note
+Paper_Adelina_II	Training Grounds Note
+Paper_Adelina_II_1	Training Field Note
 Paper_Aldred	Eldred's Note
 Paper_Aldred_1	Eldred's Note
 Paper_Aldred_I	Farmer's Note
+Paper_Aldred_I_1	Farmer's Note
 Paper_Aldred_II	Provisioner's Shop Note
 Paper_Aldred_II_1	Provisioner's Shop Note
-Paper_Aldred_I_1	Farmer's Note
 Paper_Beatrice	Bea's Note
 Paper_Beatrice_1	Bea's Note
 Paper_BoundbyLies	Wronged Man's Note
@@ -3925,13 +3975,13 @@ Paper_BraveToLove	A Man's Note
 Paper_BraveToLove_1	A Man's Note
 Paper_Bruna	Bruna's Note
 Paper_Bruna_1	Bruna's Note
-Paper_Bruna_I	Saddler's Note
-Paper_Bruna_II	Royal Trading Post Note
-Paper_Bruna_II_1	Royal Trading Post Note
+Paper_Bruna_I	Tack Keeper's Note
 Paper_Bruna_I_1	Saddler's Note
+Paper_Bruna_II	Royal Trade Post Note
+Paper_Bruna_II_1	Royal Trading Post Note
 Paper_Castiel	Castiel's Note
 Paper_Castiel_1	Castiel's Note
-Paper_Castiel_I	Stained Work Log
+Paper_Castiel_I	Stained Work Journal
 Paper_Castiel_I_1	Stained Work Log
 Paper_DelesyiaInstitute_Clue_ResearchPaper	Research Suspension Warning
 Paper_Doni	Donny's Note
@@ -3944,7 +3994,7 @@ Paper_Drianna_I	Watchtower Note
 Paper_Drianna_I_1	Watchtower Note
 Paper_Eliza	Elise's Note
 Paper_Eliza_1	Elise's Note
-Paper_Eliza_I	Note from the Street Shop
+Paper_Eliza_I	Provisioner's Note
 Paper_Eliza_I_1	Note from the Shopping Street
 Paper_FieldVoice	Excavation Site Manager's Note
 Paper_FieldVoice_1	Excavation Site Manager's Note
@@ -3962,15 +4012,15 @@ Paper_Flint_I_1	Potter's Journal
 Paper_Forex	Forrex's Note
 Paper_Forex_1	Forrex's Note
 Paper_Forex_I	Arms Scholar's Note
+Paper_Forex_I_1	Arms Scholar's Note
 Paper_Forex_II	Windrose Farm Note
 Paper_Forex_II_1	Windrose Farm Note
-Paper_Forex_I_1	Arms Scholar's Note
 Paper_FriendNews	Merchant's Note
 Paper_FriendNews_1	Merchant's Note
 Paper_FriendNews_I	Duskway Camp Note
+Paper_FriendNews_I_1	Duskway Camp Note
 Paper_FriendNews_II	Note Found at the Fence
 Paper_FriendNews_II_1	Note Found at the Fence
-Paper_FriendNews_I_1	Duskway Camp Note
 Paper_FromYann	Yann's Letter
 Paper_GoldleafGuildhouse_Clue_I	Feed Purchase Receipt
 Paper_GoldleafGuildhouse_Clue_II	Trade Schedule Log
@@ -3983,9 +4033,9 @@ Paper_GoldleafGuildhouse_Clue_VIII	Proof of Stay
 Paper_Harveston	Haverson's Note
 Paper_Harveston_1	Haverson's Note
 Paper_Harveston_I	Baker's Note
+Paper_Harveston_I_1	Baker's Note
 Paper_Harveston_II	Church Note
 Paper_Harveston_II_1	Church Note
-Paper_Harveston_I_1	Baker's Note
 Paper_Kuku_Pot	Mysterious Pot Crafting Contract
 Paper_Lenard	Leonard's Note
 Paper_Lenard_1	Leonard's Note
@@ -3994,9 +4044,9 @@ Paper_Lenard_I_1	Assistant's Note
 Paper_Maiden	Maidon's Note
 Paper_Maiden_1	Maidon's Note
 Paper_Maiden_I	Harbor Manager's Note
+Paper_Maiden_I_1	Harbor Manager's Note
 Paper_Maiden_II	Note from the Bank
 Paper_Maiden_II_1	Note from the Bank
-Paper_Maiden_I_1	Harbor Manager's Note
 Paper_Omar	Omar's Note
 Paper_Omar_1	Omar's Note
 Paper_Omar_I	Varnia Entrance Note
@@ -4016,13 +4066,13 @@ Paper_SecretSip_I	Note at Point of Contact
 Paper_SecretSip_I_1	Note from Point of Contact
 Paper_Sniks	Nix's Note
 Paper_Sniks_1	Nix's Note
-Paper_Sniks_I	Note from the Freesword Barracks
+Paper_Sniks_I	Note from Freesword Barracks
 Paper_Sniks_I_1	Note from the Freesword Barracks
 Paper_StonemireRuins_Report_2	Stonemire Ruins Record No. 2
 Paper_StonemireRuins_Report_3	Stonemire Ruins Record No. 3
 Paper_Ugmum	Ugmon's Note
 Paper_Ugmum_1	Ugmon's Note
-Paper_VegetableBox	Produce Order Form
+Paper_VegetableBox	Ingredient Delivery Request
 Paper_VegetableBox_1	Produce Order Form
 Paphneil_PlateArmor_Armor	Scorchflame Plate Armor
 Paphneil_PlateArmor_Armor_Upgrade	Kuku Flame-Resistant Armor
@@ -4060,6 +4110,7 @@ Peach	Peach
 Peach_Seed	Peach Seed
 Pear	Pear
 PearTree_Seed	Pear Tree Seed
+peas	Peas
 Peony	Peony
 Peori_Leather_Gloves	Fiori Leather Gloves
 Perelli_Leather_Boots	Perelli Leather Boots
@@ -4075,13 +4126,13 @@ Permit_Del_Furniture	Furniture Supply Contract - Timberton
 Permit_Del_General	Provisions Supply Contract - Delesyia
 Permit_Del_Seed	Seed Supply Contract - Delesyia
 Permit_Del_Tavern	Food Supply Contract - Delesyia
-Permit_DemZoo_Costume	Outfit Supply Contract - Demeniss Wildlife Park
 Permit_Dem_Costume	Outfit Supply Contract - Demeniss
 Permit_Dem_Equipment	Equipment Supply Contract - Demeniss
 Permit_Dem_Furniture	Furniture Supply Contract - Hidden Grove
 Permit_Dem_General	Provisions Supply Contract - Demeniss
 Permit_Dem_Seed	Seed Supply Contract - Demeniss
 Permit_Dem_Tavern	Food Supply Contract - Demeniss
+Permit_DemZoo_Costume	Outfit Supply Contract - Demeniss Wildlife Park
 Permit_Her_Costume	Outfit Supply Contract - Hernand
 Permit_Her_Equipment	Equipment Supply Contract - Hernand
 Permit_Her_Furniture	Furniture Supply Contract - Timberham
@@ -4119,7 +4170,12 @@ Persein_Leather_Gloves_I	Persein Leather Gloves
 Perseus_Leather_Gloves	Perseus Leather Gloves
 Pervin_Bomb	Perwin Explosive
 Pet_Attackable_Amulet	Pet Attackable Amulet
+Pet_Bond_Amulet	Sigil of Bonding
 Pet_Huntable_Amulet	Pet Huntable Amulet
+Pet_Phoenix_Amulet	Sigil of Solidarity (Phoenix)
+Pet_Phoenix_Feather	Phoenix Feather
+PetArmor_backpack_Armor_Cat	Peddler Cat Outfit
+PetArmor_backpack_Helm_Cat	Peddler Cat Hat
 PetArmor_Fabric_Armor_Dog	Puppy Cloth Outfit
 PetArmor_Fabric_Helm_Dog	Puppy Cloth Hat
 PetArmor_Marni_Armor	Visionette Neckerchief
@@ -4131,11 +4187,6 @@ PetArmor_Plate_Armor_Dog	Puppy Plate Armor
 PetArmor_Plate_Helm_Cat	Cat Plate Helm
 PetArmor_Plate_Helm_Dog	Puppy Plate Helm
 PetArmor_Rescue_Armor_Dog	Rescue Puppy Outfit
-PetArmor_backpack_Armor_Cat	Peddler Cat Outfit
-PetArmor_backpack_Helm_Cat	Peddler Cat Hat
-Pet_Bond_Amulet	Sigil of Bonding
-Pet_Phoenix_Amulet	Sigil of Solidarity (Phoenix)
-Pet_Phoenix_Feather	Phoenix Feather
 Petra_Leather_Gloves	Petra Leather Gloves
 Phavan_Leather_Armor	Favan Leather Armor
 Philaphy_OneHandMace	Thalwynd Hammer
@@ -4172,8 +4223,8 @@ Pomegranate_Seed	Pomegranate Seed
 Porcell_Fabric_Gloves_I	Porcell Cloth Gloves
 Porcell_Fabric_Gloves_II	Porcell Cloth Gloves
 Pormeranian_Leather_Armor	Pomerin Leather Armor
-PororinChildrenForest_Book	A Traveler's Log
 Pororin_Sacred	Pororin Relic
+PororinChildrenForest_Book	A Traveler's Log
 Porugate_Leather_Gloves	Brogant Leather Gloves
 Possesion_Insam	Ginseng
 Possesion_Myurdin_Leather_Armor	Umbra's Hierophany Leather Armor
@@ -4199,8 +4250,8 @@ PowerDraw_Gloves	Strongbow Gloves
 Prani_PlateArmor_Helm	Prani Plate Helm
 Premium_Stone	Flawless Stone
 Premium_Wood	Flawless Timber
-PriestWand_Big	Solumen Priest's Big Staff
-PriestWand_Big_III	Varnian Priest's Big Staff
+PriestWand_Big	Solumen Big Priest's Staff
+PriestWand_Big_III	Varnian Big Priest's Staff
 Prinkeypes_PlateArmor_Armor	Princeps Plate Armor
 Prison_Key	Prison Key
 Prisoner_Fabric_Armor	Captive's Cloth Armor
@@ -4258,7 +4309,7 @@ Quest_Burham_Maze_I	Engraved Stone
 Quest_Burham_Maze_II	Engraved Stone
 Quest_Burham_Maze_III	Engraved Stone
 Quest_ByronBastier_Letter	Anonymous Letter
-Quest_ByronBastier_Letter_1	Alliance Progress Report
+Quest_ByronBastier_Letter_1	Progress Report on Alliance Building
 Quest_ByronMyurdin_Letter	Letter from Abroad
 Quest_CelesterToBarden	Celeste's Confidential Letter
 Quest_Crowman_Key_I	Dagger of Radiance
@@ -4294,8 +4345,8 @@ Quest_Paper_Bastier_Journal	Bastier Journal
 Quest_Paper_Bastion_Secret	Bastier's Secret Letter
 Quest_Paper_Beighen_Notice	Beighen Poster
 Quest_Paper_BioExperiment_Blueprint	Biopod Blueprint found at Marni Laboratorium
-Quest_Paper_BiologicalResearch_Journal	Research Log on Living Subjects
 Quest_Paper_Biological_Journal	Test Subject Log
+Quest_Paper_BiologicalResearch_Journal	Research Log on Living Subjects
 Quest_Paper_Chaser_Journal	Tracker's Torn Journal
 Quest_Paper_Child_Notice	Missing Child Poster
 Quest_Paper_Chocolate_Factory_BackPack	Mobile Chocolate Workshop Research Journal
@@ -4361,10 +4412,10 @@ Quest_Paper_DrugFactory_IV	Dosing Pump Instructions
 Quest_Paper_DrugFactory_V	Heater Instructions
 Quest_Paper_DrugFactory_VI	Bottling Machine Instructions
 Quest_Paper_DrugFactory_VII	Lift Instructions
-Quest_Paper_EmptyIII	Simple Poster
-Quest_Paper_EmptyIV	Simple Poster
 Quest_Paper_Empty_I	Simple Poster
 Quest_Paper_Empty_II	Simple Poster
+Quest_Paper_EmptyIII	Simple Poster
+Quest_Paper_EmptyIV	Simple Poster
 Quest_Paper_Foodstorage	Kuku Cooler Blueprint
 Quest_Paper_Gregor_Letter	Tributes to Gregor
 Quest_Paper_HeavyFoodstorage	Enhanced Kuku Cooler Blueprint
@@ -4382,7 +4433,7 @@ Quest_Paper_Her_Frox	Prox's Poster
 Quest_Paper_Her_Gloin	Galen's Poster
 Quest_Paper_Her_Grana	Grania's Poster
 Quest_Paper_Her_Harveston	Haverson's Poster
-Quest_Paper_Her_Matilda	Matilda's Poster
+Quest_Paper_Her_Matilda	Mathilde's Poster
 Quest_Paper_Her_Peregrine	Peregrine's Poster
 Quest_Paper_Her_Raine	Renee's Poster
 Quest_Paper_Her_Rhett	Rhett's Poster
@@ -4413,8 +4464,8 @@ Quest_Paper_LaserTank_Blueprint	Thunder Crusher Blueprint
 Quest_Paper_Letter	Jian's Letter
 Quest_Paper_LongleafForest_PatrolRecord	Longleaf Forest Patrol Report
 Quest_Paper_Lumberjack_Testimony	Quest Paper Lumberjack Testimony
-Quest_Paper_MarniAirship_Journal	Marni Airship Journal
 Quest_Paper_Marni_CtrafingJournal	Marni's Invention Journal
+Quest_Paper_MarniAirship_Journal	Marni Airship Journal
 Quest_Paper_Marnihouse_Blueprint	Biopod Blueprint found at Marni Mansion
 Quest_Paper_MasterDoo_Ideology	Master Doo's Beliefs
 Quest_Paper_Merchant_Warning	Warning from the Merchant Guild
@@ -4435,7 +4486,7 @@ Quest_Paper_Verdict_Treason	Treason Verdict
 Quest_Paper_Walter_Document	Walter's Research Journal
 Quest_Paper_Wyvern_Species_Memo	Wyvern Traits
 Quest_Paper_Zoo_Flyer	Wildlife Park Flyer
-Quest_PendantInSnow_Letter	Letter to Younger Brother
+Quest_PendantInSnow_Letter	Letter to Younger Sibling
 Quest_Poison_Pyogo	Poison-Soaked Oakwood Mushroom
 Quest_TrollCube_I	Engraved Stone
 Quest_TrollCube_III	Engraved Stone
@@ -4516,9 +4567,9 @@ Radiano_Leather_Armor	Radiano Leather Armor
 Radley_Fabric_Armor	Radley Cloth Armor
 Rafflia_Leather_Boots	Raphelia Leather Boots
 Raging_Tempests_Leader_Leather_Gloves	Raging Tempest's Leather Gloves
+Raging_Tempests_Leader_Plate_Boots	Raging Tempest's Plate Boots
 Raging_Tempests_Leader_PlateArmor_Armor	Raging Tempest's Plate Armor
 Raging_Tempests_Leader_PlateArmor_Helm	Raging Tempest's Plate Helm
-Raging_Tempests_Leader_Plate_Boots	Raging Tempest's Plate Boots
 Rahelm_Fabric_Helm	Rahelm Cloth Headband
 Rakhir_Fabric_Gloves	Rakhir Cloth Gloves
 Rakkli_PlateArmor_Armor	Rakkli Plate Armor
@@ -4611,14 +4662,14 @@ Recipe_Book_TwoHandWeapon_II	Two-Handed Weapons of the World, Vol. II
 Recipe_Book_TwoHandWeapon_III	Two-Handed Weapons of the World, Vol. III
 Recipe_Book_TwoHandWeapon_IV	Two-Handed Weapons of the World, Vol. IV
 Recipe_Book_Varnia	Varnian Equipment Blueprint
-Recipe_Book_Wells_HorseArmor	Wells Military Tack Blueprint
+Recipe_Book_Wells_HorseArmor	Wells's Warhorse Tack Blueprint
 Recipe_Braised_Fish	Recipe: Braised Fish
 Recipe_Braised_Fish_Vegetable	Recipe: Braised Fish and Vegetables
 Recipe_Braised_Meat	Recipe: Braised Meat
 Recipe_Braised_Meat_Fish	Recipe: Braised Meat and Fish
 Recipe_Braised_Meat_Vegetable	Recipe: Braised Ribs
 Recipe_Braised_Vegetable	Recipe: Pickled Vegetables
-Recipe_Chocolate	Recipe: Chocolate
+Recipe_Chocolate	Chocolate
 Recipe_Deactived_Abyss_Artifact	Blueprint: Faded Abyss Artifact
 Recipe_DeerAntler_Fruit_Tea	Recipe: Antler Tea
 Recipe_DeerAntler_Soup	Recipe: Longhorn Soup
@@ -4629,9 +4680,9 @@ Recipe_Fish_Sanjeok	Recipe: Fish Skewers
 Recipe_Fish_Soup	Recipe: Mixed Stew
 Recipe_Fish_Stew	Recipe: Fish Stew
 Recipe_Fish_Vegetable_Porridge	Recipe: Vegetable and Seafood Porridge
-Recipe_FruitTea	Recipe: Fruit Tea
 Recipe_Fruit_Porridge	Recipe: Fruit Punch
 Recipe_Fruit_Wine	Recipe: Wine
+Recipe_FruitTea	Recipe: Fruit Tea
 Recipe_Full_Course_of_Braised_Fish	Recipe: Assorted Braised Fish
 Recipe_GoldBar	Alchemy Formula: Gold Bar
 Recipe_Grilled_Meat_Fish	Recipe: Grilled Meat and Fish
@@ -4646,9 +4697,9 @@ Recipe_Item_Skill_AbyssGear_AddCriticalRateByMaterialKey_FabricArmor_LV1	Gear Bl
 Recipe_Item_Skill_AbyssGear_AddCriticalRateByMaterialKey_LeatherArmor_LV1	Gear Blueprint: Rend
 Recipe_Item_Skill_AbyssGear_AddCriticalRateByMaterialKey_PlateArmor_LV1	Gear Blueprint: Shatter
 Recipe_Item_Skill_AbyssGear_AddFrendly_LV1	Gear Blueprint: Solidarity
+Recipe_Item_Skill_AbyssGear_AdditionalThief_LV1	Gear Blueprint: Ledgermain
 Recipe_Item_Skill_AbyssGear_AddKillSkillLevel_LV1	Gear Blueprint: Energy Drain
 Recipe_Item_Skill_AbyssGear_AddMoneyDropRate_LV1	Gear Blueprint: Fortune
-Recipe_Item_Skill_AbyssGear_AdditionalThief_LV1	Gear Blueprint: Ledgermain
 Recipe_Item_Skill_AbyssGear_Antumbra_Spear	Gear Blueprint: Warden of Darkness
 Recipe_Item_Skill_AbyssGear_Antumbra_TwoHandRod	Gear Blueprint: Dark Crescent
 Recipe_Item_Skill_AbyssGear_ArrowRain_LV1	Gear Blueprint: Arrow Rain
@@ -4682,9 +4733,9 @@ Recipe_Item_Skill_AbyssGear_DarkenRobe_LV1	Gear Blueprint: Wound of Darkness
 Recipe_Item_Skill_AbyssGear_DogClaw_LV1	Gear Blueprint: Hound's Claws
 Recipe_Item_Skill_AbyssGear_EnergyBurst_LV1	Gear Blueprint: Kinetic Burst
 Recipe_Item_Skill_AbyssGear_EnlightenmentWave_LV1	Gear Blueprint: Karmic Pulse
-Recipe_Item_Skill_AbyssGear_EquipDropRate_LV1	Gear Blueprint: Disarm
 Recipe_Item_Skill_AbyssGear_Equip_AddHorseExp_LV1	Gear Blueprint: Equestrian
 Recipe_Item_Skill_AbyssGear_Equip_AddPetFriendly_LV1	Gear Blueprint: Companionship
+Recipe_Item_Skill_AbyssGear_EquipDropRate_LV1	Gear Blueprint: Disarm
 Recipe_Item_Skill_AbyssGear_FireBreath_LV1	Gear Blueprint: Volcanic Eruption
 Recipe_Item_Skill_AbyssGear_FlashCombo_LV1	Gear Blueprint: Slashing Reeds
 Recipe_Item_Skill_AbyssGear_FoodSkillLevelUp_LV1	Gear Blueprint: Gourmet
@@ -4696,8 +4747,8 @@ Recipe_Item_Skill_AbyssGear_Hyena_PoisonImmune	Gear Blueprint: Heart of the Serp
 Recipe_Item_Skill_AbyssGear_Immune_Bismuth	Gear Blueprint: Heart of Stone
 Recipe_Item_Skill_AbyssGear_ImpBoss	Gear Blueprint: Howling of Chaos
 Recipe_Item_Skill_AbyssGear_Karanda	Gear Blueprint: Pillar of Wind
-Recipe_Item_Skill_AbyssGear_LanFord	Gear Blueprint: Parting Gift
 Recipe_Item_Skill_AbyssGear_LandMash_LV1	Gear Blueprint: Groundsurge
+Recipe_Item_Skill_AbyssGear_LanFord	Gear Blueprint: Parting Gift
 Recipe_Item_Skill_AbyssGear_Leebur	Gear Blueprint: Shadow Claw
 Recipe_Item_Skill_AbyssGear_LightningBreath_LV1	Gear Blueprint: Orbs of Lightning
 Recipe_Item_Skill_AbyssGear_LightningStab_LV1	Gear Blueprint: Storm Fang
@@ -4799,13 +4850,12 @@ Recipe_Vegetable_Juice	Recipe: Vegetable Juice
 Recipe_Vegetable_Porridge	Recipe: Vegetable Porridge
 Reckleeman_TwoHandSword	Balton Longsword
 Recle_OneHandTowerShield	Rekel Large Shield
-RedDeerHorn_Mushroom	Poison Fire Coral Mushroom
-RedHare_Horse_Report	Sighting of Camora
-RedNose_Lantern	Dark Fog Lantern
-RedStone	Bloodstone
 Red_Ring	Rough Bluestone Ring
 Redbeet	Beet
+RedDeerHorn_Mushroom	Poison Fire Coral Mushroom
+RedHare_Horse_Report	Sighting of Camora
 Redin_ChainMail_Armor	Reddin Chain Mail
+Redknight_Plate_Boots	Plate Boots of Cursed Soul
 Redknight_PlateArmor_Armor	Plate Armor of Cursed Soul
 Redknight_PlateArmor_Cloak	Plate Cloak of Cursed Soul
 Redknight_PlateArmor_Gloves	Plate Gloves of Cursed Soul
@@ -4813,19 +4863,19 @@ Redknight_PlateArmor_Helm	Plate Helm of Cursed Soul
 Redknight_PlateArmor_Helm_II	Turncoat Plate Helm
 Redknight_PlateArmor_Helm_III	Plumed Wells Rebel's Plate Helm
 Redknight_PlateArmor_Helm_IV	Wells Rebel's Silver Plate Helm
-Redknight_Plate_Boots	Plate Boots of Cursed Soul
 Redleader_Leather_Gloves	Red Rider's Leather Gloves
 Redleader_PlateArmor_Armor	Red Rider's Plate Armor
 Redleader_PlateArmor_Helm	Red Rider's Plate Helm
 Redman_PlateArmor_Armor	Redman Plate Armor
+RedNose_Lantern	Dark Fog Lantern
 Redrin_Fabric_Helm	Redrin Cloth Cap
 Redsentinel_ChainMail_Armor	Crimson Chaser Mail
 Redsentinel_ChainMail_Cloak	Crimson Chaser Chain Cloak
 Redsentinel_Necklace	Crimson Warden's Necklace
 Redsentinel_PlateArmor_Gloves	Crimson Chaser Chain Gloves
 Redsentinel_PlateArmor_Helm	Crimson Chaser Plate Helm
+RedStone	Bloodstone
 ReedDevil_Doll	Devil of the Reed Field's Doll
-ReedDevil_Mask	Mask of the Devil of the Reed Field
 Reeddevil_Fabric_Boots	Sunset Reed Cloth Boots
 Reeddevil_Fabric_Boots_T5_QA	Reeddevil Fabric Boots T5 QA
 Reeddevil_Fabric_Gloves	Sunset Reed Cloth Gloves
@@ -4838,6 +4888,7 @@ Reeddevil_Leather_Armor_I	Reed Devil Underling's Red Armor
 Reeddevil_Leather_Armor_II	Reed Devil Underling's Yellow Armor
 Reeddevil_Leather_Armor_III	Reed Devil Underling's Armor
 Reeddevil_Leather_Cloak	Sunset Reed Leather Cloak
+ReedDevil_Mask	Mask of the Devil of the Reed Field
 Reeddevil_Troll_Fabric_Helm	Reed Devil Minion Troll's Cloth Helm
 Reeddevil_Troll_Leather_Armor	Reed Devil Troll Armor
 Regglin_Boss_Fabric_Boots	Fundamentalist Officer Cloth Boots
@@ -4900,7 +4951,7 @@ Rhonda_Leather_Boots	Rhonda Leather Boots
 Rhyspidon_Leather_Armor	Lespedan Leather Armor
 Rhyspidon_Leather_Gloves	Lespedan Leather Gloves
 Rhystizer_Leather_Gloves_I	Rowley Leather Gloves
-Rhystizer_OneHandMusket	Helms Musket
+Rhystizer_OneHandMusket	The Helms' Musket
 Rhytem_Leather_Armor	Rittem Leather Armor
 Rhytrian_Fabric_Helm	Rhytrian Cloth Cap
 Ribben_Fabric_Helm	Riven Cloth Cap
@@ -4920,6 +4971,9 @@ Riding_Deer_Amulet	Sigil of Solidarity (Snowwhite Deer)
 Riding_Deer_Horn	Snowwhite Deer Antlers
 Riding_Fabric_Armor	Riding Attire
 Riding_Fabric_Cloak	Riding Cloak
+riding_Leather_Boots	Riding Boots
+riding_Leather_Gloves	Master Trainer's Touch
+riding_Leather_Helm	Leather Riding Hat
 Riding_Warthog_Amulet	Sigil of Solidarity (Rock Tusk Warthog)
 Riding_Warthog_Tooth	Rock Tusk Warthog Molar
 Riding_Wolf_Amulet	Sigil of Solidarity (Silver Fang)
@@ -4967,8 +5021,8 @@ Rosemary_yellow	Yellow Rosemary
 Roshine_Fabric_Armor	Roshayne Cloth Armor
 Rossbara_Leather_Gloves	Rossbara Leather Gloves
 Rosvar_HorseArmor_Helm	Rosbar Champron
-RoyalGuard_OneHandShield	Royal Guard Shield
 Royal_Hunting_Ground_Flag_III	Small Royal Hunting Ground Banner Pike
+RoyalGuard_OneHandShield	Royal Guard Shield
 Rubaunon_Fabric_Armor	Lubonon Cloth Armor
 Rubber_seed	Rubber Tree Seed
 Rubbiden_Leather_Armor	Rubidan Leather Armor
@@ -5000,10 +5054,10 @@ SamGyeTang	Bird Soup
 SamGyeTang_Large	Satisfying Bird Soup
 SamGyeTang_Medium	Filling Bird Soup
 SamGyeTang_XLarge	Hearty Bird Soup
+Samuel_Plate_Boots	Dark Marksman's Plate Boots
 Samuel_PlateArmor_Armor	Dark Marksman's Plate Armor
 Samuel_PlateArmor_Cloak	Dark Marksman's Plate Cloak
 Samuel_PlateArmor_Gloves	Dark Marksman's Plate Gloves
-Samuel_Plate_Boots	Dark Marksman's Plate Boots
 Saolo_Leather_Armor	Saolo Leather Armor
 Sarantos_Leather_Boots	Sarantos Leather Boots
 Sarantos_Leather_Boots_I	Dirty Sarantos Leather Boots
@@ -5035,6 +5089,7 @@ Schmidt_PlateArmor_Armor	Schmidt Plate Armor
 Schtump_Fabric_Armor	Schtump Cloth Armor
 Schtump_Fabric_Cloak	Schtump Cloth Cloak
 Scopa_Leather_Boots	Scoppa Leather Boots
+scorpion	Scorpion
 Scouter_HP_PlateArmor_Helm	Health Detection Device
 Scovi_Fabric_Helm	Scobby Cloth Headband
 ScrapMetal_BackPack_I	Scrap Metal Pack
@@ -5225,34 +5280,36 @@ Sian_Fabric_Helm	Sian Cloth Cap
 Sicillion_Leather_Armor	Sicillion Leather Armor
 Sidmon_Leather_Boots	Sydmon Leather Boots
 Sidmon_OneHandSword	Sydmon Sword
+silence_Flag_I	Small Heavy Silence Banner Pike
+silence_Flag_II	Medium Heavy Silence Banner Pike
 Silien_Leather_Boots	Cyllian Leather Boots
 Silien_OneHandSword	Wells Sword
-SilverArmor_PlateArmor_Gloves	Silver Plate Gloves
-SilverArmor_PlateArmor_Helm	Inquisitor's Plate Helm
-SilverOre	Silver Ore
 Silver_Armor_OneHandMace	Mace of Betrayal
 Silver_Armor_OneHandTowerShield	Shield of Betrayal
 Silver_Bullet	Silver Bullet
-Silver_Pack	Full Silver Pouch
+Silver_Pack	Heavy Silver Pouch
 Silver_PlateArmor_Armor	Sliver Plate Armor
 Silver_PlateArmor_Cloak	Silver Plate Cloak
 Silver_Vizione_Stand_TwoHandSpear	Silver Visione Stand
+SilverArmor_PlateArmor_Gloves	Silver Plate Gloves
+SilverArmor_PlateArmor_Helm	Inquisitor's Plate Helm
+SilverOre	Silver Ore
 Sinseollo	Harvest Soup
 Sinseollo_Large	Satisfying Harvest Soup
 Sinseollo_Medium	Filling Harvest Soup
 Sinseollo_XLarge	Hearty Harvest Soup
+Sir_Catfish_Plate_Boots	Sir Catfish's Plate Boots
 Sir_Catfish_PlateArmor_Armor	Sir Catfish's Armor
 Sir_Catfish_PlateArmor_Gloves	Sir Catfish's Plate Gloves
-Sir_Catfish_Plate_Boots	Sir Catfish's Plate Boots
 Sirion_Fabric_Armor	Sirion Cloth Armor
 Sirius_Barley_Fabric_Helm	Wyvernflame Cloth Helm
 Sitanca_PlateArmor_Armor	Sitanca Plate Armor
 Skardoo_Leather_Armor	Scarteau Leather Armor
 Skian_Fabric_Helm	Skian Cloth Cap
+Skull_Knight_Plate_Boots	Frostcursed Plate Boots
+Skull_Knight_PlateArmor_Gloves	Frostcursed Plate Gloves
 SkullKnight_Follower_Plate_Boots_I	Skull Knight Follower's Plate Boots
 SkullKnight_PlateArmor_Helm	Frostcursed Plate Helm
-Skull_Knight_PlateArmor_Gloves	Frostcursed Plate Gloves
-Skull_Knight_Plate_Boots	Frostcursed Plate Boots
 Sladen_Leather_Gloves	Sladen Leather Gloves
 Slarke_OneHandMace	Dekarr Hammer
 Slaughterer_Leahter_Armor	Slaughterer's Leather Armor
@@ -5260,11 +5317,11 @@ Slave_Fabric_Boots	Slave's Cloth Boots
 Sleep_Arrow	Sleep Arrow
 Sleeshorn_Leather_Gloves	Sleishorn Leather Gloves
 Slowin_Leather_Armor	Slouwen Leather Armor
-SmallAnimal_Poop	Manure
-Small_Copper_Pack	Light Copper Pouch
+Small_Copper_Pack	Decent Copper Pouch
 Small_Mechanical_Powerplant	Small Battery
 Small_Mechanical_Powerplant_Pack	Small Battery
-Small_Silver_Pack	Modest Silver Pouch
+Small_Silver_Pack	Light Silver Pouch
+SmallAnimal_Poop	Manure
 Smilodon_Leather_Armor	Smilodon Leather Armor
 Smoke_Bomb	Smoke Bomb
 SnapDragon	Snapdragon
@@ -5277,18 +5334,18 @@ Solas_PlateArmor_Gloves_I	Eclipsed Solas Plate Gloves
 Solas_PlateArmor_Helm	Solas Plate Helm
 Soldier_BackPack	Soldier's Pack
 Soldier_General_Fabric_Cloak	Hernandian Guard Captain's Cloth Cloak
+Soldier_General_Plate_Boots	Guard Captain's Plate Boots
 Soldier_General_PlateArmor_Armor	Guard Captain's Plate Armor
 Soldier_General_PlateArmor_Gloves	Hernandian Guard Captain's Plate Gloves
 Soldier_General_PlateArmor_Helm	Guard Captain's Plate Helm
-Soldier_General_Plate_Boots	Guard Captain's Plate Boots
 Soldworth_Leather_Armor	Solworth Leather Armor
 Somieh_Leather_Armor	Somier Leather Armor
 Songyi_Mushroom	Pine Mushroom
 Songyi_Mushroom_BackPacK	Pine Mushroom Pack
 Songyi_Mushroom_Tea	Pine Mushroom Tea
 Soron_Leather_Armor	Soron Leather Armor
-SoulKnight_OneHandSword	Shackle of Might
 Soul_TwoHandSpear	Soul Spear
+SoulKnight_OneHandSword	Shackle of Might
 Soulknight_Sprit_OneHandSword	Specter Sword
 Soulknight_Sprit_OneHandTowerShield	Shield of the Phantom
 Sound_OneHandShield	Shield of Ringing
@@ -5326,8 +5383,8 @@ Stole_PlateArmor_Armor	Strell Plate Armor
 Stone_Honey	Wild Rock Honey
 Stone_Quarry	Stone
 StoreWitchHint_Book	Witches of Pywel
-Storm_Cliff_Flag	Small Vellua Pirates Banner Pike
-Storm_Cliff_Flag_I	Small Vellua Pirates Banner Pike
+Storm_Cliff_Flag	Small Vellua Pirates' Banner Pike
+Storm_Cliff_Flag_I	Small Vellua Pirates' Banner Pike
 Storm_Cliff_Flag_II	Medium Vellua Pirate Banner Pike
 Stratton_Leather_Gloves	Stratton Leather Gloves
 Straw_Fabric_Helm	Straw Bale Helm
@@ -5340,11 +5397,11 @@ Stugrup_Leather_Armor	Stugrub Leather Armor
 Sugar	Sugar
 SungroveManor_HomeKey	Sungrove Manor Key
 Surasang_00	Grand Meal
-Surasang_00_Taro	Refreshing Grand Meal
 Surasang_00_jijeongta	Aromatic Grand Meal
+Surasang_00_Taro	Refreshing Grand Meal
 Surasang_01	Extravagant Meal
-Surasang_01_Chocolate	Satisfying Extravagant Meal
 Surasang_01_chlorella	Energizing Extravagant Meal
+Surasang_01_Chocolate	Satisfying Extravagant Meal
 Surasang_02	Lavish Meal
 Surasang_02_Dulse	Hearty Lavish Meal
 Surasang_02_Ensete	Piquant Lavish Meal
@@ -5427,6 +5484,9 @@ Tesslit_Leather_Gloves_II	Russet Pavis Leather Gloves
 Tesslit_Leather_Gloves_III	Large Pavis Leather Gloves
 Tesslit_Leather_Helm	Helm of Loyal Friendship
 Tesslit_Leather_Helm_T2_QA	Tesslit Leather Helm T2 QA
+Test_OneHandAxe	Test OneHandAxe
+Test_OneHandMace	Test OneHandMace
+Testarmor	Testarmor
 TestNeck_1_1	TestNeck 1 1
 TestNeck_1_2	TestNeck 1 2
 TestNeck_2_1	TestNeck 2 1
@@ -5441,9 +5501,6 @@ TestNeck_5_3	TestNeck 5 3
 TestShield	TestShield
 TestSword	TestSword
 TestTwoHandAxe	TestTwoHandAxe
-Test_OneHandAxe	Test OneHandAxe
-Test_OneHandMace	Test OneHandMace
-Testarmor	Testarmor
 TheFaceless_Mask	The Mask of Liberation
 ThiefGloves	Great Thief's Gloves
 ThiefWand_Flower	Shrubby Sophora
@@ -5469,20 +5526,21 @@ Tirone_Fabric_Gloves	Tiron Cloth Gloves
 Tirone_Leather_Armor	Tiron Leather Armor
 Tirone_Leather_Boots	Tiron Leather Boots
 Tirone_Leather_Gloves	Tiron Leather Gloves
-Tirone_OneHandAxe	Crow Brothers Axe
+Tirone_OneHandAxe	Crow Brothers' Axe
 Tironet_OneHandRapier	Grace Rapier
 Tirtit_Leather_Boots	Ator's Will Leather Boots
 Tiruna_Leather_Boots	Tiruna Leather Boots
 Titan_Necklace	Necklace of Lightning
+Titan_Plate_Boots	Lightning Bolt Plate Boots
 Titan_PlateArmor_Armor	Lightning Bolt Plate Armor
 Titan_PlateArmor_Armor_Upgrade	Kuku Lightning-Resistant Armor
 Titan_PlateArmor_Gloves	Lightning Bolt Plate Gloves
 Titan_PlateArmor_Helm	Lightning Bolt Plate Helm
-Titan_Plate_Boots	Lightning Bolt Plate Boots
 Titan_Spear	Titan's Spear
 Titunan_Fabric_Armor	Tytuan Cloth Armor
+toad	Toad
 Tobias_Leather_Boots	Tobias Leather Boots
-Toddbern_OneHandShotgun	Delesyian Shotgun
+Toddbern_OneHandShotgun	Delesyia Shotgun
 Tohkar_Fabric_Armor	Tohkar Cloth Armor
 Toireth_Fabric_Armor	Torress Cloth Armor
 Toitte_Fabric_Armor	Totte Cloth Armor
@@ -5492,10 +5550,12 @@ Tolkane_Fabric_Armor	Tolkane Cloth Armor
 Tomaso_Soldiers_TwoHandSpear	Tommaso Guard's Dagger-Tipped Spear
 Tomato	Tomato
 Tomato_Seed	Tomato Seed
+tommaso_Flag_I	Small Tommaso Banner Pike
+tommaso_Flag_II	Medium Tommaso Banner Pike
 Torben_Fabric_Helm	Torben Cloth Cap
 Torch	Torch
 Tormand_ChainMail_Armor	Tormand Chain Mail
-Torphel_TwoHandAxe	Hellhounds Chopping Axe
+Torphel_TwoHandAxe	Hellhounds' Chopping Axe
 Torrance_Leather_Armor	Torrance Leather Armor
 Torretlan_OneHandMusket	Wells Musket
 Tortriden_TwoHandHammer	Lanford Greathammer
@@ -5607,7 +5667,7 @@ Troom_TwoHandSpear	Ancient Wood Pole
 Troopers_HorseArmor_Armor	Hyperion Barding
 Troopers_HorseArmor_Helm	Hyperion Champron
 Troopers_HorseArmor_Saddle	Hyperion Saddle
-Troopers_HorseArmor_Saddle_I	Wells Military Saddle
+Troopers_HorseArmor_Saddle_I	Wells's Warhorse Saddle
 Troopers_HorseArmor_Stirrup	Hyperion Stirrups
 Troopers_TwoHandSpear	Derictus Spear
 Trosdern_OneHandMace	Lanford Mace
@@ -5657,7 +5717,7 @@ Tychaon_Fabric_Cloak_T5_QA	Tychaon Fabric Cloak T5 QA
 Tyguis_OneHandMace	Entwined Red Thread Hammer
 Tykatan_Fabric_Armor	Tikatan Cloth Armor
 Tynion_Giant_TwoHandGiantBastard	Absolute Justice Greatsword
-Tynion_TwoHandWarHammer	Crow Brothers Warhammer
+Tynion_TwoHandWarHammer	Crow Brothers' Warhammer
 Tyran_Fabric_Armor	Tyran Cloth Armor
 Tyran_Leather_Armor	Tyran Leather Armor
 Tyran_Leather_Boots	Tyran Leather Boots
@@ -5676,7 +5736,6 @@ Ultar_Fabric_Armor	Ultar Cloth Armor
 Ultarine_Leather_Helm	Uphren Leather Helm
 Umbra_Necklace	Eternal Darkness
 Umbrella_Mushroom	Grisette Mushroom
-UnSeal_Epistle	Unsealed Letter
 University_BackPack	Student's Pack
 UnknownDiary_Aldun	Unknown Adventurer's Log
 UnknownDiary_Bernor	Unknown Adventurer's Log
@@ -5691,6 +5750,7 @@ UnknownDiary_Retonic	Unknown Adventurer's Log
 UnknownDiary_Richart	Unknown Adventurer's Log
 UnknownDiary_RonHardt	Unknown Adventurer's Log
 UnknownDiary_Shay_Research	Unknown Adventurer's Log
+UnSeal_Epistle	Unsealed Letter
 UnyieldingShields_Flag	Small Calphadean Banner Pike
 Uronthai_Leather_Armor	Ulontai Leather Armor
 Vain_Leather_Gloves	Byren's Leather Gloves
@@ -5742,7 +5802,7 @@ Veronde_Fabric_Armor	Veronde Cloth Armor
 Veronde_Fabric_Helm	Veronde Cloth Cap
 Veroon_Leather_Gloves	Behrun Hide Bracers
 Vertical_PlateArmor_Armor	Serroa Plate Armor
-Very_Small_Copper_Pack	Paltry Copper Pouch
+Very_Small_Copper_Pack	Light Copper Pouch
 Vex_Fabric_Armor	Vex Cloth Armor
 Victorialis	Wild Garlic
 Vigil_OneHandMace	Crude Club
@@ -5753,7 +5813,7 @@ Virerette_Fabric_Armor	Verette Cloth Armor
 Visione_Chip_AbandonedHouse	Abandoned House
 Visione_Chip_AbandonedMineVillage	Abandoned Mining Village
 Visione_Chip_Abyss_Platform_01	Memories of the Disconnected Truth
-Visione_Chip_Abyss_Platform_02	Shadows Within the Ether Fragment
+Visione_Chip_Abyss_Platform_02	Shadows within the Ether Fragment
 Visione_Chip_Abyss_Platform_03	Memories of the Loop of Life
 Visione_Chip_Alustainroom	The Alchemist's Chamber
 Visione_Chip_AnchorForest	Abandoned Anchor
@@ -5766,8 +5826,8 @@ Visione_Chip_Bariklair	Barrick's Hideout
 Visione_Chip_BaronBarrel	Keglord Garnier Mk. XXIII
 Visione_Chip_BigTreeRoots	Hollow Tree
 Visione_Chip_BlockedSupply	Blocked Supply Route
-Visione_Chip_BloodTombstone	Blood-Soaked Gravestone
 Visione_Chip_Bloodcoronation	The Blood Coronation
+Visione_Chip_BloodTombstone	Blood-Soaked Gravestone
 Visione_Chip_BloodyFarmhouse	Bloody Farmhouse
 Visione_Chip_BluemontManorAlley	Bluemont Manor Alley
 Visione_Chip_Bolmen	Dolmen
@@ -5783,6 +5843,7 @@ Visione_Chip_BrookFieldManor	Brookfield Manor
 Visione_Chip_BumperCrop	Bountiful Harvest
 Visione_Chip_BursadaIslandRuins	Remote Ruins
 Visione_Chip_CarnageStreet	Bloodstained Street
+Visione_Chip_castleruincamp	Castle Ruins Encampment
 Visione_Chip_CaveEntrance	Mysterious Cave Entrance
 Visione_Chip_CliffUnderHome	Settlement Beneath the Cliff
 Visione_Chip_CrowdedBranch	Branch of Birds
@@ -5794,10 +5855,10 @@ Visione_Chip_DeadTreeRoad	Withered Path
 Visione_Chip_DeathSandpit	Pit of Death
 Visione_Chip_DelesiaAcademy	Inside of the Delesyian Institute
 Visione_Chip_DelesyiaBell	Bell of Delesyia
-Visione_Chip_DemJohnDoe	Unidentifiable Corpse
 Visione_Chip_DemenissCabin	Demeniss Cabin
 Visione_Chip_DemenissFuture	Future of Demeniss
 Visione_Chip_DemenissOrphanage	Demeniss Orphanage
+Visione_Chip_DemJohnDoe	Unidentifiable Corpse
 Visione_Chip_DesertCrocodile	Ruler of the Oasis
 Visione_Chip_DesertShipwreck	Desert Shipwreck
 Visione_Chip_DesertSwamp	Desert Swamp
@@ -5807,9 +5868,10 @@ Visione_Chip_DinosaurBones	Giant Bone Pile
 Visione_Chip_DumpBell	Abandoned Bell
 Visione_Chip_Dungeon	Dungeon
 Visione_Chip_EdgeAltar	Cliff Edge Altar
+Visione_Chip_emptycoffin	Empty Coffin
 Visione_Chip_EmptyRanch	Abandoned Ranch
 Visione_Chip_EndlessDanger	Lonely Troll
-Visione_Chip_EntHunterLair	Mistwood Hunters' Hideout
+Visione_Chip_EntHunterLair	The Mistwood Hunters' Hideout
 Visione_Chip_FallenBallon	Crashed Cloudcart
 Visione_Chip_FallenExplorer	Corpse of an Adventurer
 Visione_Chip_FireFlySwarm	Hayroof Farm Fireflies
@@ -5822,20 +5884,22 @@ Visione_Chip_GiantBallista	Giant Ballista
 Visione_Chip_GiantBone	Remains of the Giants
 Visione_Chip_GiantBoots	Giant's Boot
 Visione_Chip_GiantRoots	Wide Roots Hideout
-Visione_Chip_GodTreeCamp	Eldertree Research Camp
 Visione_Chip_GodsGarden	Garden of the Gods
-Visione_Chip_GraceMansion	Glenbright Manor
-Visione_Chip_GraceMansionStorage	Glenbright Manor Storage
+Visione_Chip_GodTreeCamp	Eldertree Research Camp
+Visione_Chip_GraceMansion	Grace Manor
+Visione_Chip_GraceMansionStorage	Grace Manor Storage
 Visione_Chip_GreyRift	Ashen Rift
+Visione_Chip_guardiandeity	Guardian Deity Altar
 Visione_Chip_Hall	H.A.L.L.
 Visione_Chip_Halsius	St. Halssius's House of Healing
 Visione_Chip_HatRock	Hat Shaped Boulder
 Visione_Chip_HayroofFarmWindmill	Hayroof Farm Windmill
 Visione_Chip_HellWoodFortGoblin	Goblins of Fort Hellwood
 Visione_Chip_HelmaraVillageScrapGrave	Helmara Scrap Graveyard
-Visione_Chip_HernandGibbet	Hernand Gallows
+Visione_Chip_hernandcampsite	Hernand Encampment
 Visione_Chip_HernandcastleBallroom	Hernand Banquet Hall
 Visione_Chip_HernandcastleChamber	Hernand Office
+Visione_Chip_HernandGibbet	Hernand Gallows
 Visione_Chip_HiddenSpace_0001	Hidden Space - 0001
 Visione_Chip_HiddenSpace_0002	Hidden Space - 0002
 Visione_Chip_HiddenSpace_0003	Hidden Space - 0003
@@ -6014,14 +6078,14 @@ Visione_Chip_LongleafTree_HuntBegin	Beginning of the Hunt
 Visione_Chip_LongleafTree_OmenMisfortune	Signs of Misfortune
 Visione_Chip_MaidsTales	Stories of the Maids
 Visione_Chip_Mansion_Byron_Memory	Memory of Byron Manor
-Visione_Chip_Mansion_Marseille_Memory_I	Azerian's Whereabouts
+Visione_Chip_Mansion_Marseille_Memory_I	Beatrice Azerian's Whereabouts
 Visione_Chip_Mansion_Marseille_Memory_II	Bastier's Co-conspirators
 Visione_Chip_MarniFirstMeet	Secret of the Helm
 Visione_Chip_Marnisecretplace	Marni's Secret Laboratory
 Visione_Chip_MentalCareRoom	Mental Reconditioning
 Visione_Chip_MerchantRefuge	Snowy Plains Hearth
 Visione_Chip_Meteor	Meteorite
-Visione_Chip_MeteorHouse	Boulder Crash Site
+Visione_Chip_MeteorHouse	Crushed House
 Visione_Chip_MissingStatue	Vanished Statue
 Visione_Chip_Mjordinludvig	Myurdin and Ludvig
 Visione_Chip_MossyGenerator	Mossy Generator
@@ -6032,8 +6096,8 @@ Visione_Chip_MushroomRock	Mushroom Rock
 Visione_Chip_MysteryTower	Mysterious Giant Tower
 Visione_Chip_NamelessHeorGrave	A Hero's Tomb
 Visione_Chip_NoEenterZone	Restricted Area
-Visione_Chip_OakenshieldManorhall	Oakenshield Manor Reception Room
 Visione_Chip_Oakenshieldmanor	Serkis's Study
+Visione_Chip_OakenshieldManorhall	Oakenshield Manor Reception Room
 Visione_Chip_OasisMonument	Oasis Headstone
 Visione_Chip_OasisShelter	Oasis Hearth
 Visione_Chip_OdeckHunterCamp	Hunters of Odeck
@@ -6051,31 +6115,34 @@ Visione_Chip_PailuneSecretBase	Pailune Secret Vault
 Visione_Chip_PaintedCave	Painted Cavern
 Visione_Chip_PainterRegret	A Painter's Regret
 Visione_Chip_PetrifiedHumans	Petrified Humans
+Visione_Chip_pharmacy	Halssius Apothecary
 Visione_Chip_PororinCave	Pororin Cave
 Visione_Chip_PrecariousRock	Unstable Rock
+Visione_Chip_precipicecoffin	Clifftop Coffin
 Visione_Chip_RectangularStone	Square Rock
 Visione_Chip_ReventineWinery	Reventine Winery
 Visione_Chip_RidgehunterLeatherMaker	Ridgehunter Tannery
 Visione_Chip_RightHandStone	Right Hand Boulder
+Visione_Chip_riverdam	Upper Nas River Dam
 Visione_Chip_RiverwardOutpost	Riverward Outpost Dispatch
 Visione_Chip_RockCreviceRuinse	Rockshard Valley Ruins
-Visione_Chip_RockShelter	A House Between Rocks
 Visione_Chip_RockingStone	Rocking Boulder
+Visione_Chip_RockShelter	A House between Rocks
 Visione_Chip_RockshroudRuins	Rockveil Ruins
 Visione_Chip_Roofless	Roofless House
 Visione_Chip_RootFortress	Report on Roothold
 Visione_Chip_RordOfBones	Path of Giant Bones
 Visione_Chip_RuinedHouse	Abandoned House on the Water
 Visione_Chip_RuinedHouse_II	Dyer on the Water
-Visione_Chip_RuinsSite	Ruins Excavation
+Visione_Chip_RuinsSite	Ruins Excavation Site
 Visione_Chip_SafetyFlowerBush	Flowerbush of Safety
-Visione_Chip_SaltRoadRuins	Ruins by the Saltroad Camp
+Visione_Chip_SaltRoadRuins	Ruins by Saltroad Camp
 Visione_Chip_SandHole	Sand Dunes
 Visione_Chip_SavageFangStele	Savage Fangs Monument
 Visione_Chip_ScaryHole	Eerie Pit
 Visione_Chip_Sculptor	A Suspicious Sculptor
-Visione_Chip_ShipWreckOakBarrel	Shipwreck Oak Barrel
 Visione_Chip_Shipwreck	Sky Galleon
+Visione_Chip_ShipWreckOakBarrel	Shipwreck Oak Barrel
 Visione_Chip_SilenceShipwreck	Shipwreck in Silence
 Visione_Chip_SilverbrookRuins	Silverbrook Ruins
 Visione_Chip_Sinkhole	Sinkhole
@@ -6085,10 +6152,10 @@ Visione_Chip_Splithornrobber	Sword of the Cursed
 Visione_Chip_StoneAltar	Desolate Monolith Altar
 Visione_Chip_StonemireRuins	Stonemire Ruins
 Visione_Chip_StoryWell	A Well with a Story
-Visione_Chip_Suspiciouscult	The Madman and the Crows
+Visione_Chip_Suspiciouscult	The Patient and the Crows
 Visione_Chip_SwordAndThrone	The Sword's Grave and Throne
-Visione_Chip_TestToMarni	An Experiment to Reach Marni
-Visione_Chip_ThiefCave	Lair of Animal Thieves
+Visione_Chip_TestToMarni	An Experiment for Marni
+Visione_Chip_ThiefCave	Livestock Thieves
 Visione_Chip_TrainThief	Ironcrawler Thief's Hideout
 Visione_Chip_TreeForestTomb	Birch Forest Grave
 Visione_Chip_TreeOfAxes	Axe-Studded Tree
@@ -6100,26 +6167,19 @@ Visione_Chip_ValleyRockWatchTower	Gorgerock Watchtower
 Visione_Chip_VatnhollCamp	Vat'nholl Camp
 Visione_Chip_VerheimRuins	Verheim Ruins
 Visione_Chip_VikingTomb	Grave of Warriors' Axes
+Visione_Chip_vinevillage	Ivynook
 Visione_Chip_WagonOnATree	Treetop Wagon
 Visione_Chip_WarNews	News of War
 Visione_Chip_WaterFallsCabin	Cabin by the Waterfall
 Visione_Chip_WeirdSkull	A Strange Skull
 Visione_Chip_WindmillCoastShipWreck	Coast Windmill Shipwreck
 Visione_Chip_WisdomWell	Well of Enlightenment
-Visione_Chip_Witch_Kidnapped_Memory	Memory of the Kidnapped Witch
-Visione_Chip_WoodKnot	Shipyard Wood Knot
+Visione_Chip_Witch_Kidnapped_Memory	Kidnapped Witches
 Visione_Chip_WoodenGazebo	Wooden Pavilion
+Visione_Chip_WoodKnot	Shipyard Wood Knot
 Visione_Chip_WreckedTradingShip	Wrecked Trading Ship
 Visione_Chip_ZianeTomb	Burial Mound
 Visione_Chip_ZooHole	Wildlife Park Passageway
-Visione_Chip_castleruincamp	Castle Ruins Encampment
-Visione_Chip_emptycoffin	Empty Coffin
-Visione_Chip_guardiandeity	Guardian Deity Altar
-Visione_Chip_hernandcampsite	Hernand Encampment
-Visione_Chip_pharmacy	Halssius Apothecary
-Visione_Chip_precipicecoffin	Clifftop Coffin
-Visione_Chip_riverdam	Upper Nas River Dam
-Visione_Chip_vinevillage	Ivynook
 Vixer_Leather_Boots	Vixer Leather Shoes
 Volcanic_OneHandCannon	Volcanic Blaster
 Volcker_Fabric_Helm	St. Halssius Priest's Hat
@@ -6155,6 +6215,8 @@ Wandering_Mercenary_Leather_Armor	Wandering Freesword's Leather Armor
 Wanted_Criminal_BackPack_I	Outlaw's Gold Ore Pack
 Wanted_Criminal_BackPack_II	Outlaw's Graverobber Pack
 Wants_Leather_Gloves	Wentz Leather Gloves
+Warblick_Fabric_Armor	Warblick Cloth Armor
+Warren_Beynon_Leather_Boots	Warren Beynon's Leather Boots
 WarRobot_Backpack_01	A.T.A.G. Thrusterpack Mk I
 WarRobot_Backpack_02	A.T.A.G. Thrusterpack Mk II
 WarRobot_Backpack_03	A.T.A.G. Thrusterpack Mk III
@@ -6171,14 +6233,12 @@ WarRobot_Gatling_01	A.T.A.G. Machine Gun
 WarRobot_Laser_01	A.T.A.G. Laser
 WarRobot_RepairTool_01_L	A.T.A.G. Pincers
 WarRobot_RepairTool_01_R	A.T.A.G. Welder
-Warblick_Fabric_Armor	Warblick Cloth Armor
-Warren_Beynon_Leather_Boots	Warren Beynon's Leather Boots
 Warstein_Fabric_Armor	Warstein Cloth Armor
 Watcher_BackPack	Watcher Pack
 Water	Water
+Water_Bomb	Water Bomb
 WaterPower_BackPack	Hydro Generator Bag
 WaterSliding_Plate_Boots	Vaporwalker
-Water_Bomb	Water Bomb
 Watous_Leather_Gloves	Wertesh Leather Gloves
 Weapon_BackPack_I	Weaponsmith's Pack
 Weapon_BackPack_II	Weaponsmith's Pack
@@ -6198,12 +6258,6 @@ WeatherWeaver_Necklace	Rainstorm Necklace
 WeatherWeaver_Sunny_Necklace	Radiant Necklace
 Weeren_PlateArmor_Gloves	Weirren Plate Gloves
 Wegalawn_Leather_Gloves	Vicaron Leather Gloves
-WellsDungeon_Key	Thornbriar Dungeon Key
-WellsKnight_PlateArmor_Armor	Grotevant Plate Armor
-WellsKnight_PlateArmor_Cloak	Grotevant Cloak
-WellsKnight_PlateArmor_Gloves	Grotevant Plate Gloves
-WellsKnight_PlateArmor_Helm	Grotevant Plate Helm
-WellsKnight_Plate_Boots	Grotevant Plate Boots
 Wells_Brigade_Flag	Small Wells Brigade Banner Pike
 Wells_Brigade_Rebel_ChainMail_Armor_I	Turncoat Chain Mail
 Wells_Brigade_Rebel_ChainMail_Armor_II	Turncoat Chain Mail
@@ -6222,34 +6276,40 @@ Wells_Flag_II	Medium Wells Banner Pike
 Wells_HorseArmor_Armor	Wells Military Barding
 Wells_PlateArmor_Armor	Wells Rider Plate Armor
 Wells_TwoHandGiantSpear	Elite Vanguard
+WellsDungeon_Key	Thornbriar Dungeon Key
+WellsKnight_Plate_Boots	Grotevant Plate Boots
+WellsKnight_PlateArmor_Armor	Grotevant Plate Armor
+WellsKnight_PlateArmor_Cloak	Grotevant Cloak
+WellsKnight_PlateArmor_Gloves	Grotevant Plate Gloves
+WellsKnight_PlateArmor_Helm	Grotevant Plate Helm
 WestDemenissChurch_Key	Church Crypt Key
 Wheat	Wheat
 Wheel_BackPack	Wheelwright's Pack
+White_Bear_Leather_Helm	White Bear Helm
+White_Crocodile_Leather_Gloves	Pale Predator's Leather Gloves
+White_Douglas_Leather_Gloves	Crowcaller's White Leather Gloves
+White_Horse_Report	Sighting of Royler
+White_Lion_Necklace	White Lion Necklace
 WhiteBear_TwoHandAxe	Split Tooth
 WhiteCrow_Witch_TwoHandedWarHammer	Crow Whisperer
 WhiteHair_Root	Satintail Root
 WhiteHorn_Earring	White Horn's Earring
 WhiteHorn_Leather_Helm	White Horn Leather Helm
 WhiteStone	Scolecite Ore
-White_Bear_Leather_Helm	White Bear Helm
-White_Crocodile_Leather_Gloves	Pale Predator's Leather Gloves
-White_Douglas_Leather_Gloves	Crowcaller's White Leather Gloves
-White_Horse_Report	Sighting of Royler
-White_Lion_Necklace	White Lion Necklace
 Wild_Honey	Wild Honey
 Wild_Insam	Wild Ginseng
 Wind_Power_OneHandShield	Gale Shield
 Wind_TwoHandSpear	Propeller Spear
 WindmillCoastShipWreck_Book	Navigator's Log
 Wintharden_Fabric_Armor	Ator's Will Cloth Armor
-WitchWarehouse_Key	Witch's Storehouse Key
 Witch_WingFan	Eastern Witch's Fan
+WitchWarehouse_Key	Witch's Storehouse Key
 Witley_Fabric_Boots	Whitley Cloth Boots
 Witley_Fabric_Gloves	Whitley Cloth Gloves
 Witley_Leather_Armor	Whitley Leather Armor
+Witters_Plate_Boots	Witters Plate Boots
 Witters_PlateArmor_Gloves	Witters Plate Gloves
 Witters_PlateArmor_Helm	Witters Plate Helm
-Witters_Plate_Boots	Witters Plate Boots
 Wolf_Chief_Leather_Helm	Alpha Wolf Helm
 Wolf_Leather	Long Hair Hide
 Wolf_OneHandSword	Sword of the Wolf
@@ -6292,63 +6352,3 @@ Ziggurat_Leather_Helm_II	Chemists' Mask Leather Helm
 Ziggurat_Leather_Helm_III	Chemists' Iron Mask Leather Helm
 Zinianne_Fabric_Armor	Zynian Cloth Armor
 Zoo_Entry_Ticket	Wildlife Park Ticket
-barnia_Flag_I	Small Varnian Banner Pike
-barnia_Flag_II	Medium Varnian Banner Pike
-burrowingtoad	Burrowing Toad
-cacao_Seed	Cacao Seed
-centipede	Centipede
-cotton_BackPack	Cotton Pack
-dain_Leather_Gloves	Dane Leather Bands
-deerking_Flag_I	Small Staglord Banner Pike
-deerking_Flag_II	Medium Staglord Banner Pike
-demenissnobility_Flag_I	Small Demenissian Noble's Banner
-demenissnobility_Flag_II	Small Demenissian Noble's Banner
-demenissnobility_Flag_III	Small Demenissian Noble's Banner
-demenissnobility_Flag_IV	Medium Demenissian Noble's Banner Pike
-demenissnobility_Flag_V	Medium Demenissian Noble's Banner Pike
-demenissnobility_Flag_VI	Medium Demenissian Noble's Banner Pike
-diereuben_Leather_Gloves	Dirrebin Leather Gloves
-dragonkiller_Flag_I	Small Flame Knights Banner Pike
-dragonkiller_Flag_II	Medium Flame Knights Banner Pike
-fort_Flag_I	Small Dusksongs Banner Pike
-fort_Flag_II	Small Faceless Banner Pike
-fort_Flag_III	Small Twilight Messengers Banner Pike
-fort_Flag_IV	Medium Dusksongs Banner Pike
-fort_Flag_V	Medium Faceless Banner Pike
-fort_Flag_VI	Medium Twilight Messengers Banner Pike
-frog	Poison Frog
-gimmick_tool_kinetic_barbell_0001	Kinetic Counterweight
-gimmick_tool_kinetic_barbell_0002	Kinetic Knight
-gimmick_tool_kinetic_boat_0001	Kinetic Boat
-gimmick_tool_kinetic_circle_0001	Kinetic Circle
-gimmick_tool_kinetic_dolphin_0001	Kinetic Dolphin Family
-gimmick_tool_kinetic_dolphin_0002	Kinetic Dolphin
-grape_BackPack	Grape Pack
-grape_Seed	Grape Seed
-graymane_Flag_I	Tiny Greymane Banner Pike
-graymane_Flag_II	Small Greymane Banner Pike
-graymane_Flag_III	Medium Greymane Banner Pike
-greenfrog	Tree Frog
-king_LostPeople_PlateArmor_Armor	Frostcursed Plate Armor
-king_LostPeople_PlateArmor_Armor_Upgrade	Kuku Ice-Resistant Armor
-king_LostPeople_PlateArmor_Cloak	Frostcursed Plate Cloak
-lilian_Leather_Boots	Lilian Leather Boots
-marni_Flag_I	Small Marni Banner Pike
-marni_Flag_II	Medium Marni Banner Pike
-musket_Flag_I	Small Musket of Demeniss Banner Pike
-musket_Flag_II	Medium Musket of Demeniss Banner Pike
-orange_BackPack	Orange Pack
-orange_Seed	Orange Seed
-orchids_BackPack	Dendrobium Orchid Pack
-pailloon_Flag_I	Small Pailunese Banner Pike
-pailloon_Flag_II	Medium Pailunese Banner Pike
-peas	Peas
-riding_Leather_Boots	Riding Boots
-riding_Leather_Gloves	Master Trainer's Touch
-riding_Leather_Helm	Leather Riding Hat
-scorpion	Scorpion
-silence_Flag_I	Small Heavy Silence Banner Pike
-silence_Flag_II	Medium Heavy Silence Banner Pike
-toad	Toad
-tommaso_Flag_I	Small Tommaso Banner Pike
-tommaso_Flag_II	Medium Tommaso Banner Pike
