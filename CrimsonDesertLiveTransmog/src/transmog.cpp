@@ -734,7 +734,14 @@ namespace Transmog
                 if (flag_dump_item_catalog().load(std::memory_order_relaxed))
                     ItemNameTable::instance().dump_catalog_tsv();
                 if (flag_dump_item_prefabs().load(std::memory_order_relaxed))
-                    dump_itemmesh_tsv();
+                {
+                    // Targeted phantom-recovery sweep can take ~minutes
+                    // on a cold registry. Detach so the rest of transmog
+                    // init (hooks, color-override) doesn't block waiting
+                    // for the TSV write -- nothing downstream depends on
+                    // the dump.
+                    std::thread{[] { dump_itemmesh_tsv(); }}.detach();
+                }
             }
             else if (result == BR::Deferred)
             {
