@@ -87,6 +87,7 @@ set(COMMON_SOURCES
     src/shared_state.cpp
     src/indexed_string_table.cpp
     src/item_name_table.cpp
+    src/itemmesh_dumper.cpp
     src/transmog_map.cpp
     src/input_handler.cpp
     src/transmog.cpp

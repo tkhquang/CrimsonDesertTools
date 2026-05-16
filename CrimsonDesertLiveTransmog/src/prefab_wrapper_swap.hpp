@@ -4,7 +4,9 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 // Pointer-swap body-mesh override.
@@ -141,6 +143,17 @@ namespace Transmog::PrefabWrapperSwap
     /// True if the AppearanceTableLoader hook fired and we hold valid
     /// snapshots of partPrefabContainer.
     [[nodiscard]] bool is_loader_ready() noexcept;
+
+    /// Walk every entry in the AppearanceTableLoader registry singleton
+    /// (the AOB-resolved partprefab name-to-wrapper table) and invoke
+    /// `cb` with each entry's inline key c-string name. Unfiltered:
+    /// emits all ~15k entries including non-body-mesh families
+    /// (`gimmick_*`, `collection_*`, `cd_ex_*`, etc.) that the internal
+    /// `enumerate_loader_registry_into_catalog` drops through its
+    /// slot-tag filter. Intended for diagnostic dumps; not used by the
+    /// live swap pipeline. No-op if the singleton isn't resolved yet.
+    void for_each_loader_prefab_name(
+        const std::function<void(std::string_view)> &cb) noexcept;
 
     /// Idempotent. Walks StringInfo with prefix "cd_phm_00_" once and
     /// classifies entries into per-slot vectors (sorted by name).

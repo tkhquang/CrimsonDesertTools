@@ -2,6 +2,7 @@
 #include "prefab_wrapper_swap.hpp"
 #include "constants.hpp"
 #include "item_name_table.hpp"
+#include "itemmesh_dumper.hpp"
 #include "preset_manager.hpp"
 #include "real_part_tear_down.hpp"
 #include "shared_state.hpp"
@@ -81,8 +82,10 @@ namespace Transmog
                         ItemNameTable::instance().load_display_names(
                             dir + DISPLAY_NAMES_FILE);
                 }
-                if (logger.is_enabled(DMK::LogLevel::Trace))
+                if (flag_dump_item_catalog().load(std::memory_order_relaxed))
                     ItemNameTable::instance().dump_catalog_tsv();
+                if (flag_dump_item_prefabs().load(std::memory_order_relaxed))
+                    dump_itemmesh_tsv();
 
                 // Re-resolve all loaded preset slots against the now-
                 // populated catalog and re-apply the active preset so

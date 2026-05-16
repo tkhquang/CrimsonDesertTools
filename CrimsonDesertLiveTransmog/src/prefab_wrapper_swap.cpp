@@ -444,6 +444,63 @@ namespace Transmog::PrefabWrapperSwap
         return result;
     }
 
+    void for_each_loader_prefab_name(
+        const std::function<void(std::string_view)> &cb) noexcept
+    {
+        // Mirror of `enumerate_loader_registry_into_catalog` minus the
+        // slot-tag filter and pending-merge bookkeeping. Walks the
+        // table struct (singleton+0x50) entry-by-entry, reads the inline
+        // key name from each wrapper, emits via callback. Skips the
+        // StringInfo-vtable sentinel rows that hold metadata-only
+        // (non-name-bearing) entries.
+        if (!cb)
+            return;
+        const auto singletonAbs =
+            s_loaderRegistrySingleton.load(std::memory_order_acquire);
+        if (singletonAbs < 0x10000ULL)
+            return;
+        const auto singletonPtr = read_qword_seh(
+            reinterpret_cast<const void *>(singletonAbs));
+        if (singletonPtr < 0x10000ULL)
+            return;
+        // singleton + 0x50 = table struct (matches internal
+        // k_loaderRegistryTableOff defined later in this TU).
+        const std::uintptr_t tableStruct = singletonPtr + 0x50;
+        const auto count = read_dword_seh(
+            reinterpret_cast<const void *>(tableStruct + 0x04));
+        const auto dataArrayPtr = read_qword_seh(
+            reinterpret_cast<const void *>(tableStruct + 0x18));
+        if (count == 0 || count > 100000 || dataArrayPtr < 0x10000ULL)
+            return;
+
+        std::vector<std::uintptr_t> entryPtrs;
+        entryPtrs.resize(count);
+        const bool bulkOk = bulk_copy_seh(
+            reinterpret_cast<const void *>(dataArrayPtr),
+            entryPtrs.data(), count * sizeof(std::uintptr_t));
+
+        const auto vtableSentinel =
+            s_stringInfoVtable.load(std::memory_order_acquire);
+        char nameBuf[k_extNameMax + 1] = {0};
+        for (std::uint32_t i = 0; i < count; ++i) {
+            const std::uintptr_t entry = bulkOk
+                ? entryPtrs[i]
+                : read_qword_seh(reinterpret_cast<const void *>(
+                      dataArrayPtr + 8ULL * i));
+            if (entry < 0x10000ULL) continue;
+            const auto wrapper = read_qword_seh(
+                reinterpret_cast<const void *>(entry + 0x08));
+            if (wrapper < 0x10000ULL) continue;
+            if (wrapper == vtableSentinel) continue;
+            constexpr std::size_t k_loaderNameCap = 96;
+            const auto rlen = read_cstr_seh(
+                reinterpret_cast<const void *>(wrapper + 0x18),
+                nameBuf, k_loaderNameCap);
+            if (rlen == SIZE_MAX || rlen == 0) continue;
+            cb(std::string_view(nameBuf, rlen));
+        }
+    }
+
     // --- Per-slot catalog state (Goal B) ---
     //
     // Built lazily on first overlay open via populate_slot_catalogs().

@@ -398,6 +398,117 @@ namespace Transmog
     };
 
     /**
+     * @brief IteminfoHolder global: address of qword_145F2A338.
+     *
+     * The engine's per-process iteminfo registry pointer. `*holder`
+     * dereferences to the registry struct; `*holder + 0x08` holds the
+     * u32 entry count, `*holder + 0x50` the QWORD entry-array pointer.
+     * The runtime item-to-prefab bridge (itemmesh_dumper) reads it to
+     * enumerate every loaded item descriptor.
+     *
+     * All three candidates anchor on a `mov rcx, [rip+disp32]` loading
+     * this address inside a lookup primitive that follows the standard
+     * `add rcx, 0x60; lea rdx, [frame]; call` sequence. The disp32 is
+     * wildcarded; surrounding stack-frame offsets and tail-instruction
+     * bytes carry the uniqueness budget.
+     */
+    inline constexpr AddrCandidate k_iteminfoHolderCandidates[] = {
+        // P1 -- xref in sub_14063C850 at 0x14063CB69. Frame disp32
+        // 0x240 on both the inbound store (`mov [rbp+0x240], eax`)
+        // and the outbound lea (`lea rdx, [rbp+0x240]`) pins this site
+        // to the sole 0x240-frame caller of the iteminfo lookup. The
+        // `74 11 44 0F B7 20` tail (jz rel8 / movzx r12d,[rax]) is the
+        // post-call success branch and is unique-text in v1.07.00 .text.
+        {"IteminfoHolder_P1_Frame0x240LookupCall",
+         "89 85 40 02 00 00 48 8B 0D ?? ?? ?? ?? 48 83 C1 60 "
+         "48 8D 95 40 02 00 00 E8 ?? ?? ?? ?? 48 85 C0 74 11 "
+         "44 0F B7 20",
+         ResolveMode::RipRelative, 9, 13},
+
+        // P2 -- xref in sub_1407307D0 at 0x140730A25. Distinctive
+        // dword-copy preamble `mov eax, [rbp+0xB0]; mov [rbp+0xA8], eax`
+        // (two stable game-struct frame offsets) precedes the load.
+        // Followed by the canonical lookup-call sequence with the same
+        // 0xA8 frame disp echoed in the lea, then a jz-success tail.
+        {"IteminfoHolder_P2_FrameB0CopyLookup",
+         "8B 85 B0 00 00 00 89 85 A8 00 00 00 48 8B 0D ?? ?? ?? ?? "
+         "48 83 C1 60 48 8D 95 A8 00 00 00 E8 ?? ?? ?? ?? "
+         "48 85 C0 74",
+         ResolveMode::RipRelative, 15, 19},
+
+        // P3 -- xref in sub_14081A580 at 0x14081A5E6. rsp-relative
+        // frame (`mov [rsp+0x50], eax`; `lea rdx, [rsp+0x50]`) rather
+        // than rbp-based, plus the post-call success branch lands on a
+        // jz rel32 (`0F 84 ?? ?? ?? ??`) followed by a u16 sentinel
+        // check `0F B7 10 66 44 3B F2` (movzx edx,[rax]; cmp r14w,dx).
+        // The sentinel byte sequence is the canonical "no match"
+        // probe used by this family of lookups.
+        {"IteminfoHolder_P3_RspFrameSentinelProbe",
+         "8B 07 89 44 24 50 48 8B 0D ?? ?? ?? ?? 48 83 C1 60 "
+         "48 8D 54 24 50 E8 ?? ?? ?? ?? 48 85 C0 0F 84 ?? ?? ?? ?? "
+         "0F B7 10 66 44 3B F2",
+         ResolveMode::RipRelative, 9, 13},
+    };
+
+    /**
+     * @brief StringinfoHolder global: address of qword_145F2A368.
+     *
+     * Sibling to IteminfoHolder, located 0x30 bytes higher in the
+     * engine's data section. Backs the engine's string-bag registry
+     * (icon-prefab names, asset paths). Used by the runtime
+     * item-to-prefab bridge (itemmesh_dumper) to translate the u16
+     * stringSlot stored in `iteminfo[id].desc+0x90` into a c-string
+     * wrapper.
+     *
+     * The generic lookup primitive (`mov reg, [rip+disp32]; add reg,
+     * 0x60; lea rdx, [frame]; call`) appears in dozens of callers for
+     * both holders. Each candidate below extends the window with
+     * caller-specific bytes (frame offsets, register selectors,
+     * sentinel writes) so the cascade cannot drift from stringinfo
+     * to iteminfo on a future rebuild. P1 specifically uses an
+     * r15-targeted load (REX.WR = 4C) while P2/P3 use the more common
+     * rcx-targeted form.
+     */
+    inline constexpr AddrCandidate k_stringinfoHolderCandidates[] = {
+        // P1 -- xref in sub_14031EC80 at 0x14031ED78. Distinguished by
+        // an r15-targeted load (`mov r15, [rip+disp32]`, REX.WR = 4C)
+        // instead of the usual rcx target, paired with a `lea rcx,
+        // [r15+0x60]` (`49 8D 4F 60`) outbound. The trailing
+        // `74 05 0F B7 30 EB 05` (jz rel8 / movzx esi,[rax] /
+        // jmp rel8) is the success/fail two-arm join unique to this
+        // caller.
+        {"StringinfoHolder_P1_R15LookupTwoArm",
+         "89 45 58 4C 8B 3D ?? ?? ?? ?? 48 8D 55 58 49 8D 4F 60 "
+         "E8 ?? ?? ?? ?? 48 85 C0 74 05 0F B7 30 EB 05",
+         ResolveMode::RipRelative, 6, 10},
+
+        // P2 -- xref in sub_140373AD0 at 0x140373C6A. Preamble
+        // `mov eax, [rsi+4]; mov [rbp+0x40], eax` followed by the
+        // load and the canonical lookup-call. The post-call tail
+        // `45 33 C0 48 85 C0 0F 84 ?? ?? ?? ?? 44 0F B7 38
+        // B8 FF FF 00 00` is the no-match sentinel write of 0xFFFF
+        // into r15w and is unique-text in v1.07.00 .text.
+        {"StringinfoHolder_P2_EsiPlus4SentinelWrite",
+         "8B 46 04 89 45 40 48 8B 0D ?? ?? ?? ?? 48 83 C1 60 "
+         "48 8D 55 40 E8 ?? ?? ?? ?? 45 33 C0 48 85 C0 "
+         "0F 84 ?? ?? ?? ?? 44 0F B7 38 B8 FF FF 00 00",
+         ResolveMode::RipRelative, 9, 13},
+
+        // P3 -- xref in sub_141CA66D0 at 0x141CA66F7. Distinctive
+        // r11-relative outbound lea `lea rdx, [r11+0x10]`
+        // (`49 8D 53 10`) -- the only family caller that passes the
+        // probe key through r11 rather than the frame. The
+        // `B8 FF FF 00 00` sentinel write is shared with P2 but the
+        // upstream `8B 41 18 41 89 43 10` preamble (mov eax,[rcx+0x18]
+        // / mov [r11+0x10], eax) is unique to this caller.
+        {"StringinfoHolder_P3_R11ProbeKeySentinel",
+         "8B 41 18 41 89 43 10 48 8B 0D ?? ?? ?? ?? 48 83 C1 60 "
+         "49 8D 53 10 E8 ?? ?? ?? ?? 48 85 C0 0F 84 ?? ?? ?? ?? "
+         "0F B7 38 B8 FF FF 00 00",
+         ResolveMode::RipRelative, 10, 14},
+    };
+
+    /**
      * @brief LoaderRegistry singleton: MEMORY[0x145DDF8B0].
      *
      * Engine partprefab name->wrapper registry singleton. The ApptName-

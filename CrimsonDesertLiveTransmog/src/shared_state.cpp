@@ -35,6 +35,8 @@ namespace Transmog
     static std::atomic<bool> s_enabled{true};
     static std::atomic<bool> s_shutdownRequested{false};
     static std::atomic<bool> s_colorOverride{false};
+    static std::atomic<bool> s_dumpItemPrefabs{false};
+    static std::atomic<bool> s_dumpItemCatalog{false};
 
     static SlotPopulatorFn s_slotPopulator = nullptr;
     static InitSwapEntryFn s_initSwapEntry = nullptr;
@@ -59,6 +61,8 @@ namespace Transmog
     std::atomic<bool> &flag_enabled() { return s_enabled; }
     std::atomic<bool> &shutdown_requested() { return s_shutdownRequested; }
     std::atomic<bool> &flag_color_override() { return s_colorOverride; }
+    std::atomic<bool> &flag_dump_item_prefabs() { return s_dumpItemPrefabs; }
+    std::atomic<bool> &flag_dump_item_catalog() { return s_dumpItemCatalog; }
 
     SlotPopulatorFn &slot_populator_fn() { return s_slotPopulator; }
     InitSwapEntryFn &init_swap_entry_fn() { return s_initSwapEntry; }
