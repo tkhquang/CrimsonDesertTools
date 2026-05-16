@@ -85,7 +85,13 @@ namespace Transmog
                 if (flag_dump_item_catalog().load(std::memory_order_relaxed))
                     ItemNameTable::instance().dump_catalog_tsv();
                 if (flag_dump_item_prefabs().load(std::memory_order_relaxed))
-                    dump_itemmesh_tsv();
+                {
+                    // Targeted phantom-recovery sweep can take ~minutes.
+                    // Detach so reresolve_all_names + manual_apply
+                    // happen immediately and the live transmog state
+                    // refreshes without waiting on the TSV write.
+                    std::thread{[] { dump_itemmesh_tsv(); }}.detach();
+                }
 
                 // Re-resolve all loaded preset slots against the now-
                 // populated catalog and re-apply the active preset so
