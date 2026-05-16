@@ -106,6 +106,12 @@ namespace Transmog
     /// it did before the ColorOverride port landed.
     std::atomic<bool> &flag_color_override();
 
+    /// One-shot diagnostic dumps gated by `[Diagnostics]` INI section.
+    /// Off by default. When true the corresponding TSV is written next
+    /// to the plugin once ItemNameTable::build() returns Ok.
+    std::atomic<bool> &flag_dump_item_prefabs();
+    std::atomic<bool> &flag_dump_item_catalog();
+
     // --- Trampoline typedefs ---
 
     // sub_14076C960: Populates slot visual data + calls VisualEquipChange.

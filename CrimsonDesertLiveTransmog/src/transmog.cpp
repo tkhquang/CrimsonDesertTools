@@ -11,6 +11,7 @@
 #include "indexed_string_table.hpp"
 #include "input_handler.hpp"
 #include "item_name_table.hpp"
+#include "itemmesh_dumper.hpp"
 #include "part_show_suppress.hpp"
 #include "preset_manager.hpp"
 #include "real_part_tear_down.hpp"
@@ -70,6 +71,17 @@ namespace Transmog
         DMK::Config::register_atomic<bool>(
             "Experimental", "ColorOverride", "Color Override",
             flag_color_override(), false);
+
+        // One-shot diagnostic TSV dumps. Off by default; enable to
+        // capture item-catalog / item->prefab snapshots once
+        // ItemNameTable::build() lands. Both files are written to the
+        // plugin's runtime directory.
+        DMK::Config::register_atomic<bool>(
+            "Diagnostics", "DumpItemPrefabsTsv", "Dump Item->Prefab TSV",
+            flag_dump_item_prefabs(), false);
+        DMK::Config::register_atomic<bool>(
+            "Diagnostics", "DumpItemCatalogTsv", "Dump Item Catalog TSV",
+            flag_dump_item_catalog(), false);
 
         // Auto-reload toggle. Off-by-default would force a relaunch for
         // every INI tweak; on-by-default keeps the iteration loop tight.
@@ -719,8 +731,10 @@ namespace Transmog
                         ItemNameTable::instance().load_display_names(
                             dir + DISPLAY_NAMES_FILE);
                 }
-                if (logger.is_enabled(DMK::LogLevel::Trace))
+                if (flag_dump_item_catalog().load(std::memory_order_relaxed))
                     ItemNameTable::instance().dump_catalog_tsv();
+                if (flag_dump_item_prefabs().load(std::memory_order_relaxed))
+                    dump_itemmesh_tsv();
             }
             else if (result == BR::Deferred)
             {
