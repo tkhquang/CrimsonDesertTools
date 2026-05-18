@@ -21,3 +21,8 @@ __pycache__/
 
 # Personal files
 .claude
+
+# Catalog page build artifacts (built into docs/live-transmog/ from docs/catalog-src/)
+docs/live-transmog/catalog.html
+docs/catalog-src/node_modules/
+docs/catalog-src/.vite/
