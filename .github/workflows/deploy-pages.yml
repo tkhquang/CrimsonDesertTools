@@ -6,6 +6,7 @@ on:
     branches: [main]
     paths:
       - "docs/live-transmog/**"
+      - "docs/catalog-src/**"
 
 permissions:
   contents: read
@@ -24,6 +25,24 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+          cache-dependency-path: docs/catalog-src/pnpm-lock.yaml
+
+      - name: Build catalog page
+        working-directory: docs/catalog-src
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run build
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
