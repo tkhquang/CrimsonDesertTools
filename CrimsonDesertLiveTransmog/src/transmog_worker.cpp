@@ -183,8 +183,6 @@ namespace Transmog
     // both deferred workers behave the same way during cold-launch.
     static constexpr int k_slotHashInitialDelayMs = 8000;
     static constexpr int k_slotHashRetryMs        = 2000;
-    static constexpr int k_slotHashMaxAttempts    = 90;
-    static constexpr int k_slotHashStablePlateau  = 5;
 
     static std::size_t expected_slot_hash_count() noexcept
     {
@@ -220,11 +218,8 @@ namespace Transmog
         }
 
         std::size_t prevResolvable = 0;
-        int stableStreak = 0;
-        bool warnedWaitingWorld = false;
-        bool warnedEmpty = false;
 
-        for (int attempt = 1; attempt <= k_slotHashMaxAttempts; ++attempt)
+        for (int attempt = 1; ; ++attempt)
         {
             for (int slept = 0; slept < k_slotHashRetryMs; slept += 250)
             {
@@ -238,29 +233,23 @@ namespace Transmog
             // and the CD_* part names are not yet registered.
             if (!Transmog::is_world_ready())
             {
-                if (!warnedWaitingWorld && attempt % 15 == 0)
-                {
+                if (attempt % 50 == 0)
                     logger.warning(
                         "[dispatch] slot-hash deferred scan: waiting "
-                        "for world (attempt {}/{})",
-                        attempt, k_slotHashMaxAttempts);
-                    warnedWaitingWorld = true;
-                }
+                        "for world after {} attempts",
+                        attempt);
                 continue;
             }
 
             auto nameToHash = scan_indexed_string_table(mapLookupAddr);
             if (nameToHash.empty())
             {
-                if (!warnedEmpty && attempt % 15 == 0)
-                {
+                if (attempt % 50 == 0)
                     logger.warning(
                         "[dispatch] slot-hash deferred scan: "
                         "IndexedStringA empty after world-ready "
-                        "(attempt {}/{})",
-                        attempt, k_slotHashMaxAttempts);
-                    warnedEmpty = true;
-                }
+                        "({} attempts)",
+                        attempt);
                 continue;
             }
 
@@ -296,31 +285,17 @@ namespace Transmog
                     "resolvable (attempt {})",
                     resolvable, expectedCount, attempt);
                 prevResolvable = resolvable;
-                stableStreak = 0;
                 continue;
             }
 
-            // Plateaued. If at least one key has resolved, commit the
-            // partial set so the hook can suppress on the slots we
-            // know about. Better than waiting forever for a name
-            // that never registers (asset rename, game update).
-            ++stableStreak;
-            if (stableStreak >= k_slotHashStablePlateau && prevResolvable > 0)
-            {
-                const auto resolved =
-                    PartShowSuppress::init_slot_hashes(nameToHash);
+            // Plateaued -- sleep and retry indefinitely until every
+            // expected key registers or shutdown is requested.
+            if (attempt % 50 == 0)
                 logger.warning(
-                    "[dispatch] slot-hash deferred scan plateaued at "
-                    "{}/{} resolvable; committing partial state",
-                    resolved, expectedCount);
-                return;
-            }
+                    "[dispatch] slot-hash deferred scan: still "
+                    "waiting after {} attempts ({}/{} resolvable)",
+                    attempt, resolvable, expectedCount);
         }
-
-        logger.warning(
-            "[dispatch] slot-hash deferred scan exhausted {} "
-            "attempts -- PartShowSuppress will be inert this session",
-            k_slotHashMaxAttempts);
     }
 
     void launch_deferred_slot_hash_scan() noexcept
@@ -684,7 +659,15 @@ namespace Transmog
     // WITHOUT running apply_all_transmog. Used after the idle pass
     // when the controlled char was already applied earlier (so we
     // need to restore the editing/UI axis but not redo the work).
-    // Mirrors sync_active_char_to_live's state reset minus the apply.
+    //
+    // The applied-state globals MUST be rehydrated from the controlled
+    // char's per-body snapshot, not wiped. The prior multi-apply pass
+    // captured the controlled char's applied ids into its bucket, and
+    // the UI's pending-changes diff compares slot_mappings (just
+    // reloaded from the preset) against last_applied_ids. Zeroing here
+    // would leave staged != lastIds for every populated slot, surfacing
+    // a stale "[PENDING -- click Apply All]" badge for transmog that
+    // is in fact already on the body.
     static void rebind_preset_to_controlled(
         const std::string &controlledName) noexcept
     {
@@ -700,10 +683,8 @@ namespace Transmog
             m.targetItemId = 0;
         }
         pm.apply_to_state();
-        last_applied_ids().fill(0);
-        real_damaged().fill(false);
-        last_applied_real_ids().fill(0);
-        last_applied_carrier_ids().fill(0);
+        const auto idx = char_idx_for_preset_name(controlledName);
+        rehydrate_applied_state_for_char(idx);
     }
 
     static void do_multi_char_apply() noexcept
