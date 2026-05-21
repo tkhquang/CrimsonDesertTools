@@ -138,7 +138,7 @@ namespace Transmog
             // populates the catalog or shutdown is requested.
             ++attempt;
             if (attempt % 50 == 0)
-                logger.warning(
+                logger.debug(
                     "[nametable] still waiting after {} attempts", attempt);
 
             for (int slept = 0; slept < k_nametableRetryMs; slept += 250)
@@ -234,7 +234,7 @@ namespace Transmog
             if (!Transmog::is_world_ready())
             {
                 if (attempt % 50 == 0)
-                    logger.warning(
+                    logger.debug(
                         "[dispatch] slot-hash deferred scan: waiting "
                         "for world after {} attempts",
                         attempt);
@@ -245,7 +245,7 @@ namespace Transmog
             if (nameToHash.empty())
             {
                 if (attempt % 50 == 0)
-                    logger.warning(
+                    logger.debug(
                         "[dispatch] slot-hash deferred scan: "
                         "IndexedStringA empty after world-ready "
                         "({} attempts)",
@@ -291,7 +291,7 @@ namespace Transmog
             // Plateaued -- sleep and retry indefinitely until every
             // expected key registers or shutdown is requested.
             if (attempt % 50 == 0)
-                logger.warning(
+                logger.debug(
                     "[dispatch] slot-hash deferred scan: still "
                     "waiting after {} attempts ({}/{} resolvable)",
                     attempt, resolvable, expectedCount);
