@@ -40,8 +40,6 @@ namespace Transmog
         CDCore::Anchors::k_visualEquipChangeCandidates;
     inline constexpr auto &k_batchEquipCandidates =
         CDCore::Anchors::k_batchEquipCandidates;
-    inline constexpr auto &k_radialSwapKeyCandidates =
-        CDCore::Anchors::k_radialSwapKeyCandidates;
 
     namespace detail
     {
@@ -560,9 +558,10 @@ namespace Transmog
      * Resolution strategy: AOB-resolve sub_141E2DBB0's prologue (which
      * IS unique), then the C++ resolver walks forward through the
      * function body to find the SECOND `48 8D 05 ?? ?? ?? ?? 48 89 07`
-     * pair (the FIRST is the intermediate vtable 0x144D242B8; the SECOND
-     * is our target). The walk-forward logic lives in
-     * prefab_wrapper_swap.cpp::resolve_appt_container_vtable.
+     * pair (the FIRST is the intermediate `_appearanceContainer` vtable;
+     * the SECOND is our target `_partPrefabDataContainer` vtable). The
+     * walk-forward logic runs inline inside prefab_wrapper_swap.cpp's
+     * `init()` after this anchor resolves.
      *
      * If this breaks: re-AOB sub_141E2DBB0 by its prologue, then in
      * IDA find the second `lea rax, [rip+disp32]; mov [rdi], rax` pair

@@ -55,26 +55,26 @@ namespace Transmog
         SubWeapon,      // engine tag 0x0C (dagger/axe family)
         TwoHandWeapon,  // engine tag 0x0D (greatsword)
         // Tag 0x0E is engine-unused for all three protagonists in any
-        // observed save. Commented out 2026-05-07 -- we don't know what
-        // it does and didn't want it in the UI picker. The slot-discovery
-        // dump still labels it "Unknown" so it stays visible in logs;
-        // re-add by uncommenting AND restoring the matching commented-
-        // out rows (same checklist as OongkaRocket below).
-        // Experimental,   // engine tag 0x0E
-        // OongkaRocket -- engine tag 0x15 (Oongka-only "Rocket Helm").
-        // Removed from the UI picker on 2026-05-07 because Kliff and
-        // Damiane reject this slot (engine metadata doesn't include
-        // tag 0x15 for them) and the slot adds no transmog value for
-        // the typical case. Re-add later by uncommenting AND restoring
-        // the matching commented-out rows in:
-        //   transmog_map.cpp        (k_slotNames, slot_from_game_slot,
-        //                            game_slot_from_transmog)
-        //   transmog_apply.cpp      (k_kliffCarriers, k_damianeCarriers,
-        //                            k_oongkaCarriers, k_gameSlotTags,
-        //                            k_tearDownSlots, k_clearSlots)
-        //   prefab_wrapper_swap.cpp (k_slotPrefixes, k_slotPrefixesFemale,
-        //                            k_slotTags, k_slotTagPatterns)
-        // OongkaRocket,   // engine tag 0x15
+        // observed save. Kept out of the UI picker because its purpose
+        // is unknown. The slot-discovery dump still labels it
+        // "Unknown" so it stays visible in logs. To experiment with
+        // it, add an `Experimental, // engine tag 0x0E` row here AND
+        // wire it through the per-slot tables below (same checklist
+        // as OongkaRocket).
+        //
+        // Tag 0x15 is the Oongka-only "Rocket Helm". Excluded because
+        // Kliff and Damiane reject this slot (engine metadata does
+        // not include tag 0x15 for them) and the slot adds no
+        // transmog value for the typical case. To re-enable, add an
+        // `OongkaRocket, // engine tag 0x15` row here AND extend
+        // every per-slot table that indexes by TransmogSlot:
+        //   slot_metadata.hpp       (k_slotMetadata -- master row:
+        //                            gameTag, displayName, prefab
+        //                            prefixes, partShowHashKey, enabled)
+        //   carrier_defaults.hpp    (k_carriers -- one carrier item +
+        //                            prefab per character per slot)
+        //   prefab_wrapper_swap.cpp (k_slotTagPatterns -- registry
+        //                            classifier patterns)
         Count
     };
 
@@ -91,6 +91,31 @@ namespace Transmog
     /// Item IDs that were last written to slot_mappings (saved before preset switch).
     /// Used by clear_all_transmog to know what to unequip.
     std::array<uint16_t, k_slotCount> &last_applied_ids();
+
+    /// Per-character tracking of the last-applied transmog snapshot.
+    /// The four globals (last_applied_ids / real_damaged / last_-
+    /// applied_real_ids / last_applied_carrier_ids) describe ONE
+    /// body's installed state at a time. With multi-character
+    /// auto-apply and the "Apply To Selected" feature, the worker
+    /// can apply to any of the three protagonists between hook
+    /// events, so a single global snapshot would conflate state
+    /// across bodies (Phase A teardown of Damiane's fakes would
+    /// try to use Kliff's `lastIds` as the truth source).
+    ///
+    /// Each char's snapshot is buffered behind the scenes. Before
+    /// each apply the worker hydrates the globals from the target
+    /// character's buffered snapshot; after the apply finishes the
+    /// new globals are captured back. Pass idx 1=Kliff, 2=Damiane,
+    /// 3=Oongka. Out-of-range idx is a no-op.
+    void rehydrate_applied_state_for_char(std::uint32_t idx) noexcept;
+    void capture_applied_state_for_char(std::uint32_t idx) noexcept;
+
+    /// Wipe both the globals and every per-character buffered
+    /// snapshot. Called from the save-load wipe path: all bodies
+    /// have been reallocated by the engine, every fake transmog
+    /// item from the prior session is gone, so the trackers must
+    /// reset to match.
+    void reset_all_applied_state() noexcept;
 
     // --- Feature flags ---
 
@@ -111,6 +136,17 @@ namespace Transmog
     /// to the plugin once ItemNameTable::build() returns Ok.
     std::atomic<bool> &flag_dump_item_prefabs();
     std::atomic<bool> &flag_dump_item_catalog();
+
+    /// When the user has the dropdown pinned to a non-controlled
+    /// character and this flag is set, overlay-UI edits (dropdown
+    /// switch, picker change, slot toggle, preset cycle, manual
+    /// buttons) apply to the editing character's body instead of
+    /// cross-applying onto the controlled body. Engine-triggered
+    /// equip events still target the controlled body so the
+    /// controlled character's transmog stays visible across their
+    /// own gear changes. When false, every apply targets the
+    /// controlled body (legacy cross-body behaviour).
+    std::atomic<bool> &flag_apply_to_editing();
 
     // --- Trampoline typedefs ---
 
@@ -138,11 +174,11 @@ namespace Transmog
     std::atomic<__int64> &player_a1();
 
     /// Returns the currently-controlled character name ("Kliff",
-    /// "Damiane", "Oongka") by reading the 1-based index byte at
-    /// `*(WS+0x30)+0x30` (CE-verified 2026-04-21 on v1.03.01).
-    /// Returns an empty string if the chain is not yet resolved,
-    /// the byte holds an unknown value, or a memory fault is
-    /// caught. Safe to call from any thread.
+    /// "Damiane", "Oongka"). Delegates to the shared Core resolver
+    /// which walks the static actor chain and classifies the CCOIA
+    /// by appearance-config asset path. Returns an empty string if
+    /// the chain is not yet resolved or the classifier failed.
+    /// Safe to call from any thread.
     std::string current_controlled_character_name() noexcept;
 
     /// WorldSystem base pointer (game_base + RVA). Atomic because x64
@@ -157,11 +193,11 @@ namespace Transmog
 
     /// Snapshot of auth-table real itemId per slot at last apply,
     /// indexed by TransmogSlot enum (0..k_slotCount-1). Compared
-    /// against live auth state to detect real-item swaps. Originally
-    /// 5-armor only; widened to all supported slots on 2026-05-07 so
-    /// real-item changes on accessories and weapon slots (e.g. tool
-    /// vs. 2H sword sharing engine slot tag 0x0D) trigger re-apply.
-    /// Slots LT does not actively manage stay zeroed.
+    /// against live auth state to detect real-item swaps. Covers
+    /// every supported slot so real-item changes on accessories and
+    /// weapon slots (e.g. tool vs. 2H sword sharing engine slot tag
+    /// 0x0D) trigger re-apply. Slots LT does not actively manage
+    /// stay zeroed.
     std::array<std::uint16_t, k_slotCount> &last_applied_real_ids();
 
     /// Carrier itemIds used in the last apply, indexed by TransmogSlot.

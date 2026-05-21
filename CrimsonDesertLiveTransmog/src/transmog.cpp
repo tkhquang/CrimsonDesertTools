@@ -51,6 +51,19 @@ namespace Transmog
         DMK::Config::register_atomic<bool>(
             "General", "PlayerOnly", "Player Only", flag_player_only(), true);
 
+        // When the dropdown is pinned to a non-controlled character,
+        // route overlay-UI edits onto that character's body instead of
+        // cross-applying onto whoever you control. Engine-triggered
+        // equip events still target the controlled body, so the
+        // controlled character's transmog stays consistent across
+        // their own gear changes. Disable to restore the legacy
+        // cross-body behaviour (preset items rendered on the
+        // controlled body regardless of the dropdown).
+        DMK::Config::register_atomic<bool>(
+            "General", "ApplyToSelectedCharacter",
+            "Apply To Selected Character",
+            flag_apply_to_editing(), true);
+
         // When true, always use the standalone transparent overlay window
         // instead of the ReShade addon tab. Useful if ReShade is installed
         // but the user prefers the standalone overlay.
@@ -61,6 +74,27 @@ namespace Transmog
                 set_force_standalone(val);
             },
             false);
+
+        // Protagonist codename overrides for CDCore's appearance-config
+        // classifier. Each codename is a substring search target inside
+        // the actor's appearance-config asset path. Defaults match the
+        // shipped engine subfolder names; provided in case a future
+        // patch or mod renames a subfolder. Empty values are ignored.
+        DMK::Config::register_string(
+            "General", "KliffCodename", "Kliff Codename",
+            [](const std::string &val)
+            { CDCore::set_protagonist_codenames(val, {}, {}); },
+            "cd_phm_macduff");
+        DMK::Config::register_string(
+            "General", "DamianeCodename", "Damiane Codename",
+            [](const std::string &val)
+            { CDCore::set_protagonist_codenames({}, val, {}); },
+            "cd_phw_damian");
+        DMK::Config::register_string(
+            "General", "OongkaCodename", "Oongka Codename",
+            [](const std::string &val)
+            { CDCore::set_protagonist_codenames({}, {}, val); },
+            "cd_phm_oongka");
 
         // Experimental: master toggle for the per-shader-property
         // ColorOverride pipeline (publisher hook, setter substitute,
@@ -190,6 +224,79 @@ namespace Transmog
         return resolve_player_component() > 0x10000;
     }
 
+    namespace
+    {
+        // Map PresetManager character names to the 1-based char-idx
+        // CDCore::snapshot_body_cache emits (1=Kliff, 2=Damiane,
+        // 3=Oongka). Returns 0 for unknown names so the targeted-apply
+        // path can refuse to schedule rather than guess.
+        std::uint32_t char_idx_for_preset_name(
+            const std::string &name) noexcept
+        {
+            if (name == "Kliff")   return 1;
+            if (name == "Damiane") return 2;
+            if (name == "Oongka")  return 3;
+            return 0;
+        }
+
+        // Editing-target gate consulted by every overlay-UI entry point
+        // (manual_apply, manual_apply_slot, manual_clear). Returns
+        // true if the caller should proceed with `schedule_transmog_*`;
+        // false if it should bail (the editing character is not in the
+        // live snapshot and the user opted out of cross-body apply).
+        //
+        // When the pin is off OR the flag is off, the helper is a
+        // no-op and the caller proceeds with the legacy controlled-
+        // body path. When the pin is on AND the flag is on, the helper
+        // resolves the editing character's char-idx, primes
+        // `set_targeted_apply_char_idx` so the worker redirects this
+        // apply, and returns true. If the editing character is not
+        // currently live, the helper logs at info level and returns
+        // false so the caller skips scheduling entirely.
+        bool prime_targeted_apply_if_pinned() noexcept
+        {
+            auto &pm = PresetManager::instance();
+            if (!pm.editing_pinned())
+                return true;
+            if (!flag_apply_to_editing().load(std::memory_order_acquire))
+                return true;
+
+            const std::string editName{pm.editing_character()};
+            const auto idx = char_idx_for_preset_name(editName);
+            if (idx == 0)
+                return true; // Unknown character name; fall back to default.
+
+            // Resolve the snapshot now so the entry point can decide
+            // whether to schedule. The worker re-resolves at apply
+            // time too -- this pre-check just lets us skip scheduling
+            // when the editing body is clearly not live.
+            std::array<CDCore::BodyCacheEntry, 3> entries{};
+            const auto n = CDCore::snapshot_body_cache(
+                entries.data(), entries.size());
+            bool live = false;
+            for (std::size_t i = 0; i < n; ++i)
+            {
+                if (entries[i].charIdx == idx)
+                {
+                    live = true;
+                    break;
+                }
+            }
+            if (!live)
+            {
+                DMK::Logger::get_instance().info(
+                    "[targeted-apply] editing '{}' not currently "
+                    "loaded -- preset edit saved, render deferred "
+                    "until {} is in the world",
+                    editName, editName);
+                return false;
+            }
+
+            set_targeted_apply_char_idx(idx);
+            return true;
+        }
+    } // namespace
+
     void manual_apply()
     {
         if (!slot_populator_fn())
@@ -202,6 +309,8 @@ namespace Transmog
             DMK::Logger::get_instance().debug("Manual apply: player not found");
             return;
         }
+        if (!prime_targeted_apply_if_pinned())
+            return;
 
         DMK::Logger::get_instance().debug("Manual apply: scheduling (debounced)");
         clear_pending().store(false, std::memory_order_release);
@@ -220,6 +329,8 @@ namespace Transmog
                 "Manual apply slot={}: player not found", slotIdx);
             return;
         }
+        if (!prime_targeted_apply_if_pinned())
+            return;
 
         DMK::Logger::get_instance().debug(
             "Manual apply slot={}: scheduling (debounced)", slotIdx);
@@ -237,6 +348,8 @@ namespace Transmog
             DMK::Logger::get_instance().warning("Manual clear: player not found");
             return;
         }
+        if (!prime_targeted_apply_if_pinned())
+            return;
 
         DMK::Logger::get_instance().info("Manual clear: scheduling (debounced)");
         clear_pending().store(true, std::memory_order_release);
@@ -683,20 +796,17 @@ namespace Transmog
 
         if (addrs.mapLookup)
         {
-            auto nameToHash = scan_indexed_string_table(addrs.mapLookup);
-            if (!nameToHash.empty())
-            {
-                auto resolved = PartShowSuppress::init_slot_hashes(nameToHash);
-                logger.info(
-                    "[dispatch] slot hashes initialized: {}/{} slots resolved",
-                    resolved, k_slotCount);
-            }
-            else
-            {
-                logger.debug(
-                    "[dispatch] IndexedStringA scan returned empty -- "
-                    "slot hashes unresolved, PartShowSuppress disabled");
-            }
+            // Deferred slot-hash resolution. A synchronous scan here
+            // would observe a small / empty IndexedStringA table on
+            // cold-launch (LT loaded before the game finishes wiring
+            // main-menu state), leaving PartShowSuppress inert for
+            // the whole session. The deferred worker polls until
+            // world-ready, then commits once every expected slot hash
+            // is present. See transmog_worker.hpp for the contract.
+            launch_deferred_slot_hash_scan();
+            logger.info(
+                "[dispatch] slot-hash resolution scheduled "
+                "(deferred until world-ready)");
         }
         else
         {
@@ -1039,10 +1149,11 @@ namespace Transmog
 
         // --- Input ---
 
-        // Resolve WorldSystem pointer for player detection on load and
-        // publish it to Core. CDCore walks this chain to reach the
-        // rotating `user+0xD8` client body pointer that powers the body
-        // learning cache and the structural Kliff anchor.
+        // Resolve WorldSystem pointer for LT-local chain walks
+        // (per-character presets, load-detect, apply-side a1 fallbacks).
+        // Independent of CDCore::controlled_char, which now uses the
+        // static-chain [moduleBase + 0x5FA0430] anchor and does not
+        // need a published WorldSystem holder.
         {
             auto wsAddr = resolve_address(
                 k_worldSystemCandidates,
@@ -1052,97 +1163,12 @@ namespace Transmog
             {
                 world_system_ptr().store(wsAddr, std::memory_order_release);
                 logger.info("WorldSystem pointer at 0x{:X}", wsAddr);
-                CDCore::set_world_system_holder(wsAddr);
             }
             else
             {
                 logger.warning(
                     "WorldSystem AOB failed -- load-time transmog and "
                     "per-character presets disabled");
-            }
-        }
-
-        // Resolve the radial-swap-input site and install the CDCore
-        // mid-hook. The callback stamps a monotonic timestamp consumed
-        // by `radial_swap_pending()` to distinguish a user swap from a
-        // save-load arena rotation; the character identity itself
-        // comes from the focus-broadcast hook below.
-        //
-        // Two-consumer (LT + EH) coordination: CrimsonDesertCore is a
-        // STATIC library, so this DLL owns its own MidHook independent
-        // of any sibling DLL's MidHook against the same process address.
-        // The AOB cascade is ordered to match either an unpatched site
-        // or a site whose prelude bytes have already been displaced by
-        // a sibling's earlier MidHook install (see anchors.hpp), so the
-        // scan succeeds regardless of load order. SafetyHook's internal
-        // chaining at the JMP target lets both DLLs' callbacks fire on
-        // every radial swap.
-        {
-            const auto radialAddr = resolve_address(
-                k_radialSwapKeyCandidates,
-                std::size(k_radialSwapKeyCandidates),
-                "RadialSwapKey");
-            if (radialAddr)
-            {
-                if (!CDCore::install_radial_swap_hook(radialAddr))
-                {
-                    logger.warning(
-                        "Radial-swap input hook install failed -- "
-                        "save-load disambiguation will fall back to "
-                        "the conservative path");
-                }
-            }
-            else
-            {
-                logger.warning(
-                    "RadialSwapKey AOB failed -- save-load "
-                    "disambiguation will fall back to the "
-                    "conservative path");
-            }
-        }
-
-        // Tier-0 controlled-character resolver: focus-actor broadcast
-        // capture. Two parts:
-        //   1) AOB-resolve the three engine-interned focus-actor hash
-        //      globals (Kliff/Oongka/Damian). The numeric handles vary
-        //      per game version so we read them from RAM each session.
-        //   2) Hook sub_14353BA60 entry. The MidHook reads ctx.r9
-        //      (the new focus handle), filters against the three
-        //      published globals, and stamps the resolved character.
-        //
-        // This layer is the canonical cold-load / save-load identity
-        // signal: the engine fires the broadcast during world-spawn
-        // before the player can interact, so the cache is populated
-        // before any mod query occurs. Failure on either step degrades
-        // gracefully to the structural-Kliff anchor + LKG cache.
-        {
-            const bool published =
-                CDCore::resolve_and_publish_focus_actor_globals();
-            if (!published)
-            {
-                logger.warning(
-                    "Focus-actor hash global resolution failed -- "
-                    "Tier-0 controlled-character signal disabled");
-            }
-
-            const auto bcastAddr = resolve_address(
-                CDCore::Anchors::k_focusBroadcastCandidates,
-                std::size(CDCore::Anchors::k_focusBroadcastCandidates),
-                "FocusBroadcast");
-            if (bcastAddr)
-            {
-                if (!CDCore::install_focus_broadcast_hook(bcastAddr))
-                {
-                    logger.warning(
-                        "Focus-broadcast hook install failed -- "
-                        "Tier-0 controlled-character signal disabled");
-                }
-            }
-            else
-            {
-                logger.warning(
-                    "FocusBroadcast AOB failed -- Tier-0 controlled-"
-                    "character signal disabled");
             }
         }
 
@@ -1215,18 +1241,7 @@ namespace Transmog
         stop_load_detect_thread();
         stop_apply_worker();
         join_deferred_nametable_scan();
-
-        // Tear down the Core-owned radial-swap mid-hook before the
-        // SafetyHook trampoline pages can be touched by a late-firing
-        // game thread. Idempotent: safe to call when no hook is
-        // installed and when the matching uninstall has already run
-        // from a sibling consumer.
-        CDCore::uninstall_radial_swap_hook();
-
-        // Same pre-DMK_Shutdown ordering as the radial-swap teardown:
-        // tear down the focus-broadcast mid-hook before the SafetyHook
-        // pages can be touched by a late-firing engine focus event.
-        CDCore::uninstall_focus_broadcast_hook();
+        join_deferred_slot_hash_scan();
 
         PrefabWrapperSwap::shutdown();
 
