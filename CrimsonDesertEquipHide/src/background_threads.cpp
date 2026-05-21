@@ -57,7 +57,7 @@ namespace EquipHide
         //       has finished growing for this load.
         constexpr int         k_scanRetryMs       = 2000;
         constexpr int         k_scanInitialDelayMs = 8000;
-        constexpr int         k_scanWarnEvery     = 30;
+        constexpr int         k_scanHeartbeatEvery = 30;
         constexpr int         k_stabilityRequired = 5;
         constexpr std::size_t k_minStableCount    = 32;
 
@@ -120,8 +120,8 @@ namespace EquipHide
                 // almost-empty hash map.
                 if (read_controlled_actor_ptr_seh() == 0)
                 {
-                    if (attempt % k_scanWarnEvery == 0)
-                        logger.warning(
+                    if (attempt % k_scanHeartbeatEvery == 0)
+                        logger.debug(
                             "IndexedStringA deferred scan: still waiting "
                             "after {} attempts (controlled actor not yet "
                             "live)",
@@ -138,8 +138,8 @@ namespace EquipHide
                 {
                     // Table still entirely empty: reset streak so we never
                     // commit the empty state on stability.
-                    if (attempt % k_scanWarnEvery == 0)
-                        logger.warning(
+                    if (attempt % k_scanHeartbeatEvery == 0)
+                        logger.debug(
                             "IndexedStringA deferred scan: still waiting "
                             "after {} attempts (table empty)",
                             attempt);
@@ -161,8 +161,8 @@ namespace EquipHide
                             "{} entries (below min {}, awaiting growth)",
                             attempt, curCount, k_minStableCount);
                     }
-                    if (attempt % k_scanWarnEvery == 0)
-                        logger.warning(
+                    if (attempt % k_scanHeartbeatEvery == 0)
+                        logger.debug(
                             "IndexedStringA deferred scan: {} entries "
                             "after {} attempts (below min commit "
                             "threshold {}, registry still loading)",
@@ -182,8 +182,8 @@ namespace EquipHide
                         "entries (changed, stability streak reset)",
                         attempt, curCount);
 
-                    if (attempt % k_scanWarnEvery == 0)
-                        logger.warning(
+                    if (attempt % k_scanHeartbeatEvery == 0)
+                        logger.debug(
                             "IndexedStringA deferred scan: still waiting "
                             "after {} attempts ({} entries currently, "
                             "table still settling)",
@@ -200,8 +200,8 @@ namespace EquipHide
                         attempt, curCount, stableStreak,
                         k_stabilityRequired);
 
-                    if (attempt % k_scanWarnEvery == 0)
-                        logger.warning(
+                    if (attempt % k_scanHeartbeatEvery == 0)
+                        logger.debug(
                             "IndexedStringA deferred scan: {} entries "
                             "after {} attempts (stable streak {}/{}, "
                             "need {} consecutive identical scans)",
