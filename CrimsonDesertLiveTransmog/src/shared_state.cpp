@@ -37,6 +37,7 @@ namespace Transmog
     static std::atomic<bool> s_colorOverride{false};
     static std::atomic<bool> s_dumpItemPrefabs{false};
     static std::atomic<bool> s_dumpItemCatalog{false};
+    static std::atomic<bool> s_applyToEditing{true};
 
     static SlotPopulatorFn s_slotPopulator = nullptr;
     static InitSwapEntryFn s_initSwapEntry = nullptr;
@@ -53,6 +54,21 @@ namespace Transmog
     static std::array<std::uint16_t, k_slotCount> s_lastAppliedCarrierIds{};
     static std::array<bool, k_slotCount> s_forceApplyPending{};
 
+    // Per-character buffered snapshots of the four applied-state
+    // arrays above. Indexed by (idx-1) where idx is the 1-based
+    // CDCore protagonist index (1=Kliff, 2=Damiane, 3=Oongka). The
+    // worker hydrates the globals from the relevant slot before each
+    // apply and writes the post-apply globals back, so Phase A
+    // teardown always sees a per-body truth source.
+    static std::array<std::array<std::uint16_t, k_slotCount>, 3>
+        s_lastAppliedIdsPerChar{};
+    static std::array<std::array<bool, k_slotCount>, 3>
+        s_realDamagedPerChar{};
+    static std::array<std::array<std::uint16_t, k_slotCount>, 3>
+        s_lastAppliedRealIdsPerChar{};
+    static std::array<std::array<std::uint16_t, k_slotCount>, 3>
+        s_lastAppliedCarrierIdsPerChar{};
+
     ResolvedAddresses &resolved_addrs() { return s_resolvedAddrs; }
     std::array<SlotMapping, k_slotCount> &slot_mappings() { return s_slotMappings; }
     std::array<uint16_t, k_slotCount> &last_applied_ids() { return s_lastAppliedIds; }
@@ -63,6 +79,7 @@ namespace Transmog
     std::atomic<bool> &flag_color_override() { return s_colorOverride; }
     std::atomic<bool> &flag_dump_item_prefabs() { return s_dumpItemPrefabs; }
     std::atomic<bool> &flag_dump_item_catalog() { return s_dumpItemCatalog; }
+    std::atomic<bool> &flag_apply_to_editing() { return s_applyToEditing; }
 
     SlotPopulatorFn &slot_populator_fn() { return s_slotPopulator; }
     InitSwapEntryFn &init_swap_entry_fn() { return s_initSwapEntry; }
@@ -88,5 +105,39 @@ namespace Transmog
     std::atomic<bool> &clear_pending() { return s_clearPending; }
     std::atomic<bool> &dye_dirty() { return s_dyeDirty; }
     std::atomic<std::size_t> &pending_slot_index() { return s_pendingSlotIndex; }
+
+    void rehydrate_applied_state_for_char(std::uint32_t idx) noexcept
+    {
+        if (idx < 1 || idx > 3)
+            return;
+        const auto bucket = static_cast<std::size_t>(idx - 1);
+        s_lastAppliedIds         = s_lastAppliedIdsPerChar[bucket];
+        s_realDamaged            = s_realDamagedPerChar[bucket];
+        s_lastAppliedRealIds     = s_lastAppliedRealIdsPerChar[bucket];
+        s_lastAppliedCarrierIds  = s_lastAppliedCarrierIdsPerChar[bucket];
+    }
+
+    void capture_applied_state_for_char(std::uint32_t idx) noexcept
+    {
+        if (idx < 1 || idx > 3)
+            return;
+        const auto bucket = static_cast<std::size_t>(idx - 1);
+        s_lastAppliedIdsPerChar[bucket]        = s_lastAppliedIds;
+        s_realDamagedPerChar[bucket]           = s_realDamaged;
+        s_lastAppliedRealIdsPerChar[bucket]    = s_lastAppliedRealIds;
+        s_lastAppliedCarrierIdsPerChar[bucket] = s_lastAppliedCarrierIds;
+    }
+
+    void reset_all_applied_state() noexcept
+    {
+        s_lastAppliedIds.fill(0);
+        s_realDamaged.fill(false);
+        s_lastAppliedRealIds.fill(0);
+        s_lastAppliedCarrierIds.fill(0);
+        for (auto &row : s_lastAppliedIdsPerChar)         row.fill(0);
+        for (auto &row : s_realDamagedPerChar)            row.fill(false);
+        for (auto &row : s_lastAppliedRealIdsPerChar)     row.fill(0);
+        for (auto &row : s_lastAppliedCarrierIdsPerChar)  row.fill(0);
+    }
 
 } // namespace Transmog

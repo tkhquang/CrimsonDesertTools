@@ -56,6 +56,27 @@ namespace EquipHide
         DMK::Config::register_atomic<bool>(
             "General", "CascadeFix", "Cascade Fix", flag_cascade_fix(), false);
 
+        // Protagonist codename overrides for CDCore's appearance-config
+        // classifier. Each codename is a substring search target inside
+        // the actor's appearance-config asset path. Defaults match the
+        // shipped engine subfolder names; provided in case a future
+        // patch or mod renames a subfolder. Empty values are ignored.
+        DMK::Config::register_string(
+            "General", "KliffCodename", "Kliff Codename",
+            [](const std::string &val)
+            { CDCore::set_protagonist_codenames(val, {}, {}); },
+            "cd_phm_macduff");
+        DMK::Config::register_string(
+            "General", "DamianeCodename", "Damiane Codename",
+            [](const std::string &val)
+            { CDCore::set_protagonist_codenames({}, val, {}); },
+            "cd_phw_damian");
+        DMK::Config::register_string(
+            "General", "OongkaCodename", "Oongka Codename",
+            [](const std::string &val)
+            { CDCore::set_protagonist_codenames({}, {}, val); },
+            "cd_phm_oongka");
+
         for (std::size_t i = 0; i < CATEGORY_COUNT; ++i)
         {
             const auto cat = static_cast<Category>(i);
@@ -399,86 +420,14 @@ namespace EquipHide
 
         auto &addrs = resolved_addrs();
 
+        // WorldSystem is consumed by EH-local chain walks
+        // (background_threads / player_detection) for user+0xD8 body
+        // resolution. CDCore::controlled_char uses the independent
+        // static-chain [moduleBase + 0x5FA0430] anchor and does not
+        // need a published holder.
         addrs.worldSystem = resolve_address(
             k_worldSystemCandidates, std::size(k_worldSystemCandidates),
             "WorldSystem");
-
-        // Publish the WorldSystem holder to Core. CDCore walks this
-        // chain to reach the rotating `user+0xD8` client body pointer
-        // that the body learning cache keys on. Idempotent across
-        // consumers: when LiveTransmog is loaded alongside, both
-        // publish the same address and the later writer wins.
-        CDCore::set_world_system_holder(addrs.worldSystem);
-
-        // Install the radial-swap-input capture mid-hook via Core.
-        // CDCore owns this DLL's SafetyHook instance; the callback
-        // stamps a monotonic timestamp consumed by
-        // `radial_swap_pending()` to disambiguate user radial swaps
-        // from save-load arena rotations.
-        //
-        // Two-consumer (EH + LT) coordination: CrimsonDesertCore is a
-        // STATIC library, so this DLL owns its own MidHook independent
-        // of any sibling DLL's MidHook against the same process address.
-        // The AOB cascade is ordered to match either an unpatched site
-        // or a site whose prelude bytes have already been displaced by
-        // a sibling's earlier MidHook install (see anchors.hpp), so the
-        // scan succeeds regardless of load order. SafetyHook's internal
-        // chaining at the JMP target lets both DLLs' callbacks fire on
-        // every radial swap.
-        {
-            const auto radialAddr = resolve_address(
-                k_radialSwapKeyCandidates,
-                std::size(k_radialSwapKeyCandidates),
-                "RadialSwapKey");
-            if (radialAddr)
-            {
-                if (!CDCore::install_radial_swap_hook(radialAddr))
-                    logger.warning(
-                        "Radial-swap input hook install failed -- "
-                        "save-load disambiguation will fall back to "
-                        "the conservative path");
-            }
-            else
-            {
-                logger.warning(
-                    "RadialSwapKey AOB failed -- save-load "
-                    "disambiguation will fall back to the "
-                    "conservative path");
-            }
-        }
-
-        // Tier-0 controlled-character resolver: focus-actor broadcast
-        // capture. AOB-resolve the three engine-interned focus-actor
-        // hash globals, then hook sub_14353BA60 entry to capture R9 on
-        // each broadcast. Failure on either step degrades gracefully
-        // to the structural-Kliff anchor and the LKG cache.
-        {
-            const bool published =
-                CDCore::resolve_and_publish_focus_actor_globals();
-            if (!published)
-                logger.warning(
-                    "Focus-actor hash global resolution failed -- "
-                    "Tier-0 controlled-character signal disabled");
-
-            const auto bcastAddr = resolve_address(
-                CDCore::Anchors::k_focusBroadcastCandidates,
-                std::size(CDCore::Anchors::k_focusBroadcastCandidates),
-                "FocusBroadcast");
-
-            if (bcastAddr)
-            {
-                if (!CDCore::install_focus_broadcast_hook(bcastAddr))
-                    logger.warning(
-                        "Focus-broadcast hook install failed -- "
-                        "Tier-0 controlled-character signal disabled");
-            }
-            else
-            {
-                logger.warning(
-                    "FocusBroadcast AOB failed -- Tier-0 controlled-"
-                    "character signal disabled");
-            }
-        }
 
         addrs.childActorVtbl = resolve_address(
             k_childActorVtblCandidates, std::size(k_childActorVtblCandidates),
@@ -811,15 +760,6 @@ namespace EquipHide
         // would race the loader unmapping the Logic-DLL pages backing
         // the cleanup function itself.
         cleanup_vis_bytes();
-        logger.flush();
-
-        // Tear down the Core-owned radial-swap mid-hook before the
-        // SafetyHook trampoline pages can be touched by a late-firing
-        // game thread. Idempotent.
-        CDCore::uninstall_radial_swap_hook();
-        // Same ordering: tear down the focus-broadcast mid-hook before
-        // the SafetyHook trampoline pages can be unmapped.
-        CDCore::uninstall_focus_broadcast_hook();
         logger.flush();
 
         logger.info("{} shutdown: step 5 DMK_Shutdown", MOD_NAME);

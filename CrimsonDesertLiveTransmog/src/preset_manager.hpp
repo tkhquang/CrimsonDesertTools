@@ -210,6 +210,27 @@ namespace Transmog
         // the *controlled* axis. editing_character() and friends are
         // the UI-side API.
         //
+        // Three character axes drive the apply pipeline. Mixing them
+        // is the cause of every "wrong char rendered" bug LT has hit
+        // since multi-character support landed; resist the urge to
+        // read "active_character" inside an apply path just because
+        // it's the shortest name:
+        //
+        //   1. CONTROLLED -- whoever the player is driving in-game.
+        //      Tracked by m_controlledCharacter / active_character().
+        //      Updated by load_detect_thread on radial swap / save-
+        //      load.
+        //   2. EDITING -- whoever the user picked in the overlay
+        //      dropdown. Tracked by m_editingCharacter /
+        //      editing_character(). Updated by the UI on dropdown
+        //      change.
+        //   3. APPLY TARGET -- whose body the next apply will install
+        //      its carrier+fake on. Equals EDITING when the pin is
+        //      engaged (editing != controlled), CONTROLLED otherwise.
+        //      Use current_apply_owner() (below) -- never inline the
+        //      ternary at a call site, or the next refactor will miss
+        //      one.
+        //
         // Thread safety: both axes are written on different threads
         // (load-detect writes controlled; the overlay render thread
         // writes editing). PresetManager has no internal locking;
@@ -391,5 +412,19 @@ namespace Transmog
         bool        m_editingPinned       = false;
         std::string m_filePath;
     };
+
+    /// Returns the name of the character whose body the next apply
+    /// SHOULD land on. This is the editing character when the editing
+    /// pin is engaged (the user has dropped the dropdown onto a
+    /// non-controlled char), and the controlled character otherwise.
+    /// Every place that needs to ask "whose carrier do I install" or
+    /// "whose row in the per-char trackers do I read" should consult
+    /// this helper rather than re-deriving the ternary in-line.
+    ///
+    /// Returns a reference into PresetManager's internal strings;
+    /// safe for use within a single thread of execution but do not
+    /// store the reference across calls that might mutate the
+    /// editing/controlled axes.
+    [[nodiscard]] const std::string &current_apply_owner() noexcept;
 
 } // namespace Transmog

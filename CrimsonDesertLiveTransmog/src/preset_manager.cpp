@@ -1492,17 +1492,26 @@ namespace Transmog
             mappings[i].targetItemId = p->slots[i].itemId;
 
             // Body-mesh slots only persist `prefabName`; the carrier
-            // itemId is derived here from the controlled character's
-            // default plate set. The carrier MUST come from the live
-            // body because PWS pointer-equality matches against the
-            // wrapper that body actually emits; using the editing
-            // character's carrier here would silently no-op the swap
-            // whenever editing is pinned to a different character.
+            // itemId is derived here so the body actually rendering
+            // the slot emits the wrapper PWS's substitution map keys
+            // on. With per-character PWS rows now contributing to a
+            // single union swap map, the correct carrier owner is the
+            // editing character whenever the pin is engaged -- their
+            // body (or the controlled body, when cross-body apply is
+            // selected) needs to emit the editing character's
+            // expected src wrapper so the editing character's row in
+            // s_swapMap matches and substitutes to the picked prefab.
+            // Using the controlled character's carrier here under a
+            // pin would install the controlled character's prefab on
+            // the targeted body, where it would either no-op or
+            // collide with the controlled character's own row in the
+            // union map and render that character's tgt by mistake.
             if (mappings[i].targetItemId == 0 &&
                 !p->slots[i].prefabName.empty())
             {
                 const auto carrier = Transmog::default_carrier_for_slot(
-                    static_cast<TransmogSlot>(i), m_controlledCharacter);
+                    static_cast<TransmogSlot>(i),
+                    Transmog::current_apply_owner());
                 if (carrier != 0)
                 {
                     mappings[i].targetItemId = carrier;
@@ -1520,6 +1529,22 @@ namespace Transmog
         // apply_to_state when populate_slot_catalogs finishes so the
         // selection lands as soon as the data is available.
         namespace PWS = Transmog::PrefabWrapperSwap;
+
+        // Bind the editing character into PWS first so subsequent
+        // set_selection calls mirror into the correct per-char row
+        // and the active-editing-view globals reflect that
+        // character's previously-saved selections. Without this
+        // binding the writes would leak into whatever bucket was
+        // last bound, and switching the editing character would
+        // silently drop the outgoing character's body-mesh picks.
+        {
+            std::uint32_t editIdx = 0;
+            if (m_editingCharacter == "Kliff")   editIdx = 1;
+            else if (m_editingCharacter == "Damiane") editIdx = 2;
+            else if (m_editingCharacter == "Oongka")  editIdx = 3;
+            PWS::set_active_char_idx(editIdx);
+        }
+
         for (std::size_t i = 0; i < k_slotCount; ++i)
         {
             const auto tslot = static_cast<TransmogSlot>(i);
@@ -1673,6 +1698,13 @@ namespace Transmog
     CharacterPresets &PresetManager::ensure_character(const std::string &name)
     {
         return m_characters[name]; // Default-constructs if absent.
+    }
+
+    const std::string &current_apply_owner() noexcept
+    {
+        auto &pm = PresetManager::instance();
+        return pm.editing_pinned() ? pm.editing_character()
+                                   : pm.active_character();
     }
 
 } // namespace Transmog

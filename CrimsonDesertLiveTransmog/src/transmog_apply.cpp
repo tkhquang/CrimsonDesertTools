@@ -198,10 +198,9 @@ namespace Transmog
         alignas(16) uint8_t swapEntry[256]{};
         initEntry(reinterpret_cast<__int64>(swapEntry));
 
-        // 2026-05-08 reinstated: enable charClass bypass for cross-
-        // class direct applies. The 2026-05-07 attempt was scoped to
-        // fixing cross-character WEAPON visibility (gated separately
-        // at equipslotinfo.entries[N].etl_hashes -- bypass here doesn't
+        // Enable charClass bypass for cross-class direct applies.
+        // Cross-character WEAPON visibility is gated separately at
+        // equipslotinfo.entries[N].etl_hashes (bypass here does NOT
         // help that case). What it DOES fix: cross-class accessory
         // teardown for slots without a Damiane/Oongka-specific carrier
         // family (Mask, etc.). Without bypass, SlotPopulator's class
@@ -286,7 +285,7 @@ namespace Transmog
     }
 
     // Expected equip-type u16 (at desc+0x42) for the given playable
-    // character. CE-verified 2026-04-21:
+    // character:
     //   Kliff   = 0x0004
     //   Oongka  = 0x0001
     //   Damiane = 0x0001
@@ -313,11 +312,12 @@ namespace Transmog
             return true;
 
         // Damiane and Oongka ALWAYS use the carrier-hybrid path. The
-        // tribe-gender_list filter (verified 2026-05-08 across 6 helms:
-        // Catfish/Madacus/Brimstone/Hyena reject Oongka, Marni-Devotee
-        // and Oongka_PlateArmor_Helm_III work) rejects most cross-body
-        // items at the engine's class gate, producing INVISIBLE renders
-        // even when equip_type matches. Forcing the carrier path on
+        // engine's tribe-gender_list filter rejects most cross-body
+        // items at the class gate (e.g. Catfish/Madacus/Brimstone/
+        // Hyena helms reject Oongka while Marni-Devotee and
+        // Oongka_PlateArmor_Helm_III pass), producing INVISIBLE
+        // renders even when equip_type matches. Forcing the carrier
+        // path on
         // every Damiane/Oongka apply uses the charClassBypass +
         // equip-type patch combo that was already proven to bypass both
         // class and tribe checks. Kliff keeps the cheaper direct-apply
@@ -349,7 +349,7 @@ namespace Transmog
     }
 
     // Legacy wrapper retained for any call sites that still assume
-    // Kliff. Matches the pre-2026-04-21 behaviour exactly.
+    // Kliff. Defers to the per-character overload with Kliff bound.
     bool needs_carrier(uint16_t itemId)
     {
         return needs_carrier(itemId, std::string("Kliff"));
@@ -601,12 +601,12 @@ namespace Transmog
         auto &lastIds = last_applied_ids();
         auto &m = mappings[slotIdx];
 
-        // resolve_player_component() walks WorldSystem → ActorManager
-        // → UserActor → actor, which we confirmed in 2026-04-21 CE
-        // probes always returns Kliff's component regardless of the
-        // currently-controlled character. Using it unconditionally
-        // clobbered per-character a1 values from VEC/BatchEquip hooks.
-        // Keep it ONLY as a fallback when the passed-in a1 is invalid.
+        // resolve_player_component() walks WorldSystem -> ActorManager
+        // -> UserActor -> actor and always returns Kliff's component
+        // regardless of the currently-controlled character. Using it
+        // unconditionally clobbers per-character a1 values from VEC /
+        // BatchEquip hooks. Keep it ONLY as a fallback when the
+        // passed-in a1 is invalid.
         if (a1 < 0x10000 && world_system_ptr().load(std::memory_order_acquire))
         {
             auto fresh = resolve_player_component();
@@ -737,8 +737,14 @@ namespace Transmog
         if (targetId != 0)
         {
             const auto tmSlot = static_cast<TransmogSlot>(slotIdx);
-            const auto &activeChar =
-                PresetManager::instance().active_character();
+            // Use current_apply_owner so a targeted-apply onto a
+            // non-controlled body resolves its carrier from THAT
+            // body's defaults. PresetManager::active_character()
+            // would return the controlled character, which under
+            // pin+flag is the wrong axis -- carrier mismatch installs
+            // the wrong wrapper family on the body and produces
+            // visual cross-talk through the swap map.
+            const auto &activeChar = current_apply_owner();
             const bool useCarrier = needs_carrier(targetId, activeChar);
             const uint16_t carrierId =
                 useCarrier
@@ -1460,10 +1466,14 @@ namespace Transmog
             // re-applies.
             //
             // Decide: direct apply or carrier-assisted apply.
+            // current_apply_owner picks the editing character when
+            // the dropdown pin is engaged, so a targeted-apply on a
+            // non-controlled body installs THAT body's carrier
+            // family. See the matching block in apply_single_slot_-
+            // transmog for the cross-talk failure mode this avoids.
             const auto tmSlot = static_cast<TransmogSlot>(i);
             const auto targetId = m.targetItemId;
-            const auto &activeChar =
-                PresetManager::instance().active_character();
+            const auto &activeChar = current_apply_owner();
             const bool useCarrier = needs_carrier(targetId, activeChar);
             const uint16_t carrierId =
                 useCarrier
@@ -1790,16 +1800,16 @@ namespace Transmog
 
         suppress_vec().store(false, std::memory_order_release);
 
-        // (Auto-deactivate of PrefabWrapperSwap was tried here but
-        // removed: the heap-walk-on-deactivate stalled preset switches
-        // by ~1m and didn't fix the helm leak anyway, because the leak
-        // is in scene-graph CHILDREN re-parented via sub_1425F41F0's
-        // runtime-resource-pointer keying -- see
-        // project_helm_runtime_effect_layer memory note. The leak is
-        // a fundamental limitation of runtime mesh substitution and
-        // requires HAWT-style PAZ patching to fully fix. Pointer-swap
-        // now stays active across applies; user clears explicitly via
-        // F10 toggle or LT's Clear button.
+        // PrefabWrapperSwap stays active across applies. Auto-
+        // deactivate after each apply is intentionally not scheduled:
+        // the wrapper-substitution path has no cheap teardown (an
+        // earlier heap-walk-on-deactivate attempt stalled preset
+        // switches by ~1 minute) and the residual helm leak sits in
+        // scene-graph children re-parented via sub_1425F41F0's
+        // runtime-resource-pointer keying, outside the wrapper-
+        // substitution path entirely. Clearing that residue requires
+        // PAZ-level patching; users invoke LT's Clear button when
+        // they want the swap explicitly torn down.
     }
 
     void clear_all_transmog(__int64 a1)
@@ -2019,7 +2029,7 @@ namespace Transmog
         // PrefabWrapperSwap::deactivate_for_clear() here.
         //
         // The natpipe hook on sub_142711DF0 must stay armed
-        // (s_active=true with s_swapMap populated) so any later
+        // (s_active=true with s_swapMapPerChar populated) so any later
         // organic unequip / scene-graph teardown -- triggered when
         // the user swaps gear via the radial after a Clear -- can
         // still find and unlink the Bastier-target wrappers LT

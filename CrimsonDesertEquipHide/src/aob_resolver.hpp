@@ -44,8 +44,6 @@ namespace EquipHide
         CDCore::Anchors::k_visualEquipChangeCandidates;
     inline constexpr auto &k_batchEquipCandidates =
         CDCore::Anchors::k_batchEquipCandidates;
-    inline constexpr auto &k_radialSwapKeyCandidates =
-        CDCore::Anchors::k_radialSwapKeyCandidates;
     // Historical EH name. BatchEquip is the unified label.
     inline constexpr auto &k_visualEquipSwapCandidates =
         CDCore::Anchors::k_batchEquipCandidates;

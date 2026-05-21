@@ -226,6 +226,19 @@ namespace EquipHide
             auto controlledActor = read_ptr_unsafe(user, 0xD8);
             static std::uintptr_t s_prevControlledActor = 0;
             static bool s_pendingReloadInvalidation = false;
+            // CDCore world-generation: bumps when the engine
+            // reallocates Kliff's CCOIA (save-load). Used by the
+            // atomic-X->Y branch below to disambiguate a save-load
+            // from an in-session radial swap.
+            //
+            // Init=0 is safe because the atomic-X->Y branch that
+            // consumes the prev value is gated on
+            // s_prevControlledActor being non-zero (also static-
+            // init=0), so it cannot fire on the very first tick;
+            // by tick 2 s_prevWorldGen has been overwritten with
+            // curWorldGen below.
+            static std::uint64_t s_prevWorldGen = 0;
+            const auto curWorldGen = CDCore::world_generation();
             if (controlledActor != s_prevControlledActor)
             {
                 if (controlledActor == 0 && s_prevControlledActor != 0)
@@ -249,63 +262,32 @@ namespace EquipHide
                 }
                 else if (s_prevControlledActor != 0 && controlledActor != 0)
                 {
-                    /* Atomic-swap save-load: v1.05 sometimes rotates
+                    /* Atomic-swap save-load: the engine rotates
                        user+0xD8 directly between two non-zero values
                        (load-screen window shorter than the resolver's
                        1 s poll, or the engine builds the new actor
                        and atomically swaps without ever publishing
-                       null) which defeats the X->0->Y state machine
-                       above and would otherwise mis-classify as an
-                       in-session radial swap. Disambiguate via the
-                       Core body learning cache: every protagonist
-                       body that was ever observed as the controlled
-                       identity this session is cache-resident, so an
-                       arriving controlled actor that matches NONE of
-                       the cache's entries cannot be one of the bodies
-                       we have already learned. CDCore is statically
-                       linked into each Logic DLL, so this cache is
-                       EH-private (no race with LiveTransmog stamping
-                       its own copy first) and is only mutated by the
-                       resolver call further down in this function.
-                       Disambiguator: a real radial swap leaves a fresh
-                       pending-key record stamped by the radial-swap
-                       safetyhook callback (TTL ~2 s, consumed by the
-                       next chain walk). A save-load has no such record
-                       because
-                       the load originates from the pause/title menu,
-                       not the radial UI. So if the new actor is absent
-                       from the body cache AND no radial input was just
-                       observed, the rotation must be a new-arena
-                       allocation -- treat as save-load. The cache-size
-                       lower bound (>= 1) guards the immediate post-
-                       wipe / pre-stamp window where peekN == 0 carries
-                       no information. */
-                    std::array<CDCore::BodyCacheEntry, 3> peek;
-                    const auto peekN = CDCore::snapshot_body_cache(
-                        peek.data(), peek.size());
-                    bool inCache = false;
-                    for (std::size_t i = 0; i < peekN; ++i)
-                    {
-                        if (peek[i].body == controlledActor)
-                        {
-                            inCache = true;
-                            break;
-                        }
-                    }
+                       null) which defeats the X->0->Y state machine.
+                       Disambiguator: CDCore::world_generation()
+                       increments when the engine reallocates
+                       Kliff's CCOIA during save-load. An in-session
+                       radial swap leaves Kliff's CCOIA pointer
+                       untouched (only sub-manager+0x38 flips between
+                       existing CCOIA pointers), so an unchanged
+                       generation means the rotation is a normal
+                       swap and the body_to_vis_ctrl LRU stays valid. */
                     const bool atomicSaveLoad =
-                        peekN >= 1 && !inCache &&
-                        !CDCore::radial_swap_pending();
+                        curWorldGen != s_prevWorldGen;
 
                     if (atomicSaveLoad)
                     {
                         DMK::Logger::get_instance().info(
                             "Save-load detected (atomic swap): "
-                            "controlled actor (0x{:X} -> 0x{:X}) "
-                            "absent from body cache (n={}, no pending "
-                            "radial); wiping body cache + "
-                            "body_to_vis_ctrl LRU",
+                            "controlled actor (0x{:X} -> 0x{:X}); "
+                            "world_generation {} -> {}; wiping body "
+                            "cache + body_to_vis_ctrl LRU",
                             s_prevControlledActor, controlledActor,
-                            peekN);
+                            s_prevWorldGen, curWorldGen);
                         apply_full_reload_wipe();
                         /* No X->0 was observed, so the deferred flag
                            was never latched -- defensively clear so a
@@ -317,14 +299,13 @@ namespace EquipHide
                     {
                         DMK::Logger::get_instance().info(
                             "Char swap detected: controlled actor "
-                            "(0x{:X} -> 0x{:X}); invalidating swap-scope "
-                            "caches (body cache preserved)",
+                            "(0x{:X} -> 0x{:X}); body cache preserved",
                             s_prevControlledActor, controlledActor);
-                        CDCore::invalidate_swap_caches();
                     }
                 }
                 s_prevControlledActor = controlledActor;
             }
+            s_prevWorldGen = curWorldGen;
 
             /* Bail until the new world has a controlled actor. With
                s_pendingReloadInvalidation still set, walking the body
@@ -335,18 +316,16 @@ namespace EquipHide
                 return;
 
             /* Controlled-character identity via the shared Core
-               resolver. Core walks WorldSystem -> ActorManager ->
-               UserActor -> controlled_actor(+0xD8), then decodes the
-               (party_class, char_kind) u32 pair at the actor's +0xDC
-               and +0xEC into a known character. The WorldSystem holder
-               address is published by this module's init in
-               equip_hide.cpp via CDCore::set_world_system_holder, so
-               the resolver is wired up by the time the polling loop
-               first reaches this point. Idempotent across consumers:
-               LiveTransmog publishes the same address and the later
-               writer wins. Resolver returns 0 -> idx=-1 -> disabled
-               override on holder-not-published, faulted chain walk,
-               or unknown identity key. */
+               resolver. Core walks the static chain
+               [moduleBase + 0x5FA0430] -> +0x28 (ClientUserActor) ->
+               +0x08 (sub-manager) -> +0x38 (controlled CCOIA), then
+               classifies the CCOIA by reading its appearance-config
+               asset path (CCOIA +0x68 -> +0x40 -> +0x40 -> +0x38)
+               and matching the embedded character codename. No
+               publisher / hook setup is required -- the chain anchor
+               defaults to GetModuleHandle(nullptr) + 0x5FA0430.
+               Resolver returns 0 -> idx=-1 -> disabled override on
+               torn chain reads or an unknown codename. */
             {
                 const auto idxU32 = CDCore::current_controlled_character_idx();
                 const int idx = (idxU32 >= 1 && idxU32 <= 3)
@@ -355,16 +334,16 @@ namespace EquipHide
                 set_active_character(idx);
             }
 
-            /* Build the protagonist vis-ctrl list strictly from the body
-               learning cache. Each entry there was stamped while the
-               resolver observed a known controlled identity, so it is
-               guaranteed to be a protagonist body and never an NPC
-               sharing the child-actor vtable. Bodies the user has not
-               yet been in this session are absent from the cache;
-               consumers downstream of visCtrls fall back to vanilla
-               visibility for those bodies, which is the user-accepted
-               trade (one radial cycle through all three protagonists
-               at session start populates every entry). */
+            /* Build the protagonist vis-ctrl list from the live
+               player-CCOIA snapshot. Core walks the static chain:
+               Kliff is always present at sub-manager+0x30; Damiane
+               and Oongka are pulled from the ClientActorManager
+               +0x100 CCOIA-only actor array and filtered through
+               the appearance-config classifier (NPCs and follower
+               humanoids share the array but fail the codename
+               substring match). Snapshot covers all three
+               protagonists from frame zero without requiring the
+               user to cycle through them first. */
             std::array<CDCore::BodyCacheEntry, k_maxProtagonists> bodyEntries;
             const auto entryCount = CDCore::snapshot_body_cache(
                 bodyEntries.data(), bodyEntries.size());

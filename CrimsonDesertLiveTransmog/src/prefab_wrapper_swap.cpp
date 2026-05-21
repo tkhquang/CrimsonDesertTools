@@ -75,25 +75,33 @@ namespace Transmog::PrefabWrapperSwap
     static constexpr std::size_t k_apptHashTableOff = 0x70;
 
     // Module is "active" when at least one slot has a resolved swap
-    // pair installed in s_swapMap. Selection is overlay-driven; there
-    // are no INI keys for this feature.
+    // pair installed in any s_swapMapPerChar bucket. Selection is
+    // overlay-driven; there are no INI keys for this feature.
     static std::atomic<bool> s_active{false};
 
-    // Resolved wrapper address map: source_wrapper_ptr → target_wrapper_ptr.
-    // Built when activation hotkey is pressed; cleared on deactivation.
-    // Read-only on hot path (no locks needed -- pointer-equality lookup
-    // against an immutable map snapshot).
+    // Per-character resolved wrapper address maps. Each character's
+    // apply rebuilds ONLY its own bucket so a Damiane apply does not
+    // wipe Kliff's substitutions while Kliff's body still has tgt
+    // wrappers physically attached. Without per-char buckets, a chained
+    // Kliff-then-Damiane sequence left the next Kliff teardown with an
+    // empty map -- the natpipe-hook found no substitution, the engine
+    // searched for the original src wrapper that the body no longer
+    // held, and the unlink silently failed (helm-stuck bug). The hook
+    // dispatches by s_activeCharIdx so cross-character src collisions
+    // (Kliff+Oongka sharing cd_phm_00_ub_00_0054) still resolve to the
+    // correct target for the body currently being assembled.
+    //   bucket = s_activeCharIdx - 1 ([0]=Kliff, [1]=Damiane, [2]=Oongka)
     static std::mutex                                 s_mapMtx;
-    static std::unordered_map<std::uintptr_t, std::uintptr_t> s_swapMap;
+    static std::unordered_map<std::uintptr_t, std::uintptr_t> s_swapMapPerChar[3];
 
     using StructCopyFn = std::int64_t(__fastcall *)(std::int64_t, std::int64_t);
     static StructCopyFn s_orig = nullptr;
 
-    // Set of target wrapper addresses (the values in s_swapMap). Used
-    // by the secondary-bind hook to detect "is this record one of our
-    // substituted ones?" by comparing the entry's wrapper-ptr at +0
-    // against this set.
-    static std::unordered_set<std::uintptr_t> s_targetWrappers;
+    // Per-character target wrapper sets (parallel to s_swapMapPerChar).
+    // Used by the secondary-bind hook to detect "is this record one of
+    // our substituted ones?" by comparing entry's wrapper-ptr at +0
+    // against the union of all three buckets.
+    static std::unordered_set<std::uintptr_t> s_targetWrappersPerChar[3];
 
     // Destination tracking: every record we substituted, with its
     // original Kliff wrapper. On deactivate, we walk this vector and
@@ -153,10 +161,9 @@ namespace Transmog::PrefabWrapperSwap
     // the right table for our use case.
     //
     // Resolved through k_apptNameLookupCandidates cascade in
-    // aob_resolver.hpp at install time (audit 2026-05-08); RVA literal
-    // removed.
+    // aob_resolver.hpp at install time; no hardcoded RVA.
 
-    // Auto-deactivate-on-preset-switch state. After F10 activates and
+    // Auto-deactivate-on-preset-switch state. Once swap activates and
     // the user applies a body-mesh preset, we record those itemIds. The
     // next apply with DIFFERENT itemIds is treated as a switch-away
     // and triggers deactivate_for_clear before its substitutions can
@@ -165,13 +172,13 @@ namespace Transmog::PrefabWrapperSwap
     static std::uint16_t s_lastApplyItems[5] = {0, 0, 0, 0, 0};
     static bool          s_lastApplyValid    = false;
 
-    // --- AppearanceTableLoader integration state (Goal A #5) ---
+    // --- AppearanceTableLoader integration state ---
     //
     // Captured by the one-shot hook on sub_1408AF8F0. After capture,
     // s_apptContainer is the heap object whose vtable (read-only check)
     // matches k_apptContainerVtable below.
     //
-    // Loader chain (verified 2026-05-06 via IDA decompile):
+    // Loader chain (IDA-decompile reconstructed):
     //   sub_1408AF8F0(a1)         -- entry; we snapshot a1 (outer struct)
     //     v85 = a1[5] (= a1+40)   -- ResMgr (the 17-slot)
     //     sub_14086A000(v85, ...) -- inside, allocates loader and stores
@@ -185,16 +192,15 @@ namespace Transmog::PrefabWrapperSwap
     // Subsequent calls (which DO occur during world reload) are
     // pass-through; we do NOT re-capture because the original boot
     // singleton is the one used by every PartPrefab consumer.
-    // PartPrefab container vtable -- now resolved at init() through
-    // k_apptLoaderCtorCandidates + walk-forward (see
-    // resolve_appt_container_vtable). Stored in s_apptContainerVtable.
-    // Per sub_141E2DBB0 (the AppearanceTableLoader constructor), the
-    // loader allocates two containers and assigns final vtables:
-    //   a1[0] (_appearanceContainer)       -> off_144D24308 (v1.05.01)
-    //   a1[1] (_partPrefabDataContainer)   -> off_144D24358 (v1.05.01)
-    // <-- WE WANT THE SECOND ONE. The walk-forward helper picks the
-    // SECOND `lea rax,[rip+disp32]; mov [rdi],rax` pair inside the
-    // ctor.
+    // PartPrefab container vtable -- resolved at init() through
+    // k_apptLoaderCtorCandidates plus an inline walk-forward scan
+    // over the ctor body. Stored in s_apptContainerVtable. Per the
+    // AppearanceTableLoader constructor, the loader allocates two
+    // containers and assigns final vtables:
+    //   a1[0] (_appearanceContainer)       -- intermediate vtable
+    //   a1[1] (_partPrefabDataContainer)   -- the one we want.
+    // The walk-forward scan picks the SECOND `lea rax,[rip+disp32];
+    // mov [rdi],rax` pair inside the ctor.
     static constexpr std::size_t k_apptResMgrOff       = 0x40;
     static constexpr std::size_t k_apptLoaderOff       = 0x88;
     static constexpr std::size_t k_apptContainerOff    = 0x08;
@@ -501,7 +507,7 @@ namespace Transmog::PrefabWrapperSwap
         }
     }
 
-    // --- Per-slot catalog state (Goal B) ---
+    // --- Per-slot catalog state ---
     //
     // Built lazily on first overlay open via populate_slot_catalogs().
     // Each catalog holds the prefabs whose inline name starts with the
@@ -510,8 +516,8 @@ namespace Transmog::PrefabWrapperSwap
     //
     // Catalog mutex is separate from s_mapMtx so the UI thread can
     // refresh without serializing with the active hot path. The hot
-    // path never reads catalogs; it reads s_swapMap (rebuilt from the
-    // catalog selections on hotkey press).
+    // path never reads catalogs; it reads s_swapMapPerChar (rebuilt
+    // from the catalog selections per character on each apply).
     static std::mutex                                          s_catalogMtx;
     static std::array<std::vector<PrefabEntry>,
                       static_cast<std::size_t>(
@@ -540,6 +546,38 @@ namespace Transmog::PrefabWrapperSwap
         = k_initialSelectionIndices;
     static std::atomic<bool>                                   s_catalogPopulated{false};
 
+    // Per-character buffered copies of the selection arrays. UI writes
+    // through set_selection mirror into s_selSrcIdxPerChar[active-1] /
+    // s_selTgtIdxPerChar[active-1]; the globals above stay as the
+    // "active editing view" the UI reads back. `apply_selections_to_-
+    // swap_map` rebuilds the active character's bucket
+    // (s_swapMapPerChar[active-1]) from that character's row each
+    // apply, leaving the other characters' buckets intact so a
+    // substitution picked on Damiane remains live in the engine's
+    // wrapper-substitution path even while the user edits another
+    // character. Without these rows the picker writes a single global,
+    // which the next dropdown switch overwrites and silently drops the
+    // outgoing character's variant.
+    //
+    // s_activeCharIdx is 0 until PresetManager::apply_to_state binds
+    // a character via set_active_char_idx(); set_selection writes only
+    // to the globals while idx is 0 (boot-time defaults).
+    static std::atomic<std::uint32_t>                          s_activeCharIdx{0};
+    static std::array<std::array<int,
+                                  static_cast<std::size_t>(
+                                      Transmog::TransmogSlot::Count)>,
+                       3>                                       s_selSrcIdxPerChar
+        = {k_initialSelectionIndices,
+           k_initialSelectionIndices,
+           k_initialSelectionIndices};
+    static std::array<std::array<int,
+                                  static_cast<std::size_t>(
+                                      Transmog::TransmogSlot::Count)>,
+                       3>                                       s_selTgtIdxPerChar
+        = {k_initialSelectionIndices,
+           k_initialSelectionIndices,
+           k_initialSelectionIndices};
+
     // Slot prefix tables come from slot_metadata.hpp's SlotMetadata
     // table (slot_meta(slot).prefabPrefixMale / .prefabPrefixFemale).
     // The engine uses `cd_phm_*` for male body prefabs and `cd_phw_*`
@@ -559,7 +597,7 @@ namespace Transmog::PrefabWrapperSwap
     // is not body-mesh-swappable" -- the picker dropdown stays empty
     // and the slot routes through the carrier-based transmog path.
 
-    // --- Shared StringInfo walker (Phase 1 fast path) ---
+    // --- Shared StringInfo walker (bulk-copy fast path) ---
     //
     // Extracted out of resolve_pairs_into_map so populate_slot_catalogs
     // can reuse the bulk-copy + vtable filter + prefix gate without
@@ -604,10 +642,9 @@ namespace Transmog::PrefabWrapperSwap
             arrayPtr < 0x10000ULL)
             return 0;
 
-        // Bulk-copy entry-pointer array (Phase 1 optimization) so the
-        // inner loop reads from process memory without a per-element
-        // SEH frame. Falls back to per-entry SEH reads if the bulk
-        // copy faults.
+        // Bulk-copy entry-pointer array so the inner loop reads from
+        // process memory without a per-element SEH frame. Falls back
+        // to per-entry SEH reads if the bulk copy faults.
         std::vector<std::uintptr_t> entryPtrs;
         const std::size_t arrayBytes =
             static_cast<std::size_t>(count) * sizeof(std::uintptr_t);
@@ -821,7 +858,7 @@ namespace Transmog::PrefabWrapperSwap
         }
     }
 
-    // --- Per-slot catalog API (Goal B) ---
+    // --- Per-slot catalog API ---
 
     const char *slot_prefix_str(Transmog::TransmogSlot slot) noexcept
     {
@@ -872,6 +909,67 @@ namespace Transmog::PrefabWrapperSwap
         if (tgtIdx < -1 || tgtIdx >= catSize) tgtIdx = -1;
         s_selSrcIdx[idx] = srcIdx;
         s_selTgtIdx[idx] = tgtIdx;
+        // Mirror the write into the active character's per-char row
+        // so `apply_selections_to_swap_map` retains it when the user
+        // switches the editing character. Idx 0 (no character bound
+        // yet) is a no-op -- the globals carry the boot-time defaults
+        // until PresetManager::apply_to_state runs and binds a row.
+        const auto charIdx =
+            s_activeCharIdx.load(std::memory_order_acquire);
+        if (charIdx >= 1 && charIdx <= 3)
+        {
+            const auto bucket = static_cast<std::size_t>(charIdx - 1);
+            s_selSrcIdxPerChar[bucket][idx] = srcIdx;
+            s_selTgtIdxPerChar[bucket][idx] = tgtIdx;
+        }
+    }
+
+    void set_active_char_idx(std::uint32_t idx) noexcept
+    {
+        if (idx > 3)
+            idx = 0;
+        const auto prev = s_activeCharIdx.exchange(
+            idx, std::memory_order_acq_rel);
+        if (idx == prev || idx == 0)
+            return;
+        // Hydrate the globals (the "active editing view") from the
+        // newly-bound character's row so subsequent UI reads
+        // (selection_src_index / selection_tgt_index) reflect that
+        // character's selections rather than the previous one's.
+        const auto bucket = static_cast<std::size_t>(idx - 1);
+        s_selSrcIdx = s_selSrcIdxPerChar[bucket];
+        s_selTgtIdx = s_selTgtIdxPerChar[bucket];
+    }
+
+    void reset_per_char_state() noexcept
+    {
+        // Clear ONLY the stale-after-arena-flip state:
+        //   - s_activeCharIdx so the next set_active_char_idx forces
+        //     a fresh hydrate.
+        //   - The active editing-view globals so the next apply_to_-
+        //     state's set_selection loop reads sane curSrc values
+        //     after re-hydration.
+        //   - s_swapMapPerChar and s_targetWrappersPerChar because
+        //     their wrapper addresses point into the previous arena and
+        //     would either no-op (best case) or crash on dereference if
+        //     the natpipe-hook fired against them.
+        //
+        // The per-char `s_selSrcIdxPerChar` / `s_selTgtIdxPerChar`
+        // rows are CATALOG INDICES, not wrapper pointers. Catalog
+        // re-population (populate_slot_catalogs) preserves entry
+        // names, so the indices remain meaningful. Wiping them here
+        // would un-seed the boot-time src defaults that
+        // populate_slot_catalogs writes per char, and the next
+        // post-save-load apply would see an empty src column,
+        // making has_any_selection() return false and the swap map
+        // never reactivate -- the user reloads into "carrier
+        // visual only" instead of their picked prefab.
+        s_activeCharIdx.store(0, std::memory_order_release);
+        s_selSrcIdx = k_initialSelectionIndices;
+        s_selTgtIdx = k_initialSelectionIndices;
+        std::scoped_lock lk(s_mapMtx);
+        for (auto &m : s_swapMapPerChar) m.clear();
+        for (auto &s : s_targetWrappersPerChar) s.clear();
     }
 
     int adopt_into_slot_and_select(Transmog::TransmogSlot intoSlot,
@@ -910,7 +1008,7 @@ namespace Transmog::PrefabWrapperSwap
         return false;
     }
 
-    // --- Loader-registry enumeration (Goal C: NPC body-mesh pickup) ---
+    // --- Loader-registry enumeration (NPC body-mesh pickup) ---
     //
     // The StringInfo registry at MEMORY[0x145EF1DE8] holds the prefab
     // wrappers that are *currently resident* in the player-character
@@ -919,7 +1017,7 @@ namespace Transmog::PrefabWrapperSwap
     // SECOND registry: the AppearanceTableLoader's own name table at
     // MEMORY[0x145DDF8B0] + 0x50 (singleton dereferenced once at boot).
     //
-    // Layout (verified live 2026-05-06, 15,298 entries on a fresh boot):
+    // Layout (~15k entries on a fresh boot):
     //   table_struct = *(QWORD*)0x145DDF8B0 + 0x50
     //     +0x00 bucket_count u32
     //     +0x04 count        u32
@@ -1231,14 +1329,13 @@ namespace Transmog::PrefabWrapperSwap
         const auto walkStart = std::chrono::steady_clock::now();
 
         // Build a single shared catalog from one StringInfo walk; copy
-        // it into every slot's local vector. Per-slot tag filtering was
-        // removed 2026-05-08 -- accessory slots (Earring/Necklace) had
-        // empty filter tags and produced empty catalogs, and the
-        // gendered-prefix variants left several female-side picker
-        // dropdowns empty (e.g. cd_phw_00_ring_* has 0 entries while
-        // Damiane's actual ring carriers are cd_phm_00_ring_*). With
-        // every slot showing the full body-mesh family the user can
-        // pick anything; the search box already filters by name.
+        // it into every slot's local vector. Per-slot tag filtering is
+        // intentionally NOT applied here: accessory slots (Earring/
+        // Necklace) carry no useful filter tag, and gendered prefixes
+        // leave several female-side dropdowns empty (e.g. Damiane's
+        // actual ring carriers are cd_phm_00_ring_*, not cd_phw_*).
+        // Showing the full body-mesh family in every slot lets the
+        // user pick anything; the search box already filters by name.
         constexpr std::size_t k_slotN =
             static_cast<std::size_t>(Transmog::TransmogSlot::Count);
         std::array<std::vector<PrefabEntry>, k_slotN> local;
@@ -1396,7 +1493,7 @@ namespace Transmog::PrefabWrapperSwap
                 std::chrono::steady_clock::now() - hwStart)
                 .count();
 
-        // --- Loader-registry enumeration (Goal C) ---
+        // --- Loader-registry enumeration ---
         //
         // Pulls in NPC + unloaded body-mesh prefabs from the
         // AppearanceTableLoader's name registry at
@@ -1536,10 +1633,10 @@ namespace Transmog::PrefabWrapperSwap
         // Picks the row matching the currently-active character (falls
         // back to Kliff if not yet set or unrecognized). The loop
         // below skips empty prefab strings so adding a slot without
-        // a captured default for the current character is safe -- no
-        // null-deref's. (Replaces 2026-05-07 trap where the prior
-        // k_defaultSrcByEnumSlot was sized 5 with trailing nullptrs
-        // that crashed strcmp once a non-armor slot populated.)
+        // a captured default for the current character is safe -- the
+        // empty-name check guards against the strcmp on a null table
+        // entry that would otherwise crash once a non-armor slot
+        // populated.
         const auto &activeChar =
             Transmog::PresetManager::instance().active_character();
         const auto seedChar =
@@ -1547,19 +1644,50 @@ namespace Transmog::PrefabWrapperSwap
                 .value_or(Transmog::CarrierChar::Kliff);
         {
             std::scoped_lock lk(s_catalogMtx);
-            for (std::size_t i = 0; i < k_slotN; ++i) {
-                if (s_selSrcIdx[i] >= 0) continue;  // already chosen
-                const char *target = Transmog::carrier_for(
-                    seedChar, static_cast<Transmog::TransmogSlot>(i))
-                    .prefabName;
-                if (!target || target[0] == '\0') continue;  // no default for this slot
-                const auto &cat = s_slotCatalogs[i];
-                for (std::size_t k = 0; k < cat.size(); ++k) {
-                    if (cat[k].name == target) {
-                        s_selSrcIdx[i] = static_cast<int>(k);
-                        break;
+
+            // Seed every protagonist's per-char row from their OWN
+            // carrier_defaults entry. Kliff and Damiane carry distinct
+            // body-prefab families (cd_phm vs cd_phw), so the src for
+            // a Chest pick must match the body actually rendering;
+            // sharing a single set across characters would let
+            // Damiane's pick substitute on Kliff's wrappers (no
+            // match, swap silently fails). Doing this for all three
+            // protagonists at boot means later set_active_char_idx
+            // calls hydrate the globals from a meaningful row instead
+            // of the all-(-1) initial state.
+            for (std::size_t ci = 0;
+                 ci < Transmog::k_carrierCharCount; ++ci)
+            {
+                const auto cc = static_cast<Transmog::CarrierChar>(ci);
+                for (std::size_t i = 0; i < k_slotN; ++i) {
+                    if (s_selSrcIdxPerChar[ci][i] >= 0)
+                        continue;  // already chosen for this char
+                    const char *target = Transmog::carrier_for(
+                        cc, static_cast<Transmog::TransmogSlot>(i))
+                        .prefabName;
+                    if (!target || target[0] == '\0')
+                        continue;
+                    const auto &cat = s_slotCatalogs[i];
+                    for (std::size_t k = 0; k < cat.size(); ++k) {
+                        if (cat[k].name == target) {
+                            s_selSrcIdxPerChar[ci][i] =
+                                static_cast<int>(k);
+                            break;
+                        }
                     }
                 }
+            }
+
+            // Mirror the active character's row into the globals so
+            // the UI (which reads selection_src_index) sees the
+            // expected defaults before any explicit set_active_char_-
+            // idx call lands.
+            const auto seedBucket =
+                static_cast<std::size_t>(seedChar);
+            for (std::size_t i = 0; i < k_slotN; ++i) {
+                if (s_selSrcIdx[i] >= 0)
+                    continue;
+                s_selSrcIdx[i] = s_selSrcIdxPerChar[seedBucket][i];
             }
         }
 
@@ -1592,6 +1720,27 @@ namespace Transmog::PrefabWrapperSwap
         // PrefabEntry::wrappers, so this hot path is O(N) over the
         // configured slots -- no I/O, no heap walk. Picker-driven
         // re-applies should land in <1ms here.
+        //
+        // Per-character build (apply-windowed model). The swap map's
+        // job is install-time substitution: the natpipe hook redirects
+        // src->tgt while the engine reads a wrapper for installation,
+        // after which the tgt is materially installed and subsequent
+        // rendering reads it directly. Each apply covers exactly ONE
+        // body, so the map is keyed by character: rebuilding ONLY the
+        // active character's bucket preserves the other characters'
+        // installed substitutions for their next teardown -- before
+        // per-char keying, a Damiane apply between two Kliff applies
+        // wiped Kliff's bucket and the second Kliff apply's tear_down
+        // could not unlink Kliff's still-attached tgt wrappers,
+        // leaving them stuck on the body. Cross-character src
+        // collisions (Kliff+Oongka both default to
+        // `cd_phm_00_ub_00_0054` for Chest) are resolved by the
+        // natpipe-hook dispatching on s_activeCharIdx -- so each
+        // body's apply sees only its own bucket and the right tgt
+        // fires. The per-char `s_selSrcIdxPerChar` /
+        // `s_selTgtIdxPerChar` arrays preserve in-memory picks across
+        // editing-character switches; the per-char swap-map buckets
+        // are the runtime materialization of those picks.
         constexpr std::size_t k_slotN =
             static_cast<std::size_t>(Transmog::TransmogSlot::Count);
         struct SlotPlan {
@@ -1601,25 +1750,31 @@ namespace Transmog::PrefabWrapperSwap
             std::uintptr_t               tgtWrapper{0};
         };
         std::array<SlotPlan, k_slotN> plans;
-        // Read the active character FRESH on every apply (mirrors the
-        // pattern in transmog_apply.cpp::apply_all_transmog where
-        // PresetManager::active_character() drives default_carrier_for_slot
-        // and needs_carrier per-call). The PWS source per slot must
-        // match the body the active character emits; otherwise the
-        // hook's pointer-equality substitution never matches and the
-        // swap silently does nothing. This avoids the prior bug where
-        // s_selSrcIdx was seeded once at boot (against whichever
-        // character PresetManager had then -- usually Kliff fallback)
-        // and never updated when the engine rotated to Damiane/Oongka.
-        const auto &activeChar =
-            Transmog::PresetManager::instance().active_character();
-        const auto activeCC =
-            Transmog::carrier_char_from_name(activeChar)
-                .value_or(Transmog::CarrierChar::Kliff);
+
+        // Resolve the apply target character. `s_activeCharIdx` is
+        // primed by `PresetManager::apply_to_state` whenever the
+        // editing character changes, and tracks the character whose
+        // carrier+prefab WILL be installed by the upcoming apply.
+        // Idx 0 means PresetManager hasn't bound a character yet
+        // (boot-time before first apply_to_state) -- clear the map
+        // and bail; the next apply_to_state will retry with a real
+        // idx.
+        const auto activeIdx =
+            s_activeCharIdx.load(std::memory_order_acquire);
+        if (activeIdx < 1 || activeIdx > 3)
+        {
+            // No bound character -- skip the rebuild entirely. Other
+            // characters' previously-installed buckets must stay intact
+            // so the natpipe-hook can still find their substitutions
+            // during a later teardown.
+            return 0;
+        }
+        const auto ci = static_cast<std::size_t>(activeIdx - 1);
+        const auto cc = static_cast<Transmog::CarrierChar>(ci);
         {
             std::scoped_lock lk(s_catalogMtx);
             for (std::size_t i = 0; i < k_slotN; ++i) {
-                const auto tgtIdx = s_selTgtIdx[i];
+                const auto tgtIdx = s_selTgtIdxPerChar[ci][i];
                 if (tgtIdx < 0) continue;
                 auto &cat = s_slotCatalogs[i];
                 if (tgtIdx >= static_cast<int>(cat.size()))
@@ -1627,32 +1782,21 @@ namespace Transmog::PrefabWrapperSwap
 
                 // src resolution priority:
                 //   1. Active character's carrier_defaults prefabName
-                //      matched by name in the slot's catalog. This is
-                //      the authoritative source identity when the
-                //      currently controlled character is known. Boot-
-                //      seeded s_selSrcIdx can be stale (seeded for
-                //      whichever character PresetManager held when
-                //      populate_slot_catalogs ran -- usually Kliff
-                //      fallback) and never updates on character swap.
-                //   2. Boot-seeded s_selSrcIdx as a fallback when the
-                //      character lookup fails (empty prefabName or
-                //      name not in slot catalog).
-                //   3. Cross-slot catalog (slot 0 / cat0) lookup +
-                //      adoption: if the slot's own catalog never got
-                //      the carrier prefab (paired secondary slots
-                //      whose tag patterns missed at boot, or prefabs
-                //      that simply weren't in the loader registry),
-                //      copy the entry from cat0 into this slot's
-                //      catalog so the swap plan can build.
-                //
-                // Without 3., paired slots and any slot whose carrier
-                // missed the boot tag classification would silently
-                // apply nothing -- the picker checkbox would show but
-                // picks would be no-ops.
+                //      matched by name in the slot's catalog (the
+                //      authoritative source identity for the
+                //      currently-installing character).
+                //   2. Per-char s_selSrcIdxPerChar fallback when the
+                //      carrier lookup misses (empty prefab name, or
+                //      not present in the slot's catalog).
+                //   3. cat0 cross-slot adoption when the slot's own
+                //      catalog never received the carrier prefab
+                //      (paired slots whose tag patterns missed at
+                //      boot, or prefabs absent from the loader
+                //      registry).
                 std::size_t resolvedSrcIdx = SIZE_MAX;
                 const char *expectedSrc = Transmog::carrier_for(
-                    activeCC,
-                    static_cast<Transmog::TransmogSlot>(i)).prefabName;
+                    cc, static_cast<Transmog::TransmogSlot>(i))
+                    .prefabName;
                 if (expectedSrc && expectedSrc[0] != '\0') {
                     for (std::size_t k = 0; k < cat.size(); ++k) {
                         if (cat[k].name == expectedSrc) {
@@ -1660,13 +1804,6 @@ namespace Transmog::PrefabWrapperSwap
                             break;
                         }
                     }
-                    // Cross-slot fallback: borrow from cat0. After
-                    // populate_slot_catalogs all slots seeded from
-                    // the same shared StringInfo walk, then registry
-                    // enrichment added slot-specific entries to each.
-                    // cat0 is therefore the densest catalog for this
-                    // missing-name lookup. Adopt by name (no allocator
-                    // surprises -- adopt is just a vector push).
                     if (resolvedSrcIdx == SIZE_MAX &&
                         !s_slotCatalogs.empty())
                     {
@@ -1681,22 +1818,17 @@ namespace Transmog::PrefabWrapperSwap
                     }
                 }
                 if (resolvedSrcIdx == SIZE_MAX) {
-                    const auto srcIdx = s_selSrcIdx[i];
+                    const auto srcIdx = s_selSrcIdxPerChar[ci][i];
                     if (srcIdx >= 0 &&
                         srcIdx < static_cast<int>(cat.size()))
-                        resolvedSrcIdx = static_cast<std::size_t>(srcIdx);
+                        resolvedSrcIdx =
+                            static_cast<std::size_t>(srcIdx);
                 }
                 if (resolvedSrcIdx == SIZE_MAX) continue;
 
                 plans[i].srcName     = cat[resolvedSrcIdx].name;
                 plans[i].tgtName     = cat[tgtIdx].name;
-                // Copy the FULL pre-cached wrapper vector. The engine
-                // may pick any parallel-pool instance at copy time, so
-                // s_swapMap must contain entries for all of them.
                 plans[i].srcWrappers = cat[resolvedSrcIdx].wrappers;
-                // Target uses the canonical wrapper (first element).
-                // The engine dedupes by content/hash internally, so a
-                // single tgt instance is sufficient as the swap value.
                 if (!cat[tgtIdx].wrappers.empty())
                     plans[i].tgtWrapper = cat[tgtIdx].wrappers.front();
             }
@@ -1712,8 +1844,10 @@ namespace Transmog::PrefabWrapperSwap
         // wrappers = missing substitutions = no visible swap.
         //
         // Re-walk for the small set of currently-selected source names
-        // here -- at most 5 names, runs in ~1-2s. Only fires on picker
-        // pick / F10 reactivation, not on hot-path apply.
+        // here -- at most 5 names for a single character, runs in
+        // ~1-2ms. Triggered through reactivate_with_selections (picker
+        // pick or notify_apply_starting at the start of an apply pass),
+        // not on a per-frame path.
         std::vector<std::string> srcNamesForWalk;
         std::vector<std::size_t> srcSlotIdx;
         for (std::size_t i = 0; i < k_slotN; ++i) {
@@ -1734,36 +1868,44 @@ namespace Transmog::PrefabWrapperSwap
                 auto &dst = plans[srcSlotIdx[k]].srcWrappers;
                 for (auto w : outBySrc[k]) dst.push_back(w);
                 std::sort(dst.begin(), dst.end());
-                dst.erase(std::unique(dst.begin(), dst.end()), dst.end());
+                dst.erase(std::unique(dst.begin(), dst.end()),
+                          dst.end());
             }
         }
 
-        // Build s_swapMap atomically under s_mapMtx.
+        // Build s_swapMapPerChar[ci] atomically under s_mapMtx. The
+        // bucket covers exactly the active character's body for this
+        // apply; the engine's natpipe-hook reads from it during
+        // install-time wrapper traversal, dispatching via
+        // s_activeCharIdx so other characters' buckets stay live for
+        // their own pending teardowns. s_targetWrappersPerChar[ci] is
+        // this character's cleanup ledger -- the global
+        // is_target_wrapper() merges all three buckets.
         std::size_t resolved = 0;
         {
             std::scoped_lock lk(s_mapMtx);
-            s_swapMap.clear();
-            s_targetWrappers.clear();
+            s_swapMapPerChar[ci].clear();
+            s_targetWrappersPerChar[ci].clear();
             for (std::size_t i = 0; i < k_slotN; ++i) {
                 auto &p = plans[i];
                 if (p.srcName.empty() || p.tgtName.empty()) continue;
                 if (p.srcWrappers.empty() || p.tgtWrapper == 0) {
                     logger.warning(
-                        "[prefab-swap]   slot[{}] UNRESOLVED "
-                        "\"{}\" -> \"{}\" (srcWrappers={} tgtWrapper="
-                        "0x{:X})",
-                        i, p.srcName, p.tgtName,
+                        "[prefab-swap]   char[{}] slot[{}] "
+                        "UNRESOLVED \"{}\" -> \"{}\" "
+                        "(srcWrappers={} tgtWrapper=0x{:X})",
+                        ci, i, p.srcName, p.tgtName,
                         p.srcWrappers.size(), p.tgtWrapper);
                     continue;
                 }
                 for (auto sw : p.srcWrappers)
-                    s_swapMap.emplace(sw, p.tgtWrapper);
-                s_targetWrappers.insert(p.tgtWrapper);
+                    s_swapMapPerChar[ci].emplace(sw, p.tgtWrapper);
+                s_targetWrappersPerChar[ci].insert(p.tgtWrapper);
                 ++resolved;
                 logger.debug(
-                    "[prefab-swap]   slot[{}] RESOLVED \"{}\" "
-                    "({} src) -> \"{}\" (0x{:X})",
-                    i, p.srcName, p.srcWrappers.size(),
+                    "[prefab-swap]   char[{}] slot[{}] RESOLVED "
+                    "\"{}\" ({} src) -> \"{}\" (0x{:X})",
+                    ci, i, p.srcName, p.srcWrappers.size(),
                     p.tgtName, p.tgtWrapper);
             }
         }
@@ -1835,9 +1977,8 @@ namespace Transmog::PrefabWrapperSwap
         // Filter the StringInfo vtable sentinel: a2 sometimes points
         // at the entry's +0x08 vtable slot rather than its wrapper-ptr
         // slot, in which case srcWrapper would equal the sentinel
-        // address (0x145BC4638 in v1.05.01). Resolved via
-        // k_stringInfoVtableCandidates (audit 2026-05-08); zero here
-        // would mean cascade failed, so the equality test simply
+        // address. Resolved via k_stringInfoVtableCandidates; a zero
+        // here means the cascade missed, so the equality test simply
         // never matches and the swap-map lookup proceeds unchanged.
         const auto siVtable =
             s_stringInfoVtable.load(std::memory_order_acquire);
@@ -1846,9 +1987,16 @@ namespace Transmog::PrefabWrapperSwap
 
         std::uintptr_t tgtWrapper = 0;
         {
+            const auto activeIdx =
+                s_activeCharIdx.load(std::memory_order_acquire);
+            if (activeIdx < 1 || activeIdx > 3)
+                return trampoline(a1, a2);
+            const auto bucket =
+                static_cast<std::size_t>(activeIdx - 1);
             std::scoped_lock lk(s_mapMtx);
-            const auto it = s_swapMap.find(srcWrapper);
-            if (it == s_swapMap.end())
+            auto &m = s_swapMapPerChar[bucket];
+            const auto it = m.find(srcWrapper);
+            if (it == m.end())
                 return trampoline(a1, a2);
             tgtWrapper = it->second;
         }
@@ -1899,7 +2047,8 @@ namespace Transmog::PrefabWrapperSwap
     // Natural-pipeline unlink hook (sub_142711DF0).
     //
     // Walks RDX's wrapper list at hook entry. For each entry whose
-    // wrapper matches a Kliff src in s_swapMap, substitutes to the
+    // wrapper matches the active character's src in
+    // s_swapMapPerChar[s_activeCharIdx-1], substitutes to the
     // corresponding target. Calls trampoline. Restores the
     // originals afterwards so the caller's refcount-release loop on
     // the list operates on the same wrappers it incremented.
@@ -1958,25 +2107,40 @@ namespace Transmog::PrefabWrapperSwap
         if (!listData || cnt == 0)
             return trampoline(a1, a2, a3);
 
+        // Resolve which character's bucket this teardown/install path
+        // applies to. s_activeCharIdx is set by PresetManager::apply_to-
+        // _state BEFORE the engine drives any wrapper traversal, so by
+        // the time the hook fires it already points at the body being
+        // assembled or torn down. With no active character bound we
+        // pass through unchanged.
+        const auto activeIdx =
+            s_activeCharIdx.load(std::memory_order_acquire);
+        if (activeIdx < 1 || activeIdx > 3)
+            return trampoline(a1, a2, a3);
+        const auto bucket =
+            static_cast<std::size_t>(activeIdx - 1);
+
         // Walk the list under SEH and substitute matching src wrappers.
-        // PASSTHROUGH entries (wrapper not in swap map / low addr)
-        // intentionally don't log -- the engine queries many unrelated
-        // wrappers and the noise drowns out the rare SUBST events that
-        // matter for the body-mesh cleanup path.
+        // PASSTHROUGH entries (wrapper not in this char's bucket / low
+        // addr) intentionally don't log -- the engine queries many
+        // unrelated wrappers and the noise drowns out the rare SUBST
+        // events that matter for the body-mesh cleanup path.
         for (std::uint32_t i = 0; i < cnt; ++i) {
             const auto orig = read_qword_seh(&listData[i * 2]);
             saved[i] = orig;
             if (orig < 0x10000ULL)
                 continue;
 
-            // Lookup in swap map (read-only on hot path; map is
-            // immutable while s_active is true per LT design).
+            // Lookup in the active character's bucket (read-only on hot
+            // path; bucket is immutable while s_active is true per LT
+            // design).
             std::uintptr_t tgt = 0;
             {
                 std::scoped_lock lk(s_mapMtx);
-                auto it = s_swapMap.find(
+                auto &m = s_swapMapPerChar[bucket];
+                auto it = m.find(
                     static_cast<std::uintptr_t>(orig));
-                if (it != s_swapMap.end())
+                if (it != m.end())
                     tgt = it->second;
             }
 
@@ -2033,8 +2197,9 @@ namespace Transmog::PrefabWrapperSwap
     void register_config()
     {
         // Body-mesh swap has no INI keys. The hook installs at boot;
-        // source defaults are hardcoded per-character (k_kliffCarriers
-        // etc.); target selection is overlay-driven.
+        // source defaults are hardcoded per-character in
+        // carrier_defaults.hpp::k_carriers; target selection is
+        // overlay-driven.
     }
 
     bool init()
@@ -2253,7 +2418,7 @@ namespace Transmog::PrefabWrapperSwap
             }
         }
 
-        // --- AppearanceTableLoader (Goal A #5) hooks ---
+        // --- AppearanceTableLoader hooks ---
         //
         // Resolve the lookup primitives FIRST so by the time the
         // capture hook fires, lookups are immediately callable. AOB
@@ -2419,8 +2584,8 @@ namespace Transmog::PrefabWrapperSwap
         }
         s_catalogPopulated.store(false, std::memory_order_release);
         std::scoped_lock lk(s_mapMtx);
-        s_swapMap.clear();
-        s_targetWrappers.clear();
+        for (auto &m : s_swapMapPerChar) m.clear();
+        for (auto &s : s_targetWrappersPerChar) s.clear();
         s_callCount.store(0, std::memory_order_relaxed);
         s_substCount.store(0, std::memory_order_relaxed);
 
@@ -2434,24 +2599,6 @@ namespace Transmog::PrefabWrapperSwap
         s_apptStringIntern   = nullptr;
         s_apptLookup         = nullptr;
         s_apptNameLookup     = nullptr;
-    }
-
-    bool is_active() { return s_active.load(std::memory_order_acquire); }
-
-    bool is_target_wrapper(std::uintptr_t wrapperPtr) noexcept
-    {
-        // Lock-free read against an immutable-on-hot-path snapshot.
-        // Set is mutated only inside resolve_pairs_into_map() at
-        // activation; SMO-add hook firing concurrently with that
-        // activation would race, but in practice the user F10s well
-        // before triggering a switch. Worst-case race = a stale
-        // false-negative for one frame on first activation.
-        return s_targetWrappers.find(wrapperPtr) != s_targetWrappers.end();
-    }
-
-    std::size_t target_wrappers_count() noexcept
-    {
-        return s_targetWrappers.size();
     }
 
     void notify_apply_starting(const std::uint16_t (&itemIds)[5])

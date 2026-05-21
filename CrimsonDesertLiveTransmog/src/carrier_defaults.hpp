@@ -52,9 +52,9 @@ namespace Transmog
     // clang-format off
     inline constexpr CarrierDefault k_carriers[k_carrierCharCount][k_slotCount] = {
         // ============================================================
-        // Kliff (male). Default carriers for slots 5..14 captured live
-        // via [slot-discovery] dump on 2026-05-07. prefabName values
-        // captured via in-game item-mesh mapping.
+        // Kliff (male). Default carriers per slot from the live
+        // slot-discovery dump; prefabName values from the in-game
+        // item-mesh mapping.
         // ============================================================
         {
             { "Scovi_Fabric_Helm",                       "cd_phm_00_hel_0122"                }, // Helm
@@ -113,18 +113,18 @@ namespace Transmog
         },
 
         // ============================================================
-        // Oongka (male orc). prefabName values derived 2026-05-08 from
-        // the save-editor companion repo's iteminfo dump. Orc-tribe
-        // assets share the cd_phm_* family (orc model is male-tier).
-        // Bilibili earring/ring use _index## minor variants; LT's
-        // body-mesh hook registers all variants of the base prefab.
+        // Oongka (male orc). prefabName values derived from the
+        // save-editor companion repo's iteminfo dump. Orc-tribe assets
+        // share the cd_phm_* family (orc model is male-tier). Bilibili
+        // earring/ring use _index## minor variants; LT's body-mesh
+        // hook registers all variants of the base prefab.
         // ============================================================
         {
-            { "Derish_Fabric_Helm",                   "cd_phm_00_hel_0050"                }, // Helm
-            { "Mercenary_Leather_Armor",                      "cd_phm_00_ub_00_0054"              }, // Chest
-            { "Mercenary_Leather_Cloak",                      "cd_phm_00_cloak_00_0054_s"         }, // Cloak
-            { "Mercenary_Gloves",                     "cd_phm_00_hand_0054"               }, // Gloves
-            { "Mercenary_Leather_Boots",                           "cd_phm_00_foot_0054"               }, // Boots
+            { "Lardein_Fabric_Helm",                   "cd_phm_00_hel_0122_01_index01"                }, // Helm
+            { "Oongka_Basic_Leather_Armor",                      "cd_phm_00_ub_00_0056"              }, // Chest
+            { "Oongka_Basic_Leather_Cloak",                      "cd_phm_00_cloak_00_0056_t"         }, // Cloak
+            { "Oongka_Basic_Leather_Gloves",                     "cd_phm_00_hand_00_0056"               }, // Gloves
+            { "Langust_Leather_Boots",                           "cd_phm_00_foot_0056"               }, // Boots
             { "Bilibili_Earring",                            "cd_phm_00_earring_0008_l_index02"  }, // Earring1
             { "WhiteHorn_Earring",                           "cd_phm_00_earring_0014_l"          }, // Earring2
             { "Bilibili_Necklace",                           "cd_phm_00_necklace_0004_index02"   }, // Necklace

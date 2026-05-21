@@ -1,183 +1,185 @@
-#include <cdcore/anchors.hpp>
 #include <cdcore/controlled_char.hpp>
 
-#include <DetourModKit.hpp>
-#include <DetourModKit/scanner.hpp>
-
-#include <safetyhook/context.hpp>
-#include <safetyhook/mid_hook.hpp>
-
 #include <Windows.h>
-#include <Psapi.h>
 
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
-#include <cstring>
 #include <mutex>
-#include <shared_mutex>
+#include <string>
 #include <string_view>
-#include <unordered_map>
 
 // ---------------------------------------------------------------------------
-// Controlled-character resolver (v1.06.01 verified).
+// Controlled-character resolver.
 //
-// Identity is decoded from the engine's own focus-actor broadcast event
-// (`sub_14353BA60` -- the per-subscriber focus-actor list mutator). R9
-// at function entry carries the new focus-actor's u32 hash handle; the
-// MidHook compares against the three AOB-resolved player hash globals
-// (Kliff/Oongka/Damiane) and stamps a process-wide cache.
+// Static-chain + body-mesh asset-path resolver. See controlled_char.hpp
+// for the architecture overview. This translation unit is intentionally
+// narrow (no hooks, no learning caches, no broadcast subscriptions) --
+// every query re-walks the chain through SEH-guarded reads.
 //
-// Resolver layers (top wins) used by `current_controlled_character()`:
-//
-//   1. Structural Kliff anchor -- `body+0x80 == 0x30` reached through
-//      the WorldSystem chain. Positive Kliff signal that does not need
-//      a broadcast (covers cold-load to Kliff).
-//   2. Tier-0 focus-broadcast cache, but only if non-Kliff. Skips a
-//      stale Kliff intermediate fired by the engine during a same-
-//      non-Kliff save reload.
-//   3. `s_lastKnownNonKliff` fallback. Preserved across
-//      `invalidate_controlled_character()` so a same-non-Kliff save
-//      reload (engine never re-broadcasts the actual non-Kliff)
-//      still recovers the correct identity.
-//   4. Tier-0 even if Kliff (engine's authoritative signal).
-//   5. LKG cache (final fallback for torn reads / pre-broadcast).
-//
-// Body learning cache. Each successful resolve stamps
-// (user+0xD8 -> character) into a learning map consumed by
-// `resolve_character_idx_for_body()` and `snapshot_body_cache()`. The
-// cache reaches `user+0xD8` via the WorldSystem chain published by
-// `set_world_system_holder()`.
-//
-// Radial-swap timestamp. The radial-swap MidHook callback is a single
-// atomic store of `GetTickCount64()`; `radial_swap_pending()` reports
-// true for the next 2 s. Consumers (EquipHide, LiveTransmog) use that
-// flag to disambiguate a user-initiated swap from a save-load arena
-// rotation when both surface as a `user+0xD8` pointer change.
-//
-// Thread safety:
-//   - All setters (`set_world_system_holder`, `set_focus_actor_hash_
-//     globals`) are safe from any thread; later writers win.
-//   - `current_controlled_character()` is non-blocking and SEH-
-//     guarded; safe from any thread including the rendering thread.
+// Internal state:
+//   - s_cachedKliffCcoia: last-observed Kliff CCOIA pointer. Drives
+//     world_generation() bump detection. The CCOIA sub-manager pointer
+//     is persistent across save-load (its address never changes within
+//     a process lifetime), so it cannot be used as the world-rebuild
+//     signal. Kliff's CCOIA IS reallocated on every save-load --
+//     tracking its address change is the correct signal for "world
+//     rebuilt, drop session-local caches".
+//   - s_worldGeneration: monotonic counter bumped each time the
+//     Kliff CCOIA pointer changes.
 // ---------------------------------------------------------------------------
 
 namespace CDCore
 {
     namespace
     {
-        // WorldSystem holder. Published by set_world_system_holder(). The
-        // chain walk in walk_to_controlled_body_seh() reaches the rotating
-        // user+0xD8 client body pointer via this chain; the body cache
-        // keys on those body pointers.
-        std::atomic<std::uintptr_t> s_wsHolder{0};
+        // Default static address (image-base + 0x5FA0430). The engine
+        // writer is a single `mov cs:<rva>h, rdi` against this slot;
+        // every published actor manager pointer flows through it.
+        constexpr std::uintptr_t k_defaultPlayerBaseOffset = 0x5FA0430;
 
-        // Tier-0 focus-broadcast cache. Stamped by the focus-broadcast
-        // MidHook every time the engine fires a focus event whose R9
-        // matches one of the three published character hash globals.
-        // Stored as the underlying enum value to keep the atomic lock-
-        // free on x64.
-        std::atomic<std::uint8_t> s_focusBroadcastChar{
-            static_cast<std::uint8_t>(ControlledCharacter::Unknown)};
-
-        // Last-known-good identity. Used as the final fallback when a
-        // chain walk transiently faults or the focus-broadcast cache
-        // has not been stamped yet.
-        std::atomic<std::uint8_t> s_lastGoodChar{
-            static_cast<std::uint8_t>(ControlledCharacter::Unknown)};
-
-        // Last broadcasted NON-Kliff identity (Damiane or Oongka).
-        // Updated only when the focus-broadcast hook captures a non-
-        // Kliff hash; Kliff captures do NOT touch this. Preserved
-        // across invalidate_controlled_character() so the resolver
-        // can recover the user's last Damiane/Oongka selection when
-        // the engine wires Kliff intermediate during a same-non-
-        // Kliff save reload (engine fires Kliff broadcast for the
-        // intermediate, then transitions to the actual non-Kliff
-        // body without firing a follow-up broadcast -- the
-        // structural body marker tells us "not Kliff" but cannot
-        // discriminate Damiane vs Oongka, so we fall back to this
-        // cache).
-        std::atomic<std::uint8_t> s_lastKnownNonKliff{
-            static_cast<std::uint8_t>(ControlledCharacter::Unknown)};
-
-        // Lower bound for "looks like a heap pointer". Any value below
-        // the 64 KiB Windows guard region is treated as null/invalid;
-        // this catches both real null pointers and small enum-shaped
-        // values an uninitialised slot may carry before the engine
-        // singleton is wired up.
+        // Lower bound for "looks like a heap pointer". Catches both real
+        // null pointers and small enum-shaped values an uninitialised
+        // slot may carry before the engine singleton is wired up.
         constexpr std::uintptr_t k_minValidPtr = 0x10000;
 
-        // -------------------------------------------------------------------
-        // Focus-broadcast (Tier-0) state.
-        //
-        // Three engine globals hold per-protagonist u32 hash handles
-        // assigned at static init by the bridge functions described in
-        // cdcore/anchors.hpp::k_focusActorInitPattern. Consumers AOB the
-        // bridges (one-shot, on init) and publish the resolved global
-        // addresses here via set_focus_actor_hash_globals(). The values
-        // themselves are read on every focus-broadcast hook tick (cheap
-        // relaxed loads) and compared against ctx.r9.
-        // -------------------------------------------------------------------
-        std::atomic<std::uintptr_t> s_kliffHashGlobalAddr{0};
-        std::atomic<std::uintptr_t> s_oongkaHashGlobalAddr{0};
-        std::atomic<std::uintptr_t> s_damianHashGlobalAddr{0};
+        // Static-chain offsets.
+        // ClientUserActor.vec_data lives at userActor+0x78 and
+        // ChildContainer.actor_list at childContainer+0x18; the
+        // CCOIA identity dword sits at +0x60 with the category
+        // marker in its high byte (+0x63). Sub-manager Kliff /
+        // controlled slots (+0x30 / +0x38), the 16-byte vec[2] =
+        // ChildContainer slot, the 100-entry actor-list capacity,
+        // the 16-byte ptr+flag stride, and the live-flag value
+        // 0x0101 round out the layout.
+        constexpr std::ptrdiff_t k_offUserActor      = 0x28; // mgr +0x28
+        constexpr std::ptrdiff_t k_offSubManager     = 0x08; // user +0x08
+        constexpr std::ptrdiff_t k_offSubMgrKliff    = 0x30; // sub +0x30
+        constexpr std::ptrdiff_t k_offSubMgrCtrl     = 0x38; // sub +0x38
+        constexpr std::ptrdiff_t k_offUserVec        = 0x78; // user +0x78
+        constexpr std::ptrdiff_t k_offVecChildSlot   = 0x20; // vec[2] (16B stride)
+        constexpr std::ptrdiff_t k_offChildList      = 0x18; // child +0x18
+        // Actor-list constants. The ChildContainer holds a 100-entry
+        // list with 16-byte stride (ptr + live flag). The snapshot
+        // path no longer uses this list -- it pulls protagonists
+        // directly from ClientActorManager+0x100 -- but the
+        // diagnostic walker debug_enumerate_actor_list keeps using
+        // it.
+        constexpr std::size_t    k_actorListCapacity = 100;
+        constexpr std::size_t    k_actorListStride   = 16;
 
-        std::mutex s_focusHookMutex;
-        safetyhook::MidHook s_focusBroadcastHook;
-        std::atomic<std::uintptr_t> s_focusBroadcastHookAddr{0};
+        // CCOIA identity bytes:
+        //   +0x60 dword (LE-packed):
+        //     byte +0x60: session-local actor ID (load order; varies)
+        //     byte +0x63: 0xA0 = Kliff, 0xB0 = everyone else
+        //
+        // Direct protagonist lookup via ClientActorManager+0x100:
+        //   - Pointer to an 8-byte-stride CCOIA-only actor array.
+        //   - Position [0] = Kliff (always present).
+        //   - Position [1] = Damiane CCOIA when she is loaded.
+        //   - Position [2] = Oongka  CCOIA when she is loaded.
+        //   - Positions [3+] are humanoid NPCs / followers in load
+        //     order; rejected by the appearance-config classifier
+        //     because their path does not contain any protagonist
+        //     codename substring.
+        constexpr std::ptrdiff_t k_offCcoiaIdentity   = 0x60;
+        constexpr std::ptrdiff_t k_offMgrActorArray   = 0x100;
+        constexpr std::uint8_t   k_kliffHighByte      = 0xA0;
+
+        // Appearance-config asset-path chain. The CCOIA's body
+        // component holder exposes a std::string carrying the
+        // protagonist's appearance-config path; reading it yields a
+        // character-specific internal codename embedded in the path:
+        //   Kliff   -> ".../cd_phm_macduff/cd_phm_macduff_00000.app_xml"
+        //   Damiane -> ".../cd_phw_damian/cd_phw_damian_00000.app_xml"
+        //   Oongka  -> ".../cd_phm_oongka/cd_phm_oongka_00000.app_xml"
+        // Path is bound at actor spawn; survives outfit changes, animation
+        // transitions, and save-load. NPCs don't carry an appearance
+        // config at this offset and fail the substring test.
+        //
+        // Chosen over the body-mesh path (which sits at the sibling
+        // +0x28->+0x18 offsets) because the body-mesh string is
+        // skeleton-archetype-keyed ("phw" identifies the female-
+        // warrior skeleton, shared by any future female protagonist),
+        // while the appearance codename is character-keyed and stays
+        // unique even if the game adds a 4th protagonist sharing
+        // Damiane's skeleton.
+        constexpr std::ptrdiff_t k_offAppearChain1 = 0x68;
+        constexpr std::ptrdiff_t k_offAppearChain2 = 0x40;
+        constexpr std::ptrdiff_t k_offAppearChain3 = 0x40;
+        constexpr std::ptrdiff_t k_offAppearChain4 = 0x38;
+
+        // MSVC std::string: when content >= 16 chars the heap-buffer
+        // pointer lives at +0x00 of the struct; smaller strings keep
+        // inline content at the same offset. All known protagonist
+        // appearance paths are 70+ chars (always heap-allocated) but
+        // the resolver falls back to inline reading on the off-chance
+        // the engine produces a short variant in a future update.
+        constexpr std::ptrdiff_t  k_offStringBufPtr   = 0x00;
+        constexpr std::size_t     k_appearPathReadMax = 160;
+        constexpr std::uintptr_t  k_canonicalUpperPtr = 0x800000000000ULL;
+
+        // Anchor: marks the start of the character subfolder name
+        // in `.../cd_<archetype>_<codename>/...`. Codename search is
+        // restricted to the suffix after this anchor so a path
+        // component earlier in the tree that happens to contain a
+        // codename substring (very unlikely, but defensive) cannot
+        // cause a false positive.
+        constexpr std::string_view k_appearAnchor = "/cd_";
+
+        // Default character-subfolder substrings. Each protagonist's
+        // appearance path embeds the full subfolder name twice
+        // (subfolder + filename), so a plain substring search is
+        // reliable. We default to the full `cd_<archetype>_<codename>`
+        // form (not the bare codename) because:
+        //   - it's self-documenting (a user reading the INI sees
+        //     the asset-path shape directly),
+        //   - it avoids any chance of a coincidental match against
+        //     an unrelated path component that happens to contain
+        //     a short codename like "damian",
+        //   - the substring is still short enough that a user-side
+        //     override can shorten it if they need a wider match.
+        // The tokens are mutable at runtime via
+        // set_protagonist_codenames() so a mod or game patch that
+        // renames a subfolder can be patched without recompiling.
+        // Guarded by s_codenameMutex; the read path snapshots all
+        // three under one lock and releases before doing the search.
+        constexpr std::string_view k_defaultCodenameKliff   = "cd_phm_macduff";
+        constexpr std::string_view k_defaultCodenameDamiane = "cd_phw_damian";
+        constexpr std::string_view k_defaultCodenameOongka  = "cd_phm_oongka";
 
         // -------------------------------------------------------------------
-        // Radial-swap timestamp (powers `radial_swap_pending()`).
-        //
-        // EquipHide consumes this signal to disambiguate two events that
-        // both rotate user+0xD8: (a) the user pressing radial-swap keys
-        // and (b) save-load reattach. When the controlled-actor pointer
-        // shifts and the new pointer is absent from the body cache,
-        // EquipHide checks `radial_swap_pending()`; true -> "first-time
-        // radial swap to this protagonist" (preserve cache), false ->
-        // "save-load arena rotation" (full reload wipe).
-        //
-        // The mid-hook callback is a single atomic store -- no character
-        // decode, no chain walk. The character identity itself comes
-        // from the focus-broadcast hook (Tier 0) which fires for the
-        // same swap event.
+        // Mutable internal state.
         // -------------------------------------------------------------------
-        constexpr std::uint64_t k_radialSwapPendingWindowMs = 2000u;
-        std::atomic<std::uint64_t> s_radialSwapTimestampMs{0};
 
-        std::mutex s_hookMutex;
-        safetyhook::MidHook s_radialSwapHook;
-        std::atomic<std::uintptr_t> s_radialSwapHookAddr{0};
+        // Track Kliff CCOIA pointer to drive world_generation() bumps
+        // and kliff_low cache invalidation. The sub-manager pointer
+        // is persistent across save-load and cannot be used here;
+        // Kliff's CCOIA IS reallocated on every save-load, and its
+        // session-local low byte at +0x60 shifts between sessions
+        // (e.g., 0x01 in one session, 0x05 in another), so watching
+        // the Kliff CCOIA pointer is the correct rebuild signal.
+        std::atomic<std::uintptr_t> s_cachedKliffCcoia{0};
+        std::atomic<std::uint64_t> s_worldGeneration{0};
 
-        // -------------------------------------------------------------------
-        // Body learning cache (body_ptr -> character).
-        //
-        // Populated as a side effect of every successful current_
-        // controlled_character() call: when the resolver confirms an
-        // identity it stamps the user+0xD8 body pointer into the cache.
-        // Consumed by resolve_character_idx_for_body() so EquipHide's
-        // roster walker can attribute non-controlled bodies (party
-        // members visible in the world).
-        //
-        // Cleared on full world-reload via invalidate_controlled_
-        // character() because save-load reallocates the body pool;
-        // pre-existing entries reference dead pointers the engine may
-        // reuse for a different protagonist.
-        // -------------------------------------------------------------------
-        std::shared_mutex s_bodyCacheMutex;
-        std::unordered_map<std::uintptr_t, ControlledCharacter>
-            s_bodyKeyCache;
+        // Codename storage. Initialised to engine defaults; mutated
+        // via set_protagonist_codenames() at config-load time and on
+        // auto-reload.
+        std::mutex   s_codenameMutex;
+        std::string  s_codenameKliff{k_defaultCodenameKliff};
+        std::string  s_codenameDamiane{k_defaultCodenameDamiane};
+        std::string  s_codenameOongka{k_defaultCodenameOongka};
 
-        // SEH-isolated read of one of the three published hash globals.
-        // Returns 0 when the address is unpublished or the load faults.
-        std::uint32_t safe_read_hash_global(std::uintptr_t addr) noexcept
+        // ---- SEH-guarded primitives -------------------------------------
+
+        std::uintptr_t safe_read_qword(std::uintptr_t addr) noexcept
         {
             if (addr < k_minValidPtr)
                 return 0;
             __try
             {
-                return *reinterpret_cast<const volatile std::uint32_t *>(addr);
+                return *reinterpret_cast<
+                    const volatile std::uintptr_t *>(addr);
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
@@ -185,587 +187,329 @@ namespace CDCore
             }
         }
 
-        // SEH-isolated read of an asciiz at @p addr into @p outBuf.
-        // Caller-owned storage avoids RAII inside the SEH scope (MSVC
-        // C2712). Writes the byte count (excluding NUL) into @p outLen.
-        bool seh_read_cstring(std::uintptr_t addr,
-                              char         *outBuf,
-                              std::size_t   capacity,
-                              std::size_t  &outLen) noexcept
+        std::uint32_t safe_read_dword(std::uintptr_t addr) noexcept
+        {
+            if (addr < k_minValidPtr)
+                return 0;
+            __try
+            {
+                return *reinterpret_cast<
+                    const volatile std::uint32_t *>(addr);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return 0;
+            }
+        }
+
+        // ---- Player base resolution -------------------------------------
+
+        std::uintptr_t resolve_player_base_address() noexcept
+        {
+            // Lazy one-shot: moduleBase + k_defaultPlayerBaseOffset.
+            static std::atomic<std::uintptr_t> s_cachedDefault{0};
+            const auto cached =
+                s_cachedDefault.load(std::memory_order_acquire);
+            if (cached >= k_minValidPtr)
+                return cached;
+            const auto mod = reinterpret_cast<std::uintptr_t>(
+                GetModuleHandleW(nullptr));
+            if (mod < k_minValidPtr)
+                return 0;
+            const auto addr = mod + k_defaultPlayerBaseOffset;
+            s_cachedDefault.store(addr, std::memory_order_release);
+            return addr;
+        }
+
+        // ---- Chain walks (SEH-guarded, single __try per call) -----------
+
+        struct ChainAnchors
+        {
+            std::uintptr_t mgr        = 0; // pa::ClientActorManager
+            std::uintptr_t userActor  = 0; // pa::ClientUserActor
+            std::uintptr_t subMgr     = 0; // CCOIA sub-manager
+            std::uintptr_t kliffCcoia = 0; // sub +0x30
+            std::uintptr_t controlled = 0; // sub +0x38
+        };
+
+        ChainAnchors walk_chain_seh() noexcept
+        {
+            ChainAnchors out{};
+            const auto playerBase = resolve_player_base_address();
+            if (playerBase < k_minValidPtr)
+                return out;
+            __try
+            {
+                const auto mgr = *reinterpret_cast<
+                    const volatile std::uintptr_t *>(playerBase);
+                if (mgr < k_minValidPtr)
+                    return out;
+                const auto userActor = *reinterpret_cast<
+                    const volatile std::uintptr_t *>(mgr + k_offUserActor);
+                if (userActor < k_minValidPtr)
+                    return out;
+                const auto subMgr = *reinterpret_cast<
+                    const volatile std::uintptr_t *>(
+                    userActor + k_offSubManager);
+                if (subMgr < k_minValidPtr)
+                    return out;
+                out.mgr        = mgr;
+                out.userActor  = userActor;
+                out.subMgr     = subMgr;
+                out.kliffCcoia = *reinterpret_cast<
+                    const volatile std::uintptr_t *>(
+                    subMgr + k_offSubMgrKliff);
+                out.controlled = *reinterpret_cast<
+                    const volatile std::uintptr_t *>(
+                    subMgr + k_offSubMgrCtrl);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                // Partial state may be set; caller checks specific
+                // anchors for non-zero before use.
+            }
+            return out;
+        }
+
+        // SEH-guarded resolution of the 100-entry actor list base from
+        // a ClientUserActor. Walks userActor+0x78 (vec_data) -> +0x20
+        // (vec[2] = ChildContainer ptr) -> +0x18 (actor list ptr).
+        // Populates @p outVec / @p outChild / @p outList with the
+        // intermediate anchors so callers can report them; returns 0
+        // when any link is null/torn, otherwise the actor_list base.
+        std::uintptr_t walk_to_actor_list_seh(
+            std::uintptr_t userActor,
+            std::uintptr_t &outVec,
+            std::uintptr_t &outChild) noexcept
+        {
+            outVec = 0;
+            outChild = 0;
+            if (userActor < k_minValidPtr)
+                return 0;
+            __try
+            {
+                const auto vecData = *reinterpret_cast<
+                    const volatile std::uintptr_t *>(
+                    userActor + k_offUserVec);
+                outVec = vecData;
+                if (vecData < k_minValidPtr)
+                    return 0;
+                const auto childContainer = *reinterpret_cast<
+                    const volatile std::uintptr_t *>(
+                    vecData + k_offVecChildSlot);
+                outChild = childContainer;
+                if (childContainer < k_minValidPtr)
+                    return 0;
+                const auto actorList = *reinterpret_cast<
+                    const volatile std::uintptr_t *>(
+                    childContainer + k_offChildList);
+                if (actorList < k_minValidPtr)
+                    return 0;
+                return actorList;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return 0;
+            }
+        }
+
+        // ---- World-generation tracking ----------------------------------
+
+        // Update world-generation counter when Kliff CCOIA identity
+        // changes (= save-load: the engine reallocates Kliff's CCOIA
+        // with a fresh session-local +0x60 lo byte). Flushes the
+        // kliff_low cache so the delta classifier reads the new
+        // anchor rather than a stale value.
+        void note_chain_observation(std::uintptr_t kliffCcoia) noexcept
+        {
+            if (kliffCcoia < k_minValidPtr)
+                return;
+            const auto last =
+                s_cachedKliffCcoia.load(std::memory_order_acquire);
+            if (kliffCcoia == last)
+                return;
+            std::uintptr_t expected = last;
+            if (s_cachedKliffCcoia.compare_exchange_strong(
+                    expected, kliffCcoia,
+                    std::memory_order_acq_rel,
+                    std::memory_order_acquire))
+            {
+                s_worldGeneration.fetch_add(1, std::memory_order_acq_rel);
+            }
+        }
+
+        // ---- ASCII reader for std::string content ----------------------
+
+        // Read up to (cap - 1) printable ASCII bytes from @p start into
+        // @p buf, stopping at the first NUL. Returns false on torn read
+        // or first non-printable byte (rejects garbage early so the
+        // classifier doesn't pattern-match on partial pointer bytes).
+        // The buffer is NUL-terminated on success.
+        bool safe_read_ascii(std::uintptr_t start,
+                             char *buf,
+                             std::size_t cap,
+                             std::size_t &outLen) noexcept
         {
             outLen = 0;
-            if (addr < k_minValidPtr || outBuf == nullptr || capacity == 0)
+            if (start < k_minValidPtr || buf == nullptr || cap == 0)
                 return false;
             __try
             {
-                const auto *cstr =
-                    reinterpret_cast<const char *>(addr);
                 std::size_t i = 0;
-                while (i < capacity - 1 && cstr[i] != '\0')
+                const auto limit = cap - 1;
+                while (i < limit)
                 {
-                    outBuf[i] = cstr[i];
+                    const auto b = *reinterpret_cast<
+                        const volatile std::uint8_t *>(start + i);
+                    if (b == 0)
+                        break;
+                    if (b < 0x20 || b > 0x7E)
+                        return false;
+                    buf[i] = static_cast<char>(b);
                     ++i;
                 }
-                outBuf[i] = '\0';
+                buf[i] = '\0';
                 outLen = i;
                 return true;
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
-                outBuf[0] = '\0';
-                outLen = 0;
                 return false;
             }
         }
 
-        // SEH-isolated walk that resolves user+0xD8 -- the rotating
-        // CLIENT body pointer used as the body-cache key. Walks the WS
-        // chain (s_wsHolder -> ws -> ws+0x30 (ActorManager) -> am+0x28
-        // (ClientUserActor) -> +0xD8). The PLAYER-STATIC chain reaches
-        // a distinct server-side ServerUserActor whose +0xD8 is not the
-        // client body and would mis-key the cache.
-        std::uintptr_t walk_to_controlled_body_seh() noexcept
+        // Walk CCOIA +0x68 -> +0x40 -> +0x40 -> +0x38 to reach the
+        // appearance-config std::string. Resolves heap-buffer vs
+        // inline layout and returns the start address of ASCII
+        // content; returns 0 on any torn link.
+        std::uintptr_t resolve_appearance_path_buffer(
+            std::uintptr_t ccoia) noexcept
         {
-            const auto wsHolder =
-                s_wsHolder.load(std::memory_order_acquire);
-            if (wsHolder < k_minValidPtr)
+            if (ccoia < k_minValidPtr)
                 return 0;
-            __try
-            {
-                const auto ws = *reinterpret_cast<
-                    const volatile std::uintptr_t *>(wsHolder);
-                if (ws < k_minValidPtr)
-                    return 0;
-                const auto am = *reinterpret_cast<
-                    const volatile std::uintptr_t *>(ws + 0x30);
-                if (am < k_minValidPtr)
-                    return 0;
-                const auto userActor = *reinterpret_cast<
-                    const volatile std::uintptr_t *>(am + 0x28);
-                if (userActor < k_minValidPtr)
-                    return 0;
-                const auto controlledBody = *reinterpret_cast<
-                    const volatile std::uintptr_t *>(userActor + 0xD8);
-                if (controlledBody < k_minValidPtr)
-                    return 0;
-                return controlledBody;
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                return 0;
-            }
+            auto p = safe_read_qword(ccoia + k_offAppearChain1);
+            if (p < k_minValidPtr) return 0;
+            p = safe_read_qword(p + k_offAppearChain2);
+            if (p < k_minValidPtr) return 0;
+            p = safe_read_qword(p + k_offAppearChain3);
+            if (p < k_minValidPtr) return 0;
+            const auto strStruct =
+                safe_read_qword(p + k_offAppearChain4);
+            if (strStruct < k_minValidPtr) return 0;
+            const auto bufPtr =
+                safe_read_qword(strStruct + k_offStringBufPtr);
+            if (bufPtr >= k_minValidPtr &&
+                bufPtr < k_canonicalUpperPtr)
+                return bufPtr;
+            return strStruct; // inline fallback
         }
 
-        // SEH-isolated structural read: is the given body Kliff?
-        // Body+0x80 dword is 0x30 for Kliff bodies and 0x1D (or
-        // similar non-0x30 sentinel) for Damiane/Oongka bodies, per
-        // live captures 2026-05-14. This is a binary "is-Kliff"
-        // signal: returns true ONLY when the marker explicitly says
-        // Kliff. Returns false for non-Kliff AND for any fault /
-        // unmapped read (so the caller falls back to Tier-0 / last-
-        // known-non-Kliff cache, never up-casting an unknown to
-        // Kliff). Cannot discriminate Damiane from Oongka -- both
-        // share the non-Kliff marker.
-        constexpr std::uint32_t k_bodyKliffMarker = 0x30;
-        constexpr std::ptrdiff_t k_bodyMarkerOffset = 0x80;
+        // ---- CCOIA classification ---------------------------------------
 
-        bool body_is_structurally_kliff(std::uintptr_t body) noexcept
-        {
-            if (body < k_minValidPtr)
-                return false;
-            __try
-            {
-                const auto marker =
-                    *reinterpret_cast<const volatile std::uint32_t *>(
-                        body + k_bodyMarkerOffset);
-                return marker == k_bodyKliffMarker;
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                return false;
-            }
-        }
-
-        // Stamp (body -> character) into the learning cache. Skips when
-        // @p body is below the guard region or @p ch is Unknown.
-        void stamp_body_cache(std::uintptr_t body,
-                              ControlledCharacter ch) noexcept
-        {
-            if (body < k_minValidPtr ||
-                ch == ControlledCharacter::Unknown)
-            {
-                return;
-            }
-            std::unique_lock<std::shared_mutex> lk(s_bodyCacheMutex);
-            s_bodyKeyCache[body] = ch;
-        }
-
-        // SafetyHook MidHook destination for sub_14353BA60 (the engine's
-        // per-subscriber focus-actor list mutator). ctx.r9 carries the
-        // new focus-actor hash handle; we compare against the three
-        // published player-character globals and, on match, stamp the
-        // resolved character into s_focusBroadcastChar.
+        // Classifies a CCOIA by reading its appearance-config path
+        // and matching the embedded character codename. Returns
+        // 1/2/3 for Kliff/Damiane/Oongka, or 0 when the chain is
+        // unreachable or the path doesn't contain any known codename
+        // (NPCs and follower humanoids fall here -- they either lack
+        // an appearance config at this offset or carry an unknown
+        // codename).
         //
-        // The vast majority of fires (~99.8% on captured sessions) carry
-        // NPC focus handles and are filtered out by the equality checks.
-        // Must not block, allocate, or call into anything that can
-        // re-enter SafetyHook.
-        void focus_broadcast_midhook(safetyhook::Context &ctx) noexcept
+        // We anchor on the "/cd_" substring (start of the character
+        // subfolder name in `.../cd_<archetype>_<codename>/...`) and
+        // search for the codename within the remaining suffix. This
+        // avoids false positives if a codename's bytes appear earlier
+        // in the path tree (e.g., directory names that coincide with
+        // a substring of a character codename).
+        std::uint32_t classify_by_appearance(
+            std::uintptr_t ccoia) noexcept
         {
-            const auto incoming = static_cast<std::uint32_t>(ctx.r9);
-            if (incoming == 0)
-                return;
+            const auto strStart = resolve_appearance_path_buffer(ccoia);
+            if (strStart == 0)
+                return 0;
+            char buf[k_appearPathReadMax]{};
+            std::size_t len = 0;
+            if (!safe_read_ascii(strStart, buf, sizeof(buf), len))
+                return 0;
+            const std::string_view path{buf, len};
+            const auto anchor = path.find(k_appearAnchor);
+            if (anchor == std::string_view::npos)
+                return 0;
+            const auto suffix = path.substr(anchor);
 
-            const auto kliff =
-                safe_read_hash_global(s_kliffHashGlobalAddr.load(
-                    std::memory_order_acquire));
-            const auto oongka =
-                safe_read_hash_global(s_oongkaHashGlobalAddr.load(
-                    std::memory_order_acquire));
-            const auto damian =
-                safe_read_hash_global(s_damianHashGlobalAddr.load(
-                    std::memory_order_acquire));
-
-            ControlledCharacter resolved = ControlledCharacter::Unknown;
-            if (kliff != 0 && incoming == kliff)
-                resolved = ControlledCharacter::Kliff;
-            else if (oongka != 0 && incoming == oongka)
-                resolved = ControlledCharacter::Oongka;
-            else if (damian != 0 && incoming == damian)
-                resolved = ControlledCharacter::Damiane;
-            else
-                return; // Not a player-character broadcast.
-
-            const auto prior = s_focusBroadcastChar.exchange(
-                static_cast<std::uint8_t>(resolved),
-                std::memory_order_acq_rel);
-            s_lastGoodChar.store(
-                static_cast<std::uint8_t>(resolved),
-                std::memory_order_release);
-
-            // Update s_lastKnownNonKliff ONLY for Damiane/Oongka
-            // captures. This cache is the resolver's fallback when
-            // the structural body marker says "not Kliff" but the
-            // engine has not fired a Damiane/Oongka broadcast for
-            // the actual current character (the same-non-Kliff
-            // save reload edge case). Kliff captures must NOT
-            // overwrite this cache, otherwise an intermediate Kliff
-            // broadcast during world load would erase the user's
-            // last Damiane/Oongka selection.
-            if (resolved == ControlledCharacter::Damiane ||
-                resolved == ControlledCharacter::Oongka)
+            // Snapshot codenames under one lock, then release before
+            // doing the substring search. Empty codenames are treated
+            // as "skip this protagonist" rather than "match everything"
+            // (find("") returns 0 = always-hit).
+            std::string kliff, damiane, oongka;
             {
-                s_lastKnownNonKliff.store(
-                    static_cast<std::uint8_t>(resolved),
-                    std::memory_order_release);
+                std::lock_guard<std::mutex> lock(s_codenameMutex);
+                kliff   = s_codenameKliff;
+                damiane = s_codenameDamiane;
+                oongka  = s_codenameOongka;
             }
-
-            // Always emit at INFO on a change, TRACE otherwise. The
-            // broadcast is event-rate (rare), not tick-rate, so log
-            // volume is irrelevant; dedupe was suppressing the first
-            // post-hot-reload capture when CDCore static state
-            // retained the pre-reload value, making it look like the
-            // hook had not fired.
-            const bool changed =
-                (prior != static_cast<std::uint8_t>(resolved));
-            auto &logger = DMK::Logger::get_instance();
-            if (changed)
-            {
-                logger.info(
-                    "ControlledChar: focus-broadcast captured "
-                    "hash=0x{:X} -> {} (changed={})",
-                    incoming,
-                    controlled_character_name(resolved),
-                    changed);
-            }
-            else
-            {
-                logger.trace(
-                    "ControlledChar: focus-broadcast captured "
-                    "hash=0x{:X} -> {} (changed={})",
-                    incoming,
-                    controlled_character_name(resolved),
-                    changed);
-            }
+            if (!kliff.empty() &&
+                suffix.find(kliff) != std::string_view::npos)
+                return 1;
+            if (!damiane.empty() &&
+                suffix.find(damiane) != std::string_view::npos)
+                return 2;
+            if (!oongka.empty() &&
+                suffix.find(oongka) != std::string_view::npos)
+                return 3;
+            return 0;
         }
 
-        // SafetyHook MidHook destination for the radial-swap handler
-        // (sub_141B04040). Stamps a single monotonic timestamp consumed
-        // by `radial_swap_pending()`. Consumers use that flag to
-        // distinguish a user radial swap from a save-load arena
-        // rotation; the character identity itself comes from the
-        // focus-broadcast hook.
-        void radial_swap_midhook(safetyhook::Context & /*ctx*/) noexcept
+        // Primary CCOIA classifier. Tries the appearance-config path
+        // first (character-codename identity that survives outfit and
+        // state changes). Falls back to the +0x63 high-byte fast-path
+        // for Kliff only when the appearance chain is mid-teardown
+        // (engine save-load window where component pointers
+        // transiently null). Damiane and Oongka are not distinguishable
+        // without the appearance chain; the resolver returns Unknown
+        // for them in that window rather than guessing.
+        std::uint32_t classify_ccoia(std::uintptr_t ccoia) noexcept
         {
-            const auto now = GetTickCount64();
-            s_radialSwapTimestampMs.store(now, std::memory_order_release);
-
-            // User-input rate (sub-Hz) -- trace log overhead is
-            // irrelevant. Surfacing every fire lets consumers tell a
-            // radial swap (fires) from a save-load reattach (does not).
-            DMK::Logger::get_instance().trace(
-                "ControlledChar: radial-swap input fired (ts={})", now);
+            if (ccoia < k_minValidPtr)
+                return 0;
+            const auto byAppearance = classify_by_appearance(ccoia);
+            if (byAppearance != 0)
+                return byAppearance;
+            const auto packed =
+                safe_read_dword(ccoia + k_offCcoiaIdentity);
+            const auto highByte =
+                static_cast<std::uint8_t>((packed >> 24) & 0xFFu);
+            if (highByte == k_kliffHighByte)
+                return 1;
+            return 0;
         }
 
-    } // anonymous namespace
+    } // namespace
 
-    void set_world_system_holder(std::uintptr_t holderAddr) noexcept
+    // ===================================================================
+    // Public API.
+    // ===================================================================
+
+    std::uintptr_t current_controlled_ccoia() noexcept
     {
-        s_wsHolder.store(holderAddr, std::memory_order_release);
-
-        if (holderAddr != 0)
-        {
-            DMK::Logger::get_instance().info(
-                "ControlledChar: WorldSystem holder published at 0x{:X}",
-                static_cast<std::uint64_t>(holderAddr));
-        }
-    }
-
-    void set_focus_actor_hash_globals(std::uintptr_t kliffAddr,
-                                      std::uintptr_t oongkaAddr,
-                                      std::uintptr_t damianAddr) noexcept
-    {
-        s_kliffHashGlobalAddr.store(kliffAddr,  std::memory_order_release);
-        s_oongkaHashGlobalAddr.store(oongkaAddr, std::memory_order_release);
-        s_damianHashGlobalAddr.store(damianAddr, std::memory_order_release);
-
-        if (kliffAddr || oongkaAddr || damianAddr)
-        {
-            // Note: hash values may be 0 at this moment if the engine's
-            // static init has not yet populated them; the addresses
-            // themselves are correct and the hook callback re-reads on
-            // every fire.
-            DMK::Logger::get_instance().info(
-                "ControlledChar: focus-actor hash global addresses "
-                "published (kliff=0x{:X}, oongka=0x{:X}, damian=0x{:X})",
-                static_cast<std::uint64_t>(kliffAddr),
-                static_cast<std::uint64_t>(oongkaAddr),
-                static_cast<std::uint64_t>(damianAddr));
-        }
-    }
-
-    bool resolve_and_publish_focus_actor_globals() noexcept
-    {
-        constexpr std::string_view k_kliffName  = "focus-actor-kliff";
-        constexpr std::string_view k_oongkaName = "focus-actor-oongka";
-        constexpr std::string_view k_damianName = "focus-actor-damian";
-
-        auto compiled = DetourModKit::Scanner::parse_aob(
-            CDCore::Anchors::k_focusActorInitPattern);
-        if (!compiled)
-        {
-            DMK::Logger::get_instance().warning(
-                "ControlledChar: focus-actor init pattern failed to "
-                "compile -- Tier-0 disabled");
-            return false;
-        }
-
-        // Resolve the main module's base + size so we can scan the
-        // whole image (including the `.tls` section). The bridge
-        // functions live in `.tls` on this binary; that section is
-        // mapped without PAGE_EXECUTE so scan_executable_regions
-        // skips it. Module-bounded find_pattern covers any section
-        // regardless of execute permission.
-        const auto mainModule = ::GetModuleHandleW(nullptr);
-        if (mainModule == nullptr)
-        {
-            DMK::Logger::get_instance().warning(
-                "ControlledChar: GetModuleHandle(nullptr) returned NULL "
-                "-- focus-actor AOB scan aborted");
-            return false;
-        }
-        MODULEINFO modInfo{};
-        if (!::GetModuleInformation(::GetCurrentProcess(),
-                                    mainModule,
-                                    &modInfo,
-                                    sizeof(modInfo)))
-        {
-            DMK::Logger::get_instance().warning(
-                "ControlledChar: GetModuleInformation failed (gle={}) "
-                "-- focus-actor AOB scan aborted",
-                ::GetLastError());
-            return false;
-        }
-        const auto *moduleBase =
-            reinterpret_cast<const std::byte *>(modInfo.lpBaseOfDll);
-        const auto moduleSize =
-            static_cast<std::size_t>(modInfo.SizeOfImage);
-
-        std::uintptr_t kliffGlobal  = 0;
-        std::uintptr_t oongkaGlobal = 0;
-        std::uintptr_t damianGlobal = 0;
-
-        // The pattern matches the generic "register tag via
-        // sub_140F46680" bridge shape used by HUNDREDS of engine
-        // strings (focus-actor-*, layer tags, query keys, etc.), not
-        // just the three protagonists. Walk the entire image with an
-        // advancing start pointer so the total cost stays O(image)
-        // rather than O(N * image), and dispatch each hit by its
-        // string content. The loop exits early once all three
-        // protagonists are bound.
-        const std::byte *cursor      = moduleBase;
-        const auto      *moduleEnd   = moduleBase + moduleSize;
-        constexpr std::size_t k_maxScannedHits = 4096;
-        std::size_t hitsScanned = 0;
-        while (cursor < moduleEnd && hitsScanned < k_maxScannedHits)
-        {
-            const auto remaining =
-                static_cast<std::size_t>(moduleEnd - cursor);
-            const auto *match =
-                DetourModKit::Scanner::find_pattern(
-                    cursor, remaining, *compiled);
-            if (match == nullptr)
-                break;
-            ++hitsScanned;
-            cursor = match + 1;
-
-            const auto matchAddr =
-                reinterpret_cast<std::uintptr_t>(match);
-
-            // Resolve the string LEA: disp32 at +9, RIP after instr at +13.
-            const auto strDispAddr =
-                matchAddr + CDCore::Anchors::k_focusActorInitStringDispOffset;
-            std::int32_t strDisp = 0;
-            std::memcpy(&strDisp,
-                        reinterpret_cast<const void *>(strDispAddr),
-                        sizeof(strDisp));
-            const auto strAddr =
-                matchAddr +
-                CDCore::Anchors::k_focusActorInitStringInstrEndOffset +
-                static_cast<std::ptrdiff_t>(strDisp);
-
-            char        nameBuf[32];
-            std::size_t nameLen = 0;
-            if (!seh_read_cstring(strAddr, nameBuf, sizeof(nameBuf), nameLen))
-                continue;
-            std::string_view name{nameBuf, nameLen};
-
-            // Resolve the dword LEA: disp32 at +22, RIP after instr at +26.
-            const auto dwordDispAddr =
-                matchAddr + CDCore::Anchors::k_focusActorInitDwordDispOffset;
-            std::int32_t dwordDisp = 0;
-            std::memcpy(&dwordDisp,
-                        reinterpret_cast<const void *>(dwordDispAddr),
-                        sizeof(dwordDisp));
-            const auto dwordAddr =
-                matchAddr +
-                CDCore::Anchors::k_focusActorInitDwordInstrEndOffset +
-                static_cast<std::ptrdiff_t>(dwordDisp);
-
-            if (name == k_kliffName)
-                kliffGlobal = dwordAddr;
-            else if (name == k_oongkaName)
-                oongkaGlobal = dwordAddr;
-            else if (name == k_damianName)
-                damianGlobal = dwordAddr;
-
-            if (kliffGlobal && oongkaGlobal && damianGlobal)
-                break;
-        }
-
-        if (!kliffGlobal || !oongkaGlobal || !damianGlobal)
-        {
-            DMK::Logger::get_instance().warning(
-                "ControlledChar: focus-actor AOB resolved {} of 3 "
-                "globals (kliff=0x{:X} oongka=0x{:X} damian=0x{:X}) "
-                "-- Tier-0 disabled",
-                (kliffGlobal ? 1 : 0) +
-                    (oongkaGlobal ? 1 : 0) +
-                    (damianGlobal ? 1 : 0),
-                static_cast<std::uint64_t>(kliffGlobal),
-                static_cast<std::uint64_t>(oongkaGlobal),
-                static_cast<std::uint64_t>(damianGlobal));
-            return false;
-        }
-
-        set_focus_actor_hash_globals(kliffGlobal, oongkaGlobal, damianGlobal);
-        return true;
+        const auto chain = walk_chain_seh();
+        note_chain_observation(chain.kliffCcoia);
+        return chain.controlled;
     }
 
     ControlledCharacter current_controlled_character() noexcept
     {
-        // Five-layer resolve. See the file-level header for the why
-        // behind each ordering choice (in particular: why Layer 2
-        // gates on non-Kliff, and why Layer 3 must outlive
-        // invalidate_controlled_character()).
-        const auto controlledBody = walk_to_controlled_body_seh();
-
-        // Layer 1: structural Kliff anchor.
-        if (body_is_structurally_kliff(controlledBody))
+        const auto chain = walk_chain_seh();
+        note_chain_observation(chain.kliffCcoia);
+        if (chain.controlled < k_minValidPtr)
+            return ControlledCharacter::Unknown;
+        const auto idx = classify_ccoia(chain.controlled);
+        switch (idx)
         {
-            s_lastGoodChar.store(
-                static_cast<std::uint8_t>(ControlledCharacter::Kliff),
-                std::memory_order_release);
-            stamp_body_cache(controlledBody,
-                             ControlledCharacter::Kliff);
-            return ControlledCharacter::Kliff;
+        case 1: return ControlledCharacter::Kliff;
+        case 2: return ControlledCharacter::Damiane;
+        case 3: return ControlledCharacter::Oongka;
+        default: return ControlledCharacter::Unknown;
         }
-
-        // Layer 2: Tier-0 if non-Kliff (bypasses stale Kliff
-        // intermediate broadcast).
-        const auto focusCh = static_cast<ControlledCharacter>(
-            s_focusBroadcastChar.load(std::memory_order_acquire));
-        if (focusCh == ControlledCharacter::Damiane ||
-            focusCh == ControlledCharacter::Oongka)
-        {
-            stamp_body_cache(controlledBody, focusCh);
-            return focusCh;
-        }
-
-        // Layer 3: last-known non-Kliff cache (saves the same-non-
-        // Kliff save-reload case).
-        const auto lastNonKliff = static_cast<ControlledCharacter>(
-            s_lastKnownNonKliff.load(std::memory_order_acquire));
-        if (lastNonKliff != ControlledCharacter::Unknown)
-        {
-            stamp_body_cache(controlledBody, lastNonKliff);
-            return lastNonKliff;
-        }
-
-        // Layer 4: Tier-0 even if Kliff.
-        if (focusCh != ControlledCharacter::Unknown)
-        {
-            stamp_body_cache(controlledBody, focusCh);
-            return focusCh;
-        }
-
-        // Layer 5: LKG.
-        return static_cast<ControlledCharacter>(
-            s_lastGoodChar.load(std::memory_order_acquire));
-    }
-
-    bool install_focus_broadcast_hook(std::uintptr_t hookAddr) noexcept
-    {
-        std::lock_guard<std::mutex> lk(s_focusHookMutex);
-
-        const auto current =
-            s_focusBroadcastHookAddr.load(std::memory_order_acquire);
-
-        if (hookAddr == 0)
-        {
-            if (current == 0)
-                return true;
-            s_focusBroadcastHook = safetyhook::MidHook{};
-            s_focusBroadcastHookAddr.store(0, std::memory_order_release);
-            DMK::Logger::get_instance().info(
-                "ControlledChar: focus-broadcast hook uninstalled");
-            return true;
-        }
-
-        if (hookAddr < k_minValidPtr)
-        {
-            DMK::Logger::get_instance().warning(
-                "ControlledChar: focus-broadcast hook rejected -- "
-                "address 0x{:X} below guard region",
-                static_cast<std::uint64_t>(hookAddr));
-            return false;
-        }
-
-        if (current == hookAddr)
-            return true;
-
-        if (current != 0)
-        {
-            DMK::Logger::get_instance().info(
-                "ControlledChar: focus-broadcast hook target shifted "
-                "0x{:X} -> 0x{:X}, rebuilding",
-                static_cast<std::uint64_t>(current),
-                static_cast<std::uint64_t>(hookAddr));
-            s_focusBroadcastHook = safetyhook::MidHook{};
-            s_focusBroadcastHookAddr.store(0, std::memory_order_release);
-        }
-
-        auto built = safetyhook::MidHook::create(
-            reinterpret_cast<void *>(hookAddr),
-            focus_broadcast_midhook);
-        if (!built)
-        {
-            DMK::Logger::get_instance().warning(
-                "ControlledChar: focus-broadcast hook creation failed "
-                "at 0x{:X}",
-                static_cast<std::uint64_t>(hookAddr));
-            return false;
-        }
-
-        s_focusBroadcastHook = std::move(*built);
-        s_focusBroadcastHookAddr.store(hookAddr, std::memory_order_release);
-
-        DMK::Logger::get_instance().info(
-            "ControlledChar: focus-broadcast hook installed at 0x{:X}",
-            static_cast<std::uint64_t>(hookAddr));
-        return true;
-    }
-
-    void uninstall_focus_broadcast_hook() noexcept
-    {
-        (void)install_focus_broadcast_hook(0);
-    }
-
-    bool install_radial_swap_hook(std::uintptr_t hookAddr) noexcept
-    {
-        std::lock_guard<std::mutex> lk(s_hookMutex);
-
-        const auto current =
-            s_radialSwapHookAddr.load(std::memory_order_acquire);
-
-        if (hookAddr == 0)
-        {
-            if (current == 0)
-                return true;
-            s_radialSwapHook = safetyhook::MidHook{};
-            s_radialSwapHookAddr.store(0, std::memory_order_release);
-            DMK::Logger::get_instance().info(
-                "ControlledChar: radial-swap hook uninstalled");
-            return true;
-        }
-
-        if (hookAddr < k_minValidPtr)
-        {
-            DMK::Logger::get_instance().warning(
-                "ControlledChar: radial-swap hook rejected -- address "
-                "0x{:X} below guard region",
-                static_cast<std::uint64_t>(hookAddr));
-            return false;
-        }
-
-        if (current == hookAddr)
-            return true;
-
-        if (current != 0)
-        {
-            DMK::Logger::get_instance().info(
-                "ControlledChar: radial-swap hook target shifted "
-                "0x{:X} -> 0x{:X}, rebuilding",
-                static_cast<std::uint64_t>(current),
-                static_cast<std::uint64_t>(hookAddr));
-            s_radialSwapHook = safetyhook::MidHook{};
-            s_radialSwapHookAddr.store(0, std::memory_order_release);
-        }
-
-        auto built = safetyhook::MidHook::create(
-            reinterpret_cast<void *>(hookAddr),
-            radial_swap_midhook);
-        if (!built)
-        {
-            DMK::Logger::get_instance().warning(
-                "ControlledChar: radial-swap hook creation failed at "
-                "0x{:X}",
-                static_cast<std::uint64_t>(hookAddr));
-            return false;
-        }
-
-        s_radialSwapHook = std::move(*built);
-        s_radialSwapHookAddr.store(hookAddr, std::memory_order_release);
-
-        DMK::Logger::get_instance().info(
-            "ControlledChar: radial-swap hook installed at 0x{:X}",
-            static_cast<std::uint64_t>(hookAddr));
-        return true;
-    }
-
-    void uninstall_radial_swap_hook() noexcept
-    {
-        (void)install_radial_swap_hook(0);
     }
 
     std::string_view controlled_character_name(
@@ -773,12 +517,11 @@ namespace CDCore
     {
         switch (ch)
         {
-            case ControlledCharacter::Kliff:   return "Kliff";
-            case ControlledCharacter::Damiane: return "Damiane";
-            case ControlledCharacter::Oongka:  return "Oongka";
-            case ControlledCharacter::Unknown: return {};
+        case ControlledCharacter::Kliff:   return "Kliff";
+        case ControlledCharacter::Damiane: return "Damiane";
+        case ControlledCharacter::Oongka:  return "Oongka";
+        default:                           return {};
         }
-        return {};
     }
 
     std::string_view current_controlled_character_name() noexcept
@@ -790,114 +533,172 @@ namespace CDCore
     {
         switch (current_controlled_character())
         {
-            case ControlledCharacter::Kliff:   return 1;
-            case ControlledCharacter::Damiane: return 2;
-            case ControlledCharacter::Oongka:  return 3;
-            case ControlledCharacter::Unknown: return 0;
+        case ControlledCharacter::Kliff:   return 1;
+        case ControlledCharacter::Damiane: return 2;
+        case ControlledCharacter::Oongka:  return 3;
+        default:                           return 0;
         }
-        return 0;
     }
 
-    std::uint32_t resolve_character_idx_for_body(
-        std::uintptr_t body) noexcept
+    std::uintptr_t equip_slot_for_ccoia(std::uintptr_t ccoia) noexcept
     {
-        if (body < k_minValidPtr)
+        if (ccoia < k_minValidPtr)
             return 0;
-        std::shared_lock<std::shared_mutex> lk(s_bodyCacheMutex);
-        const auto it = s_bodyKeyCache.find(body);
-        if (it == s_bodyKeyCache.end())
-            return 0;
-        switch (it->second)
+        __try
         {
-            case ControlledCharacter::Kliff:   return 1;
-            case ControlledCharacter::Damiane: return 2;
-            case ControlledCharacter::Oongka:  return 3;
-            case ControlledCharacter::Unknown: return 0;
+            const auto componentTable = *reinterpret_cast<
+                const volatile std::uintptr_t *>(ccoia + 0x68);
+            if (componentTable < k_minValidPtr)
+                return 0;
+            const auto equipSlot = *reinterpret_cast<
+                const volatile std::uintptr_t *>(componentTable + 0x38);
+            if (equipSlot < k_minValidPtr)
+                return 0;
+            return equipSlot;
         }
-        return 0;
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return 0;
+        }
     }
 
-    std::size_t snapshot_body_cache(BodyCacheEntry *out, std::size_t cap) noexcept
+    std::size_t snapshot_body_cache(BodyCacheEntry *out,
+                                    std::size_t cap) noexcept
     {
         if (out == nullptr || cap == 0)
             return 0;
-        std::shared_lock<std::shared_mutex> lk(s_bodyCacheMutex);
+        const auto chain = walk_chain_seh();
+        note_chain_observation(chain.kliffCcoia);
+        if (chain.kliffCcoia < k_minValidPtr)
+            return 0;
+
         std::size_t written = 0;
-        for (const auto &kv : s_bodyKeyCache)
+        // Kliff is always the first entry (always present).
+        out[written++] = {chain.kliffCcoia, 1u};
+
+        if (written >= cap)
+            return written;
+
+        // Walk the ClientActorManager+0x100 actor array. For each
+        // non-Kliff entry, run the appearance-config classifier.
+        // NPCs and followers fail the codename-substring match
+        // (their appearance path does not contain `cd_phw_damian`
+        // or `cd_phm_oongka`), so the loop emits at most one
+        // Damiane and one Oongka entry.
+        const auto actorArray =
+            safe_read_qword(chain.mgr + k_offMgrActorArray);
+        if (actorArray < k_minValidPtr)
+            return written;
+
+        bool foundDamiane = false;
+        bool foundOongka  = false;
+        for (std::size_t i = 0;
+             i < k_actorListCapacity && written < cap;
+             ++i)
         {
-            if (written >= cap)
-                break;
-            std::uint32_t idx = 0;
-            switch (kv.second)
+            const auto candidate = safe_read_qword(
+                actorArray + i * sizeof(std::uintptr_t));
+            if (candidate < k_minValidPtr ||
+                candidate == chain.kliffCcoia)
+                continue;
+            const auto idx = classify_ccoia(candidate);
+            if (idx == 2 && !foundDamiane)
             {
-                case ControlledCharacter::Kliff:   idx = 1; break;
-                case ControlledCharacter::Damiane: idx = 2; break;
-                case ControlledCharacter::Oongka:  idx = 3; break;
-                case ControlledCharacter::Unknown: continue;
+                out[written++] = {candidate, 2u};
+                foundDamiane = true;
             }
-            out[written++] = BodyCacheEntry{kv.first, idx};
+            else if (idx == 3 && !foundOongka)
+            {
+                out[written++] = {candidate, 3u};
+                foundOongka = true;
+            }
+            if (foundDamiane && foundOongka)
+                break;
         }
+
         return written;
     }
 
-    bool radial_swap_pending() noexcept
+    ActorListDebugSummary debug_enumerate_actor_list(
+        ActorListDebugEntry *out, std::size_t cap) noexcept
     {
-        const auto t =
-            s_radialSwapTimestampMs.load(std::memory_order_acquire);
-        if (t == 0)
-            return false;
-        const auto now = GetTickCount64();
-        return (now >= t) && ((now - t) <= k_radialSwapPendingWindowMs);
+        ActorListDebugSummary summary{};
+        if (out == nullptr || cap == 0)
+            return summary;
+
+        const auto chain = walk_chain_seh();
+        note_chain_observation(chain.kliffCcoia);
+        summary.mgr        = chain.mgr;
+        summary.userActor  = chain.userActor;
+        summary.subMgr     = chain.subMgr;
+        summary.kliffCcoia = chain.kliffCcoia;
+        summary.controlled = chain.controlled;
+
+        // Reuse the shared chain-to-list walker. The diagnostic
+        // summary just publishes the intermediate anchors the walker
+        // already collects.
+        const auto actorList = walk_to_actor_list_seh(
+            chain.userActor, summary.vecData, summary.childContainer);
+        summary.actorList = actorList;
+        if (actorList < k_minValidPtr)
+            return summary;
+
+        __try
+        {
+            std::size_t n = 0;
+            for (std::size_t i = 0;
+                 i < k_actorListCapacity && n < cap;
+                 ++i)
+            {
+                const auto entryBase =
+                    actorList + i * k_actorListStride;
+                const auto ccoia = *reinterpret_cast<
+                    const volatile std::uintptr_t *>(entryBase);
+                const auto flag = *reinterpret_cast<
+                    const volatile std::uint64_t *>(entryBase + 8);
+                if (ccoia < k_minValidPtr && flag == 0)
+                    continue;
+                std::uint32_t ident = 0;
+                if (ccoia >= k_minValidPtr)
+                    ident = safe_read_dword(ccoia + k_offCcoiaIdentity);
+                out[n].ccoia    = ccoia;
+                out[n].flag     = flag;
+                out[n].identity = ident;
+                ++n;
+            }
+            summary.rawEntries = n;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            // Partial state; return what we have so far.
+        }
+        return summary;
     }
 
-    void invalidate_swap_caches() noexcept
+    std::uint64_t world_generation() noexcept
     {
-        // Swap-scope invalidation: clear ONLY the radial-swap
-        // timestamp. Tier-0 (`s_focusBroadcastChar`) and the LKG
-        // cache are deliberately left intact -- they self-update on
-        // every focus broadcast, and a manual clear here would open
-        // an Unknown window between the swap-detect callback and the
-        // next resolver query that the resolver has no pull-mode
-        // fallback for.
-        //
-        // The timestamp itself must be cleared because consumer
-        // save-load disambiguation (`radial_swap_pending()`) must
-        // not false-positive across a save-load that immediately
-        // follows a radial swap.
-        s_radialSwapTimestampMs.store(0, std::memory_order_release);
+        // Take an opportunistic chain snapshot to refresh the counter
+        // when the caller hasn't recently queried identity. The
+        // counter itself is monotonic and never regresses on a
+        // transient null window.
+        const auto chain = walk_chain_seh();
+        note_chain_observation(chain.kliffCcoia);
+        return s_worldGeneration.load(std::memory_order_acquire);
     }
 
     void invalidate_controlled_character() noexcept
     {
-        // Full world-reload clear. Save-load transitions reallocate
-        // every chain pointer including the body pool; flushing the
-        // body cache here prevents post-load mis-attribution where the
-        // engine reuses a previously-cached body address for a
-        // different protagonist.
-        //
-        // Unlike invalidate_swap_caches(), this DOES clear Tier-0 +
-        // LKG because the engine is about to fire a fresh focus
-        // broadcast for the new world's controlled character; the
-        // brief Unknown window is intentional and bounded by the
-        // engine's world-spawn focus event (typically <1 s).
-        s_focusBroadcastChar.store(
-            static_cast<std::uint8_t>(ControlledCharacter::Unknown),
-            std::memory_order_release);
-        s_lastGoodChar.store(
-            static_cast<std::uint8_t>(ControlledCharacter::Unknown),
-            std::memory_order_release);
-        s_radialSwapTimestampMs.store(0, std::memory_order_release);
+        s_cachedKliffCcoia.store(0, std::memory_order_release);
+    }
 
-        // `s_lastKnownNonKliff` is deliberately PRESERVED. It is
-        // the only signal that recovers identity on a same-non-
-        // Kliff save reload, where the engine fires an intermediate
-        // Kliff broadcast and never re-broadcasts the actual
-        // Damiane/Oongka body.
-
-        {
-            std::unique_lock<std::shared_mutex> lk(s_bodyCacheMutex);
-            s_bodyKeyCache.clear();
-        }
+    void set_protagonist_codenames(std::string_view kliff,
+                                   std::string_view damiane,
+                                   std::string_view oongka) noexcept
+    {
+        std::lock_guard<std::mutex> lock(s_codenameMutex);
+        if (!kliff.empty())   s_codenameKliff   = kliff;
+        if (!damiane.empty()) s_codenameDamiane = damiane;
+        if (!oongka.empty())  s_codenameOongka  = oongka;
     }
 
 } // namespace CDCore

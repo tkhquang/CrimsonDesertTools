@@ -125,12 +125,13 @@ void draw_character_picker(PresetManager &pm)
     // drop-detection state so the next apply pass does not confuse
     // the previous character's cached itemIds with the new one's.
     //
-    // Auto-detection of the currently-controlled character from a1
-    // is deferred: the type-byte at *(actor+0x88)+1 is role-based
-    // (controlled vs background), not character-based, and the
-    // static WorldSystem -> ActorManager -> UserActor chain did not
-    // update live on control-swap in our 1.03.01 probe. Until that
-    // RE lands, the user picks the character manually here.
+    // The controlled character is auto-detected by CDCore's
+    // appearance-config classifier and the worker's load-detect
+    // thread keeps the active preset bound to whoever the user
+    // controls in-game. This dropdown is therefore an editing
+    // override -- picking a non-controlled character pins the
+    // editor onto that character's preset list while the body on
+    // screen remains the controlled one (cross-body apply).
 
     // Fixed stack buffer -- the game has a small, closed roster of
     // playable characters (Kliff / Damiane / Oongka at time of
@@ -177,10 +178,13 @@ void draw_character_picker(PresetManager &pm)
                     m.targetItemId = 0;
                 }
                 pm.apply_to_state();
-                last_applied_ids().fill(0);
-                real_damaged().fill(false);
-                last_applied_real_ids().fill(0);
-                last_applied_carrier_ids().fill(0);
+                // Retain last_applied_ids / real_damaged /
+                // last_applied_real_ids / last_applied_carrier_ids
+                // across the editing-character switch. apply_all_transmog's
+                // Phase A tear-down uses `lastIds[slot] != 0 &&
+                // !mods[slot].active` to detect stale carriers from the
+                // outgoing character's preset; pre-wiping any of those
+                // arrays leaves stale fakes installed on the body.
                 manual_apply();
                 pm.save();
             }
@@ -213,10 +217,8 @@ void draw_character_picker(PresetManager &pm)
                     m.targetItemId = 0;
                 }
                 pm.apply_to_state();
-                last_applied_ids().fill(0);
-                real_damaged().fill(false);
-                last_applied_real_ids().fill(0);
-                last_applied_carrier_ids().fill(0);
+                // Retain last_applied_* arrays for the same Phase A
+                // tear-down reason documented in the dropdown handler.
                 manual_apply();
                 pm.save();
             }
@@ -264,6 +266,29 @@ void draw_character_picker(PresetManager &pm)
                        "filtering. Use if you run a body-swap "
                        "mod that changes this character's "
                        "skeleton (e.g. Kliff -> Female).");
+
+        // Apply-to-selected-character toggle. Determines whether
+        // overlay-UI edits on a pinned non-controlled character
+        // render on that character's body or cross-apply onto the
+        // controlled body. Persists via [General]
+        // ApplyToSelectedCharacter in the INI.
+        bool applyToEditing =
+            flag_apply_to_editing().load(std::memory_order_relaxed);
+        if (ImGui::Checkbox("Apply To Selected", &applyToEditing))
+        {
+            flag_apply_to_editing().store(
+                applyToEditing, std::memory_order_relaxed);
+        }
+        if (ImGui::IsItemHovered())
+            ui_tooltip(
+                "When ticked, picking another character in the "
+                "dropdown (and subsequent picker / slot edits while "
+                "pinned) applies the preset to THAT character's "
+                "body, if they're loaded. Engine equip events still "
+                "render the controlled character's transmog as "
+                "normal. Untick to restore the legacy cross-body "
+                "behaviour where the controlled body wears the "
+                "selected character's preset items.");
     }
 
     ImGui::Separator();

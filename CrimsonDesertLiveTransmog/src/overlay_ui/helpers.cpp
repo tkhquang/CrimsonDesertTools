@@ -313,29 +313,26 @@ bool dye_picker_compute_channel_gap_tip(
 }
 
 // Force the carrier item for each slot that has a session-only prefab
-// pick to the active character's default carrier (from
+// pick to the editing-target character's default carrier (from
 // carrier_defaults.hpp). PWS swaps are keyed by the source wrapper
 // that THAT character's body emits, so the matching carrier must be
 // resident at apply time or the swap silently no-ops.
 void force_active_character_carrier_for_picked_slots()
 {
     // For each slot with a picked prefab, force the carrier item to
-    // the ACTIVE CHARACTER's carrier (from carrier_defaults.hpp via
-    // default_carrier_for_slot). The PWS swap is keyed by the source
-    // wrapper that THAT character's body emits, so we need the
-    // matching carrier to make the source wrapper resident at apply
-    // time. Hardcoding "Kliff" here would force Kliff's plate item
-    // onto Damiane / Oongka whenever they had a prefab selection
-    // active, breaking their carrier-equip path.
+    // THE BODY THIS APPLY TARGETS. Use the central
+    // current_apply_owner() helper so the picker writes the same
+    // axis the apply pipeline (and the PWS swap map) will consult --
+    // using a different axis here would install the wrong-family
+    // carrier on the targeted body and let the swap-map row miss.
     auto &mappings = Transmog::slot_mappings();
-    const auto &activeChar =
-        Transmog::PresetManager::instance().active_character();
+    const auto &carrierOwner = Transmog::current_apply_owner();
     for (std::size_t i = 0; i < Transmog::k_slotCount; ++i)
     {
         if (s_slotUI[i].pickedPrefabName.empty())
             continue;
         const auto carrierId = Transmog::default_carrier_for_slot(
-            static_cast<Transmog::TransmogSlot>(i), activeChar);
+            static_cast<Transmog::TransmogSlot>(i), carrierOwner);
         if (carrierId == 0)
             continue;  // Item catalog isn't ready yet -- skip.
         // Snapshot the slot's prior carrier state on the FIRST pick
