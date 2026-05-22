@@ -149,8 +149,24 @@ namespace EquipHide
          "4C 89 4C 24 20 53 55 56 57 41 54 41 55 48 83 EC 28 44 8B 11 48 8B D9 4D 8B E1 41 8B F0 4C 8B EA",
          ResolveMode::Direct, 0, 0},
 
+        // P2 -- inner body anchor (post-prologue arg shuffle through the
+        // following `test r10d, r10d ; jne ; mov edx,r8d ; mov rcx,rbx ;
+        // call helper ; mov r10d,[rbx] ; mov ecx,r10d ; xor ebp,ebp ;
+        // test ecx,ecx`). Original 15-byte body was unique on earlier
+        // builds but matched twice on v1.08 -- a sibling actor-component
+        // init at 0x142469B1C ran the exact same arg-shuffle plus the
+        // exact same `test/jne/call` follow-on. The differentiator is
+        // the `33 ED` (xor ebp, ebp) just before the `test ecx, ecx` --
+        // the false-positive site jumps straight to `test ecx, ecx`
+        // without zeroing ebp first. Extending the suffix through that
+        // discriminator restores uniqueness. The intervening rel8 short
+        // branch and rel32 call target are wildcarded (compiler-owned
+        // values, see aob-signatures.md §2). disp_offset stays -0x11
+        // (walks back to function start from the first byte of P2).
         {"MapInsert_P2_InnerBody",
-         "44 8B 11 48 8B D9 4D 8B E1 41 8B F0 4C 8B EA",
+         "44 8B 11 48 8B D9 4D 8B E1 41 8B F0 4C 8B EA "
+         "41 8B CA 45 85 D2 75 ?? 41 8B D0 48 8B CB "
+         "E8 ?? ?? ?? ?? 44 8B 13 41 8B CA 33 ED 85 C9",
          ResolveMode::Direct, -0x11, 0},
 
         {"MapInsert_P3_PrologueBody",
@@ -178,10 +194,17 @@ namespace EquipHide
      *   [RBP+0x67] = a4 (transition type byte, saved from R9B at prologue)
      *   [RBP+0x4F] = a1 context pointer
      *
-     * Cross-version cascade. v1.03.01 candidates come first (current live
-     * game returns 1 hit for each); v1.02.00 candidates are retained for
-     * users still on the older build and return 0 on the v1.03.01 game --
-     * that's expected, not broken.
+     * Cross-version cascade. v1.08.00 candidates come first (current
+     * live game returns 1 hit for each); v1.05.00 and v1.04.00 / v1.02.00
+     * candidates are retained for users still on older builds and return
+     * 0 on the v1.08.00 game -- that's expected, not broken.
+     *
+     * Register layout at hook point (v1.08.00):
+     *   v1.08 spills the visibility byte itself to a stack arg slot
+     *   (default `[rsp+0x20]`) before the cmp; the `mov r8b, 1` that
+     *   sets the exclusion-list flag still precedes the read. The
+     *   PartInOutSocket struct is no longer dereferenced inline at the
+     *   hook point, only by the surrounding code that fed the spill.
      *
      * Branch-encoding caveat (aob-signatures.md section 8):
      *       The hook point is movzx eax, byte [<vis>+0x1C] ; cmp al, 3.
@@ -194,13 +217,38 @@ namespace EquipHide
      *       only shortens the verified suffix, not the match start).
      */
     inline constexpr AddrCandidate k_hookSiteCandidates[] = {
+        // PN1 -- v1.08.00. The PartInOutSocket arg-passing convention
+        // changed: the visibility byte is no longer fetched through
+        // `mov rax, [rbp+0x5F] ; movzx eax, byte [rax+0x1C]` (which
+        // anchored P0..P3). The compiler now spills the byte itself to
+        // a stack arg slot and reads it directly: `movzx eax, byte
+        // [rsp+0x20] ; cmp al, 3`. The `mov r8b, 1` (set-exclusion-
+        // list flag) idiom that precedes the load is retained, so we
+        // anchor on the pair: `41 B0 01 41 0F B6 44 24 ?? 3C 03`.
+        // The stack disp8 is wildcarded -- the slot can drift across
+        // builds. Hook lands on the movzx at match + 3 (skip the
+        // `41 B0 01`). 1 hit on v1.08.00, 0 on v1.04.00 / v1.05.00.
+        {"PartInOut_PN1_v108_StackArgVisRead",
+         "41 B0 01 41 0F B6 44 24 ?? 3C 03",
+         ResolveMode::Direct, 3, 0},
+
+        // PN2 -- v1.08.00 wider: prefixed with the `EB 03` short jmp
+        // that lands on the `mov r8b, 1` from the loop-not-found
+        // branch. Provides extra structural pinning if a future
+        // recompile shuffles the `mov r8b, 1` away from PN1. Hook
+        // still lands on the movzx, at match + 5. 1 hit on v1.08.00.
+        {"PartInOut_PN2_v108_LoopExitJoin",
+         "EB 03 41 B0 01 41 0F B6 44 24 ?? 3C 03",
+         ResolveMode::Direct, 5, 0},
+
         // P0 -- v1.05.00. The visibility byte field on PartInOutSocket
         // shifted from +0x1C to +0x20, so the movzx disp8 byte is
         // wildcarded. The movzx-cmp idiom plus the literal 3 sentinel
         // are still distinctive enough for a unique CrimsonDesert.exe
         // match (1 hit on v1.05.00 at the PartInOut site). Hook lands
         // on the cmp at match + 4 (same offset semantics as P1; only
-        // the byte value differs, length is unchanged).
+        // the byte value differs, length is unchanged). Inert on
+        // v1.08.00 (the `mov rax,[rbp+0x5F]` load was rewritten away).
         {"PartInOut_P0_v105_WildcardVisOffset",
          "48 8B 45 5F 0F B6 40 ?? 3C 03",
          ResolveMode::Direct, 4, 0},
