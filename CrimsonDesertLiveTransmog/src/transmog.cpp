@@ -33,6 +33,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <fstream>
 #include <string>
 #include <thread>
 
@@ -764,6 +765,38 @@ namespace Transmog
     bool init()
     {
         auto &logger = DMK::Logger::get_instance();
+
+        // --- Required asset gate ---
+        //
+        // The display-names TSV ships with the mod and is required for
+        // the catalog UI and name-keyed preset resolution. Missing file
+        // means the user installed incorrectly; surface a hard, visible
+        // error (modal popup) and bail out of init so the failure cannot
+        // be silently ignored by skipping the log.
+        {
+            const auto rtDir = runtime_dir_utf8();
+            std::string tsvPath =
+                rtDir.empty() ? std::string{DISPLAY_NAMES_FILE}
+                              : rtDir + DISPLAY_NAMES_FILE;
+            const bool dirOk = !rtDir.empty();
+            std::ifstream probe(tsvPath);
+            if (!dirOk || !probe.is_open())
+            {
+                std::string body =
+                    "Required asset '" + std::string{DISPLAY_NAMES_FILE} +
+                    "' was not found.\n\nExpected location:\n  " + tsvPath +
+                    "\n\nThe TSV must sit next to the mod DLL (same folder, "
+                    "wherever you installed it). Reinstall the mod and "
+                    "verify all files are present.\n\nThe mod will not "
+                    "function.";
+                logger.error("{}", body);
+                ::MessageBoxA(nullptr, body.c_str(),
+                              "CrimsonDesertLiveTransmog -- missing asset",
+                              MB_OK | MB_ICONERROR | MB_TOPMOST |
+                                  MB_SYSTEMMODAL);
+                return false;
+            }
+        }
 
         if (!DMK::Memory::init_cache())
             logger.warning("Memory cache init failed -- pointer reads may be slower");
