@@ -65,137 +65,147 @@ namespace EquipHide
         if (!mtx.try_lock())
             return 0;
 
+        /* __try/__finally guarantees mtx.unlock() on every exit path.
+           Required because MSVC /EHsc does NOT route C++ exceptions
+           (logger format error, std::bad_alloc, etc.) through the SEH
+           __except below, so without __finally a thrown C++ exception
+           would leak the lock and stall every subsequent ArmorInject
+           + DirectWrite call. __leave skips to __finally when the
+           addrs guard short-circuits. */
         int result = 0;
         __try
         {
-            auto &addrs = resolved_addrs();
-            if (!addrs.mapInsert || !addrs.mapLookup)
+            __try
             {
-                mtx.unlock();
-                return 0;
-            }
+                auto &addrs = resolved_addrs();
+                if (!addrs.mapInsert || !addrs.mapLookup)
+                    __leave;
 
-            auto insert = reinterpret_cast<MapInsertFn>(addrs.mapInsert);
-            auto lookup = reinterpret_cast<MapLookupFn>(addrs.mapLookup);
+                auto insert = reinterpret_cast<MapInsertFn>(addrs.mapInsert);
+                auto lookup = reinterpret_cast<MapLookupFn>(addrs.mapLookup);
 
-            auto &logger = DMK::Logger::get_instance();
-            int injected = 0;
-            int existing_set = 0;
-            int skipped_key = 0;
+                auto &logger = DMK::Logger::get_instance();
+                int injected = 0;
+                int existing_set = 0;
+                int skipped_key = 0;
 
-            const bool cascadeOn =
-                flag_cascade_fix().load(std::memory_order_relaxed);
+                const bool cascadeOn =
+                    flag_cascade_fix().load(std::memory_order_relaxed);
 
-            // Legs, gloves, boots share a ConditionalPartPrefab cascade
-            // with chest -- hiding chest deletes their map entries.
-            // Injecting vis=0 for visible body parts keeps them alive.
-            constexpr CategoryMask k_cascadeBodyMask =
-                category_bit(Category::Legs) |
-                category_bit(Category::Gloves) |
-                category_bit(Category::Boots);
+                // Legs, gloves, boots share a ConditionalPartPrefab cascade
+                // with chest -- hiding chest deletes their map entries.
+                // Injecting vis=0 for visible body parts keeps them alive.
+                constexpr CategoryMask k_cascadeBodyMask =
+                    category_bit(Category::Legs) |
+                    category_bit(Category::Gloves) |
+                    category_bit(Category::Boots);
 
-            // Per-character map drives both the part list AND the
-            // hide-mask classification: charIdx=-1 (unknown body or
-            // fallback path) collapses to the active-character map
-            // through get_part_map_for / is_any_category_hidden_for so
-            // single-character behaviour is preserved for unidentified
-            // slots.
-            const auto &partMap =
-                (charIdx >= 0 && charIdx < static_cast<int>(kCharIdxCount))
-                    ? get_part_map_for(charIdx)
-                    : get_part_map();
+                // Per-character map drives both the part list AND the
+                // hide-mask classification: charIdx=-1 (unknown body or
+                // fallback path) collapses to the active-character map
+                // through get_part_map_for / is_any_category_hidden_for so
+                // single-character behaviour is preserved for unidentified
+                // slots.
+                const auto &partMap =
+                    (charIdx >= 0 && charIdx < static_cast<int>(kCharIdxCount))
+                        ? get_part_map_for(charIdx)
+                        : get_part_map();
 
-            int reinjected = 0;
+                int reinjected = 0;
 
-            for (const auto &[hash, mask] : partMap)
-            {
-                const bool hidden = is_any_category_hidden_for(mask, charIdx);
-                auto existing = lookup(mapBase, &hash);
-
-                if (!hidden)
+                for (const auto &[hash, mask] : partMap)
                 {
-                    /* Toggle-off cache flush. The engine caches a
-                       hidden render-state when our inject inserts an
-                       entry with vis=2; the cache is read from a
-                       struct field that direct vis-byte writes do not
-                       reach, so body armor stays visually hidden after
-                       toggle-off unless we re-insert with vis=0. The
-                       re-insert path below forces the engine to
-                       re-process the entry and clear its cached
-                       hidden state. Visible parts with no existing
-                       entry have nothing to flush, so skip unless the
-                       cascade-fix path needs them. */
-                    if (!existing)
+                    const bool hidden = is_any_category_hidden_for(mask, charIdx);
+                    auto existing = lookup(mapBase, &hash);
+
+                    if (!hidden)
                     {
-                        if (!cascadeOn || (mask & k_cascadeBodyMask) == 0)
-                            continue;
+                        /* Toggle-off cache flush. The engine caches a
+                           hidden render-state when our inject inserts an
+                           entry with vis=2; the cache is read from a
+                           struct field that direct vis-byte writes do not
+                           reach, so body armor stays visually hidden after
+                           toggle-off unless we re-insert with vis=0. The
+                           re-insert path below forces the engine to
+                           re-process the entry and clear its cached
+                           hidden state. Visible parts with no existing
+                           entry have nothing to flush, so skip unless the
+                           cascade-fix path needs them. */
+                        if (!existing)
+                        {
+                            if (!cascadeOn || (mask & k_cascadeBodyMask) == 0)
+                                continue;
+                        }
+                    }
+                    else if (existing)
+                    {
+                        /* Hidden category, entry already present: vis byte
+                           is updated in-place by the direct-write path; no
+                           re-insert needed. */
+                        ++existing_set;
+                        continue;
+                    }
+
+                    auto bucketKey = compute_bucket_key(hash);
+                    if (bucketKey == 0)
+                    {
+                        logger.trace("  0x{:X} -- skipped (no bucket key)", hash);
+                        ++skipped_key;
+                        continue;
+                    }
+
+                    alignas(8) uint8_t entryData[32] = {};
+                    entryData[0x1C] = hidden ? 2 : 0;
+
+                    uint32_t hashCopy = hash;
+                    int *hashPtr = reinterpret_cast<int *>(&hashCopy);
+                    uint8_t outExisted = 0;
+                    __int64 outHashPtr = 0;
+                    __int64 outDataPtr = 0;
+
+                    auto *mapBasePtr = reinterpret_cast<unsigned int *>(mapBase);
+
+                    insert(
+                        mapBasePtr,
+                        &hashPtr,
+                        bucketKey,
+                        reinterpret_cast<__int64>(entryData),
+                        0,
+                        &outExisted,
+                        &outHashPtr,
+                        &outDataPtr);
+
+                    if (!outExisted)
+                    {
+                        logger.debug("  0x{:X} -- INJECTED new entry", hash);
+                        ++injected;
+                    }
+                    else if (!hidden)
+                    {
+                        logger.trace("  0x{:X} -- RE-INJECTED visible (cache flush)",
+                                     hash);
+                        ++reinjected;
                     }
                 }
-                else if (existing)
-                {
-                    /* Hidden category, entry already present: vis byte
-                       is updated in-place by the direct-write path; no
-                       re-insert needed. */
-                    ++existing_set;
-                    continue;
-                }
 
-                auto bucketKey = compute_bucket_key(hash);
-                if (bucketKey == 0)
-                {
-                    logger.trace("  0x{:X} -- skipped (no bucket key)", hash);
-                    ++skipped_key;
-                    continue;
-                }
-
-                alignas(8) uint8_t entryData[32] = {};
-                entryData[0x1C] = hidden ? 2 : 0;
-
-                uint32_t hashCopy = hash;
-                int *hashPtr = reinterpret_cast<int *>(&hashCopy);
-                uint8_t outExisted = 0;
-                __int64 outHashPtr = 0;
-                __int64 outDataPtr = 0;
-
-                auto *mapBasePtr = reinterpret_cast<unsigned int *>(mapBase);
-
-                insert(
-                    mapBasePtr,
-                    &hashPtr,
-                    bucketKey,
-                    reinterpret_cast<__int64>(entryData),
-                    0,
-                    &outExisted,
-                    &outHashPtr,
-                    &outDataPtr);
-
-                if (!outExisted)
-                {
-                    logger.debug("  0x{:X} -- INJECTED new entry", hash);
-                    ++injected;
-                }
-                else if (!hidden)
-                {
-                    logger.trace("  0x{:X} -- RE-INJECTED visible (cache flush)",
-                                 hash);
-                    ++reinjected;
-                }
+                logger.debug("ArmorInject map: {} injected, {} existing updated, "
+                             "{} re-injected, {} skipped (no bucket key)",
+                             injected, existing_set, reinjected, skipped_key);
+                result = injected;
             }
-
-            logger.debug("ArmorInject map: {} injected, {} existing updated, "
-                         "{} re-injected, {} skipped (no bucket key)",
-                         injected, existing_set, reinjected, skipped_key);
-            result = injected;
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                static std::atomic<bool> s_crashLogged{false};
+                if (!s_crashLogged.exchange(true, std::memory_order_relaxed))
+                    DMK::Logger::get_instance().warning(
+                        "ArmorInject: SEH caught crash during map insertion");
+                result = -1;
+            }
         }
-        __except (EXCEPTION_EXECUTE_HANDLER)
+        __finally
         {
-            static std::atomic<bool> s_crashLogged{false};
-            if (!s_crashLogged.exchange(true, std::memory_order_relaxed))
-                DMK::Logger::get_instance().warning(
-                    "ArmorInject: SEH caught crash during map insertion");
-            result = -1;
+            mtx.unlock();
         }
-        mtx.unlock();
         return result;
     }
 

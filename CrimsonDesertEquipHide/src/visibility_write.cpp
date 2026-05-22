@@ -249,7 +249,14 @@ namespace EquipHide
             return;
         /* Manual lock/unlock: MSVC SEH does not run C++ destructors on
            unwind under /EHsc, so an RAII lock would stay held after a
-           caught fault. */
+           caught fault. The __try/__finally wrapper below provides the
+           same guarantee in SEH terms: __finally runs on every exit
+           path (normal return, SEH propagation, C++ exception unwind
+           through the noexcept barrier) so the mutex is always
+           released even if mtx.unlock() itself raises SEH or if the
+           impl propagates an uncaught C++ exception. Without this the
+           mid-hook re-fires the work on every frame, producing a
+           tight try_lock failure spam loop. */
         auto &mtx = vis_write_mutex();
         if (!mtx.try_lock())
         {
@@ -269,15 +276,22 @@ namespace EquipHide
 
         __try
         {
-            apply_direct_vis_write_impl();
+            __try
+            {
+                apply_direct_vis_write_impl();
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                static std::atomic<bool> s_crashLogged{false};
+                if (!s_crashLogged.exchange(true, std::memory_order_relaxed))
+                    DMK::Logger::get_instance().warning(
+                        "DirectWrite: SEH caught crash");
+            }
         }
-        __except (EXCEPTION_EXECUTE_HANDLER)
+        __finally
         {
-            static std::atomic<bool> s_crashLogged{false};
-            if (!s_crashLogged.exchange(true, std::memory_order_relaxed))
-                DMK::Logger::get_instance().warning("DirectWrite: SEH caught crash");
+            mtx.unlock();
         }
-        mtx.unlock();
     }
 
     /* Implementation body for cleanup_vis_bytes(): structured binding on
@@ -305,14 +319,25 @@ namespace EquipHide
         auto &mtx = vis_write_mutex();
         mtx.lock();
 
+        /* __try/__finally so the unlock runs even if cleanup_vis_bytes_impl
+           propagates a C++ exception (logger format error, bad_alloc) that
+           the SEH __except below does not catch under /EHsc, or if
+           mtx.unlock() itself raises an SEH. Either path would leak the
+           lock and stall every subsequent try_lock from the mid-hook. */
         __try
         {
-            cleanup_vis_bytes_impl();
+            __try
+            {
+                cleanup_vis_bytes_impl();
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+            }
         }
-        __except (EXCEPTION_EXECUTE_HANDLER)
+        __finally
         {
+            mtx.unlock();
         }
-        mtx.unlock();
     }
 
 } // namespace EquipHide

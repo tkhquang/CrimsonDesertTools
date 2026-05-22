@@ -162,14 +162,6 @@ namespace CDCore::Anchors
         {"PartAddShow_P2_PostPrologue",
          "48 83 EC ?? 48 8B 79 ?? 4D 8B E8 44 8B 49 ??",
          ResolveMode::Direct, -6, 0},
-
-        // P3 -- SIMD-save / shift anchor deeper in the body. Offset -0x1B
-        // backs up to function start. Anchors on `movaps [rsp+X],xmm6 ;
-        // shl rax,04 ; movaps xmm6,xmm3 ; add rax,rdi` which is
-        // structurally rare.
-        {"PartAddShow_P3_SimdBody",
-         "0F 29 74 24 ?? 48 C1 E0 04 0F 28 F3 48 03 C7",
-         ResolveMode::Direct, -0x1B, 0},
     };
 
     // -----------------------------------------------------------------------

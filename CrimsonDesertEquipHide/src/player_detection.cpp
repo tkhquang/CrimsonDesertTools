@@ -431,30 +431,43 @@ namespace EquipHide
                 auto &mtx = vis_write_mutex();
                 if (mtx.try_lock())
                 {
-                    bool changed = (count != s_prevCount);
-                    if (!changed)
+                    /* __try/__finally guarantees mtx.unlock() on every
+                       exit path. The outer __try/__except (further
+                       below) catches SEH from the inner body; __finally
+                       handles the C++ exception propagation that MSVC
+                       /EHsc lets through SEH, so the mutex is always
+                       released even when a logger format error or
+                       std::bad_alloc unwinds out of the body. */
+                    __try
                     {
-                        for (int j = 0; j < count; ++j)
+                        bool changed = (count != s_prevCount);
+                        if (!changed)
                         {
-                            if (ps.visCtrls[j].load(std::memory_order_relaxed) != s_prevVisCtrls[j])
+                            for (int j = 0; j < count; ++j)
                             {
-                                changed = true;
-                                break;
+                                if (ps.visCtrls[j].load(std::memory_order_relaxed) != s_prevVisCtrls[j])
+                                {
+                                    changed = true;
+                                    break;
+                                }
                             }
                         }
+                        if (changed)
+                        {
+                            s_prevCount = count;
+                            for (int j = 0; j < count; ++j)
+                                s_prevVisCtrls[j] = ps.visCtrls[j].load(std::memory_order_relaxed);
+                            for (int j = 0; j < k_maxProtagonists; ++j)
+                                ps.armorInjected[j].store(false, std::memory_order_relaxed);
+                            needs_direct_write().store(true, std::memory_order_relaxed);
+                            DMK::Logger::get_instance().debug(
+                                "Player set changed -- scheduling injection + direct write");
+                        }
                     }
-                    if (changed)
+                    __finally
                     {
-                        s_prevCount = count;
-                        for (int j = 0; j < count; ++j)
-                            s_prevVisCtrls[j] = ps.visCtrls[j].load(std::memory_order_relaxed);
-                        for (int j = 0; j < k_maxProtagonists; ++j)
-                            ps.armorInjected[j].store(false, std::memory_order_relaxed);
-                        needs_direct_write().store(true, std::memory_order_relaxed);
-                        DMK::Logger::get_instance().debug(
-                            "Player set changed -- scheduling injection + direct write");
+                        mtx.unlock();
                     }
-                    mtx.unlock();
                 }
             }
         }

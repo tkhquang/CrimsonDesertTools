@@ -195,23 +195,27 @@ namespace Transmog
     // only {0x012F}) are classified as Generic -- the engine accepts
     // them on any humanoid body, so the picker shows them for every
     // character.
-    // Body-type classifier tokens on v1.04.00 (renumbered from v1.03.01
-    // when the engine's class-enum was re-keyed; each token shifted by
-    // +1 or +2). Verified live against the rule-classifier arrays of
-    // WellsKnight_PlateArmor_{Helm, Armor} (known male carriers) and
-    // Demian_Leather_Armor (known female carrier). Structure unchanged
-    // at +0x248/+0x250 (rule list), +0x20/+0x28 (classifier list per
-    // rule), 0x38 rule stride; only the enum values moved.
+    // Body-type classifier tokens. The engine's class-enum has been
+    // re-keyed across major versions; structure is unchanged at +0x248
+    // / +0x250 (rule list), +0x20 / +0x28 (classifier list per rule),
+    // 0x38 rule stride. Only the enum values move:
     //
     //   v1.03.01:  male   {0x0018, 0x0058, 0x02E3}
     //              female {0x0072, 0x0382, 0x0300}
-    //   v1.04.00:  male   {0x0019, 0x0059, 0x02E5}
+    //   v1.04.00:  male   {0x0019, 0x0059, 0x02E5}     (+1 / +2 from v1.03)
     //              female {0x0073, 0x0384, 0x0302}
+    //   v1.08.00:  male   {0x0012, 0x0052, 0x02DE}     (-7 from v1.04)
+    //              female {0x006C, 0x037D, 0x02FB}     (-7 from v1.04)
+    //
+    // Kliff-native helms additionally carry the female token 0x006C
+    // alongside the male set, which classifies them as BodyKind::Both
+    // (dual-compat carrier). This matches the engine's intent to let
+    // Damiane wear Kliff-native gear via the carrier mechanism.
     static constexpr std::uint16_t k_maleBodyTokens[] = {
-        0x0019, 0x0059, 0x02E5,
+        0x0012, 0x0052, 0x02DE,
     };
     static constexpr std::uint16_t k_femaleBodyTokens[] = {
-        0x0073, 0x0384, 0x0302,
+        0x006C, 0x037D, 0x02FB,
     };
     // Body bits are accumulated during the classifier scan:
     //   Male / Female  -- saw a token from the respective body set

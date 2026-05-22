@@ -10,3 +10,4 @@
 - Fixed brief part flashes during animation transitions that could persist for the whole session when the mod was loaded before reaching the main menu.
 - New "Apply To Selected" checkbox next to the character dropdown: edits while pinned to a non-controlled character now render on that character's body, not on the one you control. Untick to keep the old cross-body behavior.
 - Preset swaps on a non-controlled character now correctly remove the previous preset's items before installing the new ones, instead of stacking outfits on top of each other.
+- Compatibility fix for Crimson Desert game version 1.08.00

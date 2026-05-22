@@ -28,20 +28,32 @@
 namespace Transmog
 {
     // SlotPopulator (sub_14076C960) maintains a dispatch cache on the
-    // component at (basePtr, count, cap). The triple shifted 0x20
-    // bytes higher between v1.03.01 and v1.04.00 as the component
-    // gained new fields lower in the struct:
+    // component at (basePtr, count, cap). The triple shifted 0x20 bytes
+    // higher between v1.03.01 and v1.04.00 as the component gained new
+    // fields lower in the struct; in v1.08.00 the same sub-struct moved
+    // another 8 bytes higher (an extra qword was inserted below it):
     //
     //   v1.03.01 -- basePtr @ +0x1B8, count @ +0x1C0, cap @ +0x1C4
     //   v1.04.00 -- basePtr @ +0x1D8, count @ +0x1E0, cap @ +0x1E4
+    //   v1.08.00 -- basePtr @ +0x1E0, count @ +0x1E8, cap @ +0x1EC
     //
     // Reading the old offsets on v1.04.00 returns zero for count (the
-    // u32 that lives there is always 0), which makes apply look like
-    // a no-op; writing the old offsets scribbles into adjacent fields
-    // and corrupts the component a slot at a time.
-    constexpr std::ptrdiff_t k_compSlotCacheBasePtrOffset = 0x1D8;
-    constexpr std::ptrdiff_t k_compSlotCacheCountOffset   = 0x1E0;
-    constexpr std::ptrdiff_t k_compSlotCacheCapOffset     = 0x1E4;
+    // u32 that lives there is always 0), which makes apply look like a
+    // no-op; writing the old offsets scribbles into adjacent fields and
+    // corrupts the component a slot at a time. On v1.08.00 the old
+    // count slot now overlaps the LOW 32 bits of the basePtr qword, so
+    // a stale read yields a wildly inflated value (e.g. 0xA8000000 =
+    // 2819141376 -- the low bits of a 0x000004??A8XXXXXX heap address)
+    // and any write to it would shred the dispatch-cache pointer.
+    //
+    // The v1.08 SlotPopulator body at 0x1407A5F60+0xDB confirms the new
+    // offsets directly:
+    //   lea  r15, [r13+0x1E0]    ; r13 = a1
+    //   mov  r8d, [r15+0x08]     ; count   = [a1+0x1E8]
+    //   mov  r9,  [r15]          ; basePtr = [a1+0x1E0]
+    constexpr std::ptrdiff_t k_compSlotCacheBasePtrOffset = 0x1E0;
+    constexpr std::ptrdiff_t k_compSlotCacheCountOffset   = 0x1E8;
+    constexpr std::ptrdiff_t k_compSlotCacheCapOffset     = 0x1EC;
 
     // Pointer to the PartDef/auth-table container on a1.
     //

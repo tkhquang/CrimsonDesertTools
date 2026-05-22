@@ -115,22 +115,6 @@ namespace Transmog
         {"SafeTearDown_P2_PostAlloca",
          "48 81 EC ?? ?? ?? ?? 41 0F B7 F8 48 8B F1",
          ResolveMode::Direct, -0x1A, 0},
-
-        // P3 -- deep-body anchor at the global-pointer call site. The
-        // 48 83 C1 60 is a game-ABI struct offset (stable ABI), kept
-        // literal. Stack disp32 in lea rdx,[rbp+disp32] and the
-        // rel32 jz target are wildcarded (both compiler-owned). The
-        // trailing stack disp E0 00 00 00 is kept literal to
-        // disambiguate from 4 sibling functions that share the same
-        // add rcx,60 / lea rdx / call / test / jz / movzx / mov [rbp+X]
-        // body shape (CE aob_scan 2026-04-19: 5 hits without it, 1 hit
-        // with). The B9 FF FF 00 00 66 3B C8 tail is a semantic
-        // sentinel check specific to this function.
-        {"SafeTearDown_P3_GlobalPtrCall",
-         "48 83 C1 60 48 8D 95 ?? ?? ?? ?? E8 ?? ?? ?? ?? "
-         "48 85 C0 0F 84 ?? ?? ?? ?? 0F B7 00 66 89 85 E0 00 00 00 "
-         "B9 FF FF 00 00 66 3B C8",
-         ResolveMode::Direct, -0x4A, 0},
     };
 
     /**
@@ -171,34 +155,6 @@ namespace Transmog
          "41 B8 01 00 00 00 48 8D 55 ?? 48 8D 4C 24 ?? E8 ?? ?? ?? ?? "
          "90 48 8B D0 48 8B CF E8",
          ResolveMode::Direct, -0x1C, 0},
-
-        // P1 -- v1.04.00 full prologue. Stack disp8 (B9), stack-alloc
-        // size (00 01 00 00), and the two local-variable disp8 values
-        // in lea rdx,[rbp+X] / lea rcx,[rbp+Y] wildcarded. The
-        // 41 B8 01 00 00 00 (mov r8d, 1) is a SEMANTIC argument flag
-        // and is kept literal. Inert on v1.05.00 (lea encoding shift).
-        {"SubTranslator_P1_FullPrologue",
-         "48 89 5C 24 08 66 89 54 24 10 55 56 57 "
-         "48 8D 6C 24 ?? 48 81 EC ?? ?? ?? ?? "
-         "48 8B F9 41 B8 01 00 00 00 48 8D 55 ?? 48 8D 4D ??",
-         ResolveMode::Direct, 0, 0},
-
-        // P2 -- v1.04.00 post-alloca scratch-buffer prep anchor. Same
-        // disp8 wildcarding as P1. Inert on v1.05.00.
-        {"SubTranslator_P2_PostAlloca",
-         "48 8B F9 41 B8 01 00 00 00 48 8D 55 ?? 48 8D 4D ?? E8",
-         ResolveMode::Direct, -0x19, 0},
-
-        // P3 -- v1.04.00 deeper anchor without the leading `mov rdi,
-        // rcx`. Without the 90 48 8B D0 48 8B CF E8 post-call suffix
-        // this shortened pattern matches 5 sibling call sites (same
-        // mov r8d,1 / lea rdx / lea rcx / call boilerplate); the
-        // suffix pins this function's second call (CE aob_scan
-        // 2026-04-19). Inert on v1.05.00.
-        {"SubTranslator_P3_ScratchBufPrep",
-         "41 B8 01 00 00 00 48 8D 55 ?? 48 8D 4D ?? E8 ?? ?? ?? ?? "
-         "90 48 8B D0 48 8B CF E8",
-         ResolveMode::Direct, -0x1C, 0},
     };
 
     /**
@@ -219,19 +175,6 @@ namespace Transmog
          "48 89 4C 24 08 53 48 83 EC 20 48 8B D9 "
          "48 C7 C0 FF FF FF FF 48 89 01 B9 FF FF 00 00",
          ResolveMode::Direct, 0, 0},
-
-        // P2 -- post-prologue field-init chain (mov [rbx+20h],rdx / ... /
-        // lea rax,[rbx+58h]).
-        {"InitSwapEntry_P2_FieldInitChain",
-         "48 89 53 20 48 89 53 28 48 89 53 30 66 89 53 38 "
-         "48 89 53 40 48 89 53 48 66 89 53 50 48 8D 43 58",
-         ResolveMode::Direct, -0x26, 0},
-
-        // P3 -- xor edx,edx + field-init chain (slightly tighter than P2).
-        {"InitSwapEntry_P3_XorInitChain",
-         "33 D2 48 89 53 20 48 89 53 28 48 89 53 30 "
-         "66 89 53 38 48 89 53 40 48 89 53 48 66 89 53 50",
-         ResolveMode::Direct, -0x24, 0},
     };
 
     /**
@@ -334,16 +277,6 @@ namespace Transmog
         {"StringInfoRegistry_P1_LoadAddCallSite",
          "8B 45 B0 89 45 58 48 8B 0D ?? ?? ?? ?? 48 83 C1 60 48 8D 55 58",
          ResolveMode::RipRelative, 9, 13},
-
-        // P2 -- xref in sub_142144B10 (large parser, 0x1d6f bytes). A
-        // distinctive `mov [rbp-0x6A], al` + 32-bit local-store sequence
-        // precedes a `mov r15, [rip+disp32]` registry load. The local
-        // disp32 sequence (90 00 00 00) is kept literal -- it's the
-        // local frame's outer-scope variable offset.
-        {"StringInfoRegistry_P2_OuterScopeFrame",
-         "88 45 96 89 8D 90 00 00 00 4C 8B 3D ?? ?? ?? ?? "
-         "48 8D 95 90 00 00 00 49 8D 4F 60",
-         ResolveMode::RipRelative, 12, 16},
 
         // P3 -- xref in sub_14074DD40. Conditional load+jump shape:
         // load r9d, test, jz, store dword to [rbp+0x70], then load
@@ -572,13 +505,16 @@ namespace Transmog
      */
     inline constexpr AddrCandidate k_apptLoaderCtorCandidates[] = {
         // P1 -- full prologue (8 callee-saved regs + frame setup).
-        // Distinctive in v1.05.01: 1 unique hit. The 41 54 41 55 41 56
-        // 41 57 (push r12-r15) is the largest possible callee-save set,
-        // typical of a 540-byte function with many locals.
+        // The 41 54 41 55 41 56 41 57 (push r12-r15) is the largest
+        // possible callee-save set, typical of a 540-byte function with
+        // many locals. The leading `48 89 54 24 10` (mov [rsp+0x10], rdx)
+        // shadow-store the compiler used on earlier builds was dropped,
+        // so the prologue now starts directly with `48 89 4C 24 08`
+        // (mov [rsp+8], rcx).
         {"ApptLoaderCtor_P1_FullPrologue",
-         "48 89 54 24 10 48 89 4C 24 08 53 55 56 57 41 54 41 55 41 56 41 57 "
+         "48 89 4C 24 08 53 55 56 57 41 54 41 55 41 56 41 57 "
          "48 83 EC 38 48 8B F1 45 33 F6 4C 89 31 4C 89 71 08 4C 89 71 10 "
-         "4C 89 71 18 44 88 71 20",
+         "4C 89 71 18 44",
          ResolveMode::Direct, 0, 0},
 
         // P2 -- mid-prologue + first field-init. Skips the `mov rcx,rdx
@@ -843,30 +779,13 @@ namespace Transmog
          "8B 88 ?? ?? ?? ?? 48 83 C1 70 48 8B D3 E8 | ?? ?? ?? ??",
          ResolveMode::RipRelative, 14, 18},
 
-        // P2 -- function prologue + early-return path. The prologue is
-        // shared with one templated clone (`sub_1430C4880`). When P1
-        // succeeds this is unused; when it fails this returns the FIRST
-        // linear-scan match which is `sub_140350910` on v1.05.01 (the
-        // canonical lookup primitive lives in the lower .text band). The
-        // `48 83 EC 20` direct alloc + `83 79 04 00` field-zero compare
-        // pin this function shape against unrelated functions.
-        {"PrefabWrapperSwap_ApptInnerLookup_P2_FullPrologueEarlyExit",
-         "4C 89 74 24 20 41 57 48 83 EC 20 "
-         "83 79 04 00 4C 8B FA 4C 8B F1 75 0E "
-         "33 C0 4C 8B 74 24 ?? 48 83 C4 20 41 5F C3",
-         ResolveMode::Direct, 0, 0},
-
-        // P3 -- prologue + post-early-exit field load. Walks one more
-        // basic block past P2 into the `mov [rsp+arg_0], rbx ; mov rbx,
-        // [rdx] ; mov [rsp+arg_10], rdi ; mov edi, [rbx+0xC]` shape. The
-        // first `?? ` is the rsp disp8 of the saved-r14 spill (compiler-
-        // owned). Same multi-hit caveat as P2 (clone shares this body).
-        {"PrefabWrapperSwap_ApptInnerLookup_P3_PrologueBodyChain",
-         "4C 89 74 24 20 41 57 48 83 EC 20 "
-         "83 79 04 00 4C 8B FA 4C 8B F1 75 0E "
-         "33 C0 4C 8B 74 24 ?? 48 83 C4 20 41 5F C3 "
-         "48 89 5C 24 30 48 8B 1A 48 89 7C 24 40 8B 7B 0C",
-         ResolveMode::Direct, 0, 0},
+        // Note: no body / prologue fallback tier here. The function
+        // shares a byte-identical prologue and body with its templated
+        // clone `sub_1430C4880`, so any non-call-site anchor multi-hits.
+        // The strict-uniqueness contract requires P1 (the RipRelative
+        // call-site anchor in sub_140347BB0) to resolve cleanly; an
+        // ambiguous fallback would risk picking the clone if P1 ever
+        // broke.
     };
 
     /**
@@ -953,18 +872,14 @@ namespace Transmog
          "48 8B 02 48 89 01 48 8D 05 ?? ?? ?? ?? 48 89 02",
          ResolveMode::Direct, 0, 0},
 
-        // P2 -- truncated prologue (no RIP-rel). Stops at `48 89 29`
-        // (the `mov [rcx], rbp` zeroing of dst+0). Survives a future
-        // build that moves the vtable lea later in the function. WARNING:
-        // pattern fragment also matches `sub_140355210` (sibling). Hit
-        // count is 1 on the canonical target only when the cascade
-        // proceeds past P1 first; otherwise relies on
-        // `sanity_check_function_prologue` post-resolve.
-        {"PrefabWrapperSwap_StructCopy_P2_PrologueNoVtable",
-         "48 89 5C 24 18 48 89 6C 24 20 48 89 4C 24 08 "
-         "56 57 41 56 48 83 EC 20 "
-         "4C 8B F2 48 8B F1 33 ED 48 89 29",
-         ResolveMode::Direct, 0, 0},
+        // Note: no middle (truncated-prologue) tier here. A prologue
+        // anchor without the vtable lea matches the sibling
+        // `sub_140355210` and several byte-identical prologue copies
+        // in kernel DLL .text sections, so any short-prologue tier
+        // multi-hits. The cascade dispatches via P1 (full prologue
+        // + vtable lea, unique) or P3 (byte-transfer body, also
+        // unique); a discriminator that beats sub_140355210 from a
+        // short prologue alone is not feasible.
 
         // P3 -- byte-transfer body anchor. The unique 4-byte payload
         // copy (`movzx eax, byte ptr [rdx+8/9/A] ; mov [rcx+8/9/A], al`
