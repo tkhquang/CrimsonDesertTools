@@ -2,6 +2,15 @@
 
 All notable changes to the CrimsonDesertEquipHide mod will be documented in this file.
 
+## [0.8.0] - Sturdier save-load detection
+
+- Per-character hide rules stay correct immediately after a save-load instead of needing a short settle window.
+- The active protagonist is detected purely from in-game data, so loading EquipHide alongside other tools is one step lighter.
+- All three protagonists are tracked from frame zero without needing the user to cycle to each one first.
+- Fixed cases where part hide rules silently failed to take effect when the mod started while still on the main menu.
+- A single typo in the Parts list no longer blocks every other entry from taking effect.
+- Compatibility fix for Crimson Desert game version 1.08.00
+
 ## [0.7.3] - Save-load and radial swap reliability
 
 - More reliable per-character hide rules on save-load and radial swap; the active protagonist's Parts list is picked up from the engine's own focus broadcast instead of needing a chain walk to settle.
@@ -237,6 +246,7 @@ All notable changes to the CrimsonDesertEquipHide mod will be documented in this
 - Customizable part lists per category via INI configuration
 - Configurable init delay and log level
 
+[0.8.0]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/equip-hide/v0.8.0
 [0.7.3]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/equip-hide/v0.7.3
 [0.7.2]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/equip-hide/v0.7.2
 [0.7.1]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/equip-hide/v0.7.1
