@@ -194,11 +194,6 @@ namespace EquipHide
      *   [RBP+0x67] = a4 (transition type byte, saved from R9B at prologue)
      *   [RBP+0x4F] = a1 context pointer
      *
-     * Cross-version cascade. v1.08.00 candidates come first (current
-     * live game returns 1 hit for each); v1.05.00 and v1.04.00 / v1.02.00
-     * candidates are retained for users still on older builds and return
-     * 0 on the v1.08.00 game -- that's expected, not broken.
-     *
      * Register layout at hook point (v1.08.00):
      *   v1.08 spills the visibility byte itself to a stack arg slot
      *   (default `[rsp+0x20]`) before the cmp; the `mov r8b, 1` that
@@ -206,15 +201,14 @@ namespace EquipHide
      *   PartInOutSocket struct is no longer dereferenced inline at the
      *   hook point, only by the surrounding code that fed the spill.
      *
-     * Branch-encoding caveat (aob-signatures.md section 8):
-     *       The hook point is movzx eax, byte [<vis>+0x1C] ; cmp al, 3.
-     *       All candidates below previously extended past that compare
-     *       into the 74 ?? / 75 ?? conditional branches that follow.
-     *       Each candidate has been truncated 2026-04-19 to terminate at
-     *       or before the first rel8 branch so the signatures no longer
-     *       hardcode a rel8 opcode. offsetToHook still points at the
-     *       movzx instruction from the same match position (truncation
-     *       only shortens the verified suffix, not the match start).
+     * Cascade contract: 1-hit-only on the current target build. Older
+     * `mov rax,[rbp+0x5F] ; movzx eax,byte [rax+0x1C]` candidates from
+     * the v1.04 / v1.05 era are intentionally NOT retained: most go
+     * 0-hit on v1.08, but the wider-context shape still resolved once
+     * on v1.08 with its disp_offset landing MID-INSTRUCTION because
+     * the function body shifted. Re-adding a legacy tier requires
+     * per-version CE verification of both match count AND the
+     * match-to-hook displacement against the target build.
      */
     inline constexpr AddrCandidate k_hookSiteCandidates[] = {
         // PN1 -- v1.08.00. The PartInOutSocket arg-passing convention
@@ -240,47 +234,6 @@ namespace EquipHide
         {"PartInOut_PN2_v108_LoopExitJoin",
          "EB 03 41 B0 01 41 0F B6 44 24 ?? 3C 03",
          ResolveMode::Direct, 5, 0},
-
-        // P0 -- v1.05.00. The visibility byte field on PartInOutSocket
-        // shifted from +0x1C to +0x20, so the movzx disp8 byte is
-        // wildcarded. The movzx-cmp idiom plus the literal 3 sentinel
-        // are still distinctive enough for a unique CrimsonDesert.exe
-        // match (1 hit on v1.05.00 at the PartInOut site). Hook lands
-        // on the cmp at match + 4 (same offset semantics as P1; only
-        // the byte value differs, length is unchanged). Inert on
-        // v1.08.00 (the `mov rax,[rbp+0x5F]` load was rewritten away).
-        {"PartInOut_P0_v105_WildcardVisOffset",
-         "48 8B 45 5F 0F B6 40 ?? 3C 03",
-         ResolveMode::Direct, 4, 0},
-
-        // P0b -- v1.05.00 widened with the leading `mov r8b, 1`
-        // (41 B0 01) for extra structural pinning. Same wildcarded
-        // disp8 as P0; hook lands on the cmp at match + 7.
-        {"PartInOut_P0b_v105_PrecedingGate",
-         "41 B0 01 48 8B 45 5F 0F B6 40 ?? 3C 03",
-         ResolveMode::Direct, 7, 0},
-
-        // P1 -- v1.04.00. Ends at `cmp al, 3` and does not cross the
-        // following jz. Hook lands on the cmp at match + 4. Inert on
-        // v1.05.00 because the visibility byte sits at +0x20, not +0x1C.
-        {"PartInOut_P1_DirectSite",
-         "48 8B 45 5F 0F B6 40 1C 3C 03",
-         ResolveMode::Direct, 4, 0},
-
-        // P2 -- v1.04.00 wider context. Tied to specific register
-        // assignments (r13/r15) that the v1.05.00 compiler reshuffled,
-        // so this candidate is inert on v1.05.00; retained for the
-        // v1.04.00 path.
-        {"PartInOut_P2_WiderContext",
-         "45 32 C0 49 8B 45 ?? 41 8B 4D ?? 48 C1 E1 04 48 03 C8 48 3B C1",
-         ResolveMode::Direct, 0x30, 0},
-
-        // P3 -- v1.04.00 with the `mov r8b, 1` prefix. Ends at the cmp,
-        // does not cross the jz. Hook lands at match + 7. Inert on
-        // v1.05.00 (same reason as P1).
-        {"PartInOut_P3_PrecedingGate",
-         "41 B0 01 48 8B 45 5F 0F B6 40 1C 3C 03",
-         ResolveMode::Direct, 7, 0},
     };
 
     /**
