@@ -13,7 +13,7 @@
 // body-mesh asset-path read on the CCOIA
 // (pa::ClientChildOnlyInGameActor):
 //
-//   [playerBase]                        ; = moduleBase + 0x5FA0430
+//   [playerBase]                        ; AOB-resolved module-static slot
 //      -> +0x28  = pa::ClientUserActor
 //          -> +0x08  = CCOIA sub-manager
 //              -> +0x30 = Kliff CCOIA           (always-present anchor)
@@ -53,7 +53,9 @@
 //   From any thread, call current_controlled_character() etc. -- the
 //   resolver walks the chain on every call (SEH-guarded). No hooks,
 //   no learning caches, no broadcast subscriptions. The player-base
-//   static (`moduleBase + 0x5FA0430`) is resolved lazily on first use.
+//   slot is AOB-resolved lazily on first use via
+//   CDCore::Anchors::k_clientActorManagerGlobalCandidates (3-tier
+//   cascade across distinct instructions in the publishing function).
 //
 // Thread safety:
 //   - All functions are non-blocking and SEH-guarded; safe from any thread

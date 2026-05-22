@@ -2,6 +2,9 @@
 
 #include <Windows.h>
 
+#include <cdcore/anchors.hpp>
+#include <cdcore/dmk_glue.hpp>
+
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -33,11 +36,6 @@ namespace CDCore
 {
     namespace
     {
-        // Default static address (image-base + 0x5FA0430). The engine
-        // writer is a single `mov cs:<rva>h, rdi` against this slot;
-        // every published actor manager pointer flows through it.
-        constexpr std::uintptr_t k_defaultPlayerBaseOffset = 0x5FA0430;
-
         // Lower bound for "looks like a heap pointer". Catches both real
         // null pointers and small enum-shaped values an uninitialised
         // slot may carry before the engine singleton is wired up.
@@ -104,6 +102,36 @@ namespace CDCore
         // while the appearance codename is character-keyed and stays
         // unique even if the game adds a 4th protagonist sharing
         // Damiane's skeleton.
+        //
+        // Step-2 caveat: the holder at ccoia+0x68 is a dense component
+        // pointer table that grows as actor components register, so
+        // the target component (pa::ClientCharacterControlActorComponent)
+        // lands at a different slot index depending on how many
+        // components have been wired up at the moment we read.
+        // Observed Kliff layouts:
+        //
+        //   early load (~5 components present):
+        //     ccoia +0x68 -> p1
+        //       p1 +0x40 -> pa::ClientEquipSlotActorComponent (wrong branch)
+        //       p1 +0x48 -> pa::ClientCharacterControlActorComponent
+        //
+        //   later load (~22 components present):
+        //     ccoia +0x68 -> p1
+        //       p1 +0x38 -> pa::ClientEquipSlotActorComponent
+        //       p1 +0x40 -> pa::ClientCharacterControlActorComponent
+        //       p1 +0x48 -> pa::ClientVehicleActorComponent
+        //
+        // The +0x40 offset is correct in the steady state where every
+        // expected component has registered; during cold load it can
+        // transiently miss, and current callers retry-on-failure to
+        // ride that out. Steps 3 (+0x40) and 4 (+0x38) dereference
+        // fixed members of the resolved component and are
+        // structurally stable.
+        //
+        // TODO: walk p1 by RTTI/vtable to land on
+        // pa::ClientCharacterControlActorComponent regardless of slot
+        // so the chain becomes session-stable; the vtable is in image
+        // and can be cached at startup.
         constexpr std::ptrdiff_t k_offAppearChain1 = 0x68;
         constexpr std::ptrdiff_t k_offAppearChain2 = 0x40;
         constexpr std::ptrdiff_t k_offAppearChain3 = 0x40;
@@ -206,18 +234,23 @@ namespace CDCore
 
         std::uintptr_t resolve_player_base_address() noexcept
         {
-            // Lazy one-shot: moduleBase + k_defaultPlayerBaseOffset.
-            static std::atomic<std::uintptr_t> s_cachedDefault{0};
+            // Lazy one-shot AOB resolve. The engine publishes the
+            // pa::ClientActorManager* into a single static slot whose
+            // module-relative offset drifts between game patches; the
+            // cascade in anchors.hpp anchors on three distinct
+            // instructions inside the publishing function so partial
+            // recompiles or compiler reorderings still resolve.
+            static std::atomic<std::uintptr_t> s_cached{0};
             const auto cached =
-                s_cachedDefault.load(std::memory_order_acquire);
+                s_cached.load(std::memory_order_acquire);
             if (cached >= k_minValidPtr)
                 return cached;
-            const auto mod = reinterpret_cast<std::uintptr_t>(
-                GetModuleHandleW(nullptr));
-            if (mod < k_minValidPtr)
+            const auto addr = CDCore::Glue::resolve_address(
+                CDCore::Anchors::k_clientActorManagerGlobalCandidates,
+                "ClientActorManagerGlobal");
+            if (addr < k_minValidPtr)
                 return 0;
-            const auto addr = mod + k_defaultPlayerBaseOffset;
-            s_cachedDefault.store(addr, std::memory_order_release);
+            s_cached.store(addr, std::memory_order_release);
             return addr;
         }
 

@@ -295,6 +295,83 @@ namespace CDCore::Anchors
          ResolveMode::Direct, -0x25, 0},
     };
 
+    // -----------------------------------------------------------------------
+    // ClientActorManagerGlobal -- module-static slot holding the published
+    // pa::ClientActorManager* singleton. Source of truth for the entire
+    // controlled-character resolver chain:
+    //
+    //   [global] -> mgr (pa::ClientActorManager)
+    //   mgr  +0x28 -> userActor (pa::ClientUserActor)
+    //   user +0x08 -> subMgr
+    //   sub  +0x30 -> Kliff CCOIA (always present)
+    //   sub  +0x38 -> currently-controlled CCOIA
+    //
+    // The slot's module-relative offset drifts between game patches
+    // (e.g., 0x5FA0430 on v1.06 / v1.07, 0x6012110 on v1.08), so a
+    // hardcoded offset silently reads unrelated `.data` on the wrong
+    // build (the v1.06 offset on a v1.08 binary lands inside a
+    // packed string table, dereferencing to ASCII content rather
+    // than a heap pointer). All three candidates anchor on distinct
+    // instructions inside the same lazy-init function that publishes
+    // the singleton and resolve to the same global slot.
+    //
+    // All candidates use RipRelative mode. Each yields the absolute
+    // address of the slot whose qword is the manager pointer.
+    // -----------------------------------------------------------------------
+    inline constexpr AddrCandidate k_clientActorManagerGlobalCandidates[] = {
+        // P1 -- publish-store + sibling sub-pointer assignments:
+        //   mov [rip+disp32], rdi         ; <-- publishes the manager
+        //   lea rax, [rdi+0x100]
+        //   mov [rip+disp32], rax         ; sibling slot +8
+        //   lea rax, [rdi+0x180]
+        //   mov [rip+disp32], rax         ; sibling slot +16
+        // The literal +0x100 / +0x180 sub-field offsets are the
+        // manager's published sub-pointers and pin the function
+        // tightly without depending on any compiler-owned values.
+        // disp32 of `mov [rip+disp32], rdi` is at match+3; the
+        // instruction is 7 bytes long.
+        {"ClientActorManagerGlobal_P1_PublishStore",
+         "48 89 3D ?? ?? ?? ?? 48 8D 87 00 01 00 00 "
+         "48 89 05 ?? ?? ?? ?? 48 8D 87 80 01 00 00 "
+         "48 89 05",
+         ResolveMode::RipRelative, 3, 7},
+
+        // P2 -- zero-init prologue that precedes the publish store:
+        //   vpxor   xmm0,xmm0,xmm0                ; C5 F9 EF C0
+        //   vmovdqu xmmword [rip+disp32], xmm0    ; C5 FA 7F 05 + disp32
+        //   mov     [rip+disp32], r12             ; 4C 89 25 + disp32
+        //   mov     byte [rip+disp32], 0          ; C6 05 + disp32 + 00
+        // The r12 register choice and the byte-store of 0 distinguish
+        // this from ordinary AVX zero-init blocks. The vmovdqu
+        // resolves to the same global slot as P1. disp32 lives at
+        // match+8; vmovdqu instruction ends at match+12.
+        {"ClientActorManagerGlobal_P2_ZeroInitPrologue",
+         "C5 F9 EF C0 C5 FA 7F 05 ?? ?? ?? ?? "
+         "4C 89 25 ?? ?? ?? ?? "
+         "C6 05 ?? ?? ?? ?? 00",
+         ResolveMode::RipRelative, 8, 12},
+
+        // P3 -- mid-body address-of-global use:
+        //   lea rdx, cs:[rip+disp32]              ; 48 8D 15 + disp32
+        //   lea rcx, [rbp+disp32]                 ; 48 8D 8D + disp32
+        //   call helper                           ; E8 + rel32
+        //   nop
+        //   mov byte [rsp+disp8], 0               ; C6 44 24 + disp8 + 00
+        //   vpxor xmm0,xmm0,xmm0                  ; C5 F9 EF C0
+        // The `lea rdx, [rip+disp32]` is the only address-of-global
+        // use in this function (the publish store uses mov, not lea).
+        // The post-call tail (`90 C6 44 24 ?? 00 C5 F9 EF C0`) is
+        // necessary to disambiguate: without it the leading
+        // `lea rdx; lea rcx,[rbp+]; call; nop` shape matched ten
+        // sites in v1.08. disp32 of the `lea rdx` lives at match+3;
+        // the instruction is 7 bytes long.
+        {"ClientActorManagerGlobal_P3_LeaCallBody",
+         "48 8D 15 ?? ?? ?? ?? 48 8D 8D ?? ?? ?? ?? "
+         "E8 ?? ?? ?? ?? 90 C6 44 24 ?? 00 "
+         "C5 F9 EF C0",
+         ResolveMode::RipRelative, 3, 7},
+    };
+
 } // namespace CDCore::Anchors
 
 #endif // CDCORE_ANCHORS_HPP
