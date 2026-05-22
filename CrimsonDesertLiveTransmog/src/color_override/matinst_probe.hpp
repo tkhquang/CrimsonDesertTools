@@ -8,8 +8,24 @@
 // submesh name off its wrapper. Centralised here so the v1.06 struct
 // offsets + heap-floor sanity live in one place.
 //
-// All readers are SEH-guarded and `noexcept`. Bad pointers / freed
-// memory return `false`; no exception escapes.
+// Stale-pointer model (two-layer defence):
+//
+//   1. Each read first validates its source page via
+//      `DMK::Memory::is_readable` (cached VirtualQuery). The common
+//      stale-pointer cases -- NULL, low addresses, uncommitted
+//      pages, PAGE_NOACCESS, PAGE_GUARD, short regions -- are
+//      filtered silently. No AV fires, so no first-chance exception
+//      lands on an attached debugger for typical filtered calls.
+//
+//   2. Each function body is wrapped in `__try/__except` so the
+//      residual TOCTOU race (page freed between predicate and read,
+//      or stale predicate cache) cannot crash the process. That
+//      race is rare in practice; the SEH boundary keeps it sound.
+//      Debugger noise is therefore proportional to the race rate,
+//      not the bad-pointer rate.
+//
+// All readers remain `noexcept`. Bad pointers / freed memory return
+// `false`; no exception escapes.
 
 #include <cstddef>
 #include <cstdint>
