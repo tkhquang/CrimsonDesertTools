@@ -2,6 +2,11 @@
 
 All notable changes to the CrimsonDesertLiveTransmog mod will be documented in this file.
 
+## [0.11.1] - Instant Apply and preset-hide fixes
+
+- Fix: real Mask/Necklace (and other accessory slots) now hide correctly when switching to a preset with all slots set to (none). Previously only the manual transmog→none path worked; preset switches left the real mesh visible on first-claim hide.
+- Fix: Instant Apply now works correctly for body-mesh prefab picks on Damiane and Oongka. Previously, Instant Apply only affected the controlled character, so editing another character's outfit reverted to their original armor.
+
 ## [0.11.0] - Multi-character world-entry auto-apply
 
 - Every visible protagonist now has their saved transmog preset applied automatically on world entry, without needing to cycle to each character first.
@@ -176,6 +181,7 @@ All notable changes to the CrimsonDesertLiveTransmog mod will be documented in t
 - Modular code split: `transmog_apply` (apply/clear logic), `transmog_hooks` (VEC/BatchEquip callbacks), `transmog_worker` (debounce/load-detect/nametable threads), `shared_state` (cross-TU atomics)
 - Docs clarify ReShade is required for GUI; without it, users edit JSON manually via Capture hotkey
 
+[0.11.1]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.11.1
 [0.11.0]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.11.0
 [0.10.1]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.10.1
 [0.10.0]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.10.0
