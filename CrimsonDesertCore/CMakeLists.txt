@@ -37,7 +37,6 @@ add_library(CrimsonDesertCore STATIC
     src/dev_helpers.cpp
     src/dmk_glue.cpp
     src/indexed_string_table.cpp
-    src/prologue_check.cpp
 )
 
 # Path to the shared dev-build hot-reload loader source. Consumers that

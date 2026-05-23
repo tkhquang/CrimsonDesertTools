@@ -798,6 +798,14 @@ namespace Transmog
             }
         }
 
+        // Apply config before the resolver and hook-install steps so
+        // the INI LogLevel takes effect for any TRACE/DEBUG emissions
+        // that follow. Setters dispatched by Config::load() touch only
+        // atomics, preset/state structures, and InputManager bindings;
+        // none of them depend on resolved addresses (those are
+        // populated below).
+        load_config();
+
         if (!DMK::Memory::init_cache())
             logger.warning("Memory cache init failed -- pointer reads may be slower");
 
@@ -935,7 +943,7 @@ namespace Transmog
                 std::size(k_initSwapEntryCandidates),
                 "InitSwapEntry");
 
-            if (iseAddr && !sanity_check_function_prologue(iseAddr))
+            if (iseAddr && !DMK::Scanner::is_likely_function_prologue(iseAddr))
             {
                 logger.warning(
                     "InitSwapEntry resolved to 0x{:X} but prologue byte "
@@ -991,10 +999,6 @@ namespace Transmog
                 "will fall back to direct apply (may not render)");
         }
 
-        // --- Load config ---
-
-        load_config();
-
         // --- Load presets ---
 
         {
@@ -1013,7 +1017,7 @@ namespace Transmog
         // SlotPopulator: resolved for direct call (not hooked).
         if (addrs.slotPopulator)
         {
-            if (sanity_check_function_prologue(addrs.slotPopulator))
+            if (DMK::Scanner::is_likely_function_prologue(addrs.slotPopulator))
             {
                 slot_populator_fn() =
                     reinterpret_cast<SlotPopulatorFn>(addrs.slotPopulator);
@@ -1036,7 +1040,7 @@ namespace Transmog
                 std::size(k_batchEquipCandidates),
                 "BatchEquip");
 
-            if (beAddr && !sanity_check_function_prologue(beAddr))
+            if (beAddr && !DMK::Scanner::is_likely_function_prologue(beAddr))
             {
                 logger.warning(
                     "BatchEquip resolved to 0x{:X} but prologue byte "
@@ -1056,7 +1060,6 @@ namespace Transmog
                 if (result.has_value())
                 {
                     orig_batch_equip() = trampoline;
-                    logger.info("BatchEquip hook installed at 0x{:X}", beAddr);
                 }
                 else
                 {
@@ -1074,7 +1077,7 @@ namespace Transmog
         {
             auto vecAddr = resolve_address(
                 k_vecCandidates, std::size(k_vecCandidates), "VEC");
-            if (vecAddr && !sanity_check_function_prologue(vecAddr))
+            if (vecAddr && !DMK::Scanner::is_likely_function_prologue(vecAddr))
             {
                 logger.warning(
                     "VEC resolved to 0x{:X} but prologue byte looks "
@@ -1092,7 +1095,6 @@ namespace Transmog
                 if (result.has_value())
                 {
                     orig_vec() = trampoline;
-                    logger.info("VEC hook installed at 0x{:X}", vecAddr);
                 }
                 else
                 {
@@ -1137,7 +1139,7 @@ namespace Transmog
                 std::size(k_partAddShowCandidates),
                 "PartAddShow");
 
-            if (pasAddr && !sanity_check_function_prologue(pasAddr))
+            if (pasAddr && !DMK::Scanner::is_likely_function_prologue(pasAddr))
             {
                 logger.warning(
                     "PartAddShow resolved to 0x{:X} but prologue byte "
@@ -1157,8 +1159,6 @@ namespace Transmog
                 if (result.has_value())
                 {
                     PartShowSuppress::set_part_add_show_trampoline(trampoline);
-                    logger.info("[dispatch] PartAddShow hook installed at 0x{:X}",
-                                pasAddr);
                 }
                 else
                 {

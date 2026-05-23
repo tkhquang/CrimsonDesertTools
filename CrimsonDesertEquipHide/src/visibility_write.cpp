@@ -8,6 +8,10 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdint>
+#include <format>
+#include <string>
+#include <utility>
 #include <vector>
 
 namespace EquipHide
@@ -99,6 +103,14 @@ namespace EquipHide
                     ? &get_part_map_for(charIdx)
                     : &get_part_map();
 
+            // Per-protagonist TRACE accumulators -- emitted as one
+            // comma-joined line per state at the end of this outer
+            // iteration. Cheap to maintain even when TRACE is off;
+            // only the join + emit at the bottom is gated.
+            std::vector<uint32_t> v_hidden;
+            std::vector<uint32_t> v_forceShown;
+            std::vector<std::pair<uint32_t, uint8_t>> v_restored;
+
             for (auto pmIt = partMapPtr->begin();
                  pmIt != partMapPtr->end(); ++pmIt)
             {
@@ -128,8 +140,7 @@ namespace EquipHide
                         origVis[key] = *visPtr;
                     *visPtr = 2;
                     ++hiddenCount;
-                    logger.trace("  [{}] 0x{:04X} hidden (vis=2, char_idx={})",
-                                 i, hash, charIdx);
+                    v_hidden.push_back(hash);
                 }
                 else
                 {
@@ -143,17 +154,53 @@ namespace EquipHide
                     auto it = origVis.find(key);
                     if (it != origVis.end())
                     {
-                        logger.trace("  [{}] 0x{:04X} restored (vis=0, "
-                                     "cached_orig=0x{:02X}, char_idx={})",
-                                     i, hash, it->second, charIdx);
+                        v_restored.push_back({hash, it->second});
                         origVis.erase(it);
                     }
                     else
                     {
-                        logger.trace("  [{}] 0x{:04X} force-shown (vis=0, char_idx={})",
-                                     i, hash, charIdx);
+                        v_forceShown.push_back(hash);
                     }
                     ++restoredCount;
+                }
+            }
+
+            // Per-protagonist compact TRACE summary. One line per state
+            // instead of one per hash (the per-hash emits historically
+            // produced 50+ near-identical lines per direct-write tick).
+            if (logger.is_enabled(DMK::LogLevel::Trace))
+            {
+                auto join_hex = [](const std::vector<uint32_t> &v) {
+                    std::string s;
+                    s.reserve(v.size() * 8);
+                    for (std::size_t k = 0; k < v.size(); ++k)
+                    {
+                        if (k > 0) s += ", ";
+                        s += std::format("0x{:04X}", v[k]);
+                    }
+                    return s;
+                };
+                if (!v_hidden.empty())
+                    logger.trace("  [{}] hidden char_idx={} ({}): {}",
+                                 i, charIdx, v_hidden.size(),
+                                 join_hex(v_hidden));
+                if (!v_forceShown.empty())
+                    logger.trace("  [{}] force-shown char_idx={} ({}): {}",
+                                 i, charIdx, v_forceShown.size(),
+                                 join_hex(v_forceShown));
+                if (!v_restored.empty())
+                {
+                    std::string s;
+                    s.reserve(v_restored.size() * 14);
+                    for (std::size_t k = 0; k < v_restored.size(); ++k)
+                    {
+                        if (k > 0) s += ", ";
+                        s += std::format("0x{:04X}(orig=0x{:02X})",
+                                         v_restored[k].first,
+                                         v_restored[k].second);
+                    }
+                    logger.trace("  [{}] restored char_idx={} ({}): {}",
+                                 i, charIdx, v_restored.size(), s);
                 }
             }
         }

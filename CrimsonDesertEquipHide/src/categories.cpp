@@ -3,8 +3,10 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <format>
 #include <limits>
 #include <mutex>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -305,15 +307,6 @@ namespace EquipHide
             if (s_hasRuntimeHashes)
             {
                 s_nameToHash = s_runtimeHashes;
-
-                int resolved = 0;
-                for (const auto& p : k_allParts)
-                {
-                    if (s_nameToHash.count(p.name))
-                        ++resolved;
-                }
-                logger.info("Hash resolution: {}/{} runtime",
-                            resolved, std::size(k_allParts));
             }
             else
             {
@@ -729,16 +722,48 @@ namespace EquipHide
         s_outlierCount.store(outlierCount, std::memory_order_release);
 
         auto& logger = DMK::Logger::get_instance();
-        const char *verb = s_nameToHashBuilt ? "rebuilt" : "built";
-        logger.info("Part lookup {}: {} entries across {} categories",
-                     verb, writeMap.size(), CATEGORY_COUNT);
+        // Skip the summary emit when the part map is empty. The empty
+        // case is the initial build that runs before any runtime hash
+        // has been resolved; name_to_hash_map() already logs
+        // "No runtime hashes available, part map empty (pending
+        // deferred scan)" for that state, so a "0 entries" companion
+        // here carries no extra signal.
         if (!writeMap.empty())
         {
-            logger.info("Hash range: 0x{:X} - 0x{:X} ({} outliers)",
-                         rangeMin, rangeMax, outlierCount);
-            for (int i = 0; i < outlierCount; ++i)
-                logger.debug("  outlier: 0x{:X}",
-                              s_outliers[i].load(std::memory_order_relaxed));
+            const char *verb = s_nameToHashBuilt ? "rebuilt" : "built";
+
+            // Catalog parts with a runtime-hash mapping. Reported as
+            // the "{resolved}/{total} resolved" field of the
+            // consolidated INFO line below.
+            int resolved = 0;
+            if (s_hasRuntimeHashes)
+            {
+                for (const auto& p : k_allParts)
+                {
+                    if (s_nameToHash.count(p.name))
+                        ++resolved;
+                }
+            }
+
+            logger.info("Part lookup {}: {} entries across {} categories "
+                        "({}/{} resolved, range 0x{:X}-0x{:X}, {} outliers)",
+                        verb, writeMap.size(), CATEGORY_COUNT,
+                        resolved, std::size(k_allParts),
+                        rangeMin, rangeMax, outlierCount);
+
+            if (outlierCount > 0 && logger.is_enabled(DMK::LogLevel::Debug))
+            {
+                std::string list;
+                list.reserve(outlierCount * 8);
+                for (int i = 0; i < outlierCount; ++i)
+                {
+                    if (i > 0) list += ", ";
+                    list += std::format(
+                        "0x{:X}",
+                        s_outliers[i].load(std::memory_order_relaxed));
+                }
+                logger.debug("  outliers: {}", list);
+            }
         }
 
         s_activeMap.fetch_xor(1, std::memory_order_release);
@@ -821,6 +846,40 @@ namespace EquipHide
         // sync across every rebuild trigger (init, INI auto-reload,
         // set_active_character, deferred IndexedString scan completion).
         build_per_char_part_maps();
+
+        // Per-category TRACE summary. Runs at the tail of every
+        // rebuild_part_lookup() caller (init post-scan, deferred-scan
+        // converge, lazy-probe progress, set_active_character, INI
+        // auto-reload) so the reported counts reflect the part map
+        // that was just published.
+        auto& logger = DMK::Logger::get_instance();
+        if (logger.get_log_level() <= DMK::LogLevel::Trace)
+        {
+            const auto& partMap = s_partMaps[
+                s_activeMap.load(std::memory_order_relaxed)];
+            for (std::size_t i = 0; i < CATEGORY_COUNT; ++i)
+            {
+                const auto cat = static_cast<Category>(i);
+                const auto bit = category_bit(cat);
+                int count = 0;
+                for (const auto& [hash, mask] : partMap)
+                {
+                    if (mask & bit)
+                        ++count;
+                }
+                const bool enabled = s_states[i].enabled.load(
+                    std::memory_order_relaxed);
+                const bool hidden = s_states[i].hidden.load(
+                    std::memory_order_relaxed);
+                if (!enabled)
+                    logger.trace("Category {}: disabled ({} parts registered)",
+                                 category_section(cat), count);
+                else
+                    logger.trace("Category {}: enabled, default={} ({} parts)",
+                                 category_section(cat),
+                                 hidden ? "hidden" : "visible", count);
+            }
+        }
     }
 
     void set_active_character(int newIdx)

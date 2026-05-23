@@ -325,7 +325,7 @@ namespace Transmog::RealPartTearDown
         }
 
         // First-byte prologue sanity check. Thin wrapper that defers to
-        // Transmog::sanity_check_function_prologue so every fn-ptr-store
+        // DMK::Scanner::is_likely_function_prologue so every fn-ptr-store
         // site in the mod uses the same gate. Kept as a byte-buffer
         // overload for the log-then-gate pattern below where we already
         // captured 8 bytes for diagnostics.
@@ -333,7 +333,7 @@ namespace Transmog::RealPartTearDown
         {
             if (!p)
                 return false;
-            return Transmog::sanity_check_function_prologue(
+            return DMK::Scanner::is_likely_function_prologue(
                 reinterpret_cast<uintptr_t>(p));
         }
 

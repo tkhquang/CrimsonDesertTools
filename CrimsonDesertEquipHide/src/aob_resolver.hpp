@@ -16,7 +16,6 @@
 // See cdcore/anchors.hpp for the full convention and authoring rules.
 
 #include <cdcore/anchors.hpp>
-#include <cdcore/prologue_check.hpp>
 
 #include <DetourModKit.hpp>
 
@@ -29,8 +28,6 @@ namespace EquipHide
 {
     using AddrCandidate = DetourModKit::Scanner::AddrCandidate;
     using ResolveMode = DetourModKit::Scanner::ResolveMode;
-
-    using CDCore::sanity_check_function_prologue;
 
     // --- Shared candidate tables (aliased by reference from CDCore) -------
 

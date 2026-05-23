@@ -121,7 +121,7 @@ namespace Transmog::ColorOverride
         if (!::Transmog::flag_color_override().load(
                 std::memory_order_acquire))
             return;
-        DMK::Logger::get_instance().info(
+        DMK::Logger::get_instance().debug(
             "[color-override] reset_all -- wiping all slot swatch "
             "tables + pending overrides (preset / character switch)");
         CarrierSet::clear_all();
