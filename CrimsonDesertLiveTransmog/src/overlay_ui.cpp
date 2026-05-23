@@ -415,7 +415,23 @@ static void draw_overlay_content()
                         {
                             flag_enabled().store(
                                 true, std::memory_order_relaxed);
-                            manual_apply_slot(i);
+                            // Body-mesh picks require the natpipe-hook
+                            // to substitute the source wrapper for the
+                            // editing character's body. That hook reads
+                            // s_swapMapPerChar[s_activeCharIdx-1] at
+                            // entry, and only the full multi-actor apply
+                            // path drives s_activeCharIdx per CCOIA
+                            // (PresetManager::apply_to_state binds it
+                            // for each character in the sweep). The
+                            // single-slot path runs against the
+                            // controlled actor only -- when the user
+                            // edits Damiane/Oongka while controlling
+                            // Kliff, the slot path byte-patches Kliff
+                            // and never triggers a body re-bind for the
+                            // editing character, so the substitution
+                            // never fires and the carrier renders
+                            // natural (e.g. Demenisian Uniform).
+                            manual_apply();
                         }
                         DMK::Logger::get_instance().info(
                             "[picker] slot={} BODY-MESH "
