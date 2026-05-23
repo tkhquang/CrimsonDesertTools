@@ -274,12 +274,6 @@ namespace Transmog::ColorOverride::HostScope
                     DetourModKit::Hook::error_to_string(r1.error()));
                 ok = false;
             }
-            else
-            {
-                log.info(
-                    "[dye-host-scope] vfunc1 hook installed at {:#x}",
-                    addr1);
-            }
         }
         else
         {
@@ -297,12 +291,6 @@ namespace Transmog::ColorOverride::HostScope
                     addr2,
                     DetourModKit::Hook::error_to_string(r2.error()));
                 ok = false;
-            }
-            else
-            {
-                log.info(
-                    "[dye-host-scope] vfunc2 hook installed at {:#x}",
-                    addr2);
             }
         }
         else

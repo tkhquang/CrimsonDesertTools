@@ -194,7 +194,7 @@ namespace Transmog::DyeRecordInject
 
         const auto inject_count = g_dyeInjectCount.fetch_add(
             1, std::memory_order_relaxed);
-        DMK::Logger::get_instance().info(
+        DMK::Logger::get_instance().debug(
             "[dye-inject] #{} dst+120=0x{:X} mode={} emitted={}/{} "
             "first_hash=0x{:08X} rgb=({:02X},{:02X},{:02X}) ok={}",
             inject_count, target_vec,
@@ -262,7 +262,7 @@ namespace Transmog::DyeRecordInject
 
     void log_counters() noexcept
     {
-        DMK::Logger::get_instance().info(
+        DMK::Logger::get_instance().debug(
             "[dye-inject] counters: injects={}",
             g_dyeInjectCount.load(std::memory_order_relaxed));
     }
@@ -316,7 +316,7 @@ namespace Transmog::DyeRecordInject
             : 0;
         g_publishedRGB.store(snap, std::memory_order_release);
 
-        DMK::Logger::get_instance().info(
+        DMK::Logger::get_instance().debug(
             "[dye-inject] state set: active_count={} firstHash=0x{:08X} "
             "firstRGB=({:02X},{:02X},{:02X}) snapshot=0x{:08X} "
             "&snap={:#x}",

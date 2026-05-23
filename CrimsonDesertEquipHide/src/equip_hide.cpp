@@ -182,38 +182,6 @@ namespace EquipHide
                     static_cast<int>(status));
             }
         }
-
-        {
-            auto &logger = DMK::Logger::get_instance();
-            if (logger.get_log_level() <= DMK::LogLevel::Trace)
-            {
-                const auto &states = category_states();
-                const auto &partMap = get_part_map();
-
-                for (std::size_t i = 0; i < CATEGORY_COUNT; ++i)
-                {
-                    const auto cat = static_cast<Category>(i);
-                    const auto bit = category_bit(cat);
-                    int count = 0;
-                    for (const auto &[hash, mask] : partMap)
-                    {
-                        if (mask & bit)
-                            ++count;
-                    }
-
-                    const bool enabled = states[i].enabled.load(std::memory_order_relaxed);
-                    const bool hidden = states[i].hidden.load(std::memory_order_relaxed);
-
-                    if (!enabled)
-                        logger.trace("Category {}: disabled ({} parts registered)",
-                                     category_section(cat), count);
-                    else
-                        logger.trace("Category {}: enabled, default={} ({} parts)",
-                                     category_section(cat),
-                                     hidden ? "hidden" : "visible", count);
-                }
-            }
-        }
     }
 
     // --- Mid-hook callback ---
@@ -415,6 +383,14 @@ namespace EquipHide
     {
         auto &logger = DMK::Logger::get_instance();
 
+        // Apply config before the resolver and hook-install steps so the
+        // INI LogLevel takes effect for any TRACE/DEBUG emissions that
+        // follow. Setters dispatched by Config::load() touch only
+        // atomics, per-category state, and InputManager bindings; none
+        // of them depend on resolved addresses (those are populated
+        // below).
+        load_config();
+
         if (!DMK::Memory::init_cache())
             logger.warning("Memory cache init failed -- pointer reads may be slower");
 
@@ -475,7 +451,6 @@ namespace EquipHide
             logger.warning("MapLookup not resolved, cannot scan IndexedStringA table");
         }
 
-        load_config();
         original_vis_map().reserve(get_part_map().size());
 
         // Initial IndexedStringA scan + deferred-launch decision.
@@ -571,8 +546,6 @@ namespace EquipHide
                 if (result.has_value())
                 {
                     set_part_add_show_trampoline(trampoline);
-                    logger.info("PartAddShow inline hook installed at 0x{:X}",
-                                partAddShowAddr);
                 }
                 else
                     logger.warning("PartAddShow hook failed: {} -- gliding flash fix disabled",
@@ -662,7 +635,6 @@ namespace EquipHide
                 if (result.has_value())
                 {
                     set_visual_equip_change_trampoline(trampoline);
-                    logger.info("VisualEquipChange hook installed at 0x{:X}", vecAddr);
                 }
                 else
                     logger.warning("VisualEquipChange hook failed: {}",
@@ -685,7 +657,6 @@ namespace EquipHide
                 if (result.has_value())
                 {
                     set_visual_equip_swap_trampoline(trampoline);
-                    logger.info("VisualEquipSwap hook installed at 0x{:X}", vesAddr);
                 }
                 else
                     logger.warning("VisualEquipSwap hook failed: {}",

@@ -6,8 +6,40 @@
 
 #include <Windows.h>
 
+#include <format>
+#include <string>
+#include <vector>
+
 namespace EquipHide
 {
+    /* File-scope scratch buffers reused across inject_armor_entries_for_map
+       calls. Cleared at function entry. Serialised by vis_write_mutex which
+       is held for the full call duration, so concurrent callers cannot race.
+       File scope (rather than function-scope std::vector / std::string) is
+       required by MSVC C2712 -- the function's __try/__finally cannot
+       coexist with objects that require C++ unwinding, and that includes
+       temporaries returned by-value from helpers. Mirrors the
+       s_touchedVisKeys pattern in visibility_write.cpp. */
+    static std::vector<uint32_t> s_v_injected;
+    static std::vector<uint32_t> s_v_reinjected;
+    static std::string s_v_joined;
+
+    /* Writes a comma-separated "0x..., 0x..., ..." rendering of @p v into
+       the file-scope @ref s_v_joined buffer. Used by the per-call summary
+       emit; lives at file scope (not as a function-local lambda) because
+       returning std::string by value would put a destructor-bearing
+       temporary inside __try and re-trigger C2712. */
+    static void build_hex_joined(const std::vector<uint32_t> &v)
+    {
+        s_v_joined.clear();
+        s_v_joined.reserve(v.size() * 8);
+        for (std::size_t k = 0; k < v.size(); ++k)
+        {
+            if (k > 0) s_v_joined += ", ";
+            s_v_joined += std::format("0x{:X}", v[k]);
+        }
+    }
+
     /**
      * @brief Game's map insertion function signature.
      *
@@ -73,6 +105,11 @@ namespace EquipHide
            + DirectWrite call. __leave skips to __finally when the
            addrs guard short-circuits. */
         int result = 0;
+        // Accumulators are the file-scope statics declared near the
+        // top of this TU (see the rationale comment there for why they
+        // cannot be function-locals). Cleared on entry under the lock.
+        s_v_injected.clear();
+        s_v_reinjected.clear();
         __try
         {
             __try
@@ -177,15 +214,29 @@ namespace EquipHide
 
                     if (!outExisted)
                     {
-                        logger.debug("  0x{:X} -- INJECTED new entry", hash);
+                        s_v_injected.push_back(hash);
                         ++injected;
                     }
                     else if (!hidden)
                     {
-                        logger.trace("  0x{:X} -- RE-INJECTED visible (cache flush)",
-                                     hash);
+                        s_v_reinjected.push_back(hash);
                         ++reinjected;
                     }
+                }
+
+                if (!s_v_injected.empty() &&
+                    logger.is_enabled(DMK::LogLevel::Debug))
+                {
+                    build_hex_joined(s_v_injected);
+                    logger.debug("  injected new ({}): {}",
+                                 s_v_injected.size(), s_v_joined);
+                }
+                if (!s_v_reinjected.empty() &&
+                    logger.is_enabled(DMK::LogLevel::Trace))
+                {
+                    build_hex_joined(s_v_reinjected);
+                    logger.trace("  re-injected visible cache-flush ({}): {}",
+                                 s_v_reinjected.size(), s_v_joined);
                 }
 
                 logger.debug("ArmorInject map: {} injected, {} existing updated, "

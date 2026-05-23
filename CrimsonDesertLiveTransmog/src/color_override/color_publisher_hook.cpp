@@ -160,7 +160,6 @@ namespace Transmog::ColorOverride::PublisherHook
                 addr, DetourModKit::Hook::error_to_string(res.error()));
             return false;
         }
-        log.info("[color-publisher] hook installed at {:#x}", addr);
         g_initDone.store(true, std::memory_order_release);
         return true;
     }

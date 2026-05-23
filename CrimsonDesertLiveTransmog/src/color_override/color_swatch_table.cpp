@@ -739,7 +739,7 @@ namespace Transmog::ColorOverride::SwatchTable
         }
         if (queued != 0 || immediate != 0)
         {
-            log.info(
+            log.debug(
                 "[swatch-persist] slot {} queued {} ({} also "
                 "applied immediately to live rows)",
                 slot, queued, immediate);
@@ -1081,7 +1081,7 @@ namespace Transmog::ColorOverride::SwatchTable
                 .template_id.load(std::memory_order_relaxed);
             const auto firstStable = g_table[s][rows.front()]
                 .stable_id.load(std::memory_order_relaxed);
-            log.info(
+            log.debug(
                 "  submesh='{}' tpl=0x{:04X} stable=0x{:016X} rows={}",
                 name, firstTpl,
                 static_cast<unsigned long long>(firstStable),
@@ -1107,7 +1107,7 @@ namespace Transmog::ColorOverride::SwatchTable
                                             ? "FROZEN"           // pruned by Reinit
                                                                  // first-fire pending capture
                                             : "PENDING";
-                log.info(
+                log.debug(
                     "    {} (0x{:04X}) def=#{:02X}{:02X}{:02X} "
                     "user=#{:02X}{:02X}{:02X} hash=0x{:08X} [{}]",
                     tokName ? tokName : "(unnamed-tok)", tok,

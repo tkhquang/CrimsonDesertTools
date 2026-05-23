@@ -775,7 +775,7 @@ namespace Transmog::PrefabWrapperSwap
             std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::steady_clock::now() - walkStart)
                 .count();
-        logger.info(
+        logger.debug(
             "[prefab-swap] StringInfo walk: count={} scanned={} "
             "vtable-pass={} prefix-pass={} prefix=\"{}\" ({}ms)",
             count, scanned, vtMatched, prefMatched,
@@ -1311,7 +1311,7 @@ namespace Transmog::PrefabWrapperSwap
             totalAdded  += addedCount[i];
             totalMerged += mergedCount[i];
         }
-        logger.info(
+        logger.debug(
             "[prefab-swap] Loader registry enumeration: "
             "walked={} entries, scanned={} body-mesh-prefix={} "
             "added {} new prefabs, merged {} into existing "
@@ -1604,7 +1604,7 @@ namespace Transmog::PrefabWrapperSwap
             }
         }
         if (is_loader_ready()) {
-            logger.info(
+            logger.debug(
                 "[prefab-swap] Catalog metadata enrichment: "
                 "{} entries cross-referenced against the "
                 "AppearanceTableLoader catalog.",
@@ -1700,7 +1700,7 @@ namespace Transmog::PrefabWrapperSwap
             "cloak={} gloves={} boots={} ({}ms)",
             counts[0], counts[1], counts[2], counts[3], counts[4],
             walkMs);
-        logger.info(
+        logger.debug(
             "[prefab-swap] Catalog wrappers cached: {} names, "
             "{} total wrappers ({}ms heap walk)",
             allNames.size(), totalWrappers, hwMs);
@@ -2223,7 +2223,7 @@ namespace Transmog::PrefabWrapperSwap
             if (siReg) {
                 s_stringInfoRegistry.store(
                     siReg, std::memory_order_release);
-                logger.info(
+                logger.debug(
                     "[prefab-swap] StringInfoRegistry resolved at "
                     "0x{:X}", siReg);
             } else {
@@ -2238,7 +2238,7 @@ namespace Transmog::PrefabWrapperSwap
             if (siVt) {
                 s_stringInfoVtable.store(
                     siVt, std::memory_order_release);
-                logger.info(
+                logger.debug(
                     "[prefab-swap] StringInfoVtable resolved at "
                     "0x{:X}", siVt);
             } else {
@@ -2253,7 +2253,7 @@ namespace Transmog::PrefabWrapperSwap
             if (loaderReg) {
                 s_loaderRegistrySingleton.store(
                     loaderReg, std::memory_order_release);
-                logger.info(
+                logger.debug(
                     "[prefab-swap] LoaderRegistry resolved at "
                     "0x{:X}", loaderReg);
             } else {
@@ -2303,7 +2303,7 @@ namespace Transmog::PrefabWrapperSwap
                 if (resolved) {
                     s_apptContainerVtable.store(
                         resolved, std::memory_order_release);
-                    logger.info(
+                    logger.debug(
                         "[prefab-swap] ApptContainerVtable resolved "
                         "at 0x{:X} (ctor 0x{:X}, lea#2)",
                         resolved, ctorAbs);
@@ -2330,7 +2330,7 @@ namespace Transmog::PrefabWrapperSwap
                 "[prefab-swap] AOB scan failed -- feature disabled");
             return false;
         }
-        if (!sanity_check_function_prologue(addr)) {
+        if (!DMK::Scanner::is_likely_function_prologue(addr)) {
             logger.warning(
                 "[prefab-swap] resolved 0x{:X} but prologue check "
                 "failed -- feature disabled",
@@ -2354,11 +2354,11 @@ namespace Transmog::PrefabWrapperSwap
         s_orig = trampoline;
         s_active.store(false, std::memory_order_release);
 
+        // Hook gates on Transmog::in_transmog() so real-item flow is
+        // untouched -- semantic invariant, not session state.
         logger.info(
             "[prefab-swap] installed at 0x{:X} (INACTIVE -- "
-            "press the toggle hotkey to resolve pairs and activate). "
-            "Hook gates on Transmog::in_transmog() so real-item flow is "
-            "untouched.",
+            "press the toggle hotkey to resolve pairs and activate).",
             addr);
 
         // Natural-pipeline unlink hook (sub_142711DF0). Substitutes
@@ -2377,8 +2377,8 @@ namespace Transmog::PrefabWrapperSwap
                     "[prefab-swap] NaturalPipeline AOB resolve "
                     "FAILED -- helm/cloak leak will persist. Other "
                     "swap features remain active.");
-            } else if (!sanity_check_function_prologue(natpipeAbs)) {
-                // Prologue sanity gate (cdcore/prologue_check). Same
+            } else if (!DMK::Scanner::is_likely_function_prologue(natpipeAbs)) {
+                // Prologue sanity gate (DMK::Scanner::is_likely_function_prologue). Same
                 // contract as the StructCopy install -- guards against
                 // a cascade that picked up a fragment of an unrelated
                 // function after a future patch reshuffles bytes.
@@ -2388,10 +2388,10 @@ namespace Transmog::PrefabWrapperSwap
                     "install. Helm/cloak leak will persist.",
                     natpipeAbs);
             } else {
-                logger.info(
-                    "[prefab-swap] NaturalPipeline resolved at 0x{:X} "
-                    "(sub_142711DF0 -- pre-unlink wrapper-list walker; "
-                    "substitutes src -> tgt at hook entry).",
+                // sub_142711DF0 = pre-unlink wrapper-list walker;
+                // substitutes src -> tgt at hook entry.
+                logger.debug(
+                    "[prefab-swap] NaturalPipeline resolved at 0x{:X}",
                     natpipeAbs);
                 NaturalPipelineFn natpipeTrampoline = nullptr;
                 auto natpipeResult = hookMgr.create_inline_hook(
@@ -2407,13 +2407,10 @@ namespace Transmog::PrefabWrapperSwap
                             natpipeResult.error()));
                 } else {
                     s_origNaturalPipeline = natpipeTrampoline;
-                    logger.info(
-                        "[prefab-swap] NaturalPipeline hook "
-                        "INSTALLED at 0x{:X}. Inactive when LT "
-                        "swap is OFF; substitutes Kliff src wrappers "
-                        "with target in the natural unlink list "
-                        "while LT is active.",
-                        natpipeAbs);
+                    // Detour is a no-op when LT swap is OFF. While
+                    // active, it substitutes Kliff src wrappers with
+                    // target wrappers in the engine's natural unlink
+                    // list.
                 }
             }
         }
@@ -2441,7 +2438,7 @@ namespace Transmog::PrefabWrapperSwap
                     "[prefab-swap] ApptNameLookup AOB resolve "
                     "FAILED -- lookup_prefab_metadata will return 0; "
                     "picker falls back to StringInfo-only behavior.");
-            } else if (!sanity_check_function_prologue(fnAbs)) {
+            } else if (!DMK::Scanner::is_likely_function_prologue(fnAbs)) {
                 logger.warning(
                     "[prefab-swap] ApptNameLookup resolved at 0x{:X} "
                     "but prologue check failed -- skipping. "
@@ -2450,10 +2447,10 @@ namespace Transmog::PrefabWrapperSwap
             } else {
                 s_apptNameLookup =
                     reinterpret_cast<ApptNameLookupFn>(fnAbs);
-                logger.info(
-                    "[prefab-swap] ApptNameLookup resolved at 0x{:X} "
-                    "(sub_1424DF420 -- name->wrapper lookup against "
-                    "MEMORY[0x145DDF8B0]+0x50).",
+                // sub_1424DF420 = name->wrapper lookup against
+                // MEMORY[0x145DDF8B0]+0x50.
+                logger.debug(
+                    "[prefab-swap] ApptNameLookup resolved at 0x{:X}",
                     fnAbs);
             }
         }
@@ -2465,10 +2462,10 @@ namespace Transmog::PrefabWrapperSwap
         if (stringInternAddr) {
             s_apptStringIntern =
                 reinterpret_cast<ApptStringInternFn>(stringInternAddr);
-            logger.info(
-                "[prefab-swap] ApptStringIntern resolved at "
-                "0x{:X} (sub_1403016B0 -- StringInfo intern primitive "
-                "for AppearanceTableLoader lookups)",
+            // sub_1403016B0 = StringInfo intern primitive for
+            // AppearanceTableLoader lookups.
+            logger.debug(
+                "[prefab-swap] ApptStringIntern resolved at 0x{:X}",
                 stringInternAddr);
         } else {
             logger.warning(
@@ -2483,10 +2480,10 @@ namespace Transmog::PrefabWrapperSwap
         if (apptLookupAddr) {
             s_apptLookup =
                 reinterpret_cast<ApptLookupFn>(apptLookupAddr);
-            logger.info(
-                "[prefab-swap] ApptLookup resolved at 0x{:X} "
-                "(sub_141D38810 -- PartPrefab container lookup; pure "
-                "read-only, returns 24B metadata or 0 on miss)",
+            // sub_141D38810 = PartPrefab container lookup; pure
+            // read-only, returns 24B metadata or 0 on miss.
+            logger.debug(
+                "[prefab-swap] ApptLookup resolved at 0x{:X}",
                 apptLookupAddr);
         } else {
             logger.warning(
@@ -2517,12 +2514,9 @@ namespace Transmog::PrefabWrapperSwap
                         apptResult.error()));
             } else {
                 s_apptResMgrInitOrig = apptInitTrampoline;
-                logger.info(
-                    "[prefab-swap] ApptResMgrInit hook INSTALLED "
-                    "at 0x{:X} (sub_1408AF8F0 entry; will snapshot "
-                    "ResMgr/loader/container on first fire). Capture "
-                    "is one-shot; subsequent calls are pass-throughs.",
-                    apptInitAddr);
+                // sub_1408AF8F0 entry hook: on the first fire it
+                // snapshots ResMgr/loader/container, then passes
+                // through on every subsequent call (one-shot capture).
             }
         } else {
             logger.warning(
@@ -2694,13 +2688,12 @@ namespace Transmog::PrefabWrapperSwap
         //
         // Engine cleanup is driven by the natural-pipeline hook on
         // sub_142711DF0, which substitutes src -> tgt wrappers in the
-        // engine's unlink list at hook entry. No
-        // explicit reverse-write, force-destroy, or smart-ptr-release
-        // is performed here.
+        // engine's unlink list at hook entry. No explicit reverse-
+        // write, force-destroy, or smart-ptr-release is performed
+        // here.
         DMK::Logger::get_instance().info(
             "[prefab-swap] DEACTIVATED -- swap map RETAINED for "
-            "next activation. Engine cleanup deferred to natural-"
-            "pipeline hook.");
+            "next activation.");
     }
 
 } // namespace Transmog::PrefabWrapperSwap
