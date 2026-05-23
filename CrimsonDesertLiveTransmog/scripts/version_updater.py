@@ -31,7 +31,7 @@ def get_current_version():
         print(f"Error: {VERSION_HEADER} not found.")
         sys.exit(1)
 
-    version_h = VERSION_HEADER.read_text()
+    version_h = VERSION_HEADER.read_text(encoding="utf-8")
 
     # Extract version components using defines
     major_match = re.search(r'#define\s+VERSION_MAJOR\s+(\d+)', version_h)
@@ -72,7 +72,7 @@ def bump_version(part):
         sys.exit(1)
 
     # Update version.hpp
-    version_h = VERSION_HEADER.read_text()
+    version_h = VERSION_HEADER.read_text(encoding="utf-8")
 
     # Update the defines
     version_h = re.sub(
@@ -91,7 +91,7 @@ def bump_version(part):
         version_h
     )
 
-    VERSION_HEADER.write_text(version_h)
+    VERSION_HEADER.write_text(version_h, encoding="utf-8")
 
     # Return the new version string
     version_str = f"{major}.{minor}.{patch}"
@@ -109,7 +109,7 @@ All notable changes to the CrimsonDesertLiveTransmog mod will be documented in t
     if not CHANGELOG_MD.exists():
         content = changelog_template
     else:
-        content = CHANGELOG_MD.read_text()
+        content = CHANGELOG_MD.read_text(encoding="utf-8")
 
         if "# Changelog" in content:
             if "All notable changes" in content:
@@ -169,7 +169,7 @@ All notable changes to the CrimsonDesertLiveTransmog mod will be documented in t
             updated_content += f"\n[{v}]: {link}"
         updated_content += "\n"
 
-        CHANGELOG_MD.write_text(updated_content)
+        CHANGELOG_MD.write_text(updated_content, encoding="utf-8")
         print(f"Updated {CHANGELOG_MD} with version {version}")
     else:
         print(f"Warning: No changelog entry provided for version {version}, skipping update.")
