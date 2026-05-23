@@ -1354,7 +1354,34 @@ namespace Transmog
                 const auto prevId = prevIds[idx];
                 const auto prevCarrier = last_applied_carrier_ids()[idx];
                 if (prevId == 0)
+                {
+                    // First-claim hide: active-none slot LT never owned
+                    // (prevIds==0, no carrier history). Phase B alone
+                    // calls the scene-graph tear-down once; empirically
+                    // that's insufficient for slots where LT hasn't
+                    // previously placed a carrier (e.g. Mask/Necklace
+                    // when switching to an all-none preset on first
+                    // apply). Doubling the call here matches the
+                    // working manual path (transmog-something → none),
+                    // which fires Phase A on the prior carrier + Phase
+                    // B on the real entry -- same hash, same slot tag,
+                    // twice.
+                    const auto &m = mappings[idx];
+                    if (m.active && m.targetItemId == 0 &&
+                        liveRealIds[idx] != 0)
+                    {
+                        logger.trace(
+                            "[dispatch] tear_down_fake slot={:#06x} "
+                            "itemId={:#06x} (first-claim hide)",
+                            td.gameTag,
+                            static_cast<std::uint16_t>(liveRealIds[idx]));
+                        RealPartTearDown::tear_down_by_item_id(
+                            reinterpret_cast<void *>(a1),
+                            liveRealIds[idx],
+                            td.gameTag);
+                    }
                     continue;
+                }
                 // Phase A runs unconditionally: fake and real are
                 // treated equally, so even when the previous fake
                 // matched the live real item we still tear it down.
