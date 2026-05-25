@@ -116,7 +116,44 @@ namespace Transmog::ColorOverride::SetterSubstitute
 
         // Diagnostic: print the descriptor at `dst_prop` as a row of
         // u32 at +0x00..+0x3C. Used on the first 8 distinct descriptor
-        // addresses to locate the real token-id field.
+        // addresses to locate per-class fields.
+        //
+        // Field-offset map (identified during the 2026-05-25
+        // publish-chain RE; offsets are STRUCT-RELATIVE so they're
+        // patch-stable, unlike the RVAs of the functions that touch
+        // them):
+        //   +0x00 = vtbl (qword). The "Color permutations" descriptor
+        //           class is identified via its constructor's call
+        //           to a string-interner helper with the literal
+        //           "Color" as one of the arguments.
+        //   +0x20 = u32 hash-key. Compared against a hash computed
+        //           from arg `a4` inside the 4-arg dispatch wrapper's
+        //           internal filter (`if (!a4 || hash_match)`).
+        //           Mismatch -> dispatch silently skipped.
+        //   +0x28 = u32 token id (= our `tokId`).
+        //   +0x44 = u32 flag field. Bit 0x200 (= 1<<9) is the
+        //           "publish-skip" gate. Read by the descriptor's
+        //           vtbl[20] (a tiny 11-byte function whose body is
+        //           `mov eax,[rcx+0x44]; shr eax,9; not al; and al,1;
+        //           ret`). When the bit is set the descriptor is
+        //           silently filtered out of the publish iterator's
+        //           inner loop.
+        //   +0x70 = u32 byte-size offset (kDesc_Size). Controls the
+        //           target-relative write offset and the inline
+        //           vs callback path in the setter.
+        //   +0x78 = qword callback fn ptr (kDesc_Callback). Tail-
+        //           called by the per-channel setter when +0x70 == 0.
+        //
+        // Publish chain shape that reaches THIS setter (functions
+        // named by ROLE since RVAs shift on patch):
+        //   vector-sync driver
+        //     -> v37.vtbl[44] (a per-class wrapper that tail-calls
+        //        the publish iterator)
+        //     -> publish iterator (iterates v10+0x38 / count v10+0x40
+        //        queue, gates each item by desc.vtbl[20] = the
+        //        publish-skip filter above)
+        //     -> 4-arg dispatch wrapper (gates by a4-hash vs +0x20)
+        //     -> desc.vtbl[89] = per-channel property setter (= us).
         void log_descriptor_shape(std::uintptr_t dst_prop) noexcept
         {
             std::uint32_t w[16]{};
@@ -126,7 +163,7 @@ namespace Transmog::ColorOverride::SetterSubstitute
                 "[dye-setter-sub] desc@{:#x}  "
                 "+00={:08X} +04={:08X} +08={:08X} +0C={:08X} "
                 "+10={:08X} +14={:08X} +18={:08X} +1C={:08X} "
-                "+20={:08X} +24={:08X} +28={:08X} +2C={:08X} "
+                "+20=hashKey{:08X} +24={:08X} +28=tok16{:08X} +2C={:08X} "
                 "+30={:08X} +34={:08X} +38={:08X} +3C={:08X}",
                 dst_prop,
                 w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7],
@@ -243,9 +280,20 @@ namespace Transmog::ColorOverride::SetterSubstitute
                 bool active = DyeRecordInject::
                     get_published_first_active_rgb(&r, &g, &b);
                 const auto hs = ColorOverride::HostScope::snapshot_stats();
+                // windowOpen indicates the engine-vs-our-gate timing:
+                // setter calls outside the LT-apply window + tail are
+                // silently dropped before any of the counters above
+                // increment (so a sudden fires-count gap correlates
+                // with windowOpen=0 at the time). tailMs is the
+                // post-close grace period (see kApplyTailMs).
+                const bool winOpen =
+                    g_applyWindowActive.load(std::memory_order_relaxed);
+                const auto winAge =
+                    now_ms() - g_windowEndMs.load(std::memory_order_relaxed);
                 DetourModKit::Logger::get_instance().trace(
                     "[dye-setter-sub] fires={} subs={} defs={} miss={} "
-                    "noSlot={} hostRej={} "
+                    "noSlot={} hostRej={} windowOpen={} winAge_ms={} "
+                    "tailMs={} "
                     "active={} rgb=({:02X},{:02X},{:02X}) "
                     "hs[player={} npc={} freed={}]",
                     fires,
@@ -254,6 +302,7 @@ namespace Transmog::ColorOverride::SetterSubstitute
                     g_swatchMisses.load(std::memory_order_relaxed),
                     g_slotUnknown.load(std::memory_order_relaxed),
                     g_hostRejects.load(std::memory_order_relaxed),
+                    winOpen ? 1 : 0, winAge, kApplyTailMs,
                     active, r, g, b,
                     hs.player, hs.npc, hs.freed);
             }
@@ -575,6 +624,12 @@ namespace Transmog::ColorOverride::SetterSubstitute
                 DetourModKit::Hook::error_to_string(res.error()));
             return false;
         }
+        // The hooked function is the per-channel property setter:
+        // called as descriptor vtbl[89] from the 4-arg dispatch
+        // wrapper -- itself reached as vtbl[66] from the publish
+        // iterator. Writes 4 bytes at `target + desc[+0x70]` then
+        // fires the publish-notify helper. See `log_descriptor_shape`
+        // above for the full publish-chain map.
         log.info(
             "[dye-setter-sub] mid-hook installed at {:#x} "
             "(per-row swatch table active)",
