@@ -590,9 +590,6 @@ namespace Transmog
             // popup slot) -- the popup is just an entry point for
             // browsing the merged catalog. This way the user can pick
             // any prefab from any slot's picker.
-            ui_text_disabled(
-                "All Prefabs (search filters across every slot)");
-
             // After populate_slot_catalogs unified the per-slot vectors
             // (every slot now holds the FULL prefab set), iterating
             // every slot would push each prefab 20x with a meaningless
@@ -626,6 +623,22 @@ namespace Transmog
                     static_cast<std::uint32_t>(pi));
             }
             const std::size_t totalShown = s_prefabFlat.size();
+
+            // Header label with live counts. Shows "(matched / total)"
+            // when the search/filter narrows the visible set; collapses
+            // to "(total)" when everything is shown.
+            {
+                char hdr[96];
+                if (totalShown == catalogedTotal)
+                    std::snprintf(hdr, sizeof(hdr),
+                                  "All Prefabs across all slots (%zu)",
+                                  catalogedTotal);
+                else
+                    std::snprintf(hdr, sizeof(hdr),
+                                  "All Prefabs across all slots (%zu / %zu)",
+                                  totalShown, catalogedTotal);
+                ui_text_disabled(hdr);
+            }
 
             // Derive a slot label from a prefab name. Substring-based
             // via slot_for_prefab_name() so NPC families (cd_nhw_*,

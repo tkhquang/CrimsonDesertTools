@@ -412,8 +412,10 @@ void draw_presets_section(PresetManager &pm)
         manual_apply();
     }
     if (ImGui::IsItemHovered())
-        ui_tooltip("Append a new preset with every slot ticked + "
-                   "none (hides all armor), then apply it.");
+        ui_tooltip("Append a new preset with Helm/Chest/Cloak/Gloves/"
+                   "Boots ticked + none (hides those five armor pieces). "
+                   "Other slots stay unticked so items like the lantern "
+                   "still work. Then apply it.");
 
     ImGui::SameLine();
 

@@ -1203,14 +1203,16 @@ namespace Transmog::PrefabWrapperSwap
                 nameBuf, k_loaderNameCap);
             if (rlen == SIZE_MAX || rlen == 0) continue;
 
-            // Body-mesh prefix gate: cd_ph (player) OR cd_nh (NPC).
-            // Cheap byte-compare avoids strlen on every entry.
+            // Broad `cd_` gate admits every character-prefab family
+            // (player, NPC, all races). The slot-tag substring loop
+            // below (`_ub_`, `_hel_`, `_cloak_`, etc.) is the real
+            // classifier: entries that match no slot tag are silently
+            // dropped, so non-armor families (monsters, misc) never
+            // enter any per-slot catalog. The "Exact" picker toggle
+            // remains the user-facing per-slot filter.
             if (!(nameBuf[0] == 'c' && nameBuf[1] == 'd' &&
                   nameBuf[2] == '_'))
                 continue;
-            if (!(nameBuf[3] == 'p' || nameBuf[3] == 'n'))
-                continue;
-            if (nameBuf[4] != 'h') continue;
             ++prefixMatch;
 
             // Slot classification by bare tag substring. NO break:
