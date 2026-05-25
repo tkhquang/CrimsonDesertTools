@@ -273,6 +273,20 @@ namespace Transmog::ColorOverride::SwatchTable
     /// + capture-window state.
     void wipe_swatch_table_for_slot(int slot) noexcept;
 
+    /// True if the slot was wiped by `wipe_swatch_table_for_slot`
+    /// (user-triggered Reset Slot) and has not been repopulated
+    /// since. Read by PresetManager::snapshot_live_swatches_into to
+    /// distinguish a user-intentional empty state from the
+    /// token-resolution race where live can be empty but the JSON
+    /// baseline must be preserved.
+    bool slot_was_explicitly_wiped(int slot) noexcept;
+
+    /// Clear the explicit-wipe flag after the empty state has been
+    /// persisted into the active preset. Called by the snapshot
+    /// path so subsequent saves on the same slot don't keep
+    /// re-flagging an already-empty preset.
+    void clear_explicit_wipe_flag(int slot) noexcept;
+
     // ---- Reinit gates (owned by SwatchTable, read by setter) --------
 
     /// Post-reinit lock: once Finalize completes, the slot's identity

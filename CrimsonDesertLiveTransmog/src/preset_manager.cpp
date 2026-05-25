@@ -605,12 +605,25 @@ namespace Transmog
             const bool liveEmpty   = liveOv.empty() && livePal.empty();
             const bool savedExists = !p.swatch_overrides[s].empty()
                                   || !p.swatch_palette[s].empty();
-            if (liveEmpty && savedExists)
+            // User-intentional empty case: Reset Slot wipes the live
+            // table and flags the slot. Without this exception the
+            // guard would treat the wipe identically to a token-race
+            // and revert to the JSON baseline -- making Reset Slot
+            // impossible to commit via Save.
+            const bool wiped = ST::slot_was_explicitly_wiped(
+                static_cast<int>(s));
+            if (liveEmpty && savedExists && !wiped)
                 continue;
             p.swatch_overrides[s]    = std::move(liveOv);
             p.swatch_palette[s]      = std::move(livePal);
             p.swatch_slot_enabled[s] = ST::slot_enabled_get(
                 static_cast<int>(s));
+            // Empty state is now committed in the preset. Drop the
+            // wipe flag so subsequent saves follow the normal guard
+            // (savedExists becomes false, the empty live write is a
+            // no-op).
+            if (wiped)
+                ST::clear_explicit_wipe_flag(static_cast<int>(s));
         }
     }
 

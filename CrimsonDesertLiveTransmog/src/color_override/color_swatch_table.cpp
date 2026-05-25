@@ -38,6 +38,14 @@ namespace Transmog::ColorOverride::SwatchTable
         std::array<std::atomic<std::size_t>, k_slotCount> g_count{};
         std::array<std::atomic<bool>, k_slotCount> g_postReinitLock{};
         std::array<std::atomic<bool>, k_slotCount> g_reinitCaptureOpen{};
+        // Set by wipe_swatch_table_for_slot (user-triggered Reset
+        // Slot) and cleared by populate_from_persisted. Read by
+        // PresetManager::snapshot_live_swatches_into to distinguish
+        // "live empty because user explicitly wiped" from "live empty
+        // because tokens haven't resolved / slot not equipped". The
+        // latter wants to preserve the JSON baseline; the former wants
+        // the save to commit the empty state.
+        std::array<std::atomic<bool>, k_slotCount> g_explicitlyWiped{};
 
         bool valid_slot(int slot) noexcept
         {
@@ -444,6 +452,25 @@ namespace Transmog::ColorOverride::SwatchTable
         // the picker between explicit init events.
         g_postReinitLock[s].store(true, std::memory_order_release);
         g_reinitCaptureOpen[s].store(false, std::memory_order_release);
+        // Mark the wipe as user-intentional so the next snapshot into
+        // the active preset (Save button) writes the empty state
+        // instead of treating the empty live table as a token-race and
+        // preserving the JSON baseline.
+        g_explicitlyWiped[s].store(true, std::memory_order_release);
+    }
+
+    bool slot_was_explicitly_wiped(int slot) noexcept
+    {
+        if (!valid_slot(slot)) return false;
+        return g_explicitlyWiped[static_cast<std::size_t>(slot)].load(
+            std::memory_order_acquire);
+    }
+
+    void clear_explicit_wipe_flag(int slot) noexcept
+    {
+        if (!valid_slot(slot)) return;
+        g_explicitlyWiped[static_cast<std::size_t>(slot)].store(
+            false, std::memory_order_release);
     }
 
     std::atomic<bool> &post_reinit_lock(int slot) noexcept
@@ -861,6 +888,13 @@ namespace Transmog::ColorOverride::SwatchTable
         if (!valid_slot(slot)) return 0;
         auto &log = DetourModKit::Logger::get_instance();
         const auto s = static_cast<std::size_t>(slot);
+        // Repopulating from saved JSON replaces any prior wipe state,
+        // so the snapshot guard should treat this slot as "has saved
+        // content" again. Reached on preset load, preset switch, and
+        // restore_swatches_from -- all paths that re-seed placeholders
+        // from a non-empty palette/overrides set.
+        if (!palette.empty() || !overrides.empty())
+            g_explicitlyWiped[s].store(false, std::memory_order_release);
         auto &table = g_table[s];
         auto &count = g_count[s];
         std::size_t seeded = 0;

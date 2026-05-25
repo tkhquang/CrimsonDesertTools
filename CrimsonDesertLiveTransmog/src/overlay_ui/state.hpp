@@ -100,6 +100,12 @@ struct SlotUIState
     // Helm's picker in prefab mode shows only Helm-family prefabs;
     // user can untick to see the full cross-slot catalog.
     bool prefabExactFilter = true;
+    // Prefab-mode-only "keep open after pick" toggle. When true the
+    // picker stays open after committing a prefab so the user can
+    // quickly try alternatives without re-opening the popup. Defaults
+    // on for the cross-slot browser since users typically iterate
+    // through several candidates per slot.
+    bool prefabKeepOpenOnPick = true;
     // Hover-apply debounce state.  We track which item the cursor is
     // on and when it first landed there.  Apply fires only after the
     // cursor has settled on the same item for k_hoverDebounceMs,
@@ -107,6 +113,23 @@ struct SlotUIState
     std::uint16_t hoverPendingId = 0;
     std::uint16_t hoverAppliedId = 0;
     std::int64_t hoverStartMs = 0;
+    // Prefab-mode mirror of the hover-apply debounce above. Keyed by
+    // prefab name (cd_phm_* / cd_phw_*) since the prefab catalog has
+    // no compact integer id like items do. Only the Up/Down nav cursor
+    // (GUI buttons or arrow keys) feeds this debounce. Mouse hover is
+    // intentionally NOT wired: a body-mesh preview fans out to a full
+    // multi-actor manual_apply, which is too disruptive to chain off
+    // casual cursor motion. The apply fires via
+    // commit_prefab_at(previewOnly=true) so the popup stays open
+    // across re-equips.
+    //
+    // Naming kept as `hover*` (rather than `nav*`) for cross-reading
+    // parity with items-mode hoverPendingId/hoverAppliedId/hoverStartMs
+    // above. Both serve the same debounce role; the trigger source
+    // differs (hover+nav for items, nav-only for prefabs).
+    std::string hoverPendingPrefab;
+    std::string hoverAppliedPrefab;
+    std::int64_t hoverPrefabStartMs = 0;
     // Button-driven navigation index into the visible (filtered)
     // list.  -1 = no highlight.  Up/Down buttons move this; Enter
     // commits the highlighted item.  lastVisibleCount stores the
