@@ -119,6 +119,8 @@ If you run into issues, check the OptiScaler documentation for DLL naming and co
 11. Press **Home** again to close the overlay
 
 > **Tip:** Enable **Instant Apply** in the overlay to preview items on hover without needing to click Apply All.
+>
+> **Picker controls:** Use **Up** / **Down** arrow keys (or the on-screen ^ / v buttons) to move the highlight, and **Enter** to commit. The picker opens scrolled to your current pick. In **Prefabs** mode, tick **Keep open** to audition several prefabs without re-opening the popup, and use the in-popup **Apply** button (equivalent to Apply All) when Instant Apply is off.
 
 ### Without the overlay (web preset builder)
 

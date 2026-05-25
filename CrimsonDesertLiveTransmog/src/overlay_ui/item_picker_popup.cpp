@@ -66,6 +66,12 @@ namespace Transmog
         ui.hoverPendingId = targetItemId;
         ui.hoverAppliedId = targetItemId;
         ui.hoverStartMs = 0;
+        // Prefab-mode equivalent: seed both pending and applied with
+        // the popup-slot's current pick so the anchor row doesn't
+        // trigger a redundant re-apply on open.
+        ui.hoverPendingPrefab = ui.pickedPrefabName;
+        ui.hoverAppliedPrefab = ui.pickedPrefabName;
+        ui.hoverPrefabStartMs = 0;
     }
 
     ui_text_disabled("Item picker");
@@ -115,6 +121,31 @@ namespace Transmog
                 "Limit the list to prefabs whose body-mesh family "
                 "matches this slot. Untick to browse the full cross-"
                 "slot catalog.");
+        ImGui::SameLine();
+        ImGui::Checkbox("Keep open##prefab_keep_open",
+                        &ui.prefabKeepOpenOnPick);
+        if (ImGui::IsItemHovered())
+            ui_tooltip(
+                "Keep the picker open after each pick so you can "
+                "quickly compare prefabs. Untick to close on click.");
+        // In-picker Apply button so users with Instant Apply off can
+        // commit a pick without leaving the popup. ImGui closes a
+        // popup on outside clicks AND consumes the click, so the
+        // main Apply All below the picker can't be reached without
+        // re-opening. This button fires the same manual_apply() the
+        // footer's Apply All uses; staying inside the popup keeps
+        // both the click consumption and the popup persistence happy.
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Apply##prefab_apply"))
+        {
+            Transmog::flag_enabled().store(
+                true, std::memory_order_relaxed);
+            Transmog::manual_apply();
+        }
+        if (ImGui::IsItemHovered())
+            ui_tooltip(
+                "Apply all pending changes without closing the "
+                "picker. Same as the main Apply All button.");
     }
 
     ImGui::SetNextItemWidth(320.0f);
@@ -147,13 +178,19 @@ namespace Transmog
     ui.navMoved = false;
     {
         const int maxNav = ui.lastVisibleCount - 1;
-        if (ImGui::SmallButton("^##nav_up"))
+        // Up/Down arrow keys mirror the GUI nav buttons. ImGui's
+        // single-line InputText (the search box) doesn't consume
+        // vertical arrows, so this is safe even when the search box
+        // has keyboard focus.
+        const bool keyUp = ImGui::IsKeyPressed(ImGuiKey_UpArrow);
+        const bool keyDown = ImGui::IsKeyPressed(ImGuiKey_DownArrow);
+        if (ImGui::SmallButton("^##nav_up") || keyUp)
         {
             ui.navIndex = (ui.navIndex > 0) ? ui.navIndex - 1 : 0;
             ui.navMoved = true;
         }
         ImGui::SameLine();
-        if (ImGui::SmallButton("v##nav_down"))
+        if (ImGui::SmallButton("v##nav_down") || keyDown)
         {
             ui.navIndex = (ui.navIndex < maxNav)
                               ? ui.navIndex + 1
@@ -381,6 +418,37 @@ namespace Transmog
     }
 
     shown = static_cast<int>(s_filtered.size());
+
+    // Anchor nav on the popup-slot's current item pick so Up/Down
+    // starts stepping from the user's prior selection rather than the
+    // top of the filtered list. Only runs on frames where navIndex was
+    // freshly reset (popup-open via IsWindowAppearing, or filter
+    // edit). Falls back to row 0 when there's no selection
+    // (targetItemId==0) or the selection is hidden by the current
+    // filters / search.
+    if (ui.navIndex == -1 && shown > 0)
+    {
+        int anchorRow = 0;
+        if (targetItemId != 0)
+        {
+            for (int row = 0; row < shown; ++row)
+            {
+                if (entries[s_filtered[static_cast<std::size_t>(row)]].id
+                    == targetItemId)
+                {
+                    anchorRow = row;
+                    break;
+                }
+            }
+        }
+        ui.navIndex = anchorRow;
+        // Piggyback on the existing nav-move scroll path so the popup
+        // scrolls the anchor row into view on first appearance.
+        // navMoved is a "highlight just shifted, scroll to it" signal
+        // regardless of whether the shift came from a button or from
+        // the anchor block.
+        ui.navMoved = true;
+    }
 
     // Pass 2: render the filtered rows. bodyMatches is recomputed
     // here rather than cached from pass 1 because the per-item flag
@@ -624,6 +692,35 @@ namespace Transmog
             }
             const std::size_t totalShown = s_prefabFlat.size();
 
+            // Anchor nav on the popup-slot's current prefab pick so
+            // Up/Down starts stepping from the user's prior selection
+            // rather than the top of the filtered prefab list. Mirrors
+            // the items-mode anchor block above. Falls back to row 0
+            // when there's no selection or the picked prefab was
+            // filtered out by Exact / search.
+            if (ui.navIndex == -1 && totalShown > 0)
+            {
+                int anchorRow = 0;
+                if (!ui.pickedPrefabName.empty())
+                {
+                    for (std::size_t i = 0; i < totalShown; ++i)
+                    {
+                        const auto pi = static_cast<std::size_t>(
+                            s_prefabFlat[i]);
+                        if (cat0[pi].name == ui.pickedPrefabName)
+                        {
+                            anchorRow = static_cast<int>(i);
+                            break;
+                        }
+                    }
+                }
+                ui.navIndex = anchorRow;
+                // Piggyback on the scroll-into-view path so the
+                // virtualized window opens centered on the anchor row
+                // rather than at the top.
+                ui.navMoved = true;
+            }
+
             // Header label with live counts. Shows "(matched / total)"
             // when the search/filter narrows the visible set; collapses
             // to "(total)" when everything is shown.
@@ -661,15 +758,84 @@ namespace Transmog
             // frame: O(visible_rows) instead of O(totalShown);
             // measured ~5000 emits -> ~30 on the live catalog.
             const float prefabRowH = ImGui::GetTextLineHeightWithSpacing();
-            const float scrollY = ImGui::GetScrollY();
+            float scrollY = ImGui::GetScrollY();
             const float winH = ImGui::GetWindowHeight();
             const int total = static_cast<int>(totalShown);
+
+            // Scroll-into-view for nav-button-moved highlight. Done
+            // BEFORE the visible-range computation so the moved-to row
+            // actually lands inside [firstVis, lastVis) and renders
+            // with the selected highlight on the same frame.
+            if (ui.navMoved && ui.navIndex >= 0 && ui.navIndex < total)
+            {
+                const float navTopY = ui.navIndex * prefabRowH;
+                const float navBotY = navTopY + prefabRowH;
+                if (navTopY < scrollY)
+                {
+                    ImGui::SetScrollY(navTopY);
+                    scrollY = navTopY;
+                }
+                else if (navBotY > scrollY + winH)
+                {
+                    const float newScrollY = navBotY - winH;
+                    ImGui::SetScrollY(newScrollY);
+                    scrollY = newScrollY;
+                }
+            }
+
             int firstVis = static_cast<int>(scrollY / prefabRowH) - 1;
             int lastVis = static_cast<int>(
                 (scrollY + winH) / prefabRowH) + 2;
             if (firstVis < 0) firstVis = 0;
             if (lastVis > total) lastVis = total;
             if (firstVis > total) firstVis = total;
+
+            // Commit helper shared by mouse click, keyboard Enter, and
+            // nav-driven auto-apply. Returns true on a successful
+            // adopt. previewOnly=true is the auto-apply path: it lets
+            // the caller run its full commit chain (PWS::set_selection
+            // + force-carrier + manual_apply) but suppresses the popup
+            // close so the user can keep auditioning prefabs. Click /
+            // Enter pass previewOnly=false and still honour KeepOpen.
+            auto commit_prefab_at = [&](std::size_t pi,
+                                        bool previewOnly = false) -> bool {
+                // Per-slot catalogs were identical right after
+                // populate_slot_catalogs seeded them from the shared
+                // StringInfo walk, but
+                // enumerate_loader_registry_into_catalog adds slot-
+                // specific NPC entries (helm-only to Helm, chest-only
+                // to Chest, etc.) and re-sorts each slot independently.
+                // Indexing a popup-slot selection by cat0's pi therefore
+                // points at a DIFFERENT prefab in the popup slot's
+                // catalog and the row label drifts off the row the user
+                // actually clicked. Resolve by name through
+                // adopt_into_slot_and_select, which finds the matching
+                // entry in slotCategory's catalog (or inserts a copy
+                // when the prefab is unique to cat0) and returns the
+                // index that is valid for slotCategory specifically.
+                const auto &pe = cat0[pi];
+                if (!pe.is_loaded)
+                    return false;
+                const auto adoptedIdx =
+                    PWS::adopt_into_slot_and_select(
+                        slotCategory,
+                        static_cast<Transmog::TransmogSlot>(0),
+                        static_cast<int>(pi));
+                if (adoptedIdx < 0)
+                    return false;
+                if (outPrefabIdx)
+                    *outPrefabIdx = adoptedIdx;
+                committed = true;
+                DMK::Logger::get_instance().info(
+                    "[picker] prefabs-mode pick: popupSlot={} "
+                    "label={} adoptedIdx={} name='{}'",
+                    Transmog::slot_name(slotCategory),
+                    label_for_prefab(pe.name),
+                    adoptedIdx, pe.name.c_str());
+                if (!previewOnly && !ui.prefabKeepOpenOnPick)
+                    ImGui::CloseCurrentPopup();
+                return true;
+            };
 
             if (firstVis > 0)
                 ImGui::Dummy(ImVec2(0.0f, firstVis * prefabRowH));
@@ -695,54 +861,91 @@ namespace Transmog
                             "[%s] %s  (unloaded)##all_prefab_%zu",
                             natName, pe.name.c_str(), pi);
                     }
-                    if (ImGui::Selectable(pickerId, false, 0, ImVec2(0, 0)))
+                    // Highlight the prefab currently selected on the
+                    // popup slot OR the row the Up/Down nav buttons
+                    // last moved to. Matches the items list's combined
+                    // "current selection + nav cursor" highlight rule.
+                    const bool isNavTarget = (row == ui.navIndex);
+                    const bool isCurrent =
+                        !ui.pickedPrefabName.empty() &&
+                        ui.pickedPrefabName == pe.name;
+                    const bool selected = isCurrent || isNavTarget;
+                    if (ImGui::Selectable(pickerId, selected, 0,
+                                          ImVec2(0, 0)))
                     {
-                        if (!pe.is_loaded)
-                            continue;
-                        // Per-slot catalogs were identical right after
-                        // populate_slot_catalogs seeded them from the
-                        // shared StringInfo walk, but
-                        // enumerate_loader_registry_into_catalog adds
-                        // slot-specific NPC entries (helm-only to Helm,
-                        // chest-only to Chest, etc.) and re-sorts each
-                        // slot independently. Indexing a popup-slot
-                        // selection by cat0's pi therefore points at a
-                        // DIFFERENT prefab in the popup slot's catalog
-                        // and the row label drifts off the row the user
-                        // actually clicked. Resolve by name through
-                        // adopt_into_slot_and_select, which finds the
-                        // matching entry in slotCategory's catalog (or
-                        // inserts a copy when the prefab is unique to
-                        // cat0) and returns the index that is valid for
-                        // slotCategory specifically.
-                        const auto adoptedIdx =
-                            PWS::adopt_into_slot_and_select(
-                                slotCategory,
-                                static_cast<Transmog::TransmogSlot>(0),
-                                static_cast<int>(pi));
-                        if (adoptedIdx < 0)
-                            continue;
-                        // Tell the caller a prefab was picked on the
-                        // popup slot so its existing
-                        // pickedPrefabName / carrier-borrow path runs.
-                        if (outPrefabIdx)
-                            *outPrefabIdx = adoptedIdx;
-                        committed = true;
-                        DMK::Logger::get_instance().info(
-                            "[picker] prefabs-mode pick: popupSlot={} "
-                            "label={} adoptedIdx={} name='{}'",
-                            Transmog::slot_name(slotCategory),
-                            natName, adoptedIdx, pe.name.c_str());
-                        ImGui::CloseCurrentPopup();
+                        commit_prefab_at(pi);
                     }
-                    // Instant Apply intentionally NOT wired for prefab
-                    // mode this release -- click-to-pick remains the
-                    // only commit path here. Hover-apply needs extra
-                    // carrier-borrow plumbing that's a follow-up.
+                    // Auto-apply on nav only -- when the Up/Down nav
+                    // cursor (GUI buttons or arrow keys) lands on a
+                    // new row, feed its name into the prefab-mode
+                    // hover-apply debounce. After k_hoverDebounceMs of
+                    // dwell the commit fires with previewOnly=true so
+                    // the popup stays open. Mouse hover does NOT
+                    // trigger here: a body-mesh preview fans out to a
+                    // full multi-actor manual_apply, which is too
+                    // disruptive to chain off casual cursor motion.
+                    if (autoApply && isNavTarget &&
+                        ui.hoverPendingPrefab != pe.name)
+                    {
+                        ui.hoverPendingPrefab = pe.name;
+                        ui.hoverPrefabStartMs = Transmog::steady_ms();
+                    }
                 }
             }
             if (lastVis < total)
                 ImGui::Dummy(ImVec2(0.0f, (total - lastVis) * prefabRowH));
+
+            // Keyboard Enter commits the nav-targeted row. Mirrors the
+            // items-list Enter behaviour above, routed through
+            // commit_prefab_at so the keep-open policy applies.
+            if (ui.navIndex >= 0 && ui.navIndex < total &&
+                (ImGui::IsKeyPressed(ImGuiKey_Enter) ||
+                 ImGui::IsKeyPressed(ImGuiKey_KeypadEnter)))
+            {
+                const auto pi = static_cast<std::size_t>(
+                    s_prefabFlat[static_cast<std::size_t>(ui.navIndex)]);
+                commit_prefab_at(pi);
+            }
+
+            // Auto-apply debounce. Fires the prefab commit when the
+            // nav cursor has rested on the same row for
+            // k_hoverDebounceMs. previewOnly=true keeps the popup open
+            // across the re-equip so the user can continue browsing.
+            // The cat0 scan resolves the pending name back to a
+            // catalog index because the row loop has already ended
+            // and pi is no longer in scope. A side-cache of pi next
+            // to the name would skip this scan but the worst-case
+            // cost (~5000 entries x ~3 Hz = ~15us per 300ms) doesn't
+            // justify adding another SlotUIState field.
+            if (autoApply &&
+                ui.hoverPendingPrefab != ui.hoverAppliedPrefab &&
+                !ui.hoverPendingPrefab.empty() &&
+                ui.hoverPrefabStartMs != 0 &&
+                (Transmog::steady_ms() - ui.hoverPrefabStartMs) >=
+                    k_hoverDebounceMs)
+            {
+                std::size_t targetPi = 0;
+                bool found = false;
+                for (std::size_t i = 0; i < cat0.size(); ++i)
+                {
+                    if (cat0[i].name == ui.hoverPendingPrefab)
+                    {
+                        targetPi = i;
+                        found = true;
+                        break;
+                    }
+                }
+                if (found && commit_prefab_at(targetPi, true))
+                {
+                    ui.hoverAppliedPrefab = ui.hoverPendingPrefab;
+                }
+            }
+
+            // Hand the visible count off to the outer clamp so the
+            // nav buttons + clamp logic at end-of-function operate on
+            // the prefab-mode count instead of the (zeroed) items
+            // count.
+            shown = total;
             if (catalogedTotal == 0)
             {
                 ui_text_disabled(
