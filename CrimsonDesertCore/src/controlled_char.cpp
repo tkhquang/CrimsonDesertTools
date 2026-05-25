@@ -121,21 +121,41 @@ namespace CDCore
         //       p1 +0x40 -> pa::ClientCharacterControlActorComponent
         //       p1 +0x48 -> pa::ClientVehicleActorComponent
         //
-        // The +0x40 offset is correct in the steady state where every
-        // expected component has registered; during cold load it can
-        // transiently miss, and current callers retry-on-failure to
-        // ride that out. Steps 3 (+0x40) and 4 (+0x38) dereference
-        // fixed members of the resolved component and are
-        // structurally stable.
-        //
-        // TODO: walk p1 by RTTI/vtable to land on
-        // pa::ClientCharacterControlActorComponent regardless of slot
-        // so the chain becomes session-stable; the vtable is in image
-        // and can be cached at startup.
+        // Step 2 (locate the CCC inside p1) now walks the table by
+        // RTTI/vtable rather than fixed offset, so the chain is
+        // session-stable regardless of how many components have
+        // registered. See find_ccc_in_component_table() below.
+        // Steps 3 (+0x40) and 4 (+0x38) dereference fixed members of
+        // the resolved CCC and are structurally stable.
         constexpr std::ptrdiff_t k_offAppearChain1 = 0x68;
-        constexpr std::ptrdiff_t k_offAppearChain2 = 0x40;
         constexpr std::ptrdiff_t k_offAppearChain3 = 0x40;
         constexpr std::ptrdiff_t k_offAppearChain4 = 0x38;
+
+        // MSVC RTTI traversal. The vtable's RTTICompleteObjectLocator
+        // (COL) sits at `vtbl - 8` (qword); the COL stores the type
+        // descriptor as an RVA at `col + 0x0C`; the type descriptor's
+        // mangled-name C-string lives at `td + 0x10`.
+        constexpr std::ptrdiff_t k_offColInVtable      = -8;
+        constexpr std::ptrdiff_t k_offTdRvaInCol       = 0x0C;
+        constexpr std::ptrdiff_t k_offNameInDescriptor = 0x10;
+
+        // RTTI mangled-name string of the target component class.
+        // MSVC encodes class types as `.?AV<name>@<scope>@@`. The
+        // engine consistently namespaces gameplay components in
+        // `pa::`, so this name is stable across patches that do not
+        // rename or move the class. Matched as an exact byte-equal
+        // compare (no substring scan) to avoid colliding with derived
+        // or sibling classes that share a prefix.
+        constexpr std::string_view k_cccTypeDescriptorName =
+            ".?AVClientCharacterControlActorComponent@pa@@";
+
+        // Maximum number of component-pointer slots to scan inside
+        // the p1 table. The table is component-type-id indexed and
+        // therefore sparse; a typical protagonist populates roughly
+        // 30 slots inside a 64-slot window. Scanning 64 slots covers
+        // any realistic engine expansion while keeping the cold-path
+        // RTTI scan bounded to a single page read.
+        constexpr std::size_t k_componentTableSlots = 64;
 
         // MSVC std::string: when content >= 16 chars the heap-buffer
         // pointer lives at +0x00 of the struct; smaller strings keep
@@ -411,23 +431,159 @@ namespace CDCore
             }
         }
 
-        // Walk CCOIA +0x68 -> +0x40 -> +0x40 -> +0x38 to reach the
-        // appearance-config std::string. Resolves heap-buffer vs
-        // inline layout and returns the start address of ASCII
-        // content; returns 0 on any torn link.
+        // ---- RTTI-based component-table walker --------------------------
+
+        // Cached vtable address of the target component class
+        // (.?AVClientCharacterControlActorComponent@pa@@). Image-
+        // resident and stable for the process lifetime; learned
+        // once via RTTI scan on the first successful chain walk.
+        std::atomic<std::uintptr_t> s_cccVtable{0};
+
+        // Compare a bounded ASCII string in memory against @p ref.
+        // Returns true only when the first ref.size() bytes match
+        // exactly and the byte at ref.size() is the NUL terminator
+        // (so a longer mangled name that begins with @p ref does
+        // not falsely match).
+        bool ascii_equals(std::uintptr_t addr,
+                          std::string_view ref) noexcept
+        {
+            if (addr < k_minValidPtr || ref.empty())
+                return false;
+            __try
+            {
+                for (std::size_t i = 0; i < ref.size(); ++i)
+                {
+                    const auto b = *reinterpret_cast<
+                        const volatile std::uint8_t *>(addr + i);
+                    if (b != static_cast<std::uint8_t>(ref[i]))
+                        return false;
+                }
+                const auto term = *reinterpret_cast<
+                    const volatile std::uint8_t *>(addr + ref.size());
+                return term == 0;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        // Returns true when the MSVC RTTI type-descriptor name for
+        // the class whose vtable is @p vtbl equals @p ref.
+        bool vtbl_matches_rtti_name(std::uintptr_t vtbl,
+                                    std::string_view ref) noexcept
+        {
+            const auto col =
+                safe_read_qword(vtbl + k_offColInVtable);
+            if (col < k_minValidPtr)
+                return false;
+            const auto tdRva =
+                safe_read_dword(col + k_offTdRvaInCol);
+            if (tdRva == 0)
+                return false;
+            // GetModuleHandle(nullptr) returns the game EXE's load
+            // address straight out of the PEB -- effectively a
+            // constant, so no caching needed.
+            const auto imgBase = reinterpret_cast<std::uintptr_t>(
+                GetModuleHandleW(nullptr));
+            if (imgBase < k_minValidPtr)
+                return false;
+            const auto td = imgBase + tdRva;
+            return ascii_equals(td + k_offNameInDescriptor, ref);
+        }
+
+        // Generic RTTI-keyed component finder. Generalises the legacy
+        // CCC-specific walker -- see `find_component_in_table` below
+        // for the public entry point. The cache slot is caller-owned
+        // (one atomic per RTTI name) so this function carries no
+        // global state and lets each consumer name its own component.
+        //
+        // Fast path (vtable cache warm): scans up to
+        // k_componentTableSlots qwords looking for a slot whose first
+        // qword equals the cached vtable. Cost is one qword read per
+        // slot plus one indirection per non-null candidate -- two
+        // page touches at worst.
+        //
+        // Cold path (cache empty, or fast-path miss): RTTI-validates
+        // each non-null slot against @p rttiName until it finds a
+        // match, then caches that slot's vtable for all subsequent
+        // walks in this process. A fast-path miss with a populated
+        // cache normally means the table got reallocated in a
+        // save-load transient -- the next walk picks it back up. The
+        // cache itself never needs invalidation because the vtable
+        // is image-resident.
+        std::uintptr_t find_component_impl(
+            std::uintptr_t p1,
+            std::string_view rttiName,
+            std::atomic<std::uintptr_t> &vtableCache) noexcept
+        {
+            if (p1 < k_minValidPtr || rttiName.empty())
+                return 0;
+            const auto cached =
+                vtableCache.load(std::memory_order_acquire);
+            if (cached >= k_minValidPtr)
+            {
+                for (std::size_t i = 0; i < k_componentTableSlots; ++i)
+                {
+                    const auto slot =
+                        safe_read_qword(p1 + i * sizeof(std::uintptr_t));
+                    if (slot < k_minValidPtr)
+                        continue;
+                    const auto vt = safe_read_qword(slot);
+                    if (vt == cached)
+                        return slot;
+                }
+                // Fast-path missed; fall through to RTTI rescan.
+            }
+            for (std::size_t i = 0; i < k_componentTableSlots; ++i)
+            {
+                const auto slot =
+                    safe_read_qword(p1 + i * sizeof(std::uintptr_t));
+                if (slot < k_minValidPtr)
+                    continue;
+                const auto vt = safe_read_qword(slot);
+                if (vt < k_minValidPtr)
+                    continue;
+                if (!vtbl_matches_rtti_name(vt, rttiName))
+                    continue;
+                std::uintptr_t expected = 0;
+                vtableCache.compare_exchange_strong(
+                    expected, vt,
+                    std::memory_order_acq_rel,
+                    std::memory_order_acquire);
+                return slot;
+            }
+            return 0;
+        }
+
+        // Internal CCC-specific walker. Used by the appearance-path
+        // resolver; thin wrapper over the generic finder.
+        std::uintptr_t find_ccc_in_component_table(
+            std::uintptr_t p1) noexcept
+        {
+            return find_component_impl(
+                p1, k_cccTypeDescriptorName, s_cccVtable);
+        }
+
+        // Walk CCOIA +0x68 -> [CCC via RTTI] -> +0x40 -> +0x38 to
+        // reach the appearance-config std::string. Resolves
+        // heap-buffer vs inline layout and returns the start
+        // address of ASCII content; returns 0 on any torn link.
         std::uintptr_t resolve_appearance_path_buffer(
             std::uintptr_t ccoia) noexcept
         {
             if (ccoia < k_minValidPtr)
                 return 0;
-            auto p = safe_read_qword(ccoia + k_offAppearChain1);
-            if (p < k_minValidPtr) return 0;
-            p = safe_read_qword(p + k_offAppearChain2);
-            if (p < k_minValidPtr) return 0;
-            p = safe_read_qword(p + k_offAppearChain3);
-            if (p < k_minValidPtr) return 0;
+            const auto p1 =
+                safe_read_qword(ccoia + k_offAppearChain1);
+            if (p1 < k_minValidPtr) return 0;
+            const auto ccc = find_ccc_in_component_table(p1);
+            if (ccc < k_minValidPtr) return 0;
+            const auto p3 =
+                safe_read_qword(ccc + k_offAppearChain3);
+            if (p3 < k_minValidPtr) return 0;
             const auto strStruct =
-                safe_read_qword(p + k_offAppearChain4);
+                safe_read_qword(p3 + k_offAppearChain4);
             if (strStruct < k_minValidPtr) return 0;
             const auto bufPtr =
                 safe_read_qword(strStruct + k_offStringBufPtr);
@@ -732,6 +888,49 @@ namespace CDCore
         if (!kliff.empty())   s_codenameKliff   = kliff;
         if (!damiane.empty()) s_codenameDamiane = damiane;
         if (!oongka.empty())  s_codenameOongka  = oongka;
+    }
+
+    std::uintptr_t find_component_in_table(
+        std::uintptr_t p1,
+        std::string_view rttiName,
+        std::atomic<std::uintptr_t> &vtableCache) noexcept
+    {
+        return find_component_impl(p1, rttiName, vtableCache);
+    }
+
+    std::uintptr_t find_component_in_controlled_actor(
+        std::string_view rttiName,
+        std::atomic<std::uintptr_t> &vtableCache) noexcept
+    {
+        const auto ccoia = current_controlled_ccoia();
+        if (ccoia < k_minValidPtr)
+            return 0;
+        const auto p1 = safe_read_qword(ccoia + k_offAppearChain1);
+        if (p1 < k_minValidPtr)
+            return 0;
+        return find_component_impl(p1, rttiName, vtableCache);
+    }
+
+    std::uintptr_t find_component_for_equipslot(
+        std::uintptr_t equipSlot,
+        std::string_view rttiName,
+        std::atomic<std::uintptr_t> &vtableCache) noexcept
+    {
+        if (equipSlot < k_minValidPtr)
+            return 0;
+        // ClientEquipSlotActorComponent + 0x08 = back-pointer to
+        // pa::ClientChildOnlyInGameActor (the CCOIA). Then the
+        // standard CCOIA + k_offAppearChain1 hop to the component
+        // table.
+        constexpr std::ptrdiff_t k_offEquipSlotCcoiaBackref = 0x08;
+        const auto ccoia =
+            safe_read_qword(equipSlot + k_offEquipSlotCcoiaBackref);
+        if (ccoia < k_minValidPtr)
+            return 0;
+        const auto p1 = safe_read_qword(ccoia + k_offAppearChain1);
+        if (p1 < k_minValidPtr)
+            return 0;
+        return find_component_impl(p1, rttiName, vtableCache);
     }
 
 } // namespace CDCore

@@ -1,5 +1,5 @@
 ## [Title for next release]
 
-- New feature
-- Bug fix
-- Improvement
+- Fixed a burst of transient errors that could appear in the log during the first few seconds after loading a save.
+- Transmog now waits for the game to finish setting up your character before applying, instead of retrying through errors.
+- Internal refactor: identify character components by class name so the mod keeps working if the game shuffles their order.

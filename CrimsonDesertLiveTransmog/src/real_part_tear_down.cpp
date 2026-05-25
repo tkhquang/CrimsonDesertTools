@@ -5,6 +5,8 @@
 #include "slot_metadata.hpp"
 #include "transmog_map.hpp"
 
+#include <cdcore/controlled_char.hpp>
+
 #include <DetourModKit.hpp>
 
 #include <Windows.h>
@@ -21,14 +23,18 @@ namespace Transmog::RealPartTearDown
         // Helper function pointer types. Addresses come from
         // Transmog::resolved_addrs() (populated elsewhere in init()):
         //
-        // sub_14075FE60 -- Safe scene-graph tear-down.
-        //   Calls sub_1425EBAE0 internally. Does NOT mutate the
-        //   authoritative equip table at *(a1+0x78).
+        // SafeTearDown -- engine scene-graph tear-down. Calls
+        //   sub_1425EBAE0 internally. Does NOT mutate the
+        //   authoritative equip table at a1+k_containerPtrOffset.
+        //   AOB-resolved -- the v1.05 build name was sub_14075FE60
+        //   and the current v1.06 build resolves to sub_1407990E0;
+        //   readers comparing to the live IDA db should use the AOB
+        //   pattern in k_safeTearDownCandidates, not these names.
         //
-        // sub_1402D75D0 -- IndexedStringA short->hash lookup. Takes the
-        //   address of a uint16_t slot id; returns a pointer whose
-        //   first DWORD is the descriptor hash used by the rest of the
-        //   equip pipeline.
+        // IndexedStringLookup (sub_1402D75D0) -- short->hash lookup.
+        //   Takes the address of a uint16_t slot id; returns a
+        //   pointer whose first DWORD is the descriptor hash used
+        //   by the rest of the equip pipeline.
 
         using SafeTearDownFn =
             std::int64_t(__fastcall *)(std::int64_t a1,
@@ -104,6 +110,7 @@ namespace Transmog::RealPartTearDown
         constexpr std::uintptr_t k_containerPtrOffset       = 0x88;
         constexpr std::uintptr_t k_containerArrayBaseOffset = 0x08;
         constexpr std::uintptr_t k_containerCountOffset     = 0x10;
+
         constexpr std::uintptr_t k_entryStride              = 0xD0;
         constexpr std::uintptr_t k_entryPrimaryWordOffset   = 0x08;
         constexpr std::uintptr_t k_entrySlotTagOffset       = 0xC8;
@@ -364,12 +371,9 @@ namespace Transmog::RealPartTearDown
         if (a1 < 0x10000)
             return false;
 
-        // Mirrors the preamble of `tear_down_real_part` exactly. Layout
-        // constants are file-scope (not exported), so the probe lives in
-        // this TU and is exposed via the namespace function only. SEH-
-        // wrapped because the placeholder wrapper that the engine parks
-        // user+0xD8 on during world load faults at the container deref --
-        // that fault is the primary signal we are filtering on.
+        // Stage 1: structural reads under SEH (POD locals only).
+        std::uintptr_t arrayBase = 0;
+        std::uint32_t  count     = 0;
         __try
         {
             const auto container =
@@ -378,43 +382,68 @@ namespace Transmog::RealPartTearDown
             if (container < 0x10000)
                 return false;
 
-            const auto arrayBase =
+            arrayBase =
                 *reinterpret_cast<volatile std::uintptr_t *>(
                     container + k_containerArrayBaseOffset);
             if (arrayBase < 0x10000)
                 return false;
 
-            const auto count =
+            count =
                 *reinterpret_cast<volatile std::uint32_t *>(
                     container + k_containerCountOffset);
-
-            // count is the slot-entry count, not the equipped-item count
-            // (the iteration in tear_down_real_part visits all indices
-            // 0..count and skips empty slots via primary==0xFFFF and
-            // gate==0 inside the loop). A naked character still reports
-            // a full slot count -- empty slots persist as 0xFFFF
-            // sentinels. Therefore count==0 with a readable container
-            // signals an actor whose container struct is allocated but
-            // whose slot entries are not yet populated -- placeholder or
-            // mid-wiring. The upper bound rejects torn reads that would
-            // otherwise pass the lower bound by accident.
-            const bool ready =
-                count >= 1 && count <= k_maxPlausibleEntries;
-
-            // Passive slot-discovery: dump the auth table the moment a
-            // ready actor first appears (and again whenever a1 or count
-            // changes -- character swap, table resize). Fires before any
-            // tear-down call lands, so we get visibility even if the
-            // user never toggles LT for a given character.
-            if (ready)
-                dump_full_auth_table_if_changed(a1, arrayBase, count);
-
-            return ready;
+            if (count < 1 || count > k_maxPlausibleEntries)
+                return false;
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
             return false;
         }
+
+        // Stage 2: engine readiness. SafeTearDown's deep dereference
+        // reads
+        //     v15 = *(CCC + 0x130);
+        //     ... *v15 ...
+        // During cold-load the field at `CCC + 0x130` is null; once
+        // the engine wires up the actor's scene graph it becomes a
+        // heap-allocated sub-handler pointer. SafeTearDown's own
+        // null-check (`if (v7)`) only guards against a null CCC and
+        // not this deeper field, so calling it before the field is
+        // populated fault-trips inside the engine. Probing this one
+        // pointer is both necessary (SafeTearDown faults when it is
+        // null) and sufficient empirically (the transition coincides
+        // with the end of the cold-load fault burst window).
+        //
+        // The CCC instance is located by MSVC RTTI mangled name
+        // rather than fixed slot offset so the slot drift documented
+        // in CDCore controlled_char does not affect this probe. Only
+        // the +0x130 sub-handler offset lives in LT; the a1->CCOIA->
+        // p1 chain offsets live inside CDCore.
+        constexpr std::ptrdiff_t k_offCccSubHandler = 0x130;
+        static std::atomic<std::uintptr_t> s_cccVt{0};
+        static constexpr std::string_view k_cccName =
+            ".?AVClientCharacterControlActorComponent@pa@@";
+
+        const auto cccAddr = CDCore::find_component_for_equipslot(
+            a1, k_cccName, s_cccVt);
+        if (cccAddr < 0x10000)
+            return false;
+
+        std::uintptr_t subHandler = 0;
+        __try
+        {
+            subHandler =
+                *reinterpret_cast<volatile std::uintptr_t *>(
+                    cccAddr + k_offCccSubHandler);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return false;
+        }
+        if (subHandler < 0x10000)
+            return false;
+
+        dump_full_auth_table_if_changed(a1, arrayBase, count);
+        return true;
     }
 
     bool resolve_helpers() noexcept
@@ -492,6 +521,7 @@ namespace Transmog::RealPartTearDown
         g_indexedStringLookup.store(
             reinterpret_cast<IndexedStringLookupFn>(lookupAddr),
             std::memory_order_release);
+
         g_ready.store(true, std::memory_order_release);
 
         logger.info(

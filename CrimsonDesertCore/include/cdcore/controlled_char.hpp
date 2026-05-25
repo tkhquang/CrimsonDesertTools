@@ -1,6 +1,7 @@
 #ifndef CDCORE_CONTROLLED_CHAR_HPP
 #define CDCORE_CONTROLLED_CHAR_HPP
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <string_view>
@@ -275,6 +276,84 @@ namespace CDCore
      *          is rarely required).
      */
     void invalidate_controlled_character() noexcept;
+
+    /**
+     * @brief Find a component instance inside a CCOIA component-pointer
+     *        table by its MSVC RTTI mangled type-descriptor name.
+     * @details Component slots in @p p1 are sparse and slot-drift across
+     *          early/late load (a class can sit at +0x40 in steady state
+     *          and +0x48 during cold load). Hardcoded slot offsets are
+     *          fragile; this scanner identifies the target by traversing
+     *          each non-null slot's vtable -> RTTICompleteObjectLocator
+     *          -> TypeDescriptor and exact-comparing the mangled name.
+     *
+     *          The vtable address of the first match is cached via the
+     *          caller-supplied @p vtableCache so subsequent calls fast-
+     *          path on a single qword compare per slot. The cache lives
+     *          for process lifetime (image-resident vtables); the caller
+     *          declares one `std::atomic<std::uintptr_t>` static per
+     *          component class.
+     *
+     *          SEH-guarded. Returns 0 on torn reads, missing class, or
+     *          when @p p1 / @p rttiName is invalid.
+     *
+     * @param p1            Component-pointer table base
+     *                      (CCOIA + 0x68 typically).
+     * @param rttiName      MSVC-mangled type-descriptor name, e.g.
+     *                      ".?AVClientCharacterControlActorComponent@pa@@".
+     * @param vtableCache   Caller-owned cache slot. Must be initialised
+     *                      to 0 and dedicated to one @p rttiName.
+     * @returns Slot pointer (the component instance) or 0.
+     */
+    [[nodiscard]] std::uintptr_t find_component_in_table(
+        std::uintptr_t p1,
+        std::string_view rttiName,
+        std::atomic<std::uintptr_t> &vtableCache) noexcept;
+
+    /**
+     * @brief Convenience: locate a component on the currently-controlled
+     *        actor by its RTTI type-descriptor name.
+     * @details Equivalent to:
+     *
+     *              ccoia = current_controlled_ccoia();
+     *              p1    = *(ccoia + 0x68);
+     *              return find_component_in_table(p1, rttiName, cache);
+     *
+     *          ...but keeps the component-table offset encapsulated
+     *          inside CDCore so callers carry no hardcoded engine
+     *          offsets. SEH-guarded end-to-end; returns 0 on a torn
+     *          chain or missing component.
+     *
+     *          Intended for readiness probes: a component that
+     *          resolves by RTTI is fully wired in the engine's
+     *          component graph. Cold-load returns 0 for at least one
+     *          component until the table finishes registering all
+     *          classes.
+     */
+    [[nodiscard]] std::uintptr_t find_component_in_controlled_actor(
+        std::string_view rttiName,
+        std::atomic<std::uintptr_t> &vtableCache) noexcept;
+
+    /**
+     * @brief Locate a component on the actor whose
+     *        ClientEquipSlotActorComponent is @p equipSlot.
+     * @details Walks the equip-slot's CCOIA back-pointer and the
+     *          CCOIA's component-pointer table internally, then
+     *          RTTI-matches @p rttiName. Encapsulates the
+     *          a1->CCOIA->p1 chain offsets inside CDCore so callers
+     *          carry no engine offsets. SEH-guarded end-to-end.
+     *          Used by readiness probes that need to inspect a
+     *          specific sibling component of any protagonist (not
+     *          just the controlled character).
+     * @param equipSlot ClientEquipSlotActorComponent pointer (the
+     *                  same a1 the SlotPopulator pipeline carries).
+     * @param rttiName  MSVC-mangled type-descriptor name.
+     * @param vtableCache Caller-owned cache slot per rttiName.
+     */
+    [[nodiscard]] std::uintptr_t find_component_for_equipslot(
+        std::uintptr_t equipSlot,
+        std::string_view rttiName,
+        std::atomic<std::uintptr_t> &vtableCache) noexcept;
 
 } // namespace CDCore
 

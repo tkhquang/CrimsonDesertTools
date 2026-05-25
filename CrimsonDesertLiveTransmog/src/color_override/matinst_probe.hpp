@@ -50,12 +50,16 @@ namespace Transmog::ColorOverride::MatInstProbe
 
     // ---- Address range sanity ----------------------------------------
     //
-    // Engine heap pool is typically `0x300000000`+; module image is
-    // `0x140000000..0x150000000` on v1.06 (no ASLR shift observed).
+    // Engine heap pool sits above `0x200000000`; the EXE image is
+    // mapped at `0x140000000` with no ASLR shift in shipped builds.
+    // The upper module bound is set to `0x160000000` to cover the
+    // shipped image (~410 MB) plus headroom for future patches that
+    // grow the module without forcing every dependent check to
+    // update.
     inline constexpr std::uintptr_t k_heapFloor   = 0x200000000ULL;
     inline constexpr std::uintptr_t k_heapCeiling = 0x800000000000ULL;
     inline constexpr std::uintptr_t k_moduleLow   = 0x140000000ULL;
-    inline constexpr std::uintptr_t k_moduleHigh  = 0x150000000ULL;
+    inline constexpr std::uintptr_t k_moduleHigh  = 0x160000000ULL;
 
     inline bool is_likely_heap(std::uintptr_t p) noexcept
     {
