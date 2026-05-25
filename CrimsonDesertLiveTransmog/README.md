@@ -111,7 +111,7 @@ If you run into issues, check the OptiScaler documentation for DLL naming and co
 3. Use the search box to filter by name
 4. Select an item - changes stay **pending** until you click **Apply All**
 5. Click **Apply All** to commit all slot changes at once
-6. Use **Append** in the Presets section to create a fresh preset with every slot ticked and set to (none) -- a hide-all starting point you can fill in from the pickers
+6. Use **Append** in the Presets section to create a fresh preset with the five armor slots (Helm/Chest/Cloak/Gloves/Boots) ticked and set to (none) -- a hide-armor starting point you can fill in from the pickers. Other slots stay unticked so working items like the lantern aren't accidentally hidden
 7. Use **Copy** to clone the active preset's saved state into a new slot. Unsaved picker edits are discarded so you start from a clean baseline you can tweak without touching the source
 8. Use **Save as New** to bottle up the current pending state (unsaved picker edits, dye, color overrides) as a brand-new preset. The active preset's saved rows stay untouched, which is the safe path when you started altering an existing preset and want to keep the new look as a separate entry
 9. **Save** commits unsaved picker edits back into the active preset. The button turns orange with a `*` marker and a `[UNSAVED -- click Save]` banner appears in the header whenever your edits differ from the stored preset

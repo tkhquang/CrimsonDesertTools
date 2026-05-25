@@ -135,7 +135,7 @@ If you run into issues, check the OptiScaler documentation for DLL naming and co
 [*]Use the search box to filter by name -items are auto-categorized to the correct slot
 [*]Select an item -changes stay [b]pending[/b] until you click [b]Apply All[/b]
 [*]Click [b]Apply All[/b] to commit all slot changes at once
-[*]Use [b]Append[/b] in the Presets section to create a fresh preset with every slot ticked and set to (none) -- a hide-all starting point you can fill in from the pickers
+[*]Use [b]Append[/b] in the Presets section to create a fresh preset with the five armor slots (Helm/Chest/Cloak/Gloves/Boots) ticked and set to (none) -- a hide-armor starting point you can fill in from the pickers. Other slots stay unticked so working items like the lantern aren't accidentally hidden
 [*]Use [b]Copy[/b] to clone the active preset's saved state into a new slot. Unsaved picker edits are discarded so you start from a clean baseline you can tweak without touching the source
 [*]Use [b]Save as New[/b] to bottle up the current pending state (unsaved picker edits, dye, color overrides) as a brand-new preset. The active preset's saved rows stay untouched, which is the safe path when you started altering an existing preset and want to keep the new look as a separate entry
 [*][b]Save[/b] commits unsaved picker edits back into the active preset. The button turns orange with a [b]*[/b] marker and a [b][UNSAVED -- click Save][/b] banner appears in the header whenever your edits differ from the stored preset

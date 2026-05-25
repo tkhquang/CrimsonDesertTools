@@ -278,9 +278,13 @@ namespace Transmog
         Preset *active_preset_mut();
         const std::vector<Preset> &presets() const;
 
-        /// Append a fresh preset with every slot ticked + none (hide all).
-        /// Pushes the new state into slot_mappings before returning so the
-        /// caller can manual_apply() immediately.
+        /// Append a fresh preset with the five armor slots
+        /// (Helm/Chest/Cloak/Gloves/Boots) ticked + none (hide those
+        /// armor pieces). Gear/accessory slots stay unticked so the
+        /// new preset doesn't accidentally hide working items (e.g.
+        /// a lantern that should still light up).
+        /// Pushes the new state into slot_mappings before returning so
+        /// the caller can manual_apply() immediately.
         void append_from_state();
 
         /// Append a new preset that is a pure clone of the active

@@ -1070,11 +1070,22 @@ namespace Transmog
         std::string name = "Preset " + std::to_string(idx);
         Preset blank;
         blank.name = name;
-        for (auto &s : blank.slots)
+        // Default ticks: only the five armor slots (Helm, Chest, Cloak,
+        // Gloves, Boots). Gear/accessory slots (Lantern, weapons, rings,
+        // etc.) stay unticked so a freshly-appended preset doesn't
+        // unintentionally hide working in-game items (e.g. a lantern
+        // that should still light up).
+        for (std::size_t i = 0; i < blank.slots.size(); ++i)
         {
-            s.active = true;
-            s.itemId = 0;
-            s.itemName.clear();
+            const auto slot = static_cast<TransmogSlot>(i);
+            blank.slots[i].active =
+                (slot == TransmogSlot::Helm   ||
+                 slot == TransmogSlot::Chest  ||
+                 slot == TransmogSlot::Cloak  ||
+                 slot == TransmogSlot::Gloves ||
+                 slot == TransmogSlot::Boots);
+            blank.slots[i].itemId = 0;
+            blank.slots[i].itemName.clear();
         }
         cp.presets.push_back(std::move(blank));
         cp.activePreset = idx;
@@ -1082,7 +1093,7 @@ namespace Transmog
         apply_to_state();
 
         DMK::Logger::get_instance().info(
-            "Preset appended: '{}' (index {}, all slots ticked + none)",
+            "Preset appended: '{}' (index {}, armor slots ticked + none)",
             name, idx);
         save();
     }
