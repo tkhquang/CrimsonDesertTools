@@ -2,6 +2,13 @@
 
 All notable changes to the CrimsonDesertLiveTransmog mod will be documented in this file.
 
+## [0.11.3] - Save-load and Color Override fixes
+
+- Fixed a burst of transient errors that could appear in the log during the first few seconds after loading a save.
+- Transmog now waits for the game to finish setting up your character before applying, instead of retrying through errors.
+- Internal refactor: identify character components by class name so the mod keeps working if the game shuffles their order.
+- Fixed an FPS drop when applying transmog while Color Override is enabled.
+
 ## [0.11.2] - Picker quality-of-life and preset polish
 
 - Prefab picker now shows non-human NPC body parts (dwarves, orcs, etc.). The "Exact" toggle still keeps things tidy per slot.
@@ -193,6 +200,7 @@ All notable changes to the CrimsonDesertLiveTransmog mod will be documented in t
 - Modular code split: `transmog_apply` (apply/clear logic), `transmog_hooks` (VEC/BatchEquip callbacks), `transmog_worker` (debounce/load-detect/nametable threads), `shared_state` (cross-TU atomics)
 - Docs clarify ReShade is required for GUI; without it, users edit JSON manually via Capture hotkey
 
+[0.11.3]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.11.3
 [0.11.2]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.11.2
 [0.11.1]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.11.1
 [0.11.0]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.11.0
