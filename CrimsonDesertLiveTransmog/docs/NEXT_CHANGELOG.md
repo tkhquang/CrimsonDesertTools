@@ -1,4 +1,4 @@
-## [Title for next release]
+## Save-load and Color Override fixes
 
 - Fixed a burst of transient errors that could appear in the log during the first few seconds after loading a save.
 - Transmog now waits for the game to finish setting up your character before applying, instead of retrying through errors.
