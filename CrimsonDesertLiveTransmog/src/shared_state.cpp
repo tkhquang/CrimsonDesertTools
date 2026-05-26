@@ -35,6 +35,7 @@ namespace Transmog
     static std::atomic<bool> s_enabled{true};
     static std::atomic<bool> s_shutdownRequested{false};
     static std::atomic<bool> s_colorOverride{false};
+    static std::atomic<bool> s_helmAudioUnmuffle{true};
     static std::atomic<bool> s_dumpItemPrefabs{false};
     static std::atomic<bool> s_dumpItemCatalog{false};
     static std::atomic<bool> s_applyToEditing{true};
@@ -77,6 +78,7 @@ namespace Transmog
     std::atomic<bool> &flag_enabled() { return s_enabled; }
     std::atomic<bool> &shutdown_requested() { return s_shutdownRequested; }
     std::atomic<bool> &flag_color_override() { return s_colorOverride; }
+    std::atomic<bool> &flag_helm_audio_unmuffle() { return s_helmAudioUnmuffle; }
     std::atomic<bool> &flag_dump_item_prefabs() { return s_dumpItemPrefabs; }
     std::atomic<bool> &flag_dump_item_catalog() { return s_dumpItemCatalog; }
     std::atomic<bool> &flag_apply_to_editing() { return s_applyToEditing; }

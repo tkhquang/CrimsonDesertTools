@@ -471,33 +471,8 @@ namespace CDCore
             std::size_t len = 0;
             if (!safe_read_ascii(strStart, buf, sizeof(buf), len))
                 return 0;
-            const std::string_view path{buf, len};
-            const auto anchor = path.find(k_appearAnchor);
-            if (anchor == std::string_view::npos)
-                return 0;
-            const auto suffix = path.substr(anchor);
-
-            // Snapshot codenames under one lock, then release before
-            // doing the substring search. Empty codenames are treated
-            // as "skip this protagonist" rather than "match everything"
-            // (find("") returns 0 = always-hit).
-            std::string kliff, damiane, oongka;
-            {
-                std::lock_guard<std::mutex> lock(s_codenameMutex);
-                kliff   = s_codenameKliff;
-                damiane = s_codenameDamiane;
-                oongka  = s_codenameOongka;
-            }
-            if (!kliff.empty() &&
-                suffix.find(kliff) != std::string_view::npos)
-                return 1;
-            if (!damiane.empty() &&
-                suffix.find(damiane) != std::string_view::npos)
-                return 2;
-            if (!oongka.empty() &&
-                suffix.find(oongka) != std::string_view::npos)
-                return 3;
-            return 0;
+            return classify_appearance_by_path(
+                std::string_view{buf, len});
         }
 
         // Primary CCOIA classifier. Tries the appearance-config path
@@ -602,6 +577,39 @@ namespace CDCore
         {
             return 0;
         }
+    }
+
+    std::uint32_t classify_appearance_by_path(
+        std::string_view path) noexcept
+    {
+        if (path.empty())
+            return 0;
+        const auto anchor = path.find(k_appearAnchor);
+        if (anchor == std::string_view::npos)
+            return 0;
+        const auto suffix = path.substr(anchor);
+
+        // Snapshot codenames under one lock, then release before
+        // doing the substring search. Empty codenames are treated
+        // as "skip this protagonist" rather than "match everything"
+        // (find("") returns 0 = always-hit).
+        std::string kliff, damiane, oongka;
+        {
+            std::lock_guard<std::mutex> lock(s_codenameMutex);
+            kliff   = s_codenameKliff;
+            damiane = s_codenameDamiane;
+            oongka  = s_codenameOongka;
+        }
+        if (!kliff.empty() &&
+            suffix.find(kliff) != std::string_view::npos)
+            return 1;
+        if (!damiane.empty() &&
+            suffix.find(damiane) != std::string_view::npos)
+            return 2;
+        if (!oongka.empty() &&
+            suffix.find(oongka) != std::string_view::npos)
+            return 3;
+        return 0;
     }
 
     std::size_t snapshot_body_cache(BodyCacheEntry *out,

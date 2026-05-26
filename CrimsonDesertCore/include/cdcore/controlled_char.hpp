@@ -145,6 +145,31 @@ namespace CDCore
         std::uintptr_t ccoia) noexcept;
 
     /**
+     * @brief Classify an appearance-config asset path into a
+     *        protagonist index using the codename set shared with the
+     *        CCOIA classifier.
+     * @details Locates the `/cd_` anchor in @p path and substring-
+     *          matches the suffix against the three configured
+     *          protagonist codenames (settable via
+     *          @ref set_protagonist_codenames). Returns the same
+     *          1-based indices @ref current_controlled_character_idx
+     *          uses: 1 for Kliff, 2 for Damiane, 3 for Oongka. Returns
+     *          0 for paths that don't contain a known codename (NPCs,
+     *          monsters, empty paths).
+     *
+     *          Exposed so callers that already hold an actor's
+     *          appearance / asset string (read from any source, not
+     *          necessarily the CCOIA chain) can classify it without
+     *          having to re-derive the chain walk used by
+     *          @ref current_controlled_character_idx.
+     *
+     * @param path ASCII appearance path or asset string.
+     * @return 1, 2, or 3 on a protagonist match; 0 otherwise.
+     */
+    [[nodiscard]] std::uint32_t classify_appearance_by_path(
+        std::string_view path) noexcept;
+
+    /**
      * @brief One entry in a live player-CCOIA snapshot.
      * @details charIdx uses the same 1-based encoding as
      *          current_controlled_character_idx(): 1 for Kliff, 2 for

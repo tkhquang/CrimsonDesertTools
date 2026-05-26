@@ -22,6 +22,7 @@
 #include "transmog_hooks.hpp"
 #include "transmog_map.hpp"
 #include "transmog_worker.hpp"
+#include "helm_audio_filter.hpp"
 
 #include <cdcore/controlled_char.hpp>
 #include <cdcore/dmk_glue.hpp>
@@ -106,6 +107,15 @@ namespace Transmog
         DMK::Config::register_atomic<bool>(
             "Experimental", "ColorOverride", "Color Override",
             flag_color_override(), false);
+
+        // Experimental: helm voice-unmuffle filter. Disabled by default;
+        // enable to remove the engine's stock plate/heavy-helm voice
+        // muffle on protagonists. The hook only installs at startup
+        // when this is true, so toggle changes take effect on the next
+        // game launch. NPC voice muffle is unaffected either way.
+        DMK::Config::register_atomic<bool>(
+            "Experimental", "UnmuffleHelmVoice", "Unmuffle Helm Voice",
+            flag_helm_audio_unmuffle(), false);
 
         // One-shot diagnostic TSV dumps. Off by default; enable to
         // capture item-catalog / item->prefab snapshots once
@@ -200,9 +210,9 @@ namespace Transmog
     // VALUES themselves are unchanged (Helm=0x03, Chest=0x04, Gloves=0x05,
     // Boots=0x06, Cloak=0x10); only the position within the entry shifted.
     // Mirrors k_entryStride / k_entrySlotTagOffset in real_part_tear_down.cpp.
-    constexpr std::ptrdiff_t k_compEntryStride         = 0xD0;
-    constexpr std::ptrdiff_t k_compEntryItemIdOffset   = 0x08;
-    constexpr std::ptrdiff_t k_compEntrySlotTagOffset  = 0xC8;
+    constexpr std::ptrdiff_t k_compEntryStride = 0xD0;
+    constexpr std::ptrdiff_t k_compEntryItemIdOffset = 0x08;
+    constexpr std::ptrdiff_t k_compEntrySlotTagOffset = 0xC8;
 
     // --- Public interface ---
 
@@ -234,9 +244,12 @@ namespace Transmog
         std::uint32_t char_idx_for_preset_name(
             const std::string &name) noexcept
         {
-            if (name == "Kliff")   return 1;
-            if (name == "Damiane") return 2;
-            if (name == "Oongka")  return 3;
+            if (name == "Kliff")
+                return 1;
+            if (name == "Damiane")
+                return 2;
+            if (name == "Oongka")
+                return 3;
             return 0;
         }
 
@@ -408,10 +421,10 @@ namespace Transmog
             if (src.group_hash == 0)
                 continue;
             auto &dst = slotPreset.dye[k];
-            dst.group_hash  = src.group_hash;
-            dst.r           = src.r;
-            dst.g           = src.g;
-            dst.b           = src.b;
+            dst.group_hash = src.group_hash;
+            dst.r = src.r;
+            dst.g = src.g;
+            dst.b = src.b;
             dst.material_id = src.material_id;
             dst.repair_byte = src.repair_byte;
             const auto *grp =
@@ -510,7 +523,11 @@ namespace Transmog
         __try
         {
             auto entryDesc = *reinterpret_cast<uintptr_t *>(a1 + k_compEntryTablePtrOffset);
-            if (entryDesc < 0x10000) { logger.warning("Capture: no entry table"); return; }
+            if (entryDesc < 0x10000)
+            {
+                logger.warning("Capture: no entry table");
+                return;
+            }
             auto entryArray = *reinterpret_cast<uintptr_t *>(entryDesc + 8);
             auto entryCount = *reinterpret_cast<uint32_t *>(entryDesc + 16);
 
@@ -623,7 +640,8 @@ namespace Transmog
         __try
         {
             auto entryDesc = *reinterpret_cast<uintptr_t *>(a1 + k_compEntryTablePtrOffset);
-            if (entryDesc < 0x10000) return;
+            if (entryDesc < 0x10000)
+                return;
             auto entryArray = *reinterpret_cast<uintptr_t *>(entryDesc + 8);
             auto entryCount = *reinterpret_cast<uint32_t *>(entryDesc + 16);
 
@@ -891,7 +909,9 @@ namespace Transmog
                     // init (hooks, color-override) doesn't block waiting
                     // for the TSV write -- nothing downstream depends on
                     // the dump.
-                    std::thread{[] { dump_itemmesh_tsv(); }}.detach();
+                    std::thread{[]
+                                { dump_itemmesh_tsv(); }}
+                        .detach();
                 }
             }
             else if (result == BR::Deferred)
@@ -977,9 +997,16 @@ namespace Transmog
             // Verify the resolved byte is 0x74 (jz). SEH-isolated via
             // noinline lambda (C++ objects in parent block unwinding).
             uint8_t probe = 0;
-            [&]() __declspec(noinline) {
-                __try { probe = *reinterpret_cast<volatile uint8_t *>(addrs.charClassBypass); }
-                __except (EXCEPTION_EXECUTE_HANDLER) { probe = 0; }
+            [&]() __declspec(noinline)
+            {
+                __try
+                {
+                    probe = *reinterpret_cast<volatile uint8_t *>(addrs.charClassBypass);
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    probe = 0;
+                }
             }();
             if (probe == 0x74)
                 logger.info("CharClassBypass at 0x{:X} (byte=0x{:02X} OK)",
@@ -1206,6 +1233,35 @@ namespace Transmog
         }
 
         PrefabWrapperSwap::init();
+
+        // Helm-audio filter -- intervenes at the passive-skill
+        // REGISTRATION boundary (sub_141C6CC90) BEFORE the muffle
+        // tag enters the character's skill registry, so no downstream
+        // Wwise / RTPC / Switch path ever observes it. The combined
+        // gates (audio-classifier call layout + RTTI chain walk to
+        // `pa::GameAudioEffectBuffData` + protagonist host) leave
+        // other passive-skill effects of the same item intact and
+        // keep NPC voices muffling as in vanilla. See
+        // helm_audio_filter.hpp for the full data-flow chain and
+        // bypass-safety analysis.
+        //
+        // Gated by `[Experimental] UnmuffleHelmVoice`. The flag is
+        // read once here at startup; runtime toggle is not supported
+        // because tearing down the inline detour would race the engine
+        // equip pipeline that calls it from arbitrary threads. The
+        // hook leaves a single virtual call un-invoked on SUPPRESS;
+        // letting users opt out is the safety lever for that bypass.
+        if (flag_helm_audio_unmuffle().load(std::memory_order_relaxed))
+        {
+            HelmAudioFilter::init();
+        }
+        else
+        {
+            DMK::Logger::get_instance().info(
+                "[helm-audio] disabled; set "
+                "`[Experimental] UnmuffleHelmVoice = true` to remove "
+                "the stock plate/heavy-helm voice muffle.");
+        }
 
         // Per-slot dye-record injector. Hooks the engine's dye-copier
         // primitive and appends fabricated ARMOR_MOD records so fake
