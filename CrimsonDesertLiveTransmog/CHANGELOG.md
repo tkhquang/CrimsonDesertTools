@@ -2,6 +2,14 @@
 
 All notable changes to the CrimsonDesertLiveTransmog mod will be documented in this file.
 
+## [0.12.0] - Helm voice unmuffle and reliability fixes
+
+- Optional setting to stop plate and heavy helmets from muffling your protagonist's voice -- enable `UnmuffleHelmVoice` under `[Experimental]` (off by default; NPC voices still muffle as in vanilla).
+- Upgraded DetourModKit dependency to v3.3.0.
+- More resilient internal checks against the game's loaded modules.
+- Reduced duplicated crash-protection code across modules.
+- Fixed first-apply errors after a cold load by waiting until the character is fully ready.
+
 ## [0.11.3] - Save-load and Color Override fixes
 
 - Fixed a burst of transient errors that could appear in the log during the first few seconds after loading a save.
@@ -200,6 +208,7 @@ All notable changes to the CrimsonDesertLiveTransmog mod will be documented in t
 - Modular code split: `transmog_apply` (apply/clear logic), `transmog_hooks` (VEC/BatchEquip callbacks), `transmog_worker` (debounce/load-detect/nametable threads), `shared_state` (cross-TU atomics)
 - Docs clarify ReShade is required for GUI; without it, users edit JSON manually via Capture hotkey
 
+[0.12.0]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.12.0
 [0.11.3]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.11.3
 [0.11.2]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.11.2
 [0.11.1]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.11.1
