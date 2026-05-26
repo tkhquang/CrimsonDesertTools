@@ -958,6 +958,30 @@ namespace Transmog
             return;
         }
 
+        // Engine-readiness gate. is_world_ready() observes the world
+        // singleton, which becomes non-null well before the per-actor
+        // sub-handler at CCC+0x130 is wired. When the dispatcher runs
+        // against an actor whose sub-handler is still null, the engine
+        // path under tear_down / tear_down_fake dereferences it as
+        // `v15 = *(v7 + 304); *v15;`, the per-slot SEH wrappers burst-
+        // catch the resulting faults, every slot exits early, and the
+        // carrier apply continues against a half-wired actor before
+        // raising out of the outer __try. Gating at this entry point
+        // covers every caller (manual_apply, the multi-protagonist
+        // worker path, any future trigger) without coupling them to
+        // LT-specific readiness semantics.
+        constexpr std::uint64_t k_applyReadyRetryMs = 1000;
+        if (!RealPartTearDown::is_actor_apply_ready(
+                reinterpret_cast<void *>(a1)))
+        {
+            logger.debug(
+                "apply_all_transmog: actor not ready (a1={:#018x}), "
+                "re-arming in {} ms",
+                static_cast<uint64_t>(a1), k_applyReadyRetryMs);
+            schedule_transmog_ms(k_applyReadyRetryMs);
+            return;
+        }
+
         // Suppress VEC hook for the entire operation.
         suppress_vec().store(true, std::memory_order_release);
 
