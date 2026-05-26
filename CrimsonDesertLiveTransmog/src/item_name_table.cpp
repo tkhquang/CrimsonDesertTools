@@ -70,82 +70,48 @@ namespace Transmog
     // one) until the next build() populates it.
     static std::atomic<uintptr_t> s_variantMetaSentinel{0};
 
-    // --- Safe memory helpers (SEH-wrapped) ---
+    // --- Safe memory helpers ---
+    //
+    // The `(value, bool& ok)` shape distinguishes a faulted read from a
+    // legitimate zero result, which matters at call sites where 0 is a
+    // valid value (e.g. slot index 0 versus unread slot field).
+    // `DMKMemory::seh_read<T>` is the underlying SEH-protected primitive;
+    // these adapters fold its `std::optional<T>` return into the local
+    // shape used by the rest of this translation unit.
 
     static uint8_t read_u8_safe(uintptr_t addr, bool &ok) noexcept
     {
-        __try
-        {
-            uint8_t v = *reinterpret_cast<const uint8_t *>(addr);
-            ok = true;
-            return v;
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER)
-        {
-            ok = false;
-            return 0;
-        }
+        const auto v = DMKMemory::seh_read<uint8_t>(addr);
+        ok = v.has_value();
+        return v.value_or(0);
     }
 
     static int32_t read_i32_safe(uintptr_t addr, bool &ok) noexcept
     {
-        __try
-        {
-            int32_t v = 0;
-            std::memcpy(&v, reinterpret_cast<const void *>(addr), sizeof(v));
-            ok = true;
-            return v;
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER)
-        {
-            ok = false;
-            return 0;
-        }
+        const auto v = DMKMemory::seh_read<int32_t>(addr);
+        ok = v.has_value();
+        return v.value_or(0);
     }
 
     static uintptr_t read_qword_safe(uintptr_t addr, bool &ok) noexcept
     {
-        __try
-        {
-            uintptr_t v = *reinterpret_cast<const uintptr_t *>(addr);
-            ok = true;
-            return v;
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER)
-        {
-            ok = false;
-            return 0;
-        }
+        const auto v = DMKMemory::seh_read<uintptr_t>(addr);
+        ok = v.has_value();
+        return v.value_or(0);
     }
 
     static uint32_t read_u32_safe(uintptr_t addr, bool &ok) noexcept
     {
-        __try
-        {
-            uint32_t v = *reinterpret_cast<const uint32_t *>(addr);
-            ok = true;
-            return v;
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER)
-        {
-            ok = false;
-            return 0;
-        }
+        const auto v = DMKMemory::seh_read<uint32_t>(addr);
+        ok = v.has_value();
+        return v.value_or(0);
     }
 
     static uint16_t read_u16_safe(uintptr_t addr, bool &ok) noexcept
     {
-        __try
-        {
-            uint16_t v = *reinterpret_cast<const uint16_t *>(addr);
-            ok = true;
-            return v;
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER)
-        {
-            ok = false;
-            return 0;
-        }
+        const auto v = DMKMemory::seh_read<uint16_t>(addr);
+        ok = v.has_value();
+        return v.value_or(0);
     }
 
     // --- Player-compatibility detection via rule-classifier tokens ---

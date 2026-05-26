@@ -57,24 +57,14 @@ namespace Transmog::ColorOverride::HostScope
 
         std::atomic<bool> g_initDone{false};
 
-        // CrimsonDesert.exe is < 0x20000000 in size.
+        // Tests whether @p p lies inside the host EXE's mapped range.
+        // `host_module_range()` is magic-static cached, so the warm
+        // path is a single atomic load plus the constexpr point-in-
+        // range comparison performed by `contains`.
         bool ptr_in_text_or_rdata(std::uintptr_t p) noexcept
         {
-            const auto base = reinterpret_cast<std::uintptr_t>(
-                GetModuleHandleW(nullptr));
-            return p >= base && p < (base + 0x20000000ull);
-        }
-
-        std::uintptr_t safe_read_qword(std::uintptr_t addr) noexcept
-        {
-            __try
-            {
-                return *reinterpret_cast<const std::uintptr_t *>(addr);
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                return 0;
-            }
+            return DMKMemory::contains(
+                DMKMemory::host_module_range(), p);
         }
 
         bool looks_like_live_host(std::uintptr_t parent) noexcept
@@ -86,7 +76,8 @@ namespace Transmog::ColorOverride::HostScope
             // either a small int or stack/junk -- reject.
             if (parent < 0x100000000ull)
                 return false;
-            const auto vtbl = safe_read_qword(parent);
+            const auto vtbl =
+                DMKMemory::seh_read<std::uintptr_t>(parent).value_or(0);
             return vtbl != 0 && ptr_in_text_or_rdata(vtbl);
         }
 

@@ -252,25 +252,9 @@ namespace Transmog::PrefabWrapperSwap
 
     // --- SEH-isolated read/write helpers ---
 
-    static std::uint64_t read_qword_seh(const void *p) noexcept
-    {
-        std::uint64_t out = 0;
-        [&]() __declspec(noinline) {
-            __try { out = *static_cast<const volatile std::uint64_t *>(p); }
-            __except (EXCEPTION_EXECUTE_HANDLER) { out = 0; }
-        }();
-        return out;
-    }
+    
 
-    static std::uint32_t read_dword_seh(const void *p) noexcept
-    {
-        std::uint32_t out = 0;
-        [&]() __declspec(noinline) {
-            __try { out = *static_cast<const volatile std::uint32_t *>(p); }
-            __except (EXCEPTION_EXECUTE_HANDLER) { out = 0; }
-        }();
-        return out;
-    }
+    
 
     static bool write_qword_seh(void *p, std::uint64_t value) noexcept
     {
@@ -302,18 +286,7 @@ namespace Transmog::PrefabWrapperSwap
         return len;
     }
 
-    // Bulk SEH-wrapped memcpy. One exception frame for the whole copy
-    // instead of one per field -- collapses ~5 SEH-guarded per-entry reads
-    // into a single 128B local copy during the StringInfo walk.
-    static bool bulk_copy_seh(const void *src, void *dst, std::size_t size) noexcept
-    {
-        bool ok = false;
-        [&]() __declspec(noinline) {
-            __try { std::memcpy(dst, src, size); ok = true; }
-            __except (EXCEPTION_EXECUTE_HANDLER) { ok = false; }
-        }();
-        return ok;
-    }
+    
 
     // Bumps a wrapper's refcount via Interlocked, gated on the same
     // condition sub_14079DA20 uses (refcount field >= 0). No-op if
@@ -465,25 +438,20 @@ namespace Transmog::PrefabWrapperSwap
             s_loaderRegistrySingleton.load(std::memory_order_acquire);
         if (singletonAbs < 0x10000ULL)
             return;
-        const auto singletonPtr = read_qword_seh(
-            reinterpret_cast<const void *>(singletonAbs));
+        const auto singletonPtr = DMKMemory::seh_read<std::uint64_t>(singletonAbs).value_or(0);
         if (singletonPtr < 0x10000ULL)
             return;
         // singleton + 0x50 = table struct (matches internal
         // k_loaderRegistryTableOff defined later in this TU).
         const std::uintptr_t tableStruct = singletonPtr + 0x50;
-        const auto count = read_dword_seh(
-            reinterpret_cast<const void *>(tableStruct + 0x04));
-        const auto dataArrayPtr = read_qword_seh(
-            reinterpret_cast<const void *>(tableStruct + 0x18));
+        const auto count = DMKMemory::seh_read<std::uint32_t>(tableStruct + 0x04).value_or(0);
+        const auto dataArrayPtr = DMKMemory::seh_read<std::uint64_t>(tableStruct + 0x18).value_or(0);
         if (count == 0 || count > 100000 || dataArrayPtr < 0x10000ULL)
             return;
 
         std::vector<std::uintptr_t> entryPtrs;
         entryPtrs.resize(count);
-        const bool bulkOk = bulk_copy_seh(
-            reinterpret_cast<const void *>(dataArrayPtr),
-            entryPtrs.data(), count * sizeof(std::uintptr_t));
+        const bool bulkOk = DMKMemory::seh_read_bytes(dataArrayPtr, entryPtrs.data(), count * sizeof(std::uintptr_t));
 
         const auto vtableSentinel =
             s_stringInfoVtable.load(std::memory_order_acquire);
@@ -491,11 +459,9 @@ namespace Transmog::PrefabWrapperSwap
         for (std::uint32_t i = 0; i < count; ++i) {
             const std::uintptr_t entry = bulkOk
                 ? entryPtrs[i]
-                : read_qword_seh(reinterpret_cast<const void *>(
-                      dataArrayPtr + 8ULL * i));
+                : DMKMemory::seh_read<std::uint64_t>(dataArrayPtr + 8ULL * i).value_or(0);
             if (entry < 0x10000ULL) continue;
-            const auto wrapper = read_qword_seh(
-                reinterpret_cast<const void *>(entry + 0x08));
+            const auto wrapper = DMKMemory::seh_read<std::uint64_t>(entry + 0x08).value_or(0);
             if (wrapper < 0x10000ULL) continue;
             if (wrapper == vtableSentinel) continue;
             constexpr std::size_t k_loaderNameCap = 96;
@@ -632,12 +598,10 @@ namespace Transmog::PrefabWrapperSwap
             return 0;
         }
         const auto regAddr = reinterpret_cast<const void *>(regAbs);
-        const auto registryPtr = read_qword_seh(regAddr);
+        const auto registryPtr = DMKMemory::seh_read<std::uint64_t>(reinterpret_cast<std::uintptr_t>(regAddr)).value_or(0);
         if (registryPtr < 0x10000ULL) return 0;
-        const auto count = read_dword_seh(
-            reinterpret_cast<const void *>(registryPtr + 8));
-        const auto arrayPtr = read_qword_seh(
-            reinterpret_cast<const void *>(registryPtr + 80));
+        const auto count = DMKMemory::seh_read<std::uint32_t>(registryPtr + 8).value_or(0);
+        const auto arrayPtr = DMKMemory::seh_read<std::uint64_t>(registryPtr + 80).value_or(0);
         if (count < k_minPlausibleCount || count > k_maxPlausibleCount ||
             arrayPtr < 0x10000ULL)
             return 0;
@@ -651,9 +615,7 @@ namespace Transmog::PrefabWrapperSwap
         bool bulkOk = false;
         if (arrayBytes > 0) {
             entryPtrs.resize(count);
-            bulkOk = bulk_copy_seh(
-                reinterpret_cast<const void *>(arrayPtr),
-                entryPtrs.data(), arrayBytes);
+            bulkOk = DMKMemory::seh_read_bytes(arrayPtr, entryPtrs.data(), arrayBytes);
         }
 
         const auto walkStart = std::chrono::steady_clock::now();
@@ -671,11 +633,9 @@ namespace Transmog::PrefabWrapperSwap
         auto decode_long_name =
             [](std::uintptr_t entry, char *buf, std::size_t cap) -> bool
         {
-            const auto wrapperPtr = read_qword_seh(
-                reinterpret_cast<const void *>(entry + k_wrapperPtrOff));
+            const auto wrapperPtr = DMKMemory::seh_read<std::uint64_t>(entry + k_wrapperPtrOff).value_or(0);
             if (wrapperPtr < 0x10000ULL) return false;
-            const auto strPtr = read_qword_seh(
-                reinterpret_cast<const void *>(wrapperPtr));
+            const auto strPtr = DMKMemory::seh_read<std::uint64_t>(wrapperPtr).value_or(0);
             if (strPtr < 0x10000ULL) return false;
             const auto extLen = read_cstr_seh(
                 reinterpret_cast<const void *>(strPtr), buf, cap);
@@ -697,13 +657,11 @@ namespace Transmog::PrefabWrapperSwap
         for (std::uint32_t i = 0; i < count; ++i) {
             const std::uintptr_t entryPtr = bulkOk
                 ? entryPtrs[i]
-                : read_qword_seh(reinterpret_cast<const void *>(
-                      arrayPtr + 8ULL * i));
+                : DMKMemory::seh_read<std::uint64_t>(arrayPtr + 8ULL * i).value_or(0);
             if (entryPtr < 0x10000ULL) continue;
             ++scanned;
 
-            if (!bulk_copy_seh(reinterpret_cast<const void *>(entryPtr),
-                               header, k_headerBytes))
+            if (!DMKMemory::seh_read_bytes(entryPtr, header, k_headerBytes))
                 continue;
 
             const std::uintptr_t vtable =
@@ -828,11 +786,9 @@ namespace Transmog::PrefabWrapperSwap
             {
                 const auto end = regionBase + regionSize - 0x40;
                 for (std::uintptr_t p = regionBase; p < end; p += 8) {
-                    const auto v = read_qword_seh(
-                        reinterpret_cast<const void *>(p));
+                    const auto v = DMKMemory::seh_read<std::uint64_t>(p).value_or(0);
                     if (v != p + 0x18) continue;
-                    const auto len = read_dword_seh(
-                        reinterpret_cast<const void *>(p + 8));
+                    const auto len = DMKMemory::seh_read<std::uint32_t>(p + 8).value_or(0);
                     if (len == 0 || len >= k_extNameMax) continue;
                     char nameBuf[k_extNameMax + 1] = {0};
                     const auto rlen = read_cstr_seh(
@@ -1118,8 +1074,7 @@ namespace Transmog::PrefabWrapperSwap
                 "resolved -- skip enumeration");
             return 0;
         }
-        const auto singletonPtr = read_qword_seh(
-            reinterpret_cast<const void *>(singletonAbs));
+        const auto singletonPtr = DMKMemory::seh_read<std::uint64_t>(singletonAbs).value_or(0);
         if (singletonPtr < 0x10000ULL) {
             logger.warning(
                 "[prefab-swap] Loader registry singleton "
@@ -1131,10 +1086,8 @@ namespace Transmog::PrefabWrapperSwap
             singletonPtr + k_loaderRegistryTableOff;
 
         // Step 2: read count + data_array_ptr, sanity-check.
-        const auto count = read_dword_seh(
-            reinterpret_cast<const void *>(tableStruct + 0x04));
-        const auto dataArrayPtr = read_qword_seh(
-            reinterpret_cast<const void *>(tableStruct + 0x18));
+        const auto count = DMKMemory::seh_read<std::uint32_t>(tableStruct + 0x04).value_or(0);
+        const auto dataArrayPtr = DMKMemory::seh_read<std::uint64_t>(tableStruct + 0x18).value_or(0);
         if (count == 0 || count > 100000 || dataArrayPtr < 0x10000ULL) {
             logger.warning(
                 "[prefab-swap] Loader registry sanity failed: "
@@ -1153,9 +1106,7 @@ namespace Transmog::PrefabWrapperSwap
         bool bulkOk = false;
         if (arrayBytes > 0) {
             entryPtrs.resize(count);
-            bulkOk = bulk_copy_seh(
-                reinterpret_cast<const void *>(dataArrayPtr),
-                entryPtrs.data(), arrayBytes);
+            bulkOk = DMKMemory::seh_read_bytes(dataArrayPtr, entryPtrs.data(), arrayBytes);
         }
 
         // Step 4: walk entries, classify by slot tag, collect (name,
@@ -1176,8 +1127,7 @@ namespace Transmog::PrefabWrapperSwap
         for (std::uint32_t i = 0; i < count; ++i) {
             const std::uintptr_t entry = bulkOk
                 ? entryPtrs[i]
-                : read_qword_seh(reinterpret_cast<const void *>(
-                      dataArrayPtr + 8ULL * i));
+                : DMKMemory::seh_read<std::uint64_t>(dataArrayPtr + 8ULL * i).value_or(0);
             if (entry < 0x10000ULL) continue;
             ++scanned;
 
@@ -1188,8 +1138,7 @@ namespace Transmog::PrefabWrapperSwap
             // VALUE wrapper is a metadata struct (counts/IDs), not a
             // name-bearing wrapper, so reading +0x18 there gives junk
             // and the prefix gate filters everything out.
-            const auto wrapper = read_qword_seh(
-                reinterpret_cast<const void *>(entry + 0x08));
+            const auto wrapper = DMKMemory::seh_read<std::uint64_t>(entry + 0x08).value_or(0);
             if (wrapper < 0x10000ULL) continue;
             // Skip the StringInfo vtable sentinel (registry can hold
             // metadata-only entries that aren't partprefab wrappers).
@@ -1974,8 +1923,7 @@ namespace Transmog::PrefabWrapperSwap
 
         s_callCount.fetch_add(1, std::memory_order_relaxed);
 
-        const auto srcWrapper = read_qword_seh(
-            reinterpret_cast<const void *>(a2));
+        const auto srcWrapper = DMKMemory::seh_read<std::uint64_t>(a2).value_or(0);
         // Filter the StringInfo vtable sentinel: a2 sometimes points
         // at the entry's +0x08 vtable slot rather than its wrapper-ptr
         // slot, in which case srcWrapper would equal the sentinel
@@ -2086,10 +2034,9 @@ namespace Transmog::PrefabWrapperSwap
         std::uint64_t *listData = nullptr;
         std::uint32_t  listCount = 0;
         if (a2) {
-            const auto raw = read_qword_seh(a2);
+            const auto raw = DMKMemory::seh_read<std::uint64_t>(reinterpret_cast<std::uintptr_t>(a2)).value_or(0);
             listData = reinterpret_cast<std::uint64_t *>(raw);
-            listCount = read_dword_seh(
-                reinterpret_cast<const char *>(a2) + 8);
+            listCount = DMKMemory::seh_read<std::uint32_t>(reinterpret_cast<std::uintptr_t>(reinterpret_cast<const char *>(a2) + 8)).value_or(0);
         }
 
         s_natpipeListEntries.fetch_add(
@@ -2128,7 +2075,7 @@ namespace Transmog::PrefabWrapperSwap
         // unrelated wrappers and the noise drowns out the rare SUBST
         // events that matter for the body-mesh cleanup path.
         for (std::uint32_t i = 0; i < cnt; ++i) {
-            const auto orig = read_qword_seh(&listData[i * 2]);
+            const auto orig = DMKMemory::seh_read<std::uint64_t>(reinterpret_cast<std::uintptr_t>(&listData[i * 2])).value_or(0);
             saved[i] = orig;
             if (orig < 0x10000ULL)
                 continue;
@@ -2181,7 +2128,7 @@ namespace Transmog::PrefabWrapperSwap
         std::uint32_t restored = 0;
         for (std::uint32_t i = 0; i < cnt; ++i) {
             if (saved[i] == 0) continue;
-            const auto cur = read_qword_seh(&listData[i * 2]);
+            const auto cur = DMKMemory::seh_read<std::uint64_t>(reinterpret_cast<std::uintptr_t>(&listData[i * 2])).value_or(0);
             if (cur == saved[i]) continue; // not substituted
             if (write_qword_seh(&listData[i * 2], saved[i]))
                 ++restored;

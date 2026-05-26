@@ -42,51 +42,34 @@ namespace Transmog
         constexpr ptrdiff_t kOffWrapLen = 0x28;
         constexpr uint32_t kSsoCap = 0x1F;
 
-        // ----- safe reads (SEH-wrapped) -----
+        // ----- safe reads -----
+        //
+        // The `(value, bool& ok)` shape distinguishes a faulted read from
+        // a legitimate zero result, which matters at call sites where 0
+        // is a valid value (e.g. a slot index of 0). `DMKMemory::seh_read`
+        // is the underlying SEH-protected primitive; these adapters fold
+        // its `std::optional<T>` return into the local shape used by the
+        // dumper's bounded walks.
 
         uintptr_t read_qword_safe(uintptr_t addr, bool &ok) noexcept
         {
-            ok = false;
-            __try
-            {
-                uintptr_t v = *reinterpret_cast<const uintptr_t *>(addr);
-                ok = true;
-                return v;
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                return 0;
-            }
+            const auto v = DMKMemory::seh_read<uintptr_t>(addr);
+            ok = v.has_value();
+            return v.value_or(0);
         }
 
         uint32_t read_u32_safe(uintptr_t addr, bool &ok) noexcept
         {
-            ok = false;
-            __try
-            {
-                uint32_t v = *reinterpret_cast<const uint32_t *>(addr);
-                ok = true;
-                return v;
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                return 0;
-            }
+            const auto v = DMKMemory::seh_read<uint32_t>(addr);
+            ok = v.has_value();
+            return v.value_or(0);
         }
 
         uint16_t read_u16_safe(uintptr_t addr, bool &ok) noexcept
         {
-            ok = false;
-            __try
-            {
-                uint16_t v = *reinterpret_cast<const uint16_t *>(addr);
-                ok = true;
-                return v;
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                return 0;
-            }
+            const auto v = DMKMemory::seh_read<uint16_t>(addr);
+            ok = v.has_value();
+            return v.value_or(0);
         }
 
         size_t read_printable_into(const char *src, char *dst, size_t maxLen) noexcept

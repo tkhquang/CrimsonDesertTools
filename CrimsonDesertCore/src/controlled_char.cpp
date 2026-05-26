@@ -121,23 +121,16 @@ namespace CDCore
         //       p1 +0x40 -> pa::ClientCharacterControlActorComponent
         //       p1 +0x48 -> pa::ClientVehicleActorComponent
         //
-        // Step 2 (locate the CCC inside p1) now walks the table by
+        // Step 2 (locate the CCC inside p1) walks the table by
         // RTTI/vtable rather than fixed offset, so the chain is
         // session-stable regardless of how many components have
-        // registered. See find_ccc_in_component_table() below.
-        // Steps 3 (+0x40) and 4 (+0x38) dereference fixed members of
-        // the resolved CCC and are structurally stable.
+        // registered. The walk runs through `DMKRtti::find_in_pointer_table`
+        // against `k_cccTypeDescriptorName`. Steps 3 (+0x40) and 4 (+0x38)
+        // dereference fixed members of the resolved CCC and are
+        // structurally stable.
         constexpr std::ptrdiff_t k_offAppearChain1 = 0x68;
         constexpr std::ptrdiff_t k_offAppearChain3 = 0x40;
         constexpr std::ptrdiff_t k_offAppearChain4 = 0x38;
-
-        // MSVC RTTI traversal. The vtable's RTTICompleteObjectLocator
-        // (COL) sits at `vtbl - 8` (qword); the COL stores the type
-        // descriptor as an RVA at `col + 0x0C`; the type descriptor's
-        // mangled-name C-string lives at `td + 0x10`.
-        constexpr std::ptrdiff_t k_offColInVtable      = -8;
-        constexpr std::ptrdiff_t k_offTdRvaInCol       = 0x0C;
-        constexpr std::ptrdiff_t k_offNameInDescriptor = 0x10;
 
         // RTTI mangled-name string of the target component class.
         // MSVC encodes class types as `.?AV<name>@<scope>@@`. The
@@ -218,38 +211,6 @@ namespace CDCore
         std::string  s_codenameDamiane{k_defaultCodenameDamiane};
         std::string  s_codenameOongka{k_defaultCodenameOongka};
 
-        // ---- SEH-guarded primitives -------------------------------------
-
-        std::uintptr_t safe_read_qword(std::uintptr_t addr) noexcept
-        {
-            if (addr < k_minValidPtr)
-                return 0;
-            __try
-            {
-                return *reinterpret_cast<
-                    const volatile std::uintptr_t *>(addr);
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                return 0;
-            }
-        }
-
-        std::uint32_t safe_read_dword(std::uintptr_t addr) noexcept
-        {
-            if (addr < k_minValidPtr)
-                return 0;
-            __try
-            {
-                return *reinterpret_cast<
-                    const volatile std::uint32_t *>(addr);
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                return 0;
-            }
-        }
-
         // ---- Player base resolution -------------------------------------
 
         std::uintptr_t resolve_player_base_address() noexcept
@@ -275,6 +236,16 @@ namespace CDCore
         }
 
         // ---- Chain walks (SEH-guarded, single __try per call) -----------
+        //
+        // Each chain walk bundles every dereference along its path under a
+        // single SEH frame. Splitting the dereferences into individual
+        // `DMKMemory::seh_read<T>` calls would pay N SEH-frame costs in
+        // place of one and would lose the "any fault aborts the walk"
+        // property that mid-teardown windows rely on (a torn intermediate
+        // pointer must short-circuit the whole walk, not just one leaf).
+        //
+        // Single-deref reads outside these chains use
+        // `DMKMemory::seh_read<T>(addr).value_or(0)` inline at the call site.
 
         struct ChainAnchors
         {
@@ -439,132 +410,6 @@ namespace CDCore
         // once via RTTI scan on the first successful chain walk.
         std::atomic<std::uintptr_t> s_cccVtable{0};
 
-        // Compare a bounded ASCII string in memory against @p ref.
-        // Returns true only when the first ref.size() bytes match
-        // exactly and the byte at ref.size() is the NUL terminator
-        // (so a longer mangled name that begins with @p ref does
-        // not falsely match).
-        bool ascii_equals(std::uintptr_t addr,
-                          std::string_view ref) noexcept
-        {
-            if (addr < k_minValidPtr || ref.empty())
-                return false;
-            __try
-            {
-                for (std::size_t i = 0; i < ref.size(); ++i)
-                {
-                    const auto b = *reinterpret_cast<
-                        const volatile std::uint8_t *>(addr + i);
-                    if (b != static_cast<std::uint8_t>(ref[i]))
-                        return false;
-                }
-                const auto term = *reinterpret_cast<
-                    const volatile std::uint8_t *>(addr + ref.size());
-                return term == 0;
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                return false;
-            }
-        }
-
-        // Returns true when the MSVC RTTI type-descriptor name for
-        // the class whose vtable is @p vtbl equals @p ref.
-        bool vtbl_matches_rtti_name(std::uintptr_t vtbl,
-                                    std::string_view ref) noexcept
-        {
-            const auto col =
-                safe_read_qword(vtbl + k_offColInVtable);
-            if (col < k_minValidPtr)
-                return false;
-            const auto tdRva =
-                safe_read_dword(col + k_offTdRvaInCol);
-            if (tdRva == 0)
-                return false;
-            // GetModuleHandle(nullptr) returns the game EXE's load
-            // address straight out of the PEB -- effectively a
-            // constant, so no caching needed.
-            const auto imgBase = reinterpret_cast<std::uintptr_t>(
-                GetModuleHandleW(nullptr));
-            if (imgBase < k_minValidPtr)
-                return false;
-            const auto td = imgBase + tdRva;
-            return ascii_equals(td + k_offNameInDescriptor, ref);
-        }
-
-        // Generic RTTI-keyed component finder. Generalises the legacy
-        // CCC-specific walker -- see `find_component_in_table` below
-        // for the public entry point. The cache slot is caller-owned
-        // (one atomic per RTTI name) so this function carries no
-        // global state and lets each consumer name its own component.
-        //
-        // Fast path (vtable cache warm): scans up to
-        // k_componentTableSlots qwords looking for a slot whose first
-        // qword equals the cached vtable. Cost is one qword read per
-        // slot plus one indirection per non-null candidate -- two
-        // page touches at worst.
-        //
-        // Cold path (cache empty, or fast-path miss): RTTI-validates
-        // each non-null slot against @p rttiName until it finds a
-        // match, then caches that slot's vtable for all subsequent
-        // walks in this process. A fast-path miss with a populated
-        // cache normally means the table got reallocated in a
-        // save-load transient -- the next walk picks it back up. The
-        // cache itself never needs invalidation because the vtable
-        // is image-resident.
-        std::uintptr_t find_component_impl(
-            std::uintptr_t p1,
-            std::string_view rttiName,
-            std::atomic<std::uintptr_t> &vtableCache) noexcept
-        {
-            if (p1 < k_minValidPtr || rttiName.empty())
-                return 0;
-            const auto cached =
-                vtableCache.load(std::memory_order_acquire);
-            if (cached >= k_minValidPtr)
-            {
-                for (std::size_t i = 0; i < k_componentTableSlots; ++i)
-                {
-                    const auto slot =
-                        safe_read_qword(p1 + i * sizeof(std::uintptr_t));
-                    if (slot < k_minValidPtr)
-                        continue;
-                    const auto vt = safe_read_qword(slot);
-                    if (vt == cached)
-                        return slot;
-                }
-                // Fast-path missed; fall through to RTTI rescan.
-            }
-            for (std::size_t i = 0; i < k_componentTableSlots; ++i)
-            {
-                const auto slot =
-                    safe_read_qword(p1 + i * sizeof(std::uintptr_t));
-                if (slot < k_minValidPtr)
-                    continue;
-                const auto vt = safe_read_qword(slot);
-                if (vt < k_minValidPtr)
-                    continue;
-                if (!vtbl_matches_rtti_name(vt, rttiName))
-                    continue;
-                std::uintptr_t expected = 0;
-                vtableCache.compare_exchange_strong(
-                    expected, vt,
-                    std::memory_order_acq_rel,
-                    std::memory_order_acquire);
-                return slot;
-            }
-            return 0;
-        }
-
-        // Internal CCC-specific walker. Used by the appearance-path
-        // resolver; thin wrapper over the generic finder.
-        std::uintptr_t find_ccc_in_component_table(
-            std::uintptr_t p1) noexcept
-        {
-            return find_component_impl(
-                p1, k_cccTypeDescriptorName, s_cccVtable);
-        }
-
         // Walk CCOIA +0x68 -> [CCC via RTTI] -> +0x40 -> +0x38 to
         // reach the appearance-config std::string. Resolves
         // heap-buffer vs inline layout and returns the start
@@ -574,19 +419,26 @@ namespace CDCore
         {
             if (ccoia < k_minValidPtr)
                 return 0;
-            const auto p1 =
-                safe_read_qword(ccoia + k_offAppearChain1);
+            const auto p1 = DMKMemory::seh_read<std::uintptr_t>(
+                                ccoia + k_offAppearChain1)
+                                .value_or(0);
             if (p1 < k_minValidPtr) return 0;
-            const auto ccc = find_ccc_in_component_table(p1);
+            const auto ccc = DMKRtti::find_in_pointer_table(
+                p1, k_componentTableSlots,
+                k_cccTypeDescriptorName, &s_cccVtable)
+                .value_or(0);
             if (ccc < k_minValidPtr) return 0;
-            const auto p3 =
-                safe_read_qword(ccc + k_offAppearChain3);
+            const auto p3 = DMKMemory::seh_read<std::uintptr_t>(
+                                ccc + k_offAppearChain3)
+                                .value_or(0);
             if (p3 < k_minValidPtr) return 0;
-            const auto strStruct =
-                safe_read_qword(p3 + k_offAppearChain4);
+            const auto strStruct = DMKMemory::seh_read<std::uintptr_t>(
+                                       p3 + k_offAppearChain4)
+                                       .value_or(0);
             if (strStruct < k_minValidPtr) return 0;
-            const auto bufPtr =
-                safe_read_qword(strStruct + k_offStringBufPtr);
+            const auto bufPtr = DMKMemory::seh_read<std::uintptr_t>(
+                                    strStruct + k_offStringBufPtr)
+                                    .value_or(0);
             if (bufPtr >= k_minValidPtr &&
                 bufPtr < k_canonicalUpperPtr)
                 return bufPtr;
@@ -663,8 +515,9 @@ namespace CDCore
             const auto byAppearance = classify_by_appearance(ccoia);
             if (byAppearance != 0)
                 return byAppearance;
-            const auto packed =
-                safe_read_dword(ccoia + k_offCcoiaIdentity);
+            const auto packed = DMKMemory::seh_read<std::uint32_t>(
+                                    ccoia + k_offCcoiaIdentity)
+                                    .value_or(0);
             const auto highByte =
                 static_cast<std::uint8_t>((packed >> 24) & 0xFFu);
             if (highByte == k_kliffHighByte)
@@ -775,7 +628,8 @@ namespace CDCore
         // or `cd_phm_oongka`), so the loop emits at most one
         // Damiane and one Oongka entry.
         const auto actorArray =
-            safe_read_qword(chain.mgr + k_offMgrActorArray);
+            DMKMemory::seh_read<std::uintptr_t>(chain.mgr + k_offMgrActorArray)
+                .value_or(0);
         if (actorArray < k_minValidPtr)
             return written;
 
@@ -785,8 +639,9 @@ namespace CDCore
              i < k_actorListCapacity && written < cap;
              ++i)
         {
-            const auto candidate = safe_read_qword(
-                actorArray + i * sizeof(std::uintptr_t));
+            const auto candidate = DMKMemory::seh_read<std::uintptr_t>(
+                                       actorArray + i * sizeof(std::uintptr_t))
+                                       .value_or(0);
             if (candidate < k_minValidPtr ||
                 candidate == chain.kliffCcoia)
                 continue;
@@ -849,7 +704,9 @@ namespace CDCore
                     continue;
                 std::uint32_t ident = 0;
                 if (ccoia >= k_minValidPtr)
-                    ident = safe_read_dword(ccoia + k_offCcoiaIdentity);
+                    ident = DMKMemory::seh_read<std::uint32_t>(
+                                ccoia + k_offCcoiaIdentity)
+                                .value_or(0);
                 out[n].ccoia    = ccoia;
                 out[n].flag     = flag;
                 out[n].identity = ident;
@@ -895,7 +752,9 @@ namespace CDCore
         std::string_view rttiName,
         std::atomic<std::uintptr_t> &vtableCache) noexcept
     {
-        return find_component_impl(p1, rttiName, vtableCache);
+        return DMKRtti::find_in_pointer_table(
+                   p1, k_componentTableSlots, rttiName, &vtableCache)
+            .value_or(0);
     }
 
     std::uintptr_t find_component_in_controlled_actor(
@@ -905,10 +764,14 @@ namespace CDCore
         const auto ccoia = current_controlled_ccoia();
         if (ccoia < k_minValidPtr)
             return 0;
-        const auto p1 = safe_read_qword(ccoia + k_offAppearChain1);
+        const auto p1 = DMKMemory::seh_read<std::uintptr_t>(
+                            ccoia + k_offAppearChain1)
+                            .value_or(0);
         if (p1 < k_minValidPtr)
             return 0;
-        return find_component_impl(p1, rttiName, vtableCache);
+        return DMKRtti::find_in_pointer_table(
+                   p1, k_componentTableSlots, rttiName, &vtableCache)
+            .value_or(0);
     }
 
     std::uintptr_t find_component_for_equipslot(
@@ -923,14 +786,19 @@ namespace CDCore
         // standard CCOIA + k_offAppearChain1 hop to the component
         // table.
         constexpr std::ptrdiff_t k_offEquipSlotCcoiaBackref = 0x08;
-        const auto ccoia =
-            safe_read_qword(equipSlot + k_offEquipSlotCcoiaBackref);
+        const auto ccoia = DMKMemory::seh_read<std::uintptr_t>(
+                               equipSlot + k_offEquipSlotCcoiaBackref)
+                               .value_or(0);
         if (ccoia < k_minValidPtr)
             return 0;
-        const auto p1 = safe_read_qword(ccoia + k_offAppearChain1);
+        const auto p1 = DMKMemory::seh_read<std::uintptr_t>(
+                            ccoia + k_offAppearChain1)
+                            .value_or(0);
         if (p1 < k_minValidPtr)
             return 0;
-        return find_component_impl(p1, rttiName, vtableCache);
+        return DMKRtti::find_in_pointer_table(
+                   p1, k_componentTableSlots, rttiName, &vtableCache)
+            .value_or(0);
     }
 
 } // namespace CDCore

@@ -5,7 +5,6 @@
 #include <DetourModKit.hpp>
 
 #include <Windows.h>
-#include <Psapi.h>
 
 #include <array>
 #include <atomic>
@@ -62,29 +61,6 @@ namespace Transmog::ColorOverride::InternerHook
         std::atomic<std::uintptr_t> g_lastEntriesBase{0};
         std::atomic<std::size_t>    g_lastEntriesIdx{0};
 
-        // SEH-guarded reads.
-        std::uint64_t safe_read_qword(std::uintptr_t addr) noexcept
-        {
-            __try
-            {
-                return *reinterpret_cast<const std::uint64_t *>(addr);
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                return 0;
-            }
-        }
-        std::uint32_t safe_read_dword(std::uintptr_t addr) noexcept
-        {
-            __try
-            {
-                return *reinterpret_cast<const std::uint32_t *>(addr);
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                return 0;
-            }
-        }
         bool safe_is_property_name(const char *p) noexcept
         {
             if (p == nullptr) return false;
@@ -196,10 +172,12 @@ namespace Transmog::ColorOverride::InternerHook
             {
                 const auto entryAddr =
                     entriesBase + i * k_entryStride;
-                const auto namePtr = safe_read_qword(
-                    entryAddr + k_offName);
-                const auto token = safe_read_dword(
-                    entryAddr + k_offToken);
+                const auto namePtr = DMKMemory::seh_read<std::uint64_t>(
+                                         entryAddr + k_offName)
+                                         .value_or(0);
+                const auto token = DMKMemory::seh_read<std::uint32_t>(
+                                       entryAddr + k_offToken)
+                                       .value_or(0);
                 // Bail when we walk off the end -- consecutive
                 // entries with null/garbage indicate we've left the
                 // allocated array.
@@ -240,15 +218,11 @@ namespace Transmog::ColorOverride::InternerHook
         void do_init() noexcept
         {
             auto &logger = DMK::Logger::get_instance();
-            const auto hmod = GetModuleHandleW(nullptr);
-            if (hmod == nullptr) return;
-            MODULEINFO mi{};
-            if (!GetModuleInformation(GetCurrentProcess(), hmod,
-                                      &mi, sizeof(mi)))
-                return;
-            const auto modBase =
-                reinterpret_cast<std::uintptr_t>(mi.lpBaseOfDll);
-            const auto modSize = mi.SizeOfImage;
+            const auto range = DMKMemory::host_module_range();
+            if (!range.valid()) return;
+            const auto modBase = range.base;
+            const auto modSize =
+                static_cast<std::size_t>(range.end - range.base);
 
             const auto funcAddr = Transmog::resolve_address(
                 Transmog::k_colorTokenInternerCandidates,
@@ -269,7 +243,7 @@ namespace Transmog::ColorOverride::InternerHook
                     funcAddr);
                 return;
             }
-            const auto stateAddr = safe_read_qword(stateSlot);
+            const auto stateAddr = DMKMemory::seh_read<std::uint64_t>(stateSlot).value_or(0);
             if (stateAddr < 0x10000ULL)
             {
                 logger.warning(
@@ -295,8 +269,8 @@ namespace Transmog::ColorOverride::InternerHook
                 for (std::size_t i = 0; i < 256; ++i)
                 {
                     const auto e = base + i * 32;
-                    const auto np = safe_read_qword(e + 0x08);
-                    const auto tk = safe_read_dword(e + 0x18);
+                    const auto np = DMKMemory::seh_read<std::uint64_t>(e + 0x08).value_or(0);
+                    const auto tk = DMKMemory::seh_read<std::uint32_t>(e + 0x18).value_or(0);
                     if (np < 0x10000ULL || np > 0x7FFFFFFFFFFFULL)
                         continue;
                     if (tk == 0 || tk > 0x100000u) continue;
@@ -306,8 +280,8 @@ namespace Transmog::ColorOverride::InternerHook
                 }
                 return valid;
             };
-            const auto base40 = safe_read_qword(stateAddr + 0x40);
-            const auto base48 = safe_read_qword(stateAddr + 0x48);
+            const auto base40 = DMKMemory::seh_read<std::uint64_t>(stateAddr + 0x40).value_or(0);
+            const auto base48 = DMKMemory::seh_read<std::uint64_t>(stateAddr + 0x48).value_or(0);
             const auto v40 = probe(base40);
             const auto v48 = probe(base48);
             logger.info(
@@ -380,14 +354,15 @@ namespace Transmog::ColorOverride::InternerHook
                 expected, true, std::memory_order_acq_rel))
             return 0;
         s_lastMs.store(nowMs, std::memory_order_release);
-        const auto stateAddr = safe_read_qword(slot);
+        const auto stateAddr = DMKMemory::seh_read<std::uint64_t>(slot).value_or(0);
         std::size_t added = 0;
         if (stateAddr >= 0x10000ULL)
         {
             const auto entriesOff = g_offEntriesArray.load(
                 std::memory_order_acquire);
-            const auto entriesBase = safe_read_qword(
-                stateAddr + entriesOff);
+            const auto entriesBase = DMKMemory::seh_read<std::uint64_t>(
+                                         stateAddr + entriesOff)
+                                         .value_or(0);
             if (entriesBase >= 0x10000ULL)
             {
                 // Resume the walk where the previous one stopped if
