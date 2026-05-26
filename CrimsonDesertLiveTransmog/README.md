@@ -177,9 +177,9 @@ ColorOverride = false
 
 ; --- Unmuffle Helm Voice ---
 ; Removes the plate/heavy-helmet voice muffle on protagonists. NPC
-; voices keep their vanilla muffle. Set to false to restore the engine's
-; stock behaviour. Toggle changes take effect on the next game launch.
-UnmuffleHelmVoice = true
+; voices keep their vanilla muffle. Off by default; set to true to remove
+; the muffle. Toggle changes take effect on the next game launch.
+UnmuffleHelmVoice = false
 ```
 
 Presets are stored in `CrimsonDesertLiveTransmog_presets.json` (auto-generated alongside the INI).
@@ -196,7 +196,7 @@ See the full list at the [Supported Input Names](https://github.com/tkhquang/Det
 ## Known Limitations
 
 - **[Experimental] Color Override** is off by default. Set `ColorOverride = true` in the `[Experimental]` INI section to enable a per-region color picker that paints transmog items (including outfits the in-game dye merchant refuses). Changes take effect on the next game launch. Expect rough edges.
-- **[Experimental] Unmuffle Helm Voice** is on by default. Plate and heavy helmets no longer muffle your protagonist's voice; NPC voices still muffle as in vanilla. Set `UnmuffleHelmVoice = false` in the `[Experimental]` INI section to restore the stock helm voice muffle. Changes take effect on the next game launch.
+- **[Experimental] Unmuffle Helm Voice** is off by default. Set `UnmuffleHelmVoice = true` in the `[Experimental]` INI section to stop plate and heavy helmets from muffling your protagonist's voice; NPC voices still muffle as in vanilla. Changes take effect on the next game launch.
 - **[Experimental] Dye support shipped as a rough POC/MVP**, please bear with the UX for now. Note that not every item is dyeable; applying a color to a non-dyeable slot will produce no visual change.
 - **Helm visibility setting is overridden** - the in-game helmet visibility setting is overridden while LT is active. Workaround: set the Helm slot in the LT picker to "(none)" to hide the helmet.
 - **Protagonist switch may leave the picker on the previous character** - when switching protagonists, the LT picker may continue to show the previous protagonist's name and presets, and the dropdown may not let you switch. This is a known bug under investigation.

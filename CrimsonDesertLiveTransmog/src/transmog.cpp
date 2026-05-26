@@ -108,14 +108,14 @@ namespace Transmog
             "Experimental", "ColorOverride", "Color Override",
             flag_color_override(), false);
 
-        // Experimental: helm voice-unmuffle filter. Enabled by default;
-        // disable to restore the engine's stock plate/heavy-helm voice
+        // Experimental: helm voice-unmuffle filter. Disabled by default;
+        // enable to remove the engine's stock plate/heavy-helm voice
         // muffle on protagonists. The hook only installs at startup
         // when this is true, so toggle changes take effect on the next
         // game launch. NPC voice muffle is unaffected either way.
         DMK::Config::register_atomic<bool>(
             "Experimental", "UnmuffleHelmVoice", "Unmuffle Helm Voice",
-            flag_helm_audio_unmuffle(), true);
+            flag_helm_audio_unmuffle(), false);
 
         // One-shot diagnostic TSV dumps. Off by default; enable to
         // capture item-catalog / item->prefab snapshots once
@@ -1258,9 +1258,9 @@ namespace Transmog
         else
         {
             DMK::Logger::get_instance().info(
-                "[helm-audio] disabled via "
-                "`[Experimental] UnmuffleHelmVoice = false`; "
-                "stock plate/heavy-helm voice muffle preserved.");
+                "[helm-audio] disabled; set "
+                "`[Experimental] UnmuffleHelmVoice = true` to remove "
+                "the stock plate/heavy-helm voice muffle.");
         }
 
         // Per-slot dye-record injector. Hooks the engine's dye-copier

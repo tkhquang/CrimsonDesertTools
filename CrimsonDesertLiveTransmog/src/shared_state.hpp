@@ -131,9 +131,9 @@ namespace Transmog
     /// it did before the ColorOverride port landed.
     std::atomic<bool> &flag_color_override();
 
-    /// Master gate for the helm voice-unmuffle filter. True by default;
-    /// disable via the `[Experimental] UnmuffleHelmVoice` INI key to
-    /// restore the engine's stock plate/heavy-helm voice muffle. When
+    /// Master gate for the helm voice-unmuffle filter. False by default;
+    /// enable via the `[Experimental] UnmuffleHelmVoice` INI key to
+    /// remove the engine's stock plate/heavy-helm voice muffle. When
     /// false, the passive-skill registrar inline hook is not installed
     /// and the muffle behaves as it does in vanilla. Toggle is read
     /// once at startup; takes effect on the next game launch.
