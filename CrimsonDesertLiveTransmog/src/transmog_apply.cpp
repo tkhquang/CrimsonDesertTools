@@ -367,32 +367,6 @@ namespace Transmog
         return needs_carrier(itemId, std::string("Kliff"));
     }
 
-    // SEH-safe memory helpers (MSVC: __try cannot coexist with C++
-    // object unwinding in the same function).
-    static uintptr_t read_qword_seh(uintptr_t addr) noexcept
-    {
-        __try
-        {
-            return *reinterpret_cast<volatile uintptr_t *>(addr);
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER)
-        {
-            return 0;
-        }
-    }
-    static bool memcpy_seh(void *dst, const void *src, size_t n) noexcept
-    {
-        __try
-        {
-            std::memcpy(dst, src, n);
-            return true;
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER)
-        {
-            return false;
-        }
-    }
-
     // Descriptor size. Stride between consecutive descriptors observed
     // in CE on the live build:
     //
@@ -510,9 +484,11 @@ namespace Transmog
 
         const auto carrierSlotAddr =
             ci.ptrArray + static_cast<uint64_t>(carrierId) * 8;
-        const uintptr_t targetDesc = read_qword_seh(
-            ci.ptrArray + static_cast<uint64_t>(targetId) * 8);
-        const uintptr_t carrierDesc = read_qword_seh(carrierSlotAddr);
+        const uintptr_t targetDesc = DMKMemory::seh_read<uintptr_t>(
+                                         ci.ptrArray + static_cast<uint64_t>(targetId) * 8)
+                                         .value_or(0);
+        const uintptr_t carrierDesc =
+            DMKMemory::seh_read<uintptr_t>(carrierSlotAddr).value_or(0);
 
         if (targetDesc < 0x10000 || carrierDesc < 0x10000)
         {
@@ -537,8 +513,7 @@ namespace Transmog
             return;
         }
 
-        if (!memcpy_seh(hybrid, reinterpret_cast<const void *>(targetDesc),
-                        k_descBufSize))
+        if (!DMKMemory::seh_read_bytes(targetDesc, hybrid, k_descBufSize))
         {
             logger.warning("[carrier] fault copying target descriptor");
             VirtualFree(hybrid, 0, MEM_RELEASE);
@@ -552,9 +527,8 @@ namespace Transmog
         {
             if (p.off + p.len > k_descBufSize)
                 continue;
-            if (!memcpy_seh(hybrid + p.off,
-                            reinterpret_cast<const void *>(carrierDesc + p.off),
-                            p.len))
+            if (!DMKMemory::seh_read_bytes(carrierDesc + p.off,
+                                           hybrid + p.off, p.len))
             {
                 logger.warning("[carrier] fault patching carrier field "
                                "at +{:#x} len={}",

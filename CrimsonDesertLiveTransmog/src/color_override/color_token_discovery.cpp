@@ -6,7 +6,6 @@
 #include <DetourModKit/scanner.hpp>
 
 #include <Windows.h>
-#include <Psapi.h>
 
 #include <array>
 #include <atomic>
@@ -162,27 +161,20 @@ namespace Transmog::ColorOverride::TokenSlotDiscovery
             using clock = std::chrono::steady_clock;
             const auto t0 = clock::now();
 
-            // Get module base + image size.
-            const auto hmod = GetModuleHandleW(nullptr);
-            if (hmod == nullptr)
+            // Get module base + image size from DMK's cached
+            // host-module range (single atomic load on the warm path).
+            const auto range = DMKMemory::host_module_range();
+            if (!range.valid())
             {
                 DMK::Logger::get_instance().warning(
-                    "[token-discovery] GetModuleHandle failed");
-                g_complete.store(true, std::memory_order_release);
-                return;
-            }
-            MODULEINFO mi{};
-            if (!GetModuleInformation(GetCurrentProcess(), hmod,
-                                      &mi, sizeof(mi)))
-            {
-                DMK::Logger::get_instance().warning(
-                    "[token-discovery] GetModuleInformation failed");
+                    "[token-discovery] host_module_range unavailable");
                 g_complete.store(true, std::memory_order_release);
                 return;
             }
             const auto *base =
-                reinterpret_cast<const std::byte *>(mi.lpBaseOfDll);
-            const auto size = mi.SizeOfImage;
+                reinterpret_cast<const std::byte *>(range.base);
+            const auto size =
+                static_cast<std::size_t>(range.end - range.base);
 
             // Walk every property-registration call site emitted by
             // the two TLS-guarded registrars (sub_14274A3C0 and
