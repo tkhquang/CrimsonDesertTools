@@ -100,6 +100,7 @@ set(COMMON_SOURCES
     src/part_show_suppress.cpp
     src/real_part_tear_down.cpp
     src/prefab_wrapper_swap.cpp
+    src/helm_audio_filter.cpp
     src/color_override/host_scope.cpp
     src/dye_record_inject.cpp
     src/color_override/setter_substitute.cpp

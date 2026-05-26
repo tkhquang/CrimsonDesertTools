@@ -196,6 +196,12 @@ PrevHotkey =
 ; HIGHLY EXPERIMENTAL -- disabled by default. Toggle changes take
 ; effect on the next game launch.
 ColorOverride = false
+
+; --- Unmuffle Helm Voice ---
+; Removes the plate/heavy-helmet voice muffle on protagonists. NPC
+; voices keep their vanilla muffle. Set to false to restore the engine's
+; stock behaviour. Toggle changes take effect on the next game launch.
+UnmuffleHelmVoice = true
 [/code]
 
 [size=4]Hotkey Format[/size]
@@ -214,6 +220,7 @@ See the full list at the [url=https://github.com/tkhquang/DetourModKit?tab=readm
 
 [list]
 [*][b][Experimental] Color Override[/b] is off by default. Set [b]ColorOverride = true[/b] in the [b][Experimental][/b] INI section to enable a per-region color picker that paints transmog items (including outfits the in-game dye merchant refuses). Changes take effect on the next game launch. Expect rough edges.
+[*][b][Experimental] Unmuffle Helm Voice[/b] is on by default. Plate and heavy helmets no longer muffle your protagonist's voice; NPC voices still muffle as in vanilla. Set [b]UnmuffleHelmVoice = false[/b] in the [b][Experimental][/b] INI section to restore the stock helm voice muffle. Changes take effect on the next game launch.
 [*][b][Experimental] Dye support shipped as a rough POC/MVP[/b], please bear with the UX for now. Note that not every item is dyeable; applying a color to a non-dyeable slot will produce no visual change.
 [*][b]Helm visibility setting is overridden[/b] -the in-game helmet visibility setting is overridden while LT is active. Workaround: set the Helm slot in the LT picker to [b](none)[/b] to hide the helmet.
 [*][b]Protagonist switch may leave the picker on the previous character[/b] -when switching protagonists, the LT picker may continue to show the previous protagonist's name and presets, and the dropdown may not let you switch. This is a known bug under investigation.

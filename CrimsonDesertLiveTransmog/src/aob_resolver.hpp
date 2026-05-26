@@ -1467,4 +1467,403 @@ namespace Transmog
     inline constexpr std::size_t k_colorTokenRegistrarCallAobCount =
         k_colorTokenRegistrarCallAobs.size();
 
+    /*
+     * sub_141C6CC90 -- per-tag passive-skill registrar. Invoked once
+     * per `{u16 tag, u32 lvl}` audio-classifier entry on the equipped
+     * item (iteminfo desc+0x100 vector). Reads the tag from `*r8`, the
+     * level from `r9`, and the character skill manager from `rcx`. The
+     * helm-audio filter hooks the function entry inline and short-
+     * circuits the call (zero the status int, return) when the call
+     * matches the audio-classifier code path (a7==0, 8-byte
+     * {u16 tag, u16 0, u16 lvl, u16 0} buffer at `a3`) AND the
+     * resolved skill's first per-level entry classifies as
+     * `pa::GameAudioEffectBuffData` AND the host actor classifies as
+     * a configured protagonist. Deriving muffle-class membership from
+     * the engine's own RTTI (rather than a hardcoded tag-id set) means
+     * any future tag backed by the same class is admitted
+     * automatically. See helm_audio_filter.{cpp,hpp} for the gate
+     * rationale and the bypass-safety analysis on the single virtual
+     * call SUPPRESS bypasses.
+     *
+     * Prologue (v1.08.00 .text @ 0x141C6CC90):
+     *   44 89 4C 24 20             mov  [rsp+20h], r9d   ; home a3
+     *   48 89 54 24 10             mov  [rsp+10h], rdx   ; home a1
+     *   55 53 56 57                push rbp/rbx/rsi/rdi
+     *   41 54 41 56 41 57          push r12/r14/r15
+     *   48 8D AC 24 B0 FE FF FF    lea  rbp, [rsp-150h]
+     *   48 81 EC 60 02 00 00       sub  rsp, 260h
+     *
+     * The 7-register save list together with the specific lea / sub
+     * immediates (-0x150, +0x260) pin this prologue uniquely in the
+     * v1.08.00 .text -- 1 match in the whole module. The two leading
+     * argument-home stores anchor the entry; the 7 pushes give a
+     * compact callee-save fingerprint; the lea/sub pair encodes the
+     * function's specific 0x4B0-byte frame.
+     */
+    /**
+     * @brief sub_1402FB2C0 -- engine's u16-tag -> skill record
+     *        resolver. Used by the helm-audio chain walk to map an
+     *        audio-classifier tag to its `pa::SkillInfo` record so
+     *        the per-level entry's class can be inspected without
+     *        hardcoded tag tokens.
+     *
+     * Function signature: `pa::SkillInfo* (*)(uint16_t* tag_ptr)`.
+     * Reads `*tag_ptr` as a u16 index into the SkillInfoManager's
+     * pointer array at `manager + 0x50`, returns the record pointer
+     * (or `MEMORY[0x145F34258]`, the manager's `default skill`
+     * sentinel, on out-of-range / unbound tags).
+     *
+     * Prologue (v1.08.00 .text @ 0x1402FB2C0):
+     *   48 89 5C 24 10           mov  [rsp+10], rbx       ; save callee
+     *   48 89 6C 24 18           mov  [rsp+18], rbp
+     *   56 57                    push rsi/rdi
+     *   41 56                    push r14
+     *   48 83 EC 40              sub  rsp, 40             ; frame
+     *   0F B7 39                 movzx edi, word ptr [rcx]; *a1 (u16 tag)
+     *   48 8B 1D ?? ?? ?? ??     mov  rbx, [rip+disp]     ; SkillInfoMgr
+     *   3B 7B 08                 cmp  edi, [rbx+8]        ; bound check
+     *
+     * Many sibling resolvers (ItemInfo, ParticleInfo, etc.) share
+     * the same prologue; what pins THIS function as the SkillInfo
+     * resolver is the specific RIP-rel offset to MEMORY[0x145F9B878].
+     * Every candidate keeps the `48 8B 1D 9C 05 CA 05` mov literal
+     * (baked disp32 to SkillInfoMgr) -- wildcarding that disp32 would
+     * collide with all 111 sibling `pa::*InfoManager` resolvers.
+     *
+     * P1 bakes the disp32 inside the function prologue (entry anchor).
+     * P2 anchors at entry+0x12 on the body sequence (movzx + mov +
+     * cmp + jnb + lea + table load) so the cascade still resolves when
+     * a future build reshapes the prologue. P3 extends P2 forward
+     * through the table-lookup tail (test + jnz + cmp + jnz + lea on
+     * the manager's `+0x88` default-skill sentinel) for maximum anti-
+     * collision while keeping the baked disp anchor.
+     */
+    inline constexpr AddrCandidate k_skillTagResolverCandidates[] = {
+        // P1 -- entry-anchored, RIP-rel to SkillInfoManager baked in.
+        // 1 unique match in v1.08.00 .text.
+        {"SkillTagResolver_P1_PrologueWithMgr",
+         "48 89 5C 24 10 "
+         "48 89 6C 24 18 "
+         "56 57 41 56 "
+         "48 83 EC 40 "
+         "0F B7 39 "
+         "48 8B 1D 9C 05 CA 05 "
+         "3B 7B 08",
+         ResolveMode::Direct, 0, 0},
+
+        // P2 -- body anchor at entry+0x12, past the 5-byte SafetyHook
+        // prologue-overwrite window. Sequence:
+        //   0F B7 39                  movzx edi, word ptr [rcx]   ; *tag
+        //   48 8B 1D 9C 05 CA 05      mov   rbx, cs:_SkillInfoMgr ; baked disp32
+        //   3B 7B 08                  cmp   edi, [rbx+8]          ; bound check
+        //   0F 83 ?? ?? ?? ??         jnb   <oob_branch>          ; rel32 wildcarded
+        //   4C 8D 34 FD 00 00 00 00   lea   r14, ds:[rdi*8 + 0]   ; index scale
+        //   48 8B 43 50               mov   rax, [rbx+0x50]       ; entry array
+        //   49 8B 04 06               mov   rax, [r14+rax]        ; entry load
+        // The baked SkillInfoMgr disp32 is the discriminator vs. the
+        // sibling resolvers; the `4C 8D 34 FD 00 00 00 00` (scaled-
+        // index lea with zero base) shape is the unique table walk.
+        // dispOffset = -0x12 walks back to the entry.
+        {"SkillTagResolver_P2_BodyBoundCheck",
+         "0F B7 39 "
+         "48 8B 1D 9C 05 CA 05 "
+         "3B 7B 08 "
+         "0F 83 ?? ?? ?? ?? "
+         "4C 8D 34 FD 00 00 00 00 "
+         "48 8B 43 50 "
+         "49 8B 04 06",
+         ResolveMode::Direct, -0x12, 0},
+
+        // P3 -- deeper body anchor: extends P2 through the entry-found
+        // arm and the `mgr + 0x88` default-skill sentinel check:
+        //   ... (P2 body) ...
+        //   48 85 C0                  test  rax, rax
+        //   0F 85 ?? ?? ?? ??         jnz   <found_branch>      ; rel32 wildcarded
+        //   48 39 83 88 00 00 00      cmp   [rbx+0x88], rax     ; sentinel cmp
+        //   75 ??                     jnz   short <skip>        ; rel8 wildcarded
+        //   4C 8D 8B 88 00 00 00      lea   r9, [rbx+0x88]
+        // The rel8 jnz IS wildcarded (would normally violate
+        // aob-signatures DOs/DONTs section 9 on encoding-flip risk),
+        // but the surrounding baked SkillInfoMgr disp + the literal
+        // `+0x88` sentinel offset keep the pattern unique even with
+        // the rel8 free. dispOffset = -0x12 walks back to the entry.
+        {"SkillTagResolver_P3_BodyTableTail",
+         "0F B7 39 "
+         "48 8B 1D 9C 05 CA 05 "
+         "3B 7B 08 "
+         "0F 83 ?? ?? ?? ?? "
+         "4C 8D 34 FD 00 00 00 00 "
+         "48 8B 43 50 "
+         "49 8B 04 06 "
+         "48 85 C0 "
+         "0F 85 ?? ?? ?? ?? "
+         "48 39 83 88 00 00 00 "
+         "75 ?? "
+         "4C 8D 8B 88 00 00 00",
+         ResolveMode::Direct, -0x12, 0},
+    };
+
+    /**
+     * @brief `pa::GameAudioEffectBuffData` vtable -- the class
+     *        marker we compare buff-instance vtable pointers against
+     *        to identify muffle-class skills.
+     *
+     * Each `pa::GameAudioEffectBuffData` instance stores the address
+     * of vfunc[0] (= vtable + 8 bytes past the RTTI metadata ptr) in
+     * its first qword. The chain walk in helm_audio_filter.cpp
+     * resolves a tag's skill record -> per-level entry array -> first
+     * entry, then reads `*entry` and compares against the value
+     * resolved here.
+     *
+     * Resolution strategy: AOB on the class's CONSTRUCTOR's final
+     * vtable assignment (which lives in `.text`), then use
+     * RipRelative mode to read the constructor's RIP-rel disp32 to
+     * compute the absolute vtable address. Direct AOB scan on the
+     * vtable bytes themselves cannot work because DetourModKit's
+     * `scan_executable_regions` filters by READABLE_EXEC_FLAGS only
+     * (scanner.cpp:669) and `.rdata` (PAGE_READONLY) is skipped.
+     *
+     * Constructor tail at v1.08.00 .text @ 0x141A09500:
+     *   48 89 91 88 00 00 00         mov [rcx+88h], rdx        ; parent ctor fill
+     *   48 8D 05 ?? ?? ?? ??         lea rax, [rip+disp32]     ; load vtable addr
+     *   48 89 01                     mov [rcx], rax            ; store at obj[0]
+     *   C6 81 90 00 00 00 03         mov byte ptr [rcx+90h], 3 ; init audio_class byte
+     *   48 8B C1                     mov rax, rcx              ; this-return
+     *   C3                           ret
+     *
+     * The 28-byte signature is unique across v1.08.00 .text (1 match);
+     * the disp32 is wildcarded for build-portability. RipRelative
+     * decode:
+     *   - disp_offset    = 10  (offset of disp32 from match start;
+     *                          the LEA is at match+7, opcode `48 8D 05`
+     *                          is 3 bytes, disp32 starts at match+10)
+     *   - instr_end_offset = 14 (next instruction begins 7 bytes after
+     *                            the LEA start; LEA = 7 bytes; match+7+7
+     *                            = match+14)
+     * Resolved address = match + 14 + sign_extend(disp32). The 0x90-
+     * byte audio_class init right after the vtable store anchors the
+     * pattern specifically to GameAudioEffectBuffData -- other ctors
+     * that do similar vtable assignments have different post-vtable
+     * field initialization shapes.
+     *
+     * P2 extends the anchor one instruction earlier (the parent ctor's
+     * +0x84 state-init byte write) to add a stable 7-byte discriminator
+     * upstream of the vtable LEA; disp_offset shifts to 17 and
+     * instr_end_offset to 21 to follow the LEA's new position within
+     * the window. P3 walks back another 17 bytes to also include the
+     * `[rcx+0x78]` qword fill and `[rcx+0x80]` dword fill that
+     * GameAudioEffectBuffData's parent ctor performs immediately
+     * before the +0x84 byte; this gives the widest sub-frame-shaped
+     * fingerprint without dragging in calls that vary across builds.
+     */
+    inline constexpr AddrCandidate
+        k_gameAudioEffectVtableCandidates[] = {
+            // P1 -- constructor tail with RIP-rel LEA. 1 unique match
+            // in v1.08.00 .text. Resolved disp32 = 0x032CE5FA ->
+            // match+14+disp = 0x144CD7B08 (= vfunc[0] address, what
+            // objects store in their first qword).
+            {"GameAudioEffectVtable_P1_CtorLea",
+             "48 89 91 88 00 00 00 "
+             "48 8D 05 ?? ?? ?? ?? "
+             "48 89 01 "
+             "C6 81 90 00 00 00 03 "
+             "48 8B C1 "
+             "C3",
+             ResolveMode::RipRelative, 10, 14},
+
+            // P2 -- extend P1 backwards by the parent ctor's +0x84
+            // state-init byte:
+            //   C6 81 84 00 00 00 03   mov  byte ptr [rcx+0x84], 3
+            //   48 89 91 88 00 00 00   mov  [rcx+0x88], rdx
+            //   48 8D 05 ?? ?? ?? ??   lea  rax, [rip+disp32]  ; vtable
+            //   48 89 01               mov  [rcx], rax
+            //   C6 81 90 00 00 00 03   mov  byte ptr [rcx+0x90], 3
+            //   48 8B C1               mov  rax, rcx
+            //   C3                     ret
+            // The dual `byte ptr [..0x84]=3` + `byte ptr [..0x90]=3`
+            // state-byte pair flanks the LEA and pins this ctor against
+            // sibling effect-buff ctors that init only one of the two
+            // bytes. LEA now sits 7 bytes deeper into the pattern, so
+            // disp_offset = 10 + 7 = 17, instr_end_offset = 14 + 7 = 21.
+            {"GameAudioEffectVtable_P2_CtorStatePair",
+             "C6 81 84 00 00 00 03 "
+             "48 89 91 88 00 00 00 "
+             "48 8D 05 ?? ?? ?? ?? "
+             "48 89 01 "
+             "C6 81 90 00 00 00 03 "
+             "48 8B C1 "
+             "C3",
+             ResolveMode::RipRelative, 17, 21},
+
+            // P3 -- extend P2 backwards by the parent ctor's earlier
+            // payload writes at [rcx+0x78] (qword) and [rcx+0x80]
+            // (dword):
+            //   48 89 51 78            mov  [rcx+0x78], rdx
+            //   89 91 80 00 00 00      mov  [rcx+0x80], edx
+            //   ... (P2 body) ...
+            // These two writes capture the parent ctor's signature
+            // packing of `rdx` into three sequential fields (qword at
+            // 0x78, dword at 0x80, byte at 0x84) -- a layout shape
+            // specific to this effect-buff family. LEA shifts a further
+            // 10 bytes (P2 backward extension was 7; P3 adds 10), so
+            // disp_offset = 17 + 10 = 27, instr_end_offset = 21 + 10 = 31.
+            {"GameAudioEffectVtable_P3_CtorFullPayload",
+             "48 89 51 78 "
+             "89 91 80 00 00 00 "
+             "C6 81 84 00 00 00 03 "
+             "48 89 91 88 00 00 00 "
+             "48 8D 05 ?? ?? ?? ?? "
+             "48 89 01 "
+             "C6 81 90 00 00 00 03 "
+             "48 8B C1 "
+             "C3",
+             ResolveMode::RipRelative, 27, 31},
+        };
+
+    // -----------------------------------------------------------------------
+    // PlayerStatic -- engine global whose chain reaches the currently-
+    // controlled protagonist's pa::ServerChildOnlyInGameActor.
+    //
+    // Used by helm_audio_filter.cpp for the Kliff init-race fallback:
+    // when the actor's CharacterAssets vector has not yet been wired
+    // up (the first muffle event after world load), the asset-string
+    // scan returns Unknown. If the chain leaf here equals the host
+    // we are classifying, we attribute the host to Kliff (he is
+    // always the first-spawned protagonist and the controlled actor
+    // at world load).
+    //
+    // Walk (runtime, v1.08):
+    //   *(static)         -> root container
+    //   *(root  + 0x18)   -> pa::NwVirtualAsyncSession
+    //   *(nwSes + 0xA0)   -> pa::ServerUserActor
+    //   *(srvUA + 0xD0)   -> pa::ServerChildOnlyInGameActor (controlled)
+    //
+    // P1 anchors on the writer site inside sub_142104390. P2 extends
+    // that same writer forward through the TLS-guarded null-check
+    // (jz + gs:0x58 TIB load + compare against `[r12+rdx]`) so the
+    // cascade still resolves if a future compiler reshuffles the
+    // `mov r12d, 0x204` immediate within the same writer. P3 anchors
+    // on an unrelated reader site inside sub_14080E8E0 (SafeLaunch /
+    // pre-character-spawn path) -- a completely different call graph
+    // that loads PlayerStatic as the first argument to sub_1421062F0.
+    // P3 keeps the cascade alive even if the entire writer function
+    // around P1/P2 is reshaped by a future patch.
+    // -----------------------------------------------------------------------
+    inline constexpr AddrCandidate k_playerStaticCandidates[] = {
+        // P1 -- unique writer site at sub_1420D0470. Carries the
+        // distinctive `mov r12d, 0x204` initialisation tag immediately
+        // after the writer, plus a follow-on load from [rdi+0xF8].
+        // Both the SEMANTIC constant 0x204 and the +0xF8 ABI offset
+        // are kept literal; the rel8 of the trailing jcc is wildcarded.
+        {"PlayerStatic_P1_WriterSite",
+         "4C 89 3D ?? ?? ?? ?? 48 8B 8F F8 00 00 00 "
+         "41 BC 04 02 00 00 48 85 C9 ??",
+         ResolveMode::RipRelative, 3, 7},
+
+        // P2 -- writer site extended through the TLS-guard tail. Same
+        // store as P1 (`mov [rip+disp32], r15`) followed by the
+        // [rdi+0xF8] field load and the 0x204 init tag, then continues
+        // past the `74 ??` short-jz into the TIB load and the per-
+        // thread flag-byte compare:
+        //   74 ??                          jz   short <skip>          ; rel8 wildcarded
+        //   65 48 8B 04 25 58 00 00 00     mov  rax, gs:0x58          ; TIB
+        //   48 8B 10                       mov  rdx, [rax]            ; TLS block
+        //   45 38 3C 14                    cmp  [r12+rdx], r15b       ; flag test
+        // The rel8 jz byte is wildcarded for encoding-flip safety.
+        // The trailing TLS+compare shape is unique-text in v1.08.00
+        // .text and pins the writer even if the 0x204 immediate ever
+        // shifts.
+        // RipRelative offsets are unchanged from P1 (disp_offset = 3,
+        // instr_end_offset = 7) because the store is still the first
+        // instruction in the window.
+        {"PlayerStatic_P2_WriterSiteTlsTail",
+         "4C 89 3D ?? ?? ?? ?? 48 8B 8F F8 00 00 00 "
+         "41 BC 04 02 00 00 48 85 C9 74 ?? "
+         "65 48 8B 04 25 58 00 00 00 "
+         "48 8B 10 "
+         "45 38 3C 14",
+         ResolveMode::RipRelative, 3, 7},
+
+        // P3 -- reader site at sub_14080E8E0+0x144. Orthogonal call
+        // graph (SafeLaunch / pre-character-spawn path): loads
+        // PlayerStatic into rcx as the first argument to
+        // sub_1421062F0, with the remaining args being two xor-zeroed
+        // dwords and an `lea rdx, [rsp+0x64]` out-pointer.
+        //   45 33 C9                   xor  r9d, r9d              ; arg4 = 0
+        //   45 33 C0                   xor  r8d, r8d              ; arg3 = 0
+        //   48 8D 54 24 64             lea  rdx, [rsp+0x64]       ; out int*
+        //   48 8B 0D ?? ?? ?? ??       mov  rcx, cs:_PlayerStatic ; baked disp32
+        //   E8 ?? ?? ?? ??             call sub_1421062F0
+        // `mov rcx, [rip+disp32]` is 7 bytes (`48 8B 0D` + disp32);
+        // the load starts at pattern offset 11, so disp32 starts at
+        // offset 14 and the next instruction begins at offset 18.
+        // RIP-rel target = match + 18 + sign_extend(disp32) =
+        // cs:0x145F9B380. Genuinely independent from P1/P2 -- a patch
+        // that shuffles only sub_142104390 leaves this anchor intact.
+        {"PlayerStatic_P3_SafeLaunchReader",
+         "45 33 C9 45 33 C0 "
+         "48 8D 54 24 64 "
+         "48 8B 0D ?? ?? ?? ?? "
+         "E8 ?? ?? ?? ??",
+         ResolveMode::RipRelative, 14, 18},
+    };
+
+    inline constexpr AddrCandidate k_helmAudioRegistrarCandidates[] = {
+        // P1 -- full prologue, entry-anchored. dispOffset = 0 because
+        // the pattern starts exactly at the function entry.
+        {"HelmAudioRegistrar_P1_FullPrologue",
+         "44 89 4C 24 20 "
+         "48 89 54 24 10 "
+         "55 53 56 57 41 54 41 56 41 57 "
+         "48 8D AC 24 B0 FE FF FF "
+         "48 81 EC 60 02 00 00",
+         ResolveMode::Direct, 0, 0},
+
+        // P2 -- post-prologue lea+sub+arg-stash chain at entry+0x14,
+        // past SafetyHook's 5-byte JMP window so the resolver still
+        // works after a sibling has inline-hooked the entry. The
+        // `48 8D AC 24 B0 FE FF FF 48 81 EC 60 02 00 00` lea/sub pair
+        // followed by `48 8B 41 08 4C 8B F9 48 89 45 90 48 8B FA`
+        // (mov rax,[rcx+8] / mov r15,rcx / mov [rbp-0x90],rax /
+        //  mov rdi,rdx) gives a 27-byte uniquely-pinned anchor.
+        // dispOffset = -0x14 walks back to the entry.
+        {"HelmAudioRegistrar_P2_PostPrologue",
+         "48 8D AC 24 B0 FE FF FF "
+         "48 81 EC 60 02 00 00 "
+         "48 8B 41 08 4C 8B F9 "
+         "48 89 45 90 48 8B FA",
+         ResolveMode::Direct, -0x14, 0},
+
+        // P3 -- deep TLS-gate anchor at entry+0x4D. Lands well past
+        // both the 5-byte SafetyHook JMP window AND the post-prologue
+        // P2 anchor, so it still resolves even when a sibling mod has
+        // installed a long mid-function detour over the prologue tail.
+        //
+        // The body shape at this offset is the function's thread-
+        // local-flag preamble:
+        //   65 48 8B 04 25 58 00 00 00   mov  rax, gs:58h         ; TIB->ThreadLocalStoragePointer
+        //   33 F6                         xor  esi, esi
+        //   48 8B 1D ?? ?? ?? ??         mov  rbx, cs:_someGlobal ; RIP-rel, disp32 wildcarded
+        //   4C 8B 00                      mov  r8, [rax]           ; TLS block base
+        //   B8 F2 01 00 00                mov  eax, 1F2h           ; TLS slot index 498
+        //   42 38 34 00                   cmp  [rax+r8], sil       ; flag byte == 0?
+        //   48 0F 45 DE                   cmovnz rbx, rsi          ; conditionally zero rbx
+        //
+        // The combination of a TIB load with the specific TLS slot
+        // 0x1F2 and a cmovnz on (rbx, rsi) is a single-occurrence
+        // fingerprint in v1.08.00 .text. The TLS slot index is a build-
+        // stable per-binary constant; the global RIP-disp32 and the
+        // SIB byte of the RIP-rel mov are wildcarded.
+        // dispOffset = -0x4D walks back to the entry.
+        {"HelmAudioRegistrar_P3_TlsGate",
+         "65 48 8B 04 25 58 00 00 00 "
+         "33 F6 "
+         "48 8B 1D ?? ?? ?? ?? "
+         "4C 8B 00 "
+         "B8 F2 01 00 00 "
+         "42 38 34 00 "
+         "48 0F 45 DE",
+         ResolveMode::Direct, -0x4D, 0},
+    };
+
 } // namespace Transmog
