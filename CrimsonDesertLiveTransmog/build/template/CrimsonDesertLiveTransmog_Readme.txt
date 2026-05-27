@@ -34,9 +34,10 @@ Installation
      - CrimsonDesertLiveTransmog_Readme.txt          (optional)
 3. Launch the game. Press Home to open the overlay.
 
-IMPORTANT: The .tsv file MUST sit next to the .asi. It maps internal
-item ids to human-readable display names in the picker. Without it,
-the picker shows raw ids only.
+IMPORTANT: The .tsv file MUST be in the same folder as the .asi --
+which folder that is does not matter, they just need to be together.
+It maps internal item ids to human-readable display names in the
+picker. Without it, the picker shows raw ids only.
 
 Usage
 -----
@@ -51,9 +52,10 @@ Usage
 Tip: enable "Instant Apply" in the overlay to preview items on hover
 without clicking Apply All.
 
-Without the overlay: use the online preset builder
-https://tkhquang.github.io/CrimsonDesertTools/live-transmog/
-or edit CrimsonDesertLiveTransmog_presets.json by hand.
+Not sure which prefab is which armor? Browse the Item Catalog:
+https://tkhquang.github.io/CrimsonDesertTools/live-transmog/catalog
+Item names carry a gender marker: _**w_ is the female variant and
+_**m_ the male variant (in most cases).
 
 Configuration
 -------------
@@ -90,8 +92,12 @@ Known Limitations
   disable safety filters unless you know what you are doing.
 - Non-humanoid items (horse tack, pet armor) crash the mesh binder.
   The "Safe only" filter hides these by default.
-- Dye is not supported yet.
-- Special-effect armor (e.g. particle helmets) may have visual quirks.
+- Dye / Color Override and Unmuffle Helm Voice are experimental,
+  off by default; enable them in the [Experimental] INI section.
+- While LT is active, the in-game helmet visibility setting is
+  overridden. Set the Helm slot to (none) in the picker to hide it.
+- Special-effect armor (e.g. particle or emissive/glow helmets) may
+  have visual quirks.
 - Hair may clip through some helmets.
 - Major game updates may break the mod until a new version ships.
 - Only tested with the Steam version.
