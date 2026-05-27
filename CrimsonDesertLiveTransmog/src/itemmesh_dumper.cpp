@@ -38,9 +38,23 @@ namespace Transmog
 
         constexpr ptrdiff_t kOffName = 0x08;
         constexpr ptrdiff_t kOffMetaSub = 0x90;
-        constexpr ptrdiff_t kOffWrapBuf = 0x20;
-        constexpr ptrdiff_t kOffWrapLen = 0x28;
-        constexpr uint32_t kSsoCap = 0x1F;
+
+        // The engine stores strings behind a "StringRef" descriptor:
+        // {char* ptr @+0x00, u32 len @+0x08}. The characters are always
+        // heap-allocated (confirmed down to a 5-character string), so there is
+        // no inline/SSO form to special-case.
+        //
+        // Two wrapper shapes reference a StringRef:
+        //   - Item NAME wrappers (desc+0x08) ARE a StringRef directly.
+        //   - stringinfo ICON wrappers are a larger object that stores a
+        //     pointer to their StringRef at +0x18. For an inline icon wrapper
+        //     that pointer targets the wrapper's own +0x20; for an external
+        //     one it targets a StringRef elsewhere on the heap. Dereferencing
+        //     +0x18 resolves both forms, whereas a fixed +0x20/+0x28 read only
+        //     handles the inline form and reads garbage on the external one.
+        constexpr ptrdiff_t kOffWrapDesc = 0x18; // icon wrapper -> StringRef*
+        constexpr ptrdiff_t kOffRefPtr = 0x00;   // StringRef: char*
+        constexpr ptrdiff_t kOffRefLen = 0x08;   // StringRef: u32 length
 
         // ----- safe reads -----
         //
@@ -106,23 +120,33 @@ namespace Transmog
             return std::string(buf, n);
         }
 
+        // Read a StringRef descriptor {char* ptr @+0x00, u32 len @+0x08}.
+        std::string read_string_ref(uintptr_t node) noexcept
+        {
+            if (!node)
+                return {};
+            bool ok = false;
+            const uint32_t len = read_u32_safe(node + kOffRefLen, ok);
+            if (!ok || len == 0 || len > 0x10000)
+                return {};
+            const uintptr_t cstr = read_qword_safe(node + kOffRefPtr, ok);
+            if (!ok || cstr < 0x10000)
+                return {};
+            return read_cstr_safe(reinterpret_cast<const char *>(cstr), len + 1);
+        }
+
+        // stringinfo ICON wrapper: the StringRef is reached via wrap+0x18
+        // (inline wrappers point back at their own +0x20; external ones point
+        // elsewhere). Dereference it so both layouts resolve.
         std::string read_wrapper_string(uintptr_t wrap) noexcept
         {
             if (!wrap)
                 return {};
             bool ok = false;
-            const uint32_t len = read_u32_safe(wrap + kOffWrapLen, ok);
-            if (!ok || len == 0 || len > 0x10000)
+            const uintptr_t node = read_qword_safe(wrap + kOffWrapDesc, ok);
+            if (!ok)
                 return {};
-            if (len <= kSsoCap)
-            {
-                return read_cstr_safe(
-                    reinterpret_cast<const char *>(wrap + kOffWrapBuf), len + 1);
-            }
-            const uintptr_t cstr = read_qword_safe(wrap + kOffWrapBuf, ok);
-            if (!ok || cstr < 0x10000)
-                return {};
-            return read_cstr_safe(reinterpret_cast<const char *>(cstr), len + 1);
+            return read_string_ref(node);
         }
 
         // Distinguish icon strings that map to a real mesh prefab from
@@ -137,6 +161,22 @@ namespace Transmog
         // filtered before the targeted phantom-recovery pass, otherwise
         // it would resolve unrelated quest-registry strings against
         // mesh-prefab names that happen to overlap post-strip.
+        bool starts_with_asset_prefix(std::string_view sl) noexcept; // fwd decl
+
+        // True when the icon string does NOT encode a real mesh/world-object
+        // prefab -- i.e. it is UI-texture-only (quest dialogs, abyss-gear,
+        // skill/stat items, money/trade UI, memory chips, dev stubs, or a
+        // bespoke `ItemIcon_<ItemName>` whose post-strip name is not a known
+        // asset family).
+        //
+        // An icon encodes a mesh when, after stripping the
+        // `itemicon_`(`prefab_`) wrapper, the remainder begins with a known
+        // asset-prefix family (the same accept-list the pool enrich pass uses:
+        // cd_/gimmick_/collection_/craft_/puzzle_/background_/lamp_/fs_/
+        // docking_/item_rare_). Classifying on the family (not on the
+        // `itemicon_prefab_` infix alone) is deliberate: gimmick/collection/
+        // craft/puzzle world-objects own real meshes but reference them through
+        // the bare `itemicon_` form, so they must still count as prefabs.
         bool is_ui_only_icon(std::string_view fullIconLower) noexcept
         {
             // `cd_questimage_*` / `cd_knowledgeimage_*` are UI-texture
@@ -151,21 +191,18 @@ namespace Transmog
                     fullIconLower.substr(0, p.size()) == p)
                     return true;
             }
-            // `ItemIcon_<X>_*` rule: items use `ItemIcon_Prefab_<mesh>`
-            // when they have a mesh prefab. Anything else under
-            // `itemicon_` is UI-only.
-            constexpr std::string_view kItemiconAll = "itemicon_";
+            // `itemicon_prefab_<cd_mesh>` is always a real mesh.
             constexpr std::string_view kItemiconMesh = "itemicon_prefab_";
-            if (fullIconLower.size() >= kItemiconAll.size() &&
-                fullIconLower.substr(0, kItemiconAll.size()) == kItemiconAll)
-            {
-                // Has `itemicon_` prefix but NOT `itemicon_prefab_` ->
-                // UI-only.
-                if (fullIconLower.size() < kItemiconMesh.size() ||
-                    fullIconLower.substr(0, kItemiconMesh.size()) != kItemiconMesh)
-                    return true;
-            }
-            return false;
+            constexpr std::string_view kItemiconAll = "itemicon_";
+            std::string_view rest = fullIconLower;
+            if (rest.size() >= kItemiconMesh.size() &&
+                rest.substr(0, kItemiconMesh.size()) == kItemiconMesh)
+                return false;
+            if (rest.size() >= kItemiconAll.size() &&
+                rest.substr(0, kItemiconAll.size()) == kItemiconAll)
+                rest = rest.substr(kItemiconAll.size());
+            // Mesh iff the icon-derived name names a known asset family.
+            return !starts_with_asset_prefix(rest);
         }
 
         std::string to_lower(std::string_view s)
@@ -681,9 +718,15 @@ namespace Transmog
                 continue;
             }
             const uintptr_t nameWrap = read_qword_safe(desc + kOffName, ok);
-            std::string internalName = read_wrapper_string(nameWrap);
+            // The name wrapper IS a StringRef directly (no icon-style +0x18
+            // indirection), so read it as one.
+            std::string internalName = read_string_ref(nameWrap);
             if (internalName.empty())
             {
+                // Recover entries whose StringRef length field is unreadable
+                // or zero while the character pointer is still valid: read the
+                // pointer target with a fixed bound. read_cstr_safe stops at
+                // the first non-printable byte, so the bound cannot overrun.
                 const uintptr_t altPtr = read_qword_safe(nameWrap, ok);
                 if (ok && altPtr >= 0x10000)
                     internalName = read_cstr_safe(reinterpret_cast<const char *>(altPtr), 128);
@@ -897,10 +940,11 @@ namespace Transmog
         // (engine's stringinfo references a prefab that the asset-bundle
         // walk missed). Emit ONE row per unique phantom iconPrefab with
         // all sharing items grouped (first as exact, rest as siblings).
-        // Many UI-shared icons reference 90+ items per prefab; without
-        // grouping the phantom block balloons to thousands of duplicate
-        // rows. Skip items whose FullIconString is a confirmed-UI
-        // category (no `_Prefab_` infix) entirely -- they have no mesh.
+        // This dump is PREFAB-based: an item only appears when it resolves
+        // to a real mesh/world-object prefab. Mesh-less UI icons (quest/
+        // skill/stat/bespoke `ItemIcon_<name>` with no asset-prefix mesh)
+        // are skipped. gimmick/collection/craft/puzzle ARE real prefabs and
+        // are kept (see is_ui_only_icon).
         uint32_t phantomRows = 0;
         uint32_t uiSkipped = 0;
         std::set<std::string> phantomIconsEmitted;
@@ -911,6 +955,8 @@ namespace Transmog
             const std::string fullLower = to_lower(items[i].fullIcon);
             if (is_ui_only_icon(fullLower))
             {
+                // Not a real mesh prefab (UI-only icon) -- skip; this dump
+                // is prefab-based.
                 ++uiSkipped;
                 continue;
             }
