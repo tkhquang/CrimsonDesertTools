@@ -5,7 +5,7 @@
     filteredRows,
     hasActiveFilter,
     installUrlSync,
-    CATALOG_VERSIONS,
+    CATALOG_VERSION,
   } from './lib/store.svelte';
   import SearchBar from './lib/components/SearchBar.svelte';
   import QuickPresets from './lib/components/QuickPresets.svelte';
@@ -50,17 +50,7 @@
 <div class="flex h-screen flex-col">
   <header class="flex items-center gap-3 border-b border-separator px-3 py-2">
     <h1 class="text-sm font-semibold">Live Transmog · Catalog</h1>
-    <label class="text-xs text-text-dim" title="Game version / TSV dump to load">
-      <select
-        value={catalog.version}
-        onchange={(e) => catalog.setVersion(e.currentTarget.value as typeof CATALOG_VERSIONS[number])}
-        class="cursor-pointer rounded border border-border bg-input px-1 py-0.5 text-xs text-text outline-none focus:border-accent"
-      >
-        {#each CATALOG_VERSIONS as version}
-          <option value={version}>{version}</option>
-        {/each}
-      </select>
-    </label>
+    <span class="text-xs text-text-dim">{CATALOG_VERSION}</span>
 
     <div class="ml-auto flex items-center gap-2 text-xs">
       {#if catalog.status === 'ready'}
@@ -76,7 +66,7 @@
         type="button"
         onclick={() => catalog.load()}
         class="cursor-pointer rounded border border-border bg-panel px-2 py-0.5 hover:border-accent hover:text-accent"
-        title={`Refetch the bundled ${catalog.version} TSVs`}
+        title={`Refetch the bundled ${CATALOG_VERSION} TSVs`}
       >
         Reload
       </button>
