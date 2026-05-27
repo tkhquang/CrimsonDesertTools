@@ -2,10 +2,30 @@ import type { CatalogRow, FacetState, QuickPreset } from './types';
 import { DEFAULT_FACETS, matchesSlot } from './types';
 import { joinAll, type JoinResult } from './parse';
 
-export const CATALOG_VERSION = 'v1.07.00';
-const DISPLAY_NAMES_URL = `./CrimsonDesertLiveTransmog_display_names_${CATALOG_VERSION}.tsv`;
-const ITEM_PREFABS_URL = `./CrimsonDesertLiveTransmog_itemprefabs_${CATALOG_VERSION}.tsv`;
-const ITEMS_URL = `./CrimsonDesertLiveTransmog_items_${CATALOG_VERSION}.tsv`;
+// Available TSV dump versions, newest first. Add a new entry here after
+// dropping the matching CrimsonDesertLiveTransmog_*_<version>.tsv files into
+// docs/live-transmog/. The first entry is the default selection.
+export const CATALOG_VERSIONS = ['v1.08.00', 'v1.07.00'] as const;
+export type CatalogVersion = (typeof CATALOG_VERSIONS)[number];
+export const DEFAULT_VERSION: CatalogVersion = CATALOG_VERSIONS[0];
+
+// Kept for any external references; reflects the default version only. Live UI
+// should read `catalog.version` so it tracks the user's selection.
+export const CATALOG_VERSION: CatalogVersion = DEFAULT_VERSION;
+
+function tsvUrl(
+  kind: 'display_names' | 'itemprefabs' | 'items',
+  version: string,
+): string {
+  return `./CrimsonDesertLiveTransmog_${kind}_${version}.tsv`;
+}
+
+function isKnownVersion(value: string | null): value is CatalogVersion {
+  return (
+    value !== null && (CATALOG_VERSIONS as readonly string[]).includes(value)
+  );
+}
+
 const SEARCH_DEBOUNCE_MS = 120;
 export const MAX_PATTERN_LENGTH = 200;
 
@@ -21,6 +41,7 @@ interface Stats {
 }
 
 class CatalogStore {
+  version = $state<CatalogVersion>(DEFAULT_VERSION);
   rows = $state<CatalogRow[]>([]);
   status = $state<LoadStatus>('idle');
   error = $state<string>('');
@@ -93,6 +114,8 @@ class CatalogStore {
       clearTimeout(this.#debounceTimer);
       this.#debounceTimer = undefined;
     }
+    const versionParam = params.get('v');
+    if (isKnownVersion(versionParam)) this.version = versionParam;
     const query = params.get('q') ?? '';
     this.query = query;
     this.debouncedQuery = query.trim();
@@ -114,6 +137,7 @@ class CatalogStore {
   // selections.
   toUrlParams(): URLSearchParams {
     const params = new URLSearchParams();
+    if (this.version !== DEFAULT_VERSION) params.set('v', this.version);
     if (this.debouncedQuery) params.set('q', this.debouncedQuery);
     if (this.useRegex) params.set('regex', '1');
     const facets = this.facets;
@@ -160,9 +184,9 @@ class CatalogStore {
       const [displayText, prefabText, itemsText] = source
         ? [source.display, source.prefabs, source.items]
         : await Promise.all([
-            fetchText(DISPLAY_NAMES_URL),
-            fetchText(ITEM_PREFABS_URL),
-            fetchText(ITEMS_URL).catch(() => undefined),
+            fetchText(tsvUrl('display_names', this.version)),
+            fetchText(tsvUrl('itemprefabs', this.version)),
+            fetchText(tsvUrl('items', this.version)).catch(() => undefined),
           ]);
       const result = joinAll(displayText, prefabText, itemsText);
       this.#applyResult(result);
@@ -171,6 +195,13 @@ class CatalogStore {
       this.error = cause instanceof Error ? cause.message : String(cause);
       this.status = 'error';
     }
+  }
+
+  // Switch the bundled TSV set and refetch. No-op if already on `next`.
+  async setVersion(next: CatalogVersion): Promise<void> {
+    if (next === this.version) return;
+    this.version = next;
+    await this.load();
   }
 
   async loadFromFiles(files: {
@@ -270,7 +301,10 @@ export function installUrlSync(): void {
 
   $effect(() => {
     const onPopState = () => {
+      const prevVersion = catalog.version;
       catalog.applyUrlState(new URL(window.location.href).searchParams);
+      // Back/forward across a version change must refetch the new TSV set.
+      if (catalog.version !== prevVersion) catalog.load();
     };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
