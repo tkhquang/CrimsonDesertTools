@@ -48,7 +48,10 @@ Download the **x64** build of [Ultimate ASI Loader](https://github.com/ThirteenA
 ### Step 2: Install the mod
 
 1. Download the latest release from the [GitHub Releases page](https://github.com/tkhquang/CrimsonDesertTools/releases)
-2. Extract `CrimsonDesertLiveTransmog.asi` and `CrimsonDesertLiveTransmog.ini` into your `bin64` folder
+2. Extract **all** of the following into your `bin64` folder:
+   - `CrimsonDesertLiveTransmog.asi` - the mod binary
+   - `CrimsonDesertLiveTransmog.ini` - configuration
+   - `CrimsonDesertLiveTransmog_display_names.tsv` - item display names for the picker (**required**; without it the picker shows raw ids only)
 
 ### Step 3: Launch and play
 
@@ -58,11 +61,12 @@ Launch the game. Press **Home** to open the transmog overlay.
 
 ```text
 <Crimson Desert>/bin64/
-├── CrimsonDesert.exe                          (Game executable)
-├── winmm.dll                                  (ASI Loader)
-├── CrimsonDesertLiveTransmog.asi              (This mod)
-├── CrimsonDesertLiveTransmog.ini              (Configuration)
-├── CrimsonDesertLiveTransmog_presets.json     (Auto-generated preset file)
+├── CrimsonDesert.exe                           (Game executable)
+├── winmm.dll                                   (ASI Loader)
+├── CrimsonDesertLiveTransmog.asi               (This mod)
+├── CrimsonDesertLiveTransmog.ini               (Configuration)
+├── CrimsonDesertLiveTransmog_display_names.tsv (Item display names, REQUIRED)
+├── CrimsonDesertLiveTransmog_presets.json      (Auto-generated preset file)
 └── ...
 ```
 
@@ -84,23 +88,57 @@ If you use [OptiScaler](https://github.com/cdozdil/OptiScaler) for frame generat
    ```
 
 3. Create a `plugins` folder inside `bin64`
-4. Move `CrimsonDesertLiveTransmog.asi` and `CrimsonDesertLiveTransmog.ini` into the `plugins` folder
+4. Move `CrimsonDesertLiveTransmog.asi`, `CrimsonDesertLiveTransmog.ini`, and `CrimsonDesertLiveTransmog_display_names.tsv` into the `plugins` folder
 
 ```text
 <Crimson Desert>/bin64/
 ├── CrimsonDesert.exe
-├── OptiScaler.ini                             (LoadAsiPlugins = true)
-├── dxgi.dll                                   (OptiScaler)
+├── OptiScaler.ini                                  (LoadAsiPlugins = true)
+├── dxgi.dll                                        (OptiScaler)
 ├── plugins/
 │   ├── CrimsonDesertLiveTransmog.asi
 │   ├── CrimsonDesertLiveTransmog.ini
-│   └── ...                                    (Other ASI mods go here too)
+│   ├── CrimsonDesertLiveTransmog_display_names.tsv (REQUIRED, keep in the same folder as the .asi)
+│   └── ...                                         (Other ASI mods go here too)
 └── ...
 ```
 
 If you run into issues, check the OptiScaler documentation for DLL naming and compatibility options.
 
 > This applies to any ASI mod, not just this one. If you have other `.asi` mods, move them into the `plugins` folder as well.
+
+### Using OptiScaler + ReShade together (one way to set up)
+
+OptiScaler and ReShade both default to the `dxgi.dll` slot, so one of them has to use a different name. The simplest fix is to rename OptiScaler to another supported proxy name and let ReShade keep `dxgi.dll`. This is **one way** to set them up; see the OptiScaler wiki's [Compatibility with other mods (ReShade, SpecialK)](<https://github.com/optiscaler/OptiScaler/wiki/Compatibility-with-other-mods-(Reshade,-SpecialK)>) for the full details and alternative arrangements.
+
+This assumes OptiScaler is already set up as in the section above (installed as `dxgi.dll`, with the mod in the `plugins` folder).
+
+> **Back up first.** Before changing anything, zip or rar your `bin64` folder. If something stops working, you can revert.
+
+1. In `bin64`, rename OptiScaler's `dxgi.dll` to **`d3d12.dll`** (or **`winmm.dll`**). This frees the `dxgi.dll` slot for ReShade - and means the ReShade installer in the next step won't overwrite OptiScaler
+2. Install [ReShade](https://reshade.me/) (the build with full add-on support is fine). Point the installer at the game's `CrimsonDesert.exe` and let it install as `dxgi.dll`. Load a shader preset `.ini` if you want one - other shader mods usually ship the `.ini` for you
+3. Open `OptiScaler.ini`, find the `[Plugins]` section, and set:
+
+   ```ini
+   LoadAsiPlugins = true
+   ```
+
+   This is what lets OptiScaler load this mod's `.asi` from the `plugins` folder - without it the transmog mod won't load.
+4. Launch the game. If it worked, you'll see the ReShade boot notification on startup (and the usual funky shader colors once a preset is active)
+
+```text
+<Crimson Desert>/bin64/
+├── CrimsonDesert.exe
+├── OptiScaler.ini                                  (LoadAsiPlugins = true)
+├── d3d12.dll                                       (OptiScaler, renamed from dxgi.dll)
+├── dxgi.dll                                        (ReShade)
+├── plugins/
+│   ├── CrimsonDesertLiveTransmog.asi
+│   ├── CrimsonDesertLiveTransmog.ini
+│   ├── CrimsonDesertLiveTransmog_display_names.tsv (REQUIRED, keep in the same folder as the .asi)
+│   └── ...                                         (Other ASI mods go here too)
+└── ...
+```
 
 ## Usage
 
@@ -122,23 +160,11 @@ If you run into issues, check the OptiScaler documentation for DLL naming and co
 >
 > **Picker controls:** Use **Up** / **Down** arrow keys (or the on-screen ^ / v buttons) to move the highlight, and **Enter** to commit. The picker opens scrolled to your current pick. In **Prefabs** mode, tick **Keep open** to audition several prefabs without re-opening the popup, and use the in-popup **Apply** button (equivalent to Apply All) when Instant Apply is off.
 
-### Without the overlay (web preset builder)
-
-If you prefer not to use the in-game overlay, use the **[online Preset Builder](https://tkhquang.github.io/CrimsonDesertTools/live-transmog/)** to create presets from your browser. It mirrors the in-game GUI - browse the full item catalog, pick armor per slot, save multiple presets, then download the JSON file.
-
-Alternatively, you can edit `CrimsonDesertLiveTransmog_presets.json` by hand:
-
-1. Launch the game once so the mod generates a default `CrimsonDesertLiveTransmog_presets.json`
-2. Close the game and open the JSON file in a text editor
-3. Each preset contains slot entries with `itemName` (string identifier). Set `active: true` and fill in the item name for each slot you want to transmog
-4. Set hotkeys in the INI (e.g. `ApplyHotkey = F5`, `ClearHotkey = F6`, `CaptureHotkey = F7`) to apply/clear/capture in-game
-5. Launch the game - the mod loads presets on startup and applies them automatically
-
-> **Tip: Use Capture to get item IDs.** Equip the armor you want in-game, then press your **Capture** hotkey. This snapshots your currently equipped gear into the active preset's slot mappings. Check `CrimsonDesertLiveTransmog_presets.json` after - the captured item names will be filled in for each slot. You can then copy these to build other presets manually.
-
 ### Item Catalog
 
-The full item catalog for the current game version can be browsed on the **[online Preset Builder](https://tkhquang.github.io/CrimsonDesertTools/live-transmog/)** under the "Item Catalog" section. It shows all item IDs, slot categories, variant/safety flags, and names in a searchable, sortable table.
+Not sure which prefab is which armor? Browse the full **[Item Catalog](https://tkhquang.github.io/CrimsonDesertTools/live-transmog/catalog)** for the current game version - a searchable, sortable table of every item ID, slot category, variant/safety flag, and display name.
+
+> **Naming convention:** item names carry a gender marker - `_**w_` is the female variant and `_**m_` the male variant (in most cases).
 
 ## Configuration
 
@@ -196,15 +222,13 @@ See the full list at the [Supported Input Names](https://github.com/tkhquang/Det
 ## Known Limitations
 
 - **[Experimental] Color Override** is off by default. Set `ColorOverride = true` in the `[Experimental]` INI section to enable a per-region color picker that paints transmog items (including outfits the in-game dye merchant refuses). Changes take effect on the next game launch. Expect rough edges.
-- **[Experimental] Unmuffle Helm Voice** is off by default. Set `UnmuffleHelmVoice = true` in the `[Experimental]` INI section to stop plate and heavy helmets from muffling your protagonist's voice; NPC voices still muffle as in vanilla. Changes take effect on the next game launch.
 - **[Experimental] Dye support shipped as a rough POC/MVP**, please bear with the UX for now. Note that not every item is dyeable; applying a color to a non-dyeable slot will produce no visual change.
-- **Helm visibility setting is overridden** - the in-game helmet visibility setting is overridden while LT is active. Workaround: set the Helm slot in the LT picker to "(none)" to hide the helmet.
-- **Protagonist switch may leave the picker on the previous character** - when switching protagonists, the LT picker may continue to show the previous protagonist's name and presets, and the dropdown may not let you switch. This is a known bug under investigation.
-- **Silverwolf Leather Armor** and some other armor seems to have combined with cloak. If you apply it and it disappears right afterwards, you should try setting the cloak slot and armor slot to none, save, then reapply the armor again.
+- **Helmets: visibility override and voice muffle** - while LT is active, the in-game helmet visibility setting is overridden (workaround: set the Helm slot in the LT picker to "(none)" to hide the helmet). Closed-face helmets also muffle your protagonist's voice; enable the experimental **Unmuffle Helm Voice** option (`UnmuffleHelmVoice = true`) to remove it, NPC voices keep their vanilla muffle. Changes take effect on the next game launch.
+- **Silverwolf Leather Armor** and some other armor seems to have combined with the cloak and other slots. If you apply it and it disappears right afterwards, try setting the cloak slot and other involved slots to none, save, then reapply the armor again.
 - **NPC armor variants and damaged variants render via carrier** -- items tagged `(carrier)` in the picker use an automatic carrier swap + character-class bypass to render. Most work; a few may still produce empty slots depending on the item's internal skeleton bindings.
 - **Non-humanoid items crash** -- horse tack, pet armor, and wagon gear crash the mesh binder. The "Safe only" filter hides these by default.
 - **Wrong-slot or non-equipment items will crash** - selecting a chest piece for the helm slot, or non-armor items (dog armor, recipes, etc.) crashes the game. Safety filters prevent this by default. Do not disable them unless you know what you are doing.
-- **Special-effect armor may have visual quirks** - armor with particle effects (e.g. Marni Laser Helm) may not render particles correctly. Hair may clip through some helmets. I haven't been able to make these work yet.
+- **Special-effect armor may have visual quirks** - armor with particle or emissive (glow) effects (e.g. Marni Laser Helm) may not render those effects correctly. Hair may clip through some helmets. I haven't been able to make these work yet.
 - Major game updates may break the mod until a new version is released.
 - Only tested with the Steam version.
 
@@ -251,17 +275,26 @@ cmake --build build/dev-msvc --config RelWithDebInfo --parallel
 
 Press **Numpad 0** in-game to trigger a reload after rebuilding.
 
-## Credits
+Built with [DetourModKit](https://github.com/tkhquang/DetourModKit) for core functionality (AOB scanning, hook management, logging, input).
 
-- [ThirteenAG](https://github.com/ThirteenAG) - for the Ultimate ASI Loader
-- [cursey](https://github.com/cursey) - for SafetyHook
-- [Brodie Thiesfield](https://github.com/brofield) - for SimpleIni
-- [Omar Cornut](https://github.com/ocornut) - for Dear ImGui
-- [Frans 'Otis_Inf' Bouma](https://github.com/FransBouma) - for v1.05.00 AOB shift diagnosis
-- [SoraSkySun](https://www.nexusmods.com/profile/SoraSkySun) - for the [Crimson Desert save editor and game file parser / item data dump](https://github.com/NattKh/CRIMSON-DESERT-SAVE-EDITOR-AND-GAME-MODS)
-- [Slinky](https://www.nexusmods.com/profile/IamSlinky) - for the dye info data dump
-- [hzeemr](https://www.nexusmods.com/profile/hz33m) - for [crimsonforge](https://github.com/hzeemr/crimsonforge), the game-file export tool
-- Pearl Abyss - for Crimson Desert
+### Credits & acknowledgements
+
+- [Frans 'Otis_Inf' Bouma](https://github.com/FransBouma) - v1.05.00 AOB shift diagnosis, plus modding direction and guidance
+- [SoraSkySun](https://www.nexusmods.com/profile/SoraSkySun) - [Crimson Desert save editor and game file parser / item data dump](https://github.com/NattKh/CRIMSON-DESERT-SAVE-EDITOR-AND-GAME-MODS)
+- [Slinky](https://www.nexusmods.com/profile/IamSlinky) - dye info data dump
+- [hzeemr](https://www.nexusmods.com/profile/hz33m) - [crimsonforge](https://github.com/hzeemr/crimsonforge), the game-file export tool
+- Pearl Abyss - Crimson Desert
+
+### Third-party libraries
+
+- [Ultimate ASI Loader](https://github.com/ThirteenAG/Ultimate-ASI-Loader) by ThirteenAG - ASI loading layer
+- [SafetyHook](https://github.com/cursey/safetyhook) by cursey - inline / mid-function hooking
+- [Zydis](https://github.com/zyantific/zydis) / [Zycore](https://github.com/zyantific/zycore-c) by Florian Bernd & Joel Höner - x86/x64 disassembly (used by SafetyHook)
+- [SimpleIni](https://github.com/brofield/simpleini) by Brodie Thiesfield - INI configuration parser
+- [nlohmann/json](https://github.com/nlohmann/json) by Niels Lohmann - JSON preset serialization
+- [Dear ImGui](https://github.com/ocornut/imgui) by Omar Cornut - overlay GUI
+- [DirectXMath](https://github.com/microsoft/DirectXMath) by Microsoft - math primitives
+- [ReShade](https://reshade.me/) by crosire - optional addon host
 
 ## Changelog
 
