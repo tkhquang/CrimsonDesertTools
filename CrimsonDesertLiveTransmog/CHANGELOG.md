@@ -2,6 +2,13 @@
 
 All notable changes to the CrimsonDesertLiveTransmog mod will be documented in this file.
 
+## [0.12.1] - Item catalog
+
+- Added a game-version switcher to the online Item Catalog.
+- Added Item Catalog data for game version 1.08.00.
+- Item Catalog now lists items that were previously missing.
+- Fixed companions sometimes not receiving their saved transmog in crowded areas.
+
 ## [0.12.0] - Helm voice unmuffle and reliability fixes
 
 - Optional setting to stop plate and heavy helmets from muffling your protagonist's voice -- enable `UnmuffleHelmVoice` under `[Experimental]` (off by default; NPC voices still muffle as in vanilla).
@@ -208,6 +215,7 @@ All notable changes to the CrimsonDesertLiveTransmog mod will be documented in t
 - Modular code split: `transmog_apply` (apply/clear logic), `transmog_hooks` (VEC/BatchEquip callbacks), `transmog_worker` (debounce/load-detect/nametable threads), `shared_state` (cross-TU atomics)
 - Docs clarify ReShade is required for GUI; without it, users edit JSON manually via Capture hotkey
 
+[0.12.1]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.12.1
 [0.12.0]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.12.0
 [0.11.3]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.11.3
 [0.11.2]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.11.2
