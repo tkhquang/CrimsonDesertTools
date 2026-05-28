@@ -72,17 +72,34 @@ namespace CDCore
         //     byte +0x63: 0xA0 = Kliff, 0xB0 = everyone else
         //
         // Direct protagonist lookup via ClientActorManager+0x100:
-        //   - Pointer to an 8-byte-stride CCOIA-only actor array.
-        //   - Position [0] = Kliff (always present).
-        //   - Position [1] = Damiane CCOIA when she is loaded.
-        //   - Position [2] = Oongka  CCOIA when she is loaded.
-        //   - Positions [3+] are humanoid NPCs / followers in load
-        //     order; rejected by the appearance-config classifier
-        //     because their path does not contain any protagonist
-        //     codename substring.
-        constexpr std::ptrdiff_t k_offCcoiaIdentity   = 0x60;
-        constexpr std::ptrdiff_t k_offMgrActorArray   = 0x100;
-        constexpr std::uint8_t   k_kliffHighByte      = 0xA0;
+        //   - +0x100: pointer to an 8-byte-stride CCOIA actor array.
+        //   - +0x10C: u32 element capacity of that array (order 1000).
+        // The array is a DENSE actor vector: every loaded character
+        // -- protagonists, companions, AND every humanoid NPC -- is
+        // appended here in spawn order. Protagonists do NOT cluster at
+        // the front. In a crowded scene (e.g. a large NPC battle) Kliff
+        // sits at [0] but the other protagonists can land hundreds of
+        // entries deep, interleaved with NPCs. The scan must therefore
+        // cover the whole live extent rather than a fixed prefix; a
+        // too-small bound silently drops protagonists that spawn late.
+        // Non-protagonist entries are rejected by the appearance-config
+        // classifier (their path carries no protagonist codename).
+        constexpr std::ptrdiff_t k_offCcoiaIdentity    = 0x60;
+        constexpr std::ptrdiff_t k_offMgrActorArray    = 0x100;
+        constexpr std::ptrdiff_t k_offMgrActorArrayCap = 0x10C;
+        constexpr std::uint8_t   k_kliffHighByte       = 0xA0;
+
+        // Scan bound for the ClientActorManager+0x100 array. We read
+        // the engine's own capacity field (+0x10C) on every call so the
+        // bound tracks the array as it grows, then clamp it to a sane
+        // window: a read below the floor is treated as torn/garbage and
+        // replaced with a generous fixed fallback, while a read above
+        // the ceiling is clamped down so worst-case work stays bounded.
+        // The snapshot runs at ~1 Hz off background poll threads, so
+        // even a full-extent sweep is cheap.
+        constexpr std::uint32_t  k_mgrArrayCapMin       = 16;
+        constexpr std::uint32_t  k_mgrArrayCapHardCap   = 8192;
+        constexpr std::size_t    k_mgrArrayScanFallback = 1024;
 
         // Appearance-config asset-path chain. The CCOIA's body
         // component holder exposes a std::string carrying the
@@ -635,16 +652,36 @@ namespace CDCore
         // (their appearance path does not contain `cd_phw_damian`
         // or `cd_phm_oongka`), so the loop emits at most one
         // Damiane and one Oongka entry.
+        //
+        // We scan the array's full live extent rather than a fixed
+        // prefix: the bound comes from the engine's clamped capacity
+        // field so a crowded scene that pushes a protagonist hundreds
+        // of entries deep still resolves. Null/torn slots are skipped
+        // (continue), never treated as end-of-array, so an interior
+        // hole or a transient unreadable slot cannot truncate the scan
+        // and drop a protagonist sitting behind it. The early-out
+        // below halts the walk as soon as both companions are found,
+        // so the full sweep only runs when one is genuinely absent.
         const auto actorArray =
             DMKMemory::seh_read<std::uintptr_t>(chain.mgr + k_offMgrActorArray)
                 .value_or(0);
         if (actorArray < k_minValidPtr)
             return written;
 
+        const auto rawCap = DMKMemory::seh_read<std::uint32_t>(
+                                chain.mgr + k_offMgrActorArrayCap)
+                                .value_or(0);
+        const std::size_t scanCap =
+            (rawCap < k_mgrArrayCapMin)
+                ? k_mgrArrayScanFallback
+            : (rawCap > k_mgrArrayCapHardCap)
+                ? static_cast<std::size_t>(k_mgrArrayCapHardCap)
+                : static_cast<std::size_t>(rawCap);
+
         bool foundDamiane = false;
         bool foundOongka  = false;
         for (std::size_t i = 0;
-             i < k_actorListCapacity && written < cap;
+             i < scanCap && written < cap;
              ++i)
         {
             const auto candidate = DMKMemory::seh_read<std::uintptr_t>(
