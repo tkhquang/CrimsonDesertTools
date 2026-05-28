@@ -2,6 +2,13 @@
 
 All notable changes to the CrimsonDesertEquipHide mod will be documented in this file.
 
+## [0.8.1] - Maintenance and reliability
+
+- Upgraded DetourModKit dependency from v3.2.3 to v3.3.0.
+- More resilient internal checks against the game's loaded modules.
+- Fixed companions' hidden equipment sometimes not applying in crowded areas.
+- Demoted some verbose logs.
+
 ## [0.8.0] - Sturdier save-load detection
 
 - Per-character hide rules stay correct immediately after a save-load instead of needing a short settle window.
@@ -246,6 +253,7 @@ All notable changes to the CrimsonDesertEquipHide mod will be documented in this
 - Customizable part lists per category via INI configuration
 - Configurable init delay and log level
 
+[0.8.1]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/equip-hide/v0.8.1
 [0.8.0]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/equip-hide/v0.8.0
 [0.7.3]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/equip-hide/v0.7.3
 [0.7.2]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/equip-hide/v0.7.2
