@@ -2,6 +2,13 @@
 
 All notable changes to the CrimsonDesertLiveTransmog mod will be documented in this file.
 
+## [0.12.2] - Crimson Desert 1.09.00 support
+
+- Updated the mod to work with Crimson Desert version 1.09.00.
+- Added Item Catalog data for game version 1.09.00.
+- Fixed the item picker showing some armor under the wrong body type, or hiding it entirely.
+- Fixed the optional helmet voice-unmuffle setting for the new game patch.
+
 ## [0.12.1] - Item catalog
 
 - Added a game-version switcher to the online Item Catalog.
@@ -215,6 +222,7 @@ All notable changes to the CrimsonDesertLiveTransmog mod will be documented in t
 - Modular code split: `transmog_apply` (apply/clear logic), `transmog_hooks` (VEC/BatchEquip callbacks), `transmog_worker` (debounce/load-detect/nametable threads), `shared_state` (cross-TU atomics)
 - Docs clarify ReShade is required for GUI; without it, users edit JSON manually via Capture hotkey
 
+[0.12.2]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.12.2
 [0.12.1]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.12.1
 [0.12.0]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.12.0
 [0.11.3]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.11.3
