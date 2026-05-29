@@ -1,3 +1,5 @@
-## Sturdier helmet voice-unmuffle
+## [Title for next release]
 
-- Improved Unmuffle Helm Voice so it better survives future game updates.
+- New feature
+- Bug fix
+- Improvement
