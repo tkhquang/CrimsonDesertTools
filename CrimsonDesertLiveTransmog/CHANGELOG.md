@@ -2,6 +2,10 @@
 
 All notable changes to the CrimsonDesertLiveTransmog mod will be documented in this file.
 
+## [0.12.3] - Sturdier helmet voice-unmuffle
+
+- Improved Unmuffle Helm Voice so it better survives future game updates.
+
 ## [0.12.2] - Crimson Desert 1.09.00 support
 
 - Updated the mod to work with Crimson Desert version 1.09.00.
@@ -222,6 +226,7 @@ All notable changes to the CrimsonDesertLiveTransmog mod will be documented in t
 - Modular code split: `transmog_apply` (apply/clear logic), `transmog_hooks` (VEC/BatchEquip callbacks), `transmog_worker` (debounce/load-detect/nametable threads), `shared_state` (cross-TU atomics)
 - Docs clarify ReShade is required for GUI; without it, users edit JSON manually via Capture hotkey
 
+[0.12.3]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.12.3
 [0.12.2]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.12.2
 [0.12.1]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.12.1
 [0.12.0]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.12.0
