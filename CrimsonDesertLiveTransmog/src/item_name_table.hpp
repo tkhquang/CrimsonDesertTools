@@ -123,18 +123,17 @@ namespace Transmog
         /**
          * @brief True if the item is safe to equip on the player.
          *
-         * An item is player-compatible if at least one of its rules in
-         * the descriptor rule list at `+0x248` has a classifier-hash
-         * array containing a known "player body-type" token. Items whose
-         * rules use only non-player classifiers (horse/mount/pet tack,
-         * wagon gear) are flagged unsafe -- equipping them on the player
+         * Player-compatible means at least one of the item's rules in the
+         * descriptor rule list at `+0x248` carries a male body-type token.
+         * The default player (Kliff) uses the male humanoid skeleton; items
+         * whose rules use only non-player classifiers (horse/mount/pet tack,
+         * wagon gear) are flagged unsafe -- binding them to a player body
          * crashes the mesh binder downstream.
          *
-         * Unknown ids and items with no rules default to `true`: the
-         * picker prefers to surface inert cosmetics rather than hide
-         * them accidentally. See `k_playerClassifiers` in the .cpp for
-         * the specific token set and how to regenerate it for a new
-         * game patch.
+         * Unknown ids and items with no rules default to `true`: the picker
+         * prefers to surface inert cosmetics rather than hide them
+         * accidentally. See `k_maleBodyTokens` in the .cpp for the token set
+         * and how to re-derive it after a game patch.
          */
         bool is_player_compatible(uint16_t itemId) const;
 

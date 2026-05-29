@@ -586,6 +586,23 @@ namespace Transmog
             return out.size() - before;
         }
 
+        // TSV columns are tab-delimited and rows newline-delimited, so a
+        // control character inside a name (a cached asset string was seen
+        // carrying an embedded CR/LF) would split or shift the row when
+        // written. Strip TAB/CR/LF so the name can neither corrupt a row
+        // nor differ from its clean twin once both are pooled.
+        std::string tsv_sanitize(std::string_view s)
+        {
+            std::string result;
+            result.reserve(s.size());
+            for (const char c : s)
+            {
+                if (c != '\t' && c != '\r' && c != '\n')
+                    result.push_back(c);
+            }
+            return result;
+        }
+
         std::string extract_base_prefix(std::string_view icon) noexcept
         {
             if (icon.size() < 5)
@@ -828,7 +845,18 @@ namespace Transmog
                 phantomTargets.size(), recovered, tT1 - tT0);
         }
 
-        std::vector<std::string> pool(poolSet.begin(), poolSet.end());
+        // A pooled name sourced from a cached or loader-registry string can
+        // carry a stray control character (an embedded CR/LF was observed in
+        // one quest-image asset name). The byte-scan and stringinfo passes
+        // already reject such bytes, but the cached passes do not, so clean
+        // every entry through one chokepoint here. Re-inserting into a set
+        // both strips the control chars and collapses the dirty variant into
+        // its clean twin, so the writer cannot emit a split row or a
+        // duplicate key for the same prefab.
+        std::set<std::string> cleanPool;
+        for (const auto &name : poolSet)
+            cleanPool.insert(tsv_sanitize(name));
+        std::vector<std::string> pool(cleanPool.begin(), cleanPool.end());
 
         // PASS 3 -- index for prefab-centric emission.
         // exact_map : pool-prefab -> item index whose iconPrefab equals it.

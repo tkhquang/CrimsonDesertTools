@@ -5,7 +5,7 @@ import { joinAll, type JoinResult } from './parse';
 // Available TSV dump versions, newest first. Add a new entry here after
 // dropping the matching CrimsonDesertLiveTransmog_*_<version>.tsv files into
 // docs/live-transmog/. The first entry is the default selection.
-export const CATALOG_VERSIONS = ['v1.08.00', 'v1.07.00'] as const;
+export const CATALOG_VERSIONS = ['v1.09.00', 'v1.08.00', 'v1.07.00'] as const;
 export type CatalogVersion = (typeof CATALOG_VERSIONS)[number];
 export const DEFAULT_VERSION: CatalogVersion = CATALOG_VERSIONS[0];
 
