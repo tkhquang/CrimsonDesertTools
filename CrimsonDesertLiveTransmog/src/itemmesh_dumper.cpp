@@ -587,10 +587,10 @@ namespace Transmog
         }
 
         // TSV columns are tab-delimited and rows newline-delimited, so a
-        // control character inside a name (a cached asset string was seen
-        // carrying an embedded CR/LF) would split or shift the row when
-        // written. Strip TAB/CR/LF so the name can neither corrupt a row
-        // nor differ from its clean twin once both are pooled.
+        // control character inside a name (a cached asset string can carry an
+        // embedded CR/LF) would split or shift the row when written. Strip
+        // TAB/CR/LF so the name can neither corrupt a row nor differ from its
+        // clean twin once both are pooled.
         std::string tsv_sanitize(std::string_view s)
         {
             std::string result;
@@ -846,13 +846,13 @@ namespace Transmog
         }
 
         // A pooled name sourced from a cached or loader-registry string can
-        // carry a stray control character (an embedded CR/LF was observed in
-        // one quest-image asset name). The byte-scan and stringinfo passes
-        // already reject such bytes, but the cached passes do not, so clean
-        // every entry through one chokepoint here. Re-inserting into a set
-        // both strips the control chars and collapses the dirty variant into
-        // its clean twin, so the writer cannot emit a split row or a
-        // duplicate key for the same prefab.
+        // carry a stray control character (e.g. an embedded CR/LF in an asset
+        // name). The byte-scan and stringinfo passes already reject such
+        // bytes, but the cached passes do not, so clean every entry through
+        // one chokepoint here. Re-inserting into a set both strips the control
+        // chars and collapses the dirty variant into its clean twin, so the
+        // writer cannot emit a split row or a duplicate key for the same
+        // prefab.
         std::set<std::string> cleanPool;
         for (const auto &name : poolSet)
             cleanPool.insert(tsv_sanitize(name));

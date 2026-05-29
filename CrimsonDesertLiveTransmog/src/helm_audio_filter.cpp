@@ -44,7 +44,11 @@ namespace Transmog::HelmAudioFilter
         using SkillTagResolverFn = std::int64_t (*)(std::uint16_t *);
 
         PassiveSkillRegistrarFn g_trampoline = nullptr;
-        SkillTagResolverFn g_skillTagResolver = nullptr;
+        // Bound lazily on the first registrar invocation (see
+        // ensure_skill_tag_resolver). Atomic because it is published and read
+        // from arbitrary equip threads; release/acquire gives a
+        // standards-clean happens-before independent of which path bound it.
+        std::atomic<SkillTagResolverFn> g_skillTagResolver{nullptr};
         // The value stored in the first qword of every
         // `pa::GameAudioEffectBuffData` instance: i.e. the address of
         // vfunc[0]. We compare buff_instance[0] against this value to
@@ -62,6 +66,71 @@ namespace Transmog::HelmAudioFilter
         std::uintptr_t g_playerStatic = 0;
 
         std::atomic<bool> g_initDone{false};
+
+        // Forward declaration; defined at the bottom, by the other scan logic.
+        [[nodiscard]] std::uintptr_t resolve_skill_tag_resolver();
+
+        // Binds g_skillTagResolver lazily on the first audio-classifier call,
+        // preferring the patch-resilient RTTI scan and falling back to the
+        // build-specific baked-disp cascade. The first path that resolves wins
+        // and the bind is terminal.
+        //
+        // Resolution is deferred out of init() on purpose. The RTTI primary
+        // identifies the SkillInfo resolver by the class name of a live
+        // pa::SkillInfoManager, but that singleton is not constructed when
+        // init() runs (the mod resolves its anchors during the save-load
+        // window), so an init-time scan loses the race. The hooked registrar
+        // is a generic, widely-shared engine routine (it registers both
+        // item-equip passives and character built-in passives), so we cannot
+        // assume the first detour call already has the singleton live either.
+        // We therefore re-scan on every call until something binds.
+        //
+        // No upgrade loop, no give-up cap: a cascade hit is only possible on a
+        // build where the baked RIP-relative disp still matches, i.e. a build
+        // where the resolver has not moved and RTTI would resolve to the same
+        // address anyway, so there is nothing to upgrade to. When the manager
+        // global does relocate (the real risk on a content patch), the cascade
+        // signature stops matching, the cascade never binds, and we stay in
+        // the unbound state re-scanning until RTTI finds the relocated resolver
+        // once the singleton is live. The only state that re-scans repeatedly
+        // is a doubly-dead build (disp drifted AND the RTTI class renamed) on
+        // which neither path can ever bind; that scan only fires on
+        // audio-classifier registrations (equip / spawn), never per frame, and
+        // can be bounded later if such a build ever appears.
+        //
+        // noexcept: callers are noexcept (is_audio_muffle_class, on equip
+        // threads). The try wrapper swallows a log/alloc throw; the atomic
+        // compare-exchange publishes the pointer to acquire-loading readers
+        // regardless of whether logging throws afterwards, and guarantees a
+        // single winner if two equip threads resolve concurrently.
+        void ensure_skill_tag_resolver() noexcept
+        {
+            if (g_skillTagResolver.load(std::memory_order_acquire) != nullptr)
+                return; // already bound (RTTI or cascade); terminal
+            try
+            {
+                const std::uintptr_t rtti = resolve_skill_tag_resolver();
+                const std::uintptr_t addr =
+                    rtti != 0
+                        ? rtti
+                        : ::Transmog::resolve_address(
+                              ::Transmog::k_skillTagResolverCandidates,
+                              "HelmAudioFilter_SkillTagResolver");
+                if (addr == 0)
+                    return; // nothing resolved this call; retry on the next
+
+                SkillTagResolverFn expected = nullptr;
+                if (g_skillTagResolver.compare_exchange_strong(
+                        expected, reinterpret_cast<SkillTagResolverFn>(addr),
+                        std::memory_order_release, std::memory_order_relaxed))
+                    DMK::Logger::get_instance().info(
+                        "[helm-audio] skill-tag resolver bound via {} at 0x{:X}",
+                        rtti != 0 ? "RTTI" : "baked-disp cascade", addr);
+            }
+            catch (...)
+            {
+            }
+        }
 
         // Chain from a pa::ServerChildOnlyInGameActor host to the
         // CharacterAssets std::vector<std::string>:
@@ -199,7 +268,12 @@ namespace Transmog::HelmAudioFilter
         // without hardcoded tag tokens.
         bool is_audio_muffle_class(std::uint16_t *a3) noexcept
         {
-            if (g_skillTagResolver == nullptr
+            // Bind the resolver on first use, retrying while unbound; until a
+            // bind holds, pass through.
+            ensure_skill_tag_resolver();
+            const auto resolver =
+                g_skillTagResolver.load(std::memory_order_acquire);
+            if (resolver == nullptr
                 || g_gameAudioEffectVtable == 0
                 || a3 == nullptr)
                 return false;
@@ -214,7 +288,7 @@ namespace Transmog::HelmAudioFilter
             std::int64_t record = 0;
             __try
             {
-                record = g_skillTagResolver(a3);
+                record = resolver(a3);
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
@@ -761,9 +835,14 @@ namespace Transmog::HelmAudioFilter
                 cur = hit + 1; // resume the sweep just past this hit
             }
 
-            log.warning(
+            // Expected while the SkillInfoManager singleton is still
+            // constructing: ensure_skill_tag_resolver re-scans on later calls
+            // (and binds the baked-disp cascade as a fallback when it matches
+            // this build), so a missing RTTI hit here is a trace, not a
+            // warning.
+            log.trace(
                 "[helm-audio] RTTI scan: no SkillInfoManager resolver among "
-                "{} body-shape matches",
+                "{} body-shape matches (will retry)",
                 scanned);
             return 0;
         }
@@ -788,35 +867,13 @@ namespace Transmog::HelmAudioFilter
             return false;
         }
 
-        // Resolve the engine's tag -> skill record resolver. Required
-        // for the class chain walk; without it we cannot distinguish
-        // muffle-class buffs from other audio-classifier entries and the
-        // hook would have no safe way to suppress.
-        //
-        // Primary path is the RTTI-discriminated scan: it signs only the
-        // resolver's opcode body shape and identifies the SkillInfo
-        // instance by its manager's RTTI class name, so it keeps working
-        // when the function or its manager global moves between builds
-        // (see resolve_skill_tag_resolver above). The build-specific
-        // baked-disp cascade is the fallback for the rare case the RTTI
-        // walk is unavailable (e.g. info managers not yet constructed) on
-        // a build whose baked disp is still current.
-        auto resolverAddr = resolve_skill_tag_resolver();
-        if (resolverAddr == 0)
-        {
-            resolverAddr = ::Transmog::resolve_address(
-                ::Transmog::k_skillTagResolverCandidates,
-                "HelmAudioFilter_SkillTagResolver");
-        }
-        if (resolverAddr == 0)
-        {
-            log.warning(
-                "[helm-audio] skill-tag resolver resolve failed "
-                "(RTTI scan + baked-disp cascade); feature disabled");
-            return false;
-        }
-        g_skillTagResolver =
-            reinterpret_cast<SkillTagResolverFn>(resolverAddr);
+        // The engine's tag -> skill record resolver is bound lazily on the
+        // first registrar detour invocation rather than here: its RTTI
+        // primary needs the pa::SkillInfoManager singleton to be live, which
+        // is not guaranteed during this init pass but is guaranteed once
+        // skill registration (the hooked path) runs. A resolve failure there
+        // only makes is_audio_muffle_class pass through, so it never blocks
+        // hook installation. See ensure_skill_tag_resolver.
 
         // Resolve the pa::GameAudioEffectBuffData vtable's first vfunc
         // address. Each instance of that class stores this exact value
@@ -870,9 +927,9 @@ namespace Transmog::HelmAudioFilter
 
         log.info(
             "[helm-audio] inline-hook installed at 0x{:X} "
-            "(resolver=0x{:X}, audio-vtable=0x{:X}, "
-            "player-static=0x{:X})",
-            target, resolverAddr, vtableAddr, g_playerStatic);
+            "(audio-vtable=0x{:X}, player-static=0x{:X}); "
+            "skill-tag resolver bound on first use",
+            target, vtableAddr, g_playerStatic);
 
         g_initDone.store(true, std::memory_order_release);
         return true;
