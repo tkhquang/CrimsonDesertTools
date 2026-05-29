@@ -1501,60 +1501,77 @@ namespace Transmog
      * function's specific 0x4B0-byte frame.
      */
     /**
-     * @brief sub_1402FB2C0 -- engine's u16-tag -> skill record
-     *        resolver. Used by the helm-audio chain walk to map an
-     *        audio-classifier tag to its `pa::SkillInfo` record so
-     *        the per-level entry's class can be inspected without
-     *        hardcoded tag tokens.
+     * @brief Engine u16-tag -> skill record resolver. Used by the
+     *        helm-audio chain walk to map an audio-classifier tag to its
+     *        `pa::SkillInfo` record so the per-level entry's class can be
+     *        inspected without hardcoded tag tokens.
+     *
+     * FALLBACK ONLY. The primary resolver is the RTTI-discriminated scan
+     * in helm_audio_filter.cpp (`resolve_skill_tag_resolver`), which
+     * signs only the opcode body shape (see @ref k_skillTagResolverBodyAob)
+     * and identifies this function by its manager's RTTI class name. This
+     * cascade hardcodes the build-specific SkillInfoManager disp32, so it
+     * resolves only on the build that disp was captured from; it is kept
+     * as a fast path for the case the RTTI walk is unavailable (e.g. the
+     * info-manager singletons are not yet constructed). A stale baked
+     * disp here is harmless: it matches the exact SkillInfo resolver or
+     * nothing, and can never mis-hit a sibling resolver.
      *
      * Function signature: `pa::SkillInfo* (*)(uint16_t* tag_ptr)`.
-     * Reads `*tag_ptr` as a u16 index into the SkillInfoManager's
-     * pointer array at `manager + 0x50`, returns the record pointer
-     * (or `MEMORY[0x145F34258]`, the manager's `default skill`
-     * sentinel, on out-of-range / unbound tags).
+     * Reads `*tag_ptr` as a u16 index into the SkillInfoManager's pointer
+     * array at `manager + 0x50`, returns the record pointer (or the
+     * manager's default-skill sentinel on out-of-range / unbound tags).
      *
-     * Prologue (v1.08.00 .text @ 0x1402FB2C0):
-     *   48 89 5C 24 10           mov  [rsp+10], rbx       ; save callee
-     *   48 89 6C 24 18           mov  [rsp+18], rbp
-     *   56 57                    push rsi/rdi
-     *   41 56                    push r14
-     *   48 83 EC 40              sub  rsp, 40             ; frame
-     *   0F B7 39                 movzx edi, word ptr [rcx]; *a1 (u16 tag)
-     *   48 8B 1D ?? ?? ?? ??     mov  rbx, [rip+disp]     ; SkillInfoMgr
-     *   3B 7B 08                 cmp  edi, [rbx+8]        ; bound check
+     * Prologue (captured at v1.09.00 .text 0x1402FB650):
+     *   48 89 5C 24 10           mov   [rsp+10], rbx       ; save callee
+     *   48 89 6C 24 18           mov   [rsp+18], rbp
+     *   56 57                    push  rsi / rdi
+     *   41 56                    push  r14
+     *   48 83 EC 40              sub   rsp, 40             ; frame
+     *   0F B7 39                 movzx edi, word ptr [rcx] ; *tag (u16)
+     *   48 8B 1D 2C D6 CA 05     mov   rbx, [rip+disp]     ; SkillInfoMgr
+     *   3B 7B 08                 cmp   edi, [rbx+8]        ; bound check
      *
-     * Many sibling resolvers (ItemInfo, ParticleInfo, etc.) share
-     * the same prologue; what pins THIS function as the SkillInfo
-     * resolver is the specific RIP-rel offset to MEMORY[0x145F9B878].
-     * Every candidate keeps the `48 8B 1D 9C 05 CA 05` mov literal
-     * (baked disp32 to SkillInfoMgr) -- wildcarding that disp32 would
-     * collide with all 111 sibling `pa::*InfoManager` resolvers.
+     * A family of `pa::*InfoManager` resolvers shares this exact prologue
+     * and body; what pins THIS one as the SkillInfo resolver is the
+     * RIP-rel disp32 to the SkillInfoManager pointer global (0x145FA8C98
+     * at the captured build). Wildcarding that disp32 makes the signature
+     * match the whole family (111 functions at the captured build), which
+     * is why the baked-disp form must hardcode it and the primary path
+     * disambiguates by RTTI instead.
+     *
+     * To re-derive after a build update: AOB-scan the body table-walk
+     * with the disp wildcarded (@ref k_skillTagResolverBodyAob), then for
+     * each hit follow [rip+disp] -> manager pointer -> manager vtable ->
+     * MSVC RTTI type-descriptor name; the one named
+     * `.?AVSkillInfoManager@pa@@` (NOT SkillTree / SkillTreeGroup /
+     * SkillGroup) is this resolver. Re-bake its disp32 into all three
+     * candidates below.
      *
      * P1 bakes the disp32 inside the function prologue (entry anchor).
-     * P2 anchors at entry+0x12 on the body sequence (movzx + mov +
-     * cmp + jnb + lea + table load) so the cascade still resolves when
-     * a future build reshapes the prologue. P3 extends P2 forward
-     * through the table-lookup tail (test + jnz + cmp + jnz + lea on
-     * the manager's `+0x88` default-skill sentinel) for maximum anti-
-     * collision while keeping the baked disp anchor.
+     * P2 anchors at entry+0x12 on the body sequence (movzx + mov + cmp +
+     * jnb + lea + table load) so the cascade still resolves if a build
+     * reshapes the prologue. P3 extends P2 through the table-lookup tail
+     * (test + jnz + cmp + jnz + lea on the manager's +0x88 default-skill
+     * sentinel) for maximum anti-collision while keeping the baked disp.
      */
     inline constexpr AddrCandidate k_skillTagResolverCandidates[] = {
         // P1 -- entry-anchored, RIP-rel to SkillInfoManager baked in.
-        // 1 unique match in v1.08.00 .text.
+        // Resolves to 1 unique match.
         {"SkillTagResolver_P1_PrologueWithMgr",
          "48 89 5C 24 10 "
          "48 89 6C 24 18 "
          "56 57 41 56 "
          "48 83 EC 40 "
          "0F B7 39 "
-         "48 8B 1D 9C 05 CA 05 "
+         "48 8B 1D 2C D6 CA 05 "
          "3B 7B 08",
          ResolveMode::Direct, 0, 0},
 
         // P2 -- body anchor at entry+0x12, past the 5-byte SafetyHook
         // prologue-overwrite window. Sequence:
         //   0F B7 39                  movzx edi, word ptr [rcx]   ; *tag
-        //   48 8B 1D 9C 05 CA 05      mov   rbx, cs:_SkillInfoMgr ; baked disp32
+        //   48 8B 1D 2C D6 CA 05      mov   rbx, cs:_SkillInfoMgr ; baked disp32
         //   3B 7B 08                  cmp   edi, [rbx+8]          ; bound check
         //   0F 83 ?? ?? ?? ??         jnb   <oob_branch>          ; rel32 wildcarded
         //   4C 8D 34 FD 00 00 00 00   lea   r14, ds:[rdi*8 + 0]   ; index scale
@@ -1566,7 +1583,7 @@ namespace Transmog
         // dispOffset = -0x12 walks back to the entry.
         {"SkillTagResolver_P2_BodyBoundCheck",
          "0F B7 39 "
-         "48 8B 1D 9C 05 CA 05 "
+         "48 8B 1D 2C D6 CA 05 "
          "3B 7B 08 "
          "0F 83 ?? ?? ?? ?? "
          "4C 8D 34 FD 00 00 00 00 "
@@ -1589,7 +1606,7 @@ namespace Transmog
         // the rel8 free. dispOffset = -0x12 walks back to the entry.
         {"SkillTagResolver_P3_BodyTableTail",
          "0F B7 39 "
-         "48 8B 1D 9C 05 CA 05 "
+         "48 8B 1D 2C D6 CA 05 "
          "3B 7B 08 "
          "0F 83 ?? ?? ?? ?? "
          "4C 8D 34 FD 00 00 00 00 "
@@ -1602,6 +1619,63 @@ namespace Transmog
          "4C 8D 8B 88 00 00 00",
          ResolveMode::Direct, -0x12, 0},
     };
+
+    /**
+     * @brief Signature inputs for the PRIMARY skill-tag resolver path
+     *        (`resolve_skill_tag_resolver` in helm_audio_filter.cpp). See
+     *        that function and the k_skillTagResolverCandidates doc above
+     *        for the full rationale.
+     *
+     * Unlike the cascade above (which hardcodes the build-specific
+     * SkillInfoManager disp32), this AOB signs ONLY the resolver's
+     * opcode/ModRM body shape with every movable operand wildcarded:
+     * the manager disp32 and both forward-jump rel32s. It therefore
+     * matches ALL members of the pa::*InfoManager resolver family (111
+     * at the captured build), not just the SkillInfo one. The consumer
+     * enumerates every hit and disambiguates by reading each resolver's
+     * manager pointer and comparing the manager's MSVC RTTI class name
+     * against @ref k_skillInfoManagerRttiName, a source-level type
+     * identity that tends to outlive recompiles and address reshuffles
+     * in a way no baked offset can. The body anchors at function
+     * entry+0x12, past the first 5 bytes, so that a sibling mod which
+     * inline-hooks the resolver (overwriting its prologue with a jump to
+     * a trampoline) does not stop the scan from matching. The disp32 and
+     * offset constants below decode the manager global from a match.
+     *
+     *   0F B7 39                 movzx edi, word ptr [rcx] ; *tag
+     *   48 8B 1D ?? ?? ?? ??     mov   rbx, [rip+disp32]    ; <Mgr>* (wild)
+     *   3B 7B 08                 cmp   edi, [rbx+8]         ; bound check
+     *   0F 83 ?? ?? ?? ??        jae   <oob>               ; rel32  (wild)
+     *   4C 8D 34 FD 00 00 00 00  lea   r14, [rdi*8+0]      ; index scale
+     *   48 8B 43 50              mov   rax, [rbx+0x50]      ; entry array
+     *   49 8B 04 06              mov   rax, [r14+rax]       ; entry load
+     */
+    inline constexpr std::string_view k_skillTagResolverBodyAob =
+        "0F B7 39 "
+        "48 8B 1D ?? ?? ?? ?? "
+        "3B 7B 08 "
+        "0F 83 ?? ?? ?? ?? "
+        "4C 8D 34 FD 00 00 00 00 "
+        "48 8B 43 50 "
+        "49 8B 04 06";
+
+    /**
+     * @brief Decorated MSVC RTTI name of the manager whose resolver we
+     *        want. Compared byte-exact (DMKRtti::vtable_is_type rejects
+     *        substrings) so the sibling SkillTree / SkillTreeGroup /
+     *        SkillGroup managers cannot be mistaken for the SkillInfo
+     *        one. A class rename in a future patch is the only edit this
+     *        primary path would ever need.
+     */
+    inline constexpr std::string_view k_skillInfoManagerRttiName =
+        ".?AVSkillInfoManager@pa@@";
+
+    /// Body offset of the disp32 inside the `mov rbx,[rip+disp32]`.
+    inline constexpr std::ptrdiff_t k_skillTagResolverDispOffset = 6;
+    /// End of the `mov rbx,[rip+disp32]`, i.e. the RIP base for its disp32.
+    inline constexpr std::ptrdiff_t k_skillTagResolverInstrEnd = 10;
+    /// Distance from the body anchor (entry+0x12) back to the entry.
+    inline constexpr std::ptrdiff_t k_skillTagResolverEntryBackoff = 0x12;
 
     /**
      * @brief `pa::GameAudioEffectBuffData` vtable -- the class

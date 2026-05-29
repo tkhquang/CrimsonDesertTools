@@ -656,6 +656,117 @@ namespace Transmog::HelmAudioFilter
                 *a2 = 0;
             return a2;
         }
+
+        // Resolves the engine's u16-tag -> SkillInfo record resolver in a
+        // way meant to survive game updates rather than pinning it to one
+        // build's addresses.
+        //
+        // The engine emits a family of byte-identical pa::*InfoManager
+        // index resolvers from one shared template. They differ ONLY in
+        // the RIP-relative disp32 that names their manager-pointer
+        // global. A signature that bakes that disp32 (the
+        // k_skillTagResolverCandidates cascade) only matches the build it
+        // was captured from, because the linker recomputes that
+        // displacement on every rebuild.
+        //
+        // This path instead signs ONLY the opcode/ModRM body shape
+        // (every movable operand wildcarded: the manager disp32 and both
+        // forward-jump rel32s), then disambiguates the structurally
+        // identical hits at runtime by the MSVC RTTI class name of the
+        // manager each resolver references. The class name is a
+        // source-level identity that tends to outlive recompiles and
+        // address reshuffles, so this keeps working when the function or
+        // its manager global moves. The SkillInfo resolver is the
+        // lowest-address member of the family, so the sweep usually
+        // returns on the first hit; correctness does not depend on that
+        // ordering, as every hit is RTTI-checked.
+        [[nodiscard]] std::uintptr_t resolve_skill_tag_resolver()
+        {
+            auto &log = DMK::Logger::get_instance();
+
+            // The two signature inputs -- the resolver's opcode body
+            // shape (every movable operand wildcarded) and the target
+            // manager's decorated RTTI name -- live in aob_resolver.hpp
+            // (k_skillTagResolverBodyAob / k_skillInfoManagerRttiName),
+            // alongside the fallback cascade, so all of this mod's
+            // signatures stay in one place. The body anchors at function
+            // entry+0x12 and the offsets used below to read the manager
+            // disp32 and walk back to the entry are named there too.
+            const auto pattern =
+                DMKScanner::parse_aob(::Transmog::k_skillTagResolverBodyAob);
+            if (!pattern)
+                return 0; // parse_aob already logged the malformed token
+
+            const auto range = DMKMemory::host_module_range();
+            if (!range.valid())
+                return 0;
+
+            const auto *cur = reinterpret_cast<const std::byte *>(range.base);
+            const auto *const end =
+                reinterpret_cast<const std::byte *>(range.end);
+            std::size_t scanned = 0;
+
+            while (cur < end)
+            {
+                const auto remaining = static_cast<std::size_t>(end - cur);
+                const std::byte *hit =
+                    DMKScanner::find_pattern(cur, remaining, *pattern);
+                if (hit == nullptr)
+                    break;
+
+                ++scanned;
+                const auto match = reinterpret_cast<std::uintptr_t>(hit);
+
+                // mov rbx,[rip+disp32]: the 3-byte movzx, then 48 8B 1D +
+                // disp32. disp32 sits at body offset +DispOffset; the mov
+                // ends at +InstrEnd, which is the RIP base for it.
+                const auto disp = DMKMemory::seh_read<std::int32_t>(
+                    match + ::Transmog::k_skillTagResolverDispOffset);
+                if (disp.has_value())
+                {
+                    const auto mgrGlobal =
+                        match + ::Transmog::k_skillTagResolverInstrEnd
+                        + static_cast<std::int64_t>(*disp);
+                    // The pointer SLOT lives in the EXE image (.data/.bss);
+                    // the manager object it points at is on the heap, and
+                    // that object's vtable is back inside the image.
+                    if (DMKMemory::contains(range, mgrGlobal))
+                    {
+                        const auto mgrObj =
+                            DMKMemory::seh_read<std::uintptr_t>(mgrGlobal)
+                                .value_or(0);
+                        const auto vtbl =
+                            DMKMemory::seh_read<std::uintptr_t>(mgrObj)
+                                .value_or(0);
+                        if (DMKRtti::vtable_is_type(
+                                vtbl, ::Transmog::k_skillInfoManagerRttiName))
+                        {
+                            const auto entry =
+                                match
+                                - ::Transmog::k_skillTagResolverEntryBackoff;
+                            if (DMKScanner::is_likely_function_prologue(entry))
+                            {
+                                log.info(
+                                    "[helm-audio] skill-tag resolver resolved "
+                                    "via RTTI '{}' at 0x{:X} (hit #{} of "
+                                    "body-shape family)",
+                                    ::Transmog::k_skillInfoManagerRttiName,
+                                    entry, scanned);
+                                return entry;
+                            }
+                        }
+                    }
+                }
+
+                cur = hit + 1; // resume the sweep just past this hit
+            }
+
+            log.warning(
+                "[helm-audio] RTTI scan: no SkillInfoManager resolver among "
+                "{} body-shape matches",
+                scanned);
+            return 0;
+        }
     } // namespace
 
     bool init()
@@ -677,19 +788,31 @@ namespace Transmog::HelmAudioFilter
             return false;
         }
 
-        // Resolve the engine's tag -> skill record resolver
-        // (sub_1402FB2C0). Required for the class chain walk; without
-        // it we cannot distinguish muffle-class buffs from other
-        // audio-classifier entries and the hook would have no safe
-        // way to suppress.
-        const auto resolverAddr = ::Transmog::resolve_address(
-            ::Transmog::k_skillTagResolverCandidates,
-            "HelmAudioFilter_SkillTagResolver");
+        // Resolve the engine's tag -> skill record resolver. Required
+        // for the class chain walk; without it we cannot distinguish
+        // muffle-class buffs from other audio-classifier entries and the
+        // hook would have no safe way to suppress.
+        //
+        // Primary path is the RTTI-discriminated scan: it signs only the
+        // resolver's opcode body shape and identifies the SkillInfo
+        // instance by its manager's RTTI class name, so it keeps working
+        // when the function or its manager global moves between builds
+        // (see resolve_skill_tag_resolver above). The build-specific
+        // baked-disp cascade is the fallback for the rare case the RTTI
+        // walk is unavailable (e.g. info managers not yet constructed) on
+        // a build whose baked disp is still current.
+        auto resolverAddr = resolve_skill_tag_resolver();
+        if (resolverAddr == 0)
+        {
+            resolverAddr = ::Transmog::resolve_address(
+                ::Transmog::k_skillTagResolverCandidates,
+                "HelmAudioFilter_SkillTagResolver");
+        }
         if (resolverAddr == 0)
         {
             log.warning(
-                "[helm-audio] skill-tag resolver AOB resolve failed; "
-                "feature disabled");
+                "[helm-audio] skill-tag resolver resolve failed "
+                "(RTTI scan + baked-disp cascade); feature disabled");
             return false;
         }
         g_skillTagResolver =
