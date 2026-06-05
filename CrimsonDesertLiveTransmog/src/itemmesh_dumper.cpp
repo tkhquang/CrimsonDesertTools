@@ -56,6 +56,21 @@ namespace Transmog
         constexpr ptrdiff_t kOffRefPtr = 0x00;   // StringRef: char*
         constexpr ptrdiff_t kOffRefLen = 0x08;   // StringRef: u32 length
 
+        // Item body-mesh chain. An item carries its actual per-rig mesh
+        // prefab names here, independent of the icon. Several rig variants
+        // of one item share a single icon -- Daeil_Band, Damian_Daeil_Band
+        // and OOngka_Daeil_Band all expose ItemIcon_Prefab_cd_phm_... yet
+        // emit cd_phm / cd_phw / cd_pom meshes respectively -- so the icon
+        // alone collapses them onto the cd_phm prefab. desc+0x248 holds a
+        // rule-list pointer (count at +0x250); each rule's mesh-slot array
+        // (u16 stringinfo slots) is at rule+0x00 with its count at rule+0x08.
+        constexpr ptrdiff_t kOffDescRuleList  = 0x248;
+        constexpr ptrdiff_t kOffDescRuleCount = 0x250;
+        constexpr ptrdiff_t kRuleStride       = 0x38;
+        constexpr ptrdiff_t kOffRuleMeshArr   = 0x00;
+        constexpr ptrdiff_t kOffRuleMeshCount = 0x08;
+        constexpr uint32_t  kRuleScanCap      = 64; // bound on garbage counts
+
         // ----- safe reads -----
         //
         // The `(value, bool& ok)` shape distinguishes a faulted read from
@@ -96,8 +111,18 @@ namespace Transmog
                     char c = src[i];
                     if (c == 0)
                         break;
-                    unsigned char u = static_cast<unsigned char>(c);
-                    if (u < 32 || u > 126)
+                    // Reject control bytes (0x01..0x1F): a misaligned or
+                    // torn heap read lands on pointer/length bytes that
+                    // carry low control values, so a control byte aborts
+                    // the read. High bytes (0x80..0xFF) are accepted
+                    // because some item name keys are UTF-8 encoded -- the
+                    // Roman numerals in `Goblin_Merchant_Fabric_Armor_*`
+                    // use `E2 85 A2..A5` -- and a printable-ASCII-only
+                    // filter would zero the whole name, dropping the item
+                    // from the prefab pass entirely (it never reaches the
+                    // exact/base maps, so its prefab loses its item link).
+                    // Mirrors the name reader in item_name_table.cpp.
+                    if (static_cast<unsigned char>(c) < 0x20)
                     {
                         n = 0;
                         break;
@@ -623,6 +648,67 @@ namespace Transmog
             return std::string(icon);
         }
 
+        // Strip a 3-character rig prefix (`cd_phm_` / `cd_phw_` / `cd_pom_`
+        // / `cd_nhm_` ...) so two rig variants of the same mesh compare
+        // equal. Returns the input unchanged when it is not in the
+        // `cd_???_` shape, so model-keyed prefabs (`cd_m0001_...`) keep
+        // their prefix and only collide with an exact twin.
+        std::string_view strip_rig_prefix(std::string_view s) noexcept
+        {
+            if (s.size() >= 7 && s[0] == 'c' && s[1] == 'd' && s[2] == '_' &&
+                s[6] == '_')
+                return s.substr(7);
+            return s;
+        }
+
+        // Resolve the item's primary body-mesh prefab from its rule chain.
+        // Returns the mesh whose rig-stripped name equals @p iconStem -- the
+        // same logical item in its actual wearer rig -- which lets rig
+        // variants link to cd_phw / cd_pom instead of the shared cd_phm
+        // icon. Sub-part meshes (e.g. `..._wire_0001_r`) have a different
+        // stem and are skipped. Returns "" when the rule chain is absent or
+        // no mesh matches, so the caller keeps the icon-derived prefab; for
+        // an ordinary item the matching mesh equals the icon prefab, so the
+        // result is identical and only genuine rig variants change.
+        std::string resolve_rule_body_mesh(uintptr_t desc, uintptr_t stringArr,
+                                           uint32_t stringCount,
+                                           std::string_view iconStem) noexcept
+        {
+            if (!desc || !stringArr || iconStem.empty())
+                return {};
+            bool ok = false;
+            const uintptr_t ruleList =
+                read_qword_safe(desc + kOffDescRuleList, ok);
+            const uint32_t ruleCount =
+                read_u32_safe(desc + kOffDescRuleCount, ok);
+            if (!ruleList || ruleCount == 0 || ruleCount > kRuleScanCap)
+                return {};
+            for (uint32_t r = 0; r < ruleCount; ++r)
+            {
+                const uintptr_t rule =
+                    ruleList + static_cast<uintptr_t>(r) * kRuleStride;
+                const uintptr_t meshArr =
+                    read_qword_safe(rule + kOffRuleMeshArr, ok);
+                const uint32_t meshCount =
+                    read_u32_safe(rule + kOffRuleMeshCount, ok);
+                if (!meshArr || meshCount == 0 || meshCount > kRuleScanCap)
+                    continue;
+                for (uint32_t m = 0; m < meshCount; ++m)
+                {
+                    const uint16_t mslot = read_u16_safe(
+                        meshArr + static_cast<uintptr_t>(m) * 2, ok);
+                    if (!ok || mslot == 0xFFFF || mslot >= stringCount)
+                        continue;
+                    const uintptr_t wrap = read_qword_safe(
+                        stringArr + static_cast<uintptr_t>(mslot) * 8, ok);
+                    std::string mesh = to_lower(read_wrapper_string(wrap));
+                    if (!mesh.empty() && strip_rig_prefix(mesh) == iconStem)
+                        return mesh;
+                }
+            }
+            return {};
+        }
+
         // ----- per-item record collected from iteminfo/stringinfo -----
 
         struct ItemEntry
@@ -639,6 +725,30 @@ namespace Transmog
     void dump_itemmesh_tsv()
     {
         auto &logger = DMK::Logger::get_instance();
+
+        // Gate on the swap catalog before sourcing the prefab pool. PASS 1a
+        // reads PrefabWrapperSwap's slot catalog, which
+        // populate_slot_catalogs() builds once a world is loaded (on the
+        // save-load tick, or lazily on first overlay open). Both dump
+        // triggers spawn this routine in a detached thread the instant the
+        // dump flag is set, which can beat that build and leave PASS 1a with
+        // nothing -- an incomplete pool.
+        //
+        // Wait for the catalog rather than capping the wait: there is no
+        // valid timeout here. A player can sit at the main menu for days with
+        // no world and therefore no catalog, so any cap would just skip the
+        // dump (or fall back to a degraded one) for a state that is normal,
+        // not failed. Polling until the catalog exists yields a complete dump
+        // whenever the world finally loads, however long that takes. The wait
+        // is free (this already runs off the main thread) and the thread is
+        // reclaimed at process exit if a world is never entered.
+        if (!PrefabWrapperSwap::is_catalog_populated())
+        {
+            logger.info("[itemprefab] waiting for swap catalog before dumping");
+            constexpr DWORD k_catalogPollMs = 500;
+            while (!PrefabWrapperSwap::is_catalog_populated())
+                Sleep(k_catalogPollMs);
+        }
 
         // Resolve both registry-holder absolute addresses via the AOB
         // cascade. The patterns target the `mov reg, [rip+disp32]`
@@ -798,12 +908,20 @@ namespace Transmog
             {
                 iconPrefab = iconPrefab.substr(kShortPrefix.size());
             }
+            // Prefer the item's actual rig mesh over the icon-derived
+            // prefab. The icon is shared across rig variants, so the rule
+            // chain is the only place the real cd_phw / cd_pom mesh appears;
+            // for an ordinary item the rule mesh equals the icon prefab and
+            // this is a no-op.
+            std::string bodyMesh = resolve_rule_body_mesh(
+                desc, stringArr, stringCount, strip_rig_prefix(iconPrefab));
             ItemEntry e;
             e.runtimeIdx = id;
             e.internalName = std::move(internalName);
             e.iconSlot = slot;
             e.fullIcon = full;
-            e.iconPrefab = std::string(iconPrefab);
+            e.iconPrefab = bodyMesh.empty() ? std::string(iconPrefab)
+                                            : std::move(bodyMesh);
             e.base = extract_base_prefix(e.iconPrefab);
             items.push_back(std::move(e));
         }

@@ -50,7 +50,11 @@ namespace CDCore
         // ChildContainer slot, the 100-entry actor-list capacity,
         // the 16-byte ptr+flag stride, and the live-flag value
         // 0x0101 round out the layout.
-        constexpr std::ptrdiff_t k_offUserActor      = 0x28; // mgr +0x28
+        // mgr -> userActor. The canonical offset lives in
+        // controlled_char.hpp (CDCore::ActorChainOffsets), shared with
+        // the LT/EH WorldSystem-rooted resolvers.
+        constexpr std::ptrdiff_t k_offUserActor      =
+            ActorChainOffsets::k_actorManagerToUserActor;
         constexpr std::ptrdiff_t k_offSubManager     = 0x08; // user +0x08
         constexpr std::ptrdiff_t k_offSubMgrKliff    = 0x30; // sub +0x30
         constexpr std::ptrdiff_t k_offSubMgrCtrl     = 0x38; // sub +0x38
@@ -60,7 +64,7 @@ namespace CDCore
         // Actor-list constants. The ChildContainer holds a 100-entry
         // list with 16-byte stride (ptr + live flag). The snapshot
         // path no longer uses this list -- it pulls protagonists
-        // directly from ClientActorManager+0x100 -- but the
+        // directly from ClientActorManager+0x130 -- but the
         // diagnostic walker debug_enumerate_actor_list keeps using
         // it.
         constexpr std::size_t    k_actorListCapacity = 100;
@@ -71,9 +75,12 @@ namespace CDCore
         //     byte +0x60: session-local actor ID (load order; varies)
         //     byte +0x63: 0xA0 = Kliff, 0xB0 = everyone else
         //
-        // Direct protagonist lookup via ClientActorManager+0x100:
-        //   - +0x100: pointer to an 8-byte-stride CCOIA actor array.
-        //   - +0x10C: u32 element capacity of that array (order 1000).
+        // Direct protagonist lookup via ClientActorManager+0x130:
+        //   - +0x130: pointer to an 8-byte-stride CCOIA actor array.
+        //   - +0x13C: u32 element capacity of that array (order 1000).
+        // These sit in the same post-header region as the userActor
+        // field, so a manager re-layout shifts them by the same delta;
+        // keep them in step with k_offUserActor when re-deriving.
         // The array is a DENSE actor vector: every loaded character
         // -- protagonists, companions, AND every humanoid NPC -- is
         // appended here in spawn order. Protagonists do NOT cluster at
@@ -85,12 +92,12 @@ namespace CDCore
         // Non-protagonist entries are rejected by the appearance-config
         // classifier (their path carries no protagonist codename).
         constexpr std::ptrdiff_t k_offCcoiaIdentity    = 0x60;
-        constexpr std::ptrdiff_t k_offMgrActorArray    = 0x100;
-        constexpr std::ptrdiff_t k_offMgrActorArrayCap = 0x10C;
+        constexpr std::ptrdiff_t k_offMgrActorArray    = 0x130;
+        constexpr std::ptrdiff_t k_offMgrActorArrayCap = 0x13C;
         constexpr std::uint8_t   k_kliffHighByte       = 0xA0;
 
-        // Scan bound for the ClientActorManager+0x100 array. We read
-        // the engine's own capacity field (+0x10C) on every call so the
+        // Scan bound for the ClientActorManager+0x130 array. We read
+        // the engine's own capacity field (+0x13C) on every call so the
         // bound tracks the array as it grows, then clamp it to a sane
         // window: a read below the floor is treated as torn/garbage and
         // replaced with a generous fixed fallback, while a read above
@@ -645,7 +652,7 @@ namespace CDCore
         if (written >= cap)
             return written;
 
-        // Walk the ClientActorManager+0x100 actor array. For each
+        // Walk the ClientActorManager+0x130 actor array. For each
         // non-Kliff entry, run the appearance-config classifier.
         // NPCs and followers fail the codename-substring match
         // (their appearance path does not contain `cd_phw_damian`

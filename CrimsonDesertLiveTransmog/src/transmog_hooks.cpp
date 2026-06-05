@@ -49,7 +49,7 @@ namespace Transmog
     // tag LT manages). The hook below queries it directly.
 
     // Returns true iff a1 matches the controlled-character's actor
-    // component (WS → ActorManager+0x30 → UserActor+0x28 → +0xD8).
+    // component (WS → ActorManager+0x30 → UserActor+0x58 → +0xD8).
     // Early-outs on mismatch prevent LT from re-running its carrier-
     // apply on every background companion's equip/VEC event -- each
     // such unintended apply was mutating scene-graph state for the

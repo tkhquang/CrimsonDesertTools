@@ -6,6 +6,8 @@
     hasActiveFilter,
     installUrlSync,
     CATALOG_VERSIONS,
+    UNCORRECTED_VERSIONS,
+    DEFAULT_VERSION,
   } from './lib/store.svelte';
   import SearchBar from './lib/components/SearchBar.svelte';
   import QuickPresets from './lib/components/QuickPresets.svelte';
@@ -22,6 +24,10 @@
     catalog.stats.total > 0
       ? (visibleRows.length / catalog.stats.total) * 100
       : 0,
+  );
+
+  const isUncorrectedVersion = $derived(
+    UNCORRECTED_VERSIONS.includes(catalog.version),
   );
 
   let displayInput: HTMLInputElement | undefined = $state();
@@ -82,6 +88,22 @@
       </button>
     </div>
   </header>
+
+  {#if isUncorrectedVersion}
+    <div
+      class="border-b border-separator bg-input px-3 py-2 text-xs text-orange"
+      role="alert"
+    >
+      ⚠ <span class="font-semibold">{catalog.version}</span> is an older dump
+      and its data may be incomplete. Dumps before
+      <span class="font-semibold">{DEFAULT_VERSION}</span> were generated
+      before two catalog fixes: items whose names use special characters
+      (e.g. Roman numerals) can be missing, and some character-specific gear
+      meshes (male / female / orc rig variants) can be mislinked. Select
+      <span class="font-semibold">{DEFAULT_VERSION}</span> for the corrected
+      data.
+    </div>
+  {/if}
 
   {#if catalog.status === 'error'}
     <div class="border-b border-separator bg-input px-3 py-2 text-xs text-red">

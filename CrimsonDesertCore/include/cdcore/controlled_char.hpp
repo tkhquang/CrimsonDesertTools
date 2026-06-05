@@ -15,7 +15,7 @@
 // (pa::ClientChildOnlyInGameActor):
 //
 //   [playerBase]                        ; AOB-resolved module-static slot
-//      -> +0x28  = pa::ClientUserActor
+//      -> +0x58  = pa::ClientUserActor
 //          -> +0x08  = CCOIA sub-manager
 //              -> +0x30 = Kliff CCOIA           (always-present anchor)
 //              -> +0x38 = currently-controlled CCOIA
@@ -23,7 +23,8 @@
 //              -> vec[2] = pa::ClientChildContainerActorComponent
 //                  -> +0x18 = 100-entry actor list (16-byte stride ptr+flag)
 //
-//   ClientActorManager+0x100 -> CCOIA-only actor array (8-byte stride):
+//   ClientActorManager+0x130 -> CCOIA-only actor array (8-byte stride,
+//   element capacity at +0x13C):
 //     [0] = Kliff       (always present)
 //     [1] = Damiane     (when loaded)
 //     [2] = Oongka      (when loaded)
@@ -68,6 +69,45 @@
 namespace CDCore
 {
     /**
+     * @brief pa::ClientActorManager / pa::ClientUserActor memory-layout
+     *        offsets shared by every controlled-character resolver in
+     *        the suite.
+     * @details Single authority for the offsets that describe the
+     *          controlled-character chain so a game-update struct drift
+     *          is a one-line edit here instead of N edits scattered
+     *          across the mods. Three resolvers consume these:
+     *            - CDCore controlled_char.cpp -- roots at the published
+     *              ClientActorManagerGlobal slot (anchors.hpp AOB).
+     *            - LiveTransmog transmog_worker.cpp
+     *              (resolve_player_component / read_*_actor_ptr_seh) and
+     *            - EquipHide background_threads.cpp (controlled-actor
+     *              poll) -- both root at the WorldSystem holder
+     *              (k_worldSystemToActorManager) instead.
+     *          The two roots are independent anchors that resolve to
+     *          the SAME pa::ClientActorManager, so they share
+     *          k_actorManagerToUserActor downstream. The WorldSystem-
+     *          rooted walks then read k_userActorToControlled directly,
+     *          reaching the same controlled CCOIA the CDCore chain
+     *          resolves indirectly through the sub-manager (+0x38).
+     *
+     *          A game update that re-lays-out pa::ClientActorManager
+     *          moves k_actorManagerToUserActor; it is the offset most
+     *          likely to change on a patch, which is why it lives here
+     *          once rather than inline at each call site. See
+     *          CrimsonDesertCore/include/cdcore/anchors.hpp for the AOB
+     *          that resolves the manager itself.
+     */
+    namespace ActorChainOffsets
+    {
+        /// Offset from pa::ClientActorManager to pa::ClientUserActor.
+        inline constexpr std::ptrdiff_t k_actorManagerToUserActor = 0x58;
+        /// Offset from the WorldSystem holder qword to pa::ClientActorManager.
+        inline constexpr std::ptrdiff_t k_worldSystemToActorManager = 0x30;
+        /// Offset from pa::ClientUserActor to the controlled CCOIA.
+        inline constexpr std::ptrdiff_t k_userActorToControlled = 0xD8;
+    } // namespace ActorChainOffsets
+
+    /**
      * @brief Identifies one of the three controlled playable characters.
      * @details Unknown is returned when the static chain has not yet
      *          been populated (cold-load), when it is mid-teardown
@@ -83,7 +123,7 @@ namespace CDCore
 
     /**
      * @brief CCOIA pointer of the currently-controlled character.
-     * @details Walks [playerBase] -> +0x28 -> +0x08 -> +0x38. SEH-
+     * @details Walks [playerBase] -> +0x58 -> +0x08 -> +0x38. SEH-
      *          guarded. Returns 0 when the chain is mid-teardown (engine
      *          published a null along the path during save-load) or
      *          before the engine has finished cold-load wiring.
@@ -188,7 +228,7 @@ namespace CDCore
      *          CCOIAs currently live in the world:
      *            - Kliff is always present (sub-manager +0x30).
      *            - Damiane / Oongka are pulled from the
-     *              `ClientActorManager + 0x100` CCOIA-only actor array
+     *              `ClientActorManager + 0x130` CCOIA-only actor array
      *              (8-byte stride) and accepted only when the
      *              appearance-config classifier matches their
      *              character codename. NPCs and follower humanoids

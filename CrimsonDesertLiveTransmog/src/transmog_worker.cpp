@@ -315,23 +315,62 @@ namespace Transmog
     }
 
     // --- Player component resolution ---
+    //
+    // WorldSystem -> ClientActorManager -> ClientUserActor chain
+    // offsets. The same pa::ClientActorManager singleton is reached via
+    // the WorldSystem holder here and via the published
+    // ClientActorManagerGlobal in CDCore's controlled_char.cpp. The
+    // layout offsets are owned by CDCore (ActorChainOffsets,
+    // controlled_char.hpp) so a struct re-layout is a single edit
+    // there; these aliases keep the local names the consumers below
+    // use.
+    constexpr std::ptrdiff_t k_wsToActorManager   =
+        CDCore::ActorChainOffsets::k_worldSystemToActorManager;
+    constexpr std::ptrdiff_t k_actorManagerToUser =
+        CDCore::ActorChainOffsets::k_actorManagerToUserActor;
+    constexpr std::ptrdiff_t k_userToControlled   =
+        CDCore::ActorChainOffsets::k_userActorToControlled;
 
-    __int64 resolve_player_component() noexcept
+    // SEH-isolated walk WorldSystem -> ActorManager -> UserActor.
+    // Returns the validated (>0x10000) pa::ClientUserActor pointer, or
+    // 0 on a null WorldSystem holder or any torn/faulting intermediate.
+    // Single source of truth for resolve_player_component(),
+    // read_user_actor_ptr_seh() and read_controlled_actor_ptr_seh(),
+    // which would otherwise each repeat this exact three-link walk.
+    static std::uintptr_t walk_ws_to_user_actor_seh() noexcept
     {
-        const auto wsBase = world_system_ptr().load(std::memory_order_acquire);
+        const auto wsBase =
+            world_system_ptr().load(std::memory_order_acquire);
         if (!wsBase)
             return 0;
         __try
         {
-            auto ws = *reinterpret_cast<uintptr_t *>(wsBase);
+            const auto ws = *reinterpret_cast<uintptr_t *>(wsBase);
             if (ws < 0x10000)
                 return 0;
-            auto am = *reinterpret_cast<uintptr_t *>(ws + 0x30);
+            const auto am =
+                *reinterpret_cast<uintptr_t *>(ws + k_wsToActorManager);
             if (am < 0x10000)
                 return 0;
-            auto user = *reinterpret_cast<uintptr_t *>(am + 0x28);
+            const auto user =
+                *reinterpret_cast<uintptr_t *>(am + k_actorManagerToUser);
             if (user < 0x10000)
                 return 0;
+            return user;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return 0;
+        }
+    }
+
+    __int64 resolve_player_component() noexcept
+    {
+        const auto user = walk_ws_to_user_actor_seh();
+        if (user < 0x10000)
+            return 0;
+        __try
+        {
             // user+0xD8 holds the currently-controlled character's
             // ClientChildOnlyInGameActor. It coincides with user+0xD0
             // (the "primary" slot, always Kliff) when Kliff is the
@@ -340,7 +379,8 @@ namespace Transmog
             // unconditionally would land all companion applies on
             // Kliff's actor, which is why the apply pipeline always
             // walks +0xD8.
-            auto actor = *reinterpret_cast<uintptr_t *>(user + 0xD8);
+            auto actor =
+                *reinterpret_cast<uintptr_t *>(user + k_userToControlled);
             if (actor < 0x10000)
                 return 0;
 
@@ -1328,27 +1368,11 @@ namespace Transmog
     // as "chain not yet ready" and defer the save-load branch.
     static std::uintptr_t read_user_actor_ptr_seh() noexcept
     {
-        const auto wsBase =
-            world_system_ptr().load(std::memory_order_acquire);
-        if (!wsBase)
-            return 0;
-        __try
-        {
-            auto ws = *reinterpret_cast<uintptr_t *>(wsBase);
-            if (ws < 0x10000)
-                return 0;
-            auto am = *reinterpret_cast<uintptr_t *>(ws + 0x30);
-            if (am < 0x10000)
-                return 0;
-            auto user = *reinterpret_cast<uintptr_t *>(am + 0x28);
-            if (user < 0x10000)
-                return 0;
-            return user;
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER)
-        {
-            return 0;
-        }
+        // Named entry point over the shared walker (see
+        // walk_ws_to_user_actor_seh). Kept distinct because callers
+        // read it specifically as the world-reload signal documented
+        // above (UserActor pointer change == new world loaded).
+        return walk_ws_to_user_actor_seh();
     }
 
     /** @brief SEH-isolated read of `user+0xD8` (the rotating CLIENT
@@ -1361,28 +1385,18 @@ namespace Transmog
      *           been published as null (engine mid-transition). */
     static std::uintptr_t read_controlled_actor_ptr_seh() noexcept
     {
-        const auto wsBase =
-            world_system_ptr().load(std::memory_order_acquire);
-        if (!wsBase)
+        const auto user = walk_ws_to_user_actor_seh();
+        if (user < 0x10000)
             return 0;
         __try
         {
-            auto ws = *reinterpret_cast<uintptr_t *>(wsBase);
-            if (ws < 0x10000)
-                return 0;
-            auto am = *reinterpret_cast<uintptr_t *>(ws + 0x30);
-            if (am < 0x10000)
-                return 0;
-            auto user = *reinterpret_cast<uintptr_t *>(am + 0x28);
-            if (user < 0x10000)
-                return 0;
             // user+0xD8 is the CLIENT body pointer (rotates per
             // radial swap or save-load arena allocation). Unlike
-            // the other chain reads above, we DO NOT reject 0 here
-            // because an X->0 transition is the save-load signal
-            // we want to detect.
+            // the chain reads in the shared walker, we DO NOT reject
+            // 0 here because an X->0 transition is the save-load
+            // signal we want to detect.
             auto controlled =
-                *reinterpret_cast<uintptr_t *>(user + 0xD8);
+                *reinterpret_cast<uintptr_t *>(user + k_userToControlled);
             return controlled;
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
