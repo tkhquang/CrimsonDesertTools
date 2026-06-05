@@ -125,17 +125,25 @@ namespace EquipHide
 
         auto &ps = player_state();
 
+        // WorldSystem -> ActorManager -> UserActor chain offsets are owned
+        // by CDCore::ActorChainOffsets (controlled_char.hpp), the single
+        // authority shared with background_threads and CDCore's own
+        // resolver, so a manager re-layout is a one-line edit there. This
+        // walk reaches the SAME pa::ClientActorManager that CDCore roots at
+        // the published global slot.
+        namespace AC = CDCore::ActorChainOffsets;
+
         __try
         {
             /* read_ptr_unsafe: outer __try makes is_readable() redundant. */
             auto ws = read_ptr_unsafe(addrs.worldSystem, 0);
             if (!ws)
                 return;
-            auto am = read_ptr_unsafe(ws, 0x30);
+            auto am = read_ptr_unsafe(ws, AC::k_worldSystemToActorManager);
             if (!am)
                 return;
 
-            auto user = read_ptr_unsafe(am, 0x28);
+            auto user = read_ptr_unsafe(am, AC::k_actorManagerToUserActor);
             if (!user)
                 return;
 
@@ -215,7 +223,7 @@ namespace EquipHide
                zero and the freshly-walked pointer is the initial
                controlled actor, so invalidating would wipe a cache
                just populated against it. */
-            auto controlledActor = read_ptr_unsafe(user, 0xD8);
+            auto controlledActor = read_ptr_unsafe(user, AC::k_userActorToControlled);
             static std::uintptr_t s_prevControlledActor = 0;
             static bool s_pendingReloadInvalidation = false;
             // CDCore world-generation: bumps when the engine
@@ -309,7 +317,7 @@ namespace EquipHide
 
             /* Controlled-character identity via the shared Core
                resolver. Core walks the static chain
-               [moduleBase + 0x5FA0430] -> +0x28 (ClientUserActor) ->
+               [moduleBase + 0x5FA0430] -> +0x58 (ClientUserActor) ->
                +0x08 (sub-manager) -> +0x38 (controlled CCOIA), then
                classifies the CCOIA by reading its appearance-config
                asset path (CCOIA +0x68 -> +0x40 -> +0x40 -> +0x38)
@@ -330,7 +338,7 @@ namespace EquipHide
                player-CCOIA snapshot. Core walks the static chain:
                Kliff is always present at sub-manager+0x30; Damiane
                and Oongka are pulled from the ClientActorManager
-               +0x100 CCOIA-only actor array and filtered through
+               +0x130 CCOIA-only actor array and filtered through
                the appearance-config classifier (NPCs and follower
                humanoids share the array but fail the codename
                substring match). Snapshot covers all three

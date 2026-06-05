@@ -5,9 +5,25 @@ import { joinAll, type JoinResult } from './parse';
 // Available TSV dump versions, newest first. Add a new entry here after
 // dropping the matching CrimsonDesertLiveTransmog_*_<version>.tsv files into
 // docs/live-transmog/. The first entry is the default selection.
-export const CATALOG_VERSIONS = ['v1.09.00', 'v1.08.00', 'v1.07.00'] as const;
+export const CATALOG_VERSIONS = [
+  'v1.10.00',
+  'v1.09.00',
+  'v1.08.00',
+  'v1.07.00',
+] as const;
 export type CatalogVersion = (typeof CATALOG_VERSIONS)[number];
 export const DEFAULT_VERSION: CatalogVersion = CATALOG_VERSIONS[0];
+
+// Dumps produced before the catalog-data fixes shipped (UTF-8 item names
+// and per-rig mesh variants). Their itemprefabs data can omit items whose
+// names use special characters and can mislink character-rig mesh variants
+// (male / female / orc), so the UI warns when one of these is selected.
+// Newer corrected versions are intentionally absent from this list.
+export const UNCORRECTED_VERSIONS: readonly string[] = [
+  'v1.09.00',
+  'v1.08.00',
+  'v1.07.00',
+];
 
 // Kept for any external references; reflects the default version only. Live UI
 // should read `catalog.version` so it tracks the user's selection.

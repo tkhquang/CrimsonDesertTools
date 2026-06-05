@@ -66,12 +66,12 @@ namespace Transmog
             { "Ancient_People_Earring",                      "cd_phm_00_earring_0004_r"          }, // Earring2
             { "Titan_Necklace",                              "cd_phm_00_necklace_0017"           }, // Necklace
             { "Antumbra_DarkDeacon_Ring",                    "cd_phm_00_ring_0018_l"             }, // Ring1
-            { "AbyssReward_EastWitch_Ring",                  "cd_phm_00_ring_00_0017_r"          }, // Ring2 (variants: _l/_r)
+            { "AbyssReward_EastWitch_Ring",                  "cd_phm_00_ring_0017_r"             }, // Ring2 (variants: _l/_r)
             { "RedNose_Lantern",                             "cd_t0000_lantern_0003"             }, // Lantern
             { "Kliff_Glasses",                               "cd_phm_00_glasses_0002"            }, // Glasses
             { "Kliff_Mask",                                  "cd_phm_00_mask_00_0271_a"          }, // Mask
             { "Aggro_Backpack",                              "cd_phm_00_bag_0053"                }, // Backpack
-            { "Daeil_Band",                                  "cd_phw_00_rinkband_0001"           }, // Bracelet (phw on male)
+            { "Daeil_Band",                                  "cd_phm_00_rinkband_0001"           }, // Bracelet (phm, male rig)
             { "Legendary_Dragon_OneHandSword",               "cd_phm_01_sword_0023_r"            }, // MainHand
             { "Legendary_Dragon_OneHandSword",               "cd_phm_01_sword_0023_l"            }, // OffHand (mirror)
             { "GreyWolf_OneHandBow",                         "cd_phm_04_bow_0003"                }, // Ranged
@@ -104,7 +104,7 @@ namespace Transmog
             { "Kliff_Glasses",                               "cd_phm_00_glasses_0002"            }, // Glasses (Kliff fallback)
             { "Kliff_Mask",                                  "cd_phm_00_mask_00_0271_a"          }, // Mask    (cross-char)
             { "Aggro_Backpack",                              "cd_phm_00_bag_0053"                }, // Backpack (Kliff fallback)
-            { "Daeil_Band",                                  "cd_phw_00_rinkband_0001"           }, // Bracelet (universal)
+            { "Damian_Daeil_Band",                           "cd_phw_00_rinkband_0001"           }, // Bracelet (phw, female rig)
             { "Demian_OneHandRapier",                        "cd_phw_01_sword_0005"              }, // MainHand
             { "Damian_OneHandShield",                        "cd_phw_03_shield_0131"             }, // OffHand (shield off-hand)
             { "Damian_OneHandPistol",                        "cd_phm_06_pistol_0001"             }, // Ranged
@@ -134,7 +134,7 @@ namespace Transmog
             { "",                                            ""                                  }, // Glasses (no Oongka capture)
             { "Kliff_Mask",                                  "cd_phm_00_mask_00_0271_a"          }, // Mask    (cross-char)
             { "Oongka_Rocket_BackPack",                      "cd_phm_00_bag_0057"                }, // Backpack (orc-tribe rocket pack)
-            { "Daeil_Band",                                  "cd_phw_00_rinkband_0001"           }, // Bracelet (universal)
+            { "OOngka_Daeil_Band",                           "cd_pom_00_rinkband_0001"           }, // Bracelet (pom, orc rig)
             { "Big_Horn_Tiger_OneHandAxe",                   "cd_phm_01_axe_0035_r"              }, // MainHand
             { "Big_Horn_Tiger_OneHandAxe",                   "cd_phm_01_axe_0035_r"              }, // OffHand (1H mirror)
             { "Orc_OneHandCannon",                           "cd_phm_13_cannon_0003_l"           }, // Ranged

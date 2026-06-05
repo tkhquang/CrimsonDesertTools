@@ -382,13 +382,20 @@ namespace EquipHide
             auto &addrs = resolved_addrs();
             if (!addrs.worldSystem)
                 return 0;
-            // seh_read_chain walks WorldSystem -> +0x30 ActorManager ->
-            // +0x28 UserActor -> +0xD8 controlled actor and performs the
-            // terminal deref INSIDE its own SEH frame, so a half-torn
-            // rotation state faults safely instead of crashing. The final
-            // >= 0x10000 guard rejects the not-yet-wired-up sentinel range.
+            // seh_read_chain walks WorldSystem -> ActorManager ->
+            // UserActor -> controlled actor and performs the terminal
+            // deref INSIDE its own SEH frame, so a half-torn rotation
+            // state faults safely instead of crashing. The final
+            // >= 0x10000 guard rejects the not-yet-wired-up sentinel
+            // range. Layout offsets come from CDCore::ActorChainOffsets
+            // (controlled_char.hpp), the single authority shared with
+            // LiveTransmog and CDCore's own resolver.
+            namespace AC = CDCore::ActorChainOffsets;
             auto r = DMK::Memory::seh_read_chain<std::uintptr_t>(
-                addrs.worldSystem, {0x00, 0x30, 0x28, 0xD8});
+                addrs.worldSystem,
+                {0x00, AC::k_worldSystemToActorManager,
+                 AC::k_actorManagerToUserActor,
+                 AC::k_userActorToControlled});
             return (r && *r >= 0x10000) ? *r : 0;
         }
 

@@ -55,8 +55,10 @@ namespace CDCore::Anchors
     // the mod chases to obtain the player actor component. RipRelative mode:
     // the disp32 is read at match+7 and added to (match + 11).
     //
-    // Walk (runtime-data):
-    //   *(wsPtr) -> *(+0x30) -> *(+0x28) -> *(+0xD0) = actor
+    // Walk (runtime-data); the +0x30 / +0x58 / +0xD8 manager-chain
+    // offsets are owned by CDCore::ActorChainOffsets (controlled_char.hpp),
+    // the single authority shared with the LT/EH controlled-actor polls:
+    //   *(wsPtr) -> *(+0x30) -> *(+0x58) -> *(+0xD8) = actor
     //   actor    -> *(+104)  -> *(+56)             = component
     //
     // 3-tier cascade. P2_StructField is a structurally different sibling
@@ -291,10 +293,17 @@ namespace CDCore::Anchors
     // controlled-character resolver chain:
     //
     //   [global] -> mgr (pa::ClientActorManager)
-    //   mgr  +0x28 -> userActor (pa::ClientUserActor)
+    //   mgr  +0x58 -> userActor (pa::ClientUserActor)
     //   user +0x08 -> subMgr
     //   sub  +0x30 -> Kliff CCOIA (always present)
     //   sub  +0x38 -> currently-controlled CCOIA
+    //
+    // A game update that re-lays-out pa::ClientActorManager moves the
+    // userActor field (mgr+0x58) and the CCOIA actor-array descriptor
+    // (mgr+0x130, capacity at mgr+0x13C) together by the same delta. The
+    // userActor offset is owned by CDCore::ActorChainOffsets
+    // (controlled_char.hpp); the array offsets live with the snapshot
+    // walk in controlled_char.cpp.
     //
     // The slot's module-relative offset drifts between game patches
     // (e.g., 0x5FA0430 on v1.06 / v1.07, 0x6012110 on v1.08), so a
@@ -311,18 +320,21 @@ namespace CDCore::Anchors
     inline constexpr AddrCandidate k_clientActorManagerGlobalCandidates[] = {
         // P1 -- publish-store + sibling sub-pointer assignments:
         //   mov [rip+disp32], rdi         ; <-- publishes the manager
-        //   lea rax, [rdi+0x100]
+        //   lea rax, [rdi+0x130]
         //   mov [rip+disp32], rax         ; sibling slot +8
-        //   lea rax, [rdi+0x180]
+        //   lea rax, [rdi+0x1B0]
         //   mov [rip+disp32], rax         ; sibling slot +16
-        // The literal +0x100 / +0x180 sub-field offsets are the
+        // The literal +0x130 / +0x1B0 sub-field offsets are the
         // manager's published sub-pointers and pin the function
         // tightly without depending on any compiler-owned values.
+        // They track the manager layout, so a re-layout that shifts
+        // the chain offsets (see the doc above) also requires
+        // re-deriving these two immediates from the publish function.
         // disp32 of `mov [rip+disp32], rdi` is at match+3; the
         // instruction is 7 bytes long.
         {"ClientActorManagerGlobal_P1_PublishStore",
-         "48 89 3D ?? ?? ?? ?? 48 8D 87 00 01 00 00 "
-         "48 89 05 ?? ?? ?? ?? 48 8D 87 80 01 00 00 "
+         "48 89 3D ?? ?? ?? ?? 48 8D 87 30 01 00 00 "
+         "48 89 05 ?? ?? ?? ?? 48 8D 87 B0 01 00 00 "
          "48 89 05",
          ResolveMode::RipRelative, 3, 7},
 
