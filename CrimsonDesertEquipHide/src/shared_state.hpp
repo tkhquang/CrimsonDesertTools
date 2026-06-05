@@ -26,14 +26,12 @@ namespace EquipHide
          *        inner `call sub_1402E1430` (through which PostfixEval
          *        runs for newly-instantiated prefabs).
          *
-         * CE captures across Kliff (194 hits) and Oongka (173 hits)
-         * sessions on 2026-04-22: every PostfixEval hit that came from
-         * prefab instantiation (NPC creation events at load) had this
-         * return address on its stack; no player-side hit (196/196 for
-         * the two active-protagonist contexts) did. BaldFix uses this
-         * stack-presence check as a deterministic call-graph filter --
-         * no ctx caching, no frequency heuristics. Resolved via an AOB
-         * anchor at mod init.
+         * Every PostfixEval invocation that comes from prefab
+         * instantiation (NPC creation events at load) carries this
+         * return address on its stack; no player-side invocation does.
+         * BaldFix uses this stack-presence check as a deterministic
+         * call-graph filter -- no ctx caching, no frequency heuristics.
+         * Resolved via an AOB anchor at mod init.
          */
         uintptr_t npcPfeReturnAddr = 0;
     };
@@ -133,24 +131,14 @@ namespace EquipHide
             .count();
     }
 
-    /** @brief Unsafe pointer read -- use ONLY inside SEH-protected hot paths. */
+    /** @brief Unsafe pointer read -- use ONLY inside SEH-protected hot paths.
+     *  @details Forwards to DMKMemory::read_ptr_unchecked, which applies the
+     *           same low-address result guard plus a source-address guard and
+     *           an aliasing-safe memcpy read. No OS-level fault protection: the
+     *           caller must keep this inside an SEH frame for stale pointers. */
     inline uintptr_t read_ptr_unsafe(uintptr_t base, ptrdiff_t off) noexcept
     {
-        auto addr = *reinterpret_cast<const uintptr_t *>(base + off);
-        return (addr > 0x10000) ? addr : 0;
-    }
-
-    /** @brief Unsafe raw u64 read -- use ONLY inside SEH-protected hot paths.
-     *  @details Companion to `read_ptr_unsafe` for fields that hold packed
-     *           non-pointer data such as the AM body-pool count/cap pair at
-     *           AM+0xF8 (low u32 = count, high u32 = cap). The
-     *           pointer-validity rejection in `read_ptr_unsafe` would zero
-     *           the entire qword for any value below 0x10000, which is
-     *           wrong for a packed integer field whose low half routinely
-     *           lives in that range. Returns the raw value verbatim. */
-    inline uint64_t read_qword_unsafe(uintptr_t base, ptrdiff_t off) noexcept
-    {
-        return *reinterpret_cast<const uint64_t *>(base + off);
+        return DMKMemory::read_ptr_unchecked(base, off);
     }
 
     /** @brief Returns true if the part at the given hash pointer is hidden by any category. */

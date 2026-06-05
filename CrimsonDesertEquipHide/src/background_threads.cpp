@@ -382,26 +382,14 @@ namespace EquipHide
             auto &addrs = resolved_addrs();
             if (!addrs.worldSystem)
                 return 0;
-            __try
-            {
-                auto ws = *reinterpret_cast<uintptr_t *>(addrs.worldSystem);
-                if (ws < 0x10000)
-                    return 0;
-                auto am = *reinterpret_cast<uintptr_t *>(ws + 0x30);
-                if (am < 0x10000)
-                    return 0;
-                auto user = *reinterpret_cast<uintptr_t *>(am + 0x28);
-                if (user < 0x10000)
-                    return 0;
-                auto actor = *reinterpret_cast<uintptr_t *>(user + 0xD8);
-                if (actor < 0x10000)
-                    return 0;
-                return actor;
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                return 0;
-            }
+            // seh_read_chain walks WorldSystem -> +0x30 ActorManager ->
+            // +0x28 UserActor -> +0xD8 controlled actor and performs the
+            // terminal deref INSIDE its own SEH frame, so a half-torn
+            // rotation state faults safely instead of crashing. The final
+            // >= 0x10000 guard rejects the not-yet-wired-up sentinel range.
+            auto r = DMK::Memory::seh_read_chain<std::uintptr_t>(
+                addrs.worldSystem, {0x00, 0x30, 0x28, 0xD8});
+            return (r && *r >= 0x10000) ? *r : 0;
         }
 
         // Fires resolve_player_vis_ctrls when either:

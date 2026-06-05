@@ -9,7 +9,6 @@
 #include "overlay_ui/state.hpp"
 
 #include "carrier_defaults.hpp"
-#include "color_override/color_picker_state.hpp"
 #include "color_override/color_reinit.hpp"
 #include "item_name_table.hpp"
 #include "prefab_wrapper_swap.hpp"
@@ -300,15 +299,14 @@ namespace Transmog
     static constexpr ImU32 k_colorAmbiguous = IM_COL32(230, 210, 120, 255);
     static constexpr ImU32 k_colorDimmed = IM_COL32(160, 160, 160, 200);
 
-    // Active character's body kind (CE-verified 2026-04-21). Stable
+    // Active character's body kind. Stable
     // for the entire popup invocation: PresetManager state cannot
     // mutate between picker frames on the render thread, so resolving
     // it once here avoids ~6k redundant PresetManager + string
     // comparisons per frame inside the filter loop. Armor rule
     // classifier tokens partition the catalog into disjoint body
-    // families:
-    //   Male:   {0x0018, 0x0058, 0x02E3}
-    //   Female: {0x0072, 0x0382, 0x0300}
+    // families (male/female token sets live in
+    // item_name_table.cpp::k_maleBodyTokens / k_femaleBodyTokens):
     //   Horse / pet / wagon / dragon: separate token pools with
     //     zero overlap with humanoid. Flagged as NonHumanoid and
     //     hidden unconditionally -- these never render on a human

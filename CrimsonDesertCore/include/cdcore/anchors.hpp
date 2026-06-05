@@ -144,15 +144,15 @@ namespace CDCore::Anchors
     //       float   blend,        // XMM3 animation blend
     //       __int64 a5..a9)       // stack params
     //
-    // History:
-    //   2026-04-19 P1 tightened after CE aob_scan found a second hit in a
-    //   Windows module (kernel DLL). Appended the P2 discriminator
-    //   (`4D 8B E8 44 8B 49 ??`) so the pattern uniquely selects the game.
+    // P1 is tightened past the bare prologue: an aob_scan of the 14-byte
+    // prologue alone also hits a Windows module (kernel DLL) function with
+    // a different body, so the P2 discriminator (`4D 8B E8 44 8B 49 ??`) is
+    // appended to make the pattern uniquely select the game.
     // -----------------------------------------------------------------------
     inline constexpr AddrCandidate k_partAddShowCandidates[] = {
-        // P1 -- full prologue through the r13/r9d setup. Extended 2026-04-19
-        // to include post-alloca moves because the 14-byte prologue alone
-        // also matched a Windows DLL function with a different body.
+        // P1 -- full prologue through the r13/r9d setup, including the
+        // post-alloca moves because the 14-byte prologue alone also matched
+        // a Windows DLL function with a different body.
         {"PartAddShow_P1_FullPrologue",
          "40 55 56 57 41 55 48 83 EC ?? 48 8B 79 ?? 4D 8B E8 44 8B 49 ??",
          ResolveMode::Direct, 0, 0},
@@ -195,8 +195,8 @@ namespace CDCore::Anchors
 
         // P2 -- push-frame anchor (pushes + lea + mov eax,imm + __chkstk
         // call + sub rsp,rax + first two post-alloca register moves).
-        // Extended 2026-04-19: the wildcarded stack-size and function-
-        // size slots alone matched 5 unrelated prologues; adding the
+        // The wildcarded stack-size and function-size slots alone match 5
+        // unrelated prologues; adding the
         // `48 2B E0 49 8B F1 41 0F B7 D8` tail (specific VEC register
         // shuffle through `movzx ebx, r8w`) restores uniqueness without
         // re-introducing a hardcoded stack frame. Offset -0x10 backs up
@@ -249,9 +249,9 @@ namespace CDCore::Anchors
     inline constexpr AddrCandidate k_batchEquipCandidates[] = {
         // P1 -- full prologue: save rbx, push 7 callee-saves, lea rbp,
         // mov eax=__chkstk size, call __chkstk, sub rsp,rax, first 3
-        // post-alloca register moves. Extended 2026-04-19 into the
-        // body shuffle -- the wildcarded stack-size and function-size
-        // slots alone matched 5 unrelated prologues; the
+        // post-alloca register moves, extending into the body shuffle --
+        // the wildcarded stack-size and function-size slots alone match 5
+        // unrelated prologues; the
         // `48 2B E0 4D 8B F8 4C 8B E2 48 8B F1` tail restores
         // uniqueness without a hardcoded stack frame (§2).
         {"BatchEquip_P1_FullPrologue",
@@ -266,10 +266,8 @@ namespace CDCore::Anchors
         // Stack disp8 offsets wildcarded per §2. Offset -0x22 backs up
         // to function start.
         //
-        // (The old "BatchEquip_P2_PushFrame" was dropped 2026-04-19:
-        //  wildcarding its stack-frame disp32 reduced it to 3 non-
-        //  unique hits, and any extension into the body duplicated P2
-        //  above. P1 already covers the push-frame region.)
+        // A push-frame-only candidate here is non-unique once its stack
+        // disp32 is wildcarded; P1 already covers the push-frame region.
         {"BatchEquip_P2_PostAlloca",
          "48 2B E0 4D 8B F8 4C 8B E2 48 8B F1 4C 8B 71 08 "
          "48 8D 45 ?? 48 89 45 ?? 33 C9",

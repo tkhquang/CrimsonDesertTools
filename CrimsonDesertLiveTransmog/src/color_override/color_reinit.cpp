@@ -1,6 +1,5 @@
 #include "color_reinit.hpp"
 #include "color_swatch_table.hpp"
-#include "color_picker_state.hpp"
 #include "preset_manager.hpp"
 #include "shared_state.hpp"
 #include "transmog.hpp"
@@ -40,12 +39,11 @@ namespace Transmog::ColorOverride::Reinit
             };
             enum Mode : int
             {
-                ModeReinit3Pass  = 0,
                 ModeCommitRetick = 1,
                 ModeReinit1Pass  = 2,
             };
             std::atomic<int> phase{Idle};
-            std::atomic<int> mode{ModeReinit3Pass};
+            std::atomic<int> mode{ModeReinit1Pass};
             std::atomic<int> pass{0};
             std::atomic<std::int64_t> deadline_ms{0};
             // Captured identity tuples per pass. Guarded by g_mutex
@@ -72,43 +70,6 @@ namespace Transmog::ColorOverride::Reinit
                 && static_cast<std::size_t>(slot) < k_slotCount;
         }
     } // namespace
-
-    bool start_slot_reinit(int slot) noexcept
-    {
-        if (!valid_slot(slot)) return false;
-        auto &m = slot_mappings()[static_cast<std::size_t>(slot)];
-        if (!m.active || m.targetItemId == 0)
-        {
-            DMK::Logger::get_instance().debug(
-                "[color-reinit] start slot={} REJECTED "
-                "(active={} target={:#06x})",
-                slot, m.active, m.targetItemId);
-            return false;
-        }
-        auto &st = g_state[static_cast<std::size_t>(slot)];
-        int expected = SlotReinitState::Idle;
-        if (!st.phase.compare_exchange_strong(
-                expected, SlotReinitState::TeardownApply,
-                std::memory_order_acq_rel))
-            return false;
-        st.mode.store(SlotReinitState::ModeReinit3Pass,
-                      std::memory_order_release);
-        st.pass.store(0, std::memory_order_release);
-        {
-            std::lock_guard<std::mutex> lk(g_mutex);
-            for (auto &v : st.seen) v.clear();
-        }
-        // Allow inserts again + un-freeze any previously-hidden rows
-        // so a re-run can pick up identities the prior reinit missed.
-        SwatchTable::post_reinit_lock(slot).store(
-            false, std::memory_order_release);
-        SwatchTable::reinit_capture_open(slot).store(
-            true, std::memory_order_release);
-        DMK::Logger::get_instance().debug(
-            "[color-reinit] slot={} START 3-pass target={:#06x}",
-            slot, m.targetItemId);
-        return true;
-    }
 
     bool start_slot_reinit_once(int slot) noexcept
     {
@@ -191,13 +152,6 @@ namespace Transmog::ColorOverride::Reinit
                    != SlotReinitState::Idle
             && st.mode.load(std::memory_order_acquire)
                    == SlotReinitState::ModeCommitRetick;
-    }
-
-    int slot_reinit_pass(int slot) noexcept
-    {
-        if (!valid_slot(slot)) return 0;
-        return g_state[static_cast<std::size_t>(slot)].pass.load(
-            std::memory_order_acquire);
     }
 
     bool any_slot_reinit_active() noexcept
@@ -314,17 +268,15 @@ namespace Transmog::ColorOverride::Reinit
                     = true;
                 // CRITICAL: reset active_this_apply on every row
                 // BEFORE the retick fires. The setter sets the flag
-                // back to true on rows that fire property writes
-                // this pass; rows that DON'T fire stay inactive.
+                // back to true on rows that fire property writes this
+                // pass; rows that DON'T fire stay inactive.
                 // snapshot_active_identities then returns only the
-                // rows actually seen this pass, so the 3-pass
-                // intersection in Finalize is meaningful.
+                // rows actually seen this pass.
                 //
-                // Without this reset, active_this_apply persists
-                // across passes (it's only set true on insert/hit,
-                // never cleared) and every pass's snapshot returns
-                // the full accumulated set, so the intersection
-                // becomes the union and nothing gets pruned.
+                // Without this reset, active_this_apply persists (it's
+                // only set true on insert/hit, never cleared) so the
+                // snapshot would return the full accumulated set rather
+                // than the live identities for this capture.
                 SwatchTable::mark_all_inactive(slot);
                 DMK::Logger::get_instance().debug(
                     "[color-reinit] slot={} CarrierApply pass={} "
@@ -374,31 +326,13 @@ namespace Transmog::ColorOverride::Reinit
                 DMK::Logger::get_instance().debug(
                     "[color-reinit] slot={} pass={} captured={}",
                     slot, pass + 1, captured);
-                const int cur_mode =
-                    st.mode.load(std::memory_order_acquire);
-                if (cur_mode == SlotReinitState::ModeReinit1Pass)
-                {
-                    // 1-pass auto-trigger from popup tab switch:
-                    // skip the remaining two capture cycles and go
-                    // straight to Finalize. The intersection logic
-                    // there handles non-empty pass selection -- with
-                    // only seen[0] populated it becomes "keep
-                    // everything captured this pass", which is the
-                    // intended behaviour (no ghost filtering).
-                    st.phase.store(SlotReinitState::Finalize,
-                                   std::memory_order_release);
-                }
-                else if (pass < 2)
-                {
-                    st.pass.store(pass + 1, std::memory_order_release);
-                    st.phase.store(SlotReinitState::TeardownApply,
-                                   std::memory_order_release);
-                }
-                else
-                {
-                    st.phase.store(SlotReinitState::Finalize,
-                                   std::memory_order_release);
-                }
+                // Single-pass capture: go straight to Finalize. The
+                // intersection logic there handles non-empty pass
+                // selection -- with only seen[0] populated it becomes
+                // "keep everything captured this pass" (no ghost
+                // filtering).
+                st.phase.store(SlotReinitState::Finalize,
+                               std::memory_order_release);
                 continue;
             }
             if (phase == SlotReinitState::Finalize)
@@ -466,18 +400,14 @@ namespace Transmog::ColorOverride::Reinit
                     true, std::memory_order_release);
                 SwatchTable::reinit_capture_open(slot).store(
                     false, std::memory_order_release);
-                // Auto-enable the slot's override toggle -- reinit
-                // implies "I want to control this slot's colors".
-                PickerState::set_slot_override_active(slot, true);
-                // Also auto-tick the master Dye toggle the UI binds
-                // to dye_state()[slot].slot_enabled. PickerState is
-                // a separate gate from the user-facing checkbox; the
-                // UI looks at SwatchTable::slot_enabled_get(slot)
-                // for the master toggle and the substitute path
-                // gates on it too. After a fresh reinit capture the
-                // slot is ready to substitute, so flip the toggle
-                // ON so the user doesn't have to click it manually
-                // before colours start applying.
+                // Auto-tick the master Dye toggle the UI binds to
+                // dye_state()[slot].slot_enabled. The UI looks at
+                // SwatchTable::slot_enabled_get(slot) for the master
+                // toggle and the substitute path gates on it too.
+                // After a fresh reinit capture the slot is ready to
+                // substitute, so flip the toggle ON so the user
+                // doesn't have to click it manually before colours
+                // start applying.
                 SwatchTable::slot_enabled_set(slot, true);
                 // Mark dirty so the user knows to click Save -- but
                 // do NOT auto-save. Auto-saving here also commits

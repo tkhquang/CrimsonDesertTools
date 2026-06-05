@@ -208,14 +208,14 @@ namespace Transmog
          * armor slot (weapon, shield, horse armor, quest item, etc).
          */
         /// Body-type classification derived from an item's rule
-        /// classifier tokens (CE-verified 2026-04-21). Drives the
+        /// classifier tokens. Drives the
         /// picker's per-character visibility: an item rendered on the
         /// wrong body produces broken meshes, so the filter hides
         /// opposite-body items by default.
         ///
         ///   Generic:     no classifier tokens at all (rule-less items)
-        ///   Male:        has male tokens   {0x0018, 0x0058, 0x02E3}
-        ///   Female:      has female tokens {0x0072, 0x0382, 0x0300}
+        ///   Male:        has a male token   (k_maleBodyTokens)
+        ///   Female:      has a female token (k_femaleBodyTokens)
         ///   Both:        rare -- has both male and female tokens
         ///   Ambiguous:   humanoid-range tokens only, but not in the
         ///                male or female body sets (e.g. NPC-specific
@@ -265,13 +265,13 @@ namespace Transmog
          * @brief Look up the transmog slot for an item id.
          *
          * Driven by the canonical item-type code at `desc+0x44` captured
-         * during the catalog build (CE-verified on v1.03.01):
+         * during the catalog build; `desc+0x44` is the canonical
+         * game-side classifier. See `slot_from_type_code` for the
+         * authoritative typeCode->slot table (cloak spans 0x45-0x47).
          *
-         *   0x04 -> Helm    0x05 -> Chest    0x06 -> Gloves
-         *   0x07 -> Boots   0x45 -> Cloak
-         *
-         * Every other code (shields 0x20, horse 0x53, quest 0xFFFF, ...)
-         * or an unknown id returns `TransmogSlot::Count`.
+         * Every code that does not map to a transmog-eligible armor slot
+         * (shields, horse armor, quest items, ...) or an unknown id
+         * returns `TransmogSlot::Count`.
          */
         TransmogSlot category_of(uint16_t itemId) const noexcept;
 

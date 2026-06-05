@@ -14,7 +14,6 @@
 #include "overlay_ui/state.hpp"
 
 #include "color_override/color_pending_overrides.hpp"
-#include "color_override/color_picker_state.hpp"
 #include "color_override/color_reinit.hpp"
 #include "color_override/color_swatch_table.hpp"
 #include "color_override/color_token_table.hpp"

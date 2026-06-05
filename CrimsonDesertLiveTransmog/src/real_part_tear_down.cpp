@@ -120,7 +120,7 @@ namespace Transmog::RealPartTearDown
         // Slot-tag range covers the full engine taxonomy: 0x00..0x15.
         // Tag 0x0E is engine-unused but harmless to include in the
         // range -- the auth-table walk simply never finds an entry
-        // for it. See reference_engine_slot_taxonomy_2026-05-07.md.
+        // for it.
         constexpr std::uint16_t k_minPlausibleSlotTag      = 0x0000;
         constexpr std::uint16_t k_maxPlausibleSlotTag      = 0x0015;
 

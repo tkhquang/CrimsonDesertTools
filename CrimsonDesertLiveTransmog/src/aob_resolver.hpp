@@ -162,8 +162,8 @@ namespace Transmog
      * Signature (x64 __fastcall):
      *   __int64 sub_141D451B0(__int64 dest)
      *
-     * Converted from hardcoded gameBase + 0x1D451B0 to AOB on
-     * 2026-04-11 to survive code-drift in earlier .text sections.
+     * Resolved via AOB rather than a hardcoded RVA so it survives
+     * code-drift in earlier .text sections across game patches.
      */
     inline constexpr AddrCandidate k_initSwapEntryCandidates[] = {
         // P1 -- true prologue (mov [rsp+8],rcx / push rbx / sub rsp,20h /
@@ -219,7 +219,7 @@ namespace Transmog
     };
 
     // -----------------------------------------------------------------------
-    // PrefabWrapperSwap module data globals (audit 2026-05-08).
+    // PrefabWrapperSwap module data globals.
     //
     // The PrefabWrapperSwap module previously hardcoded six absolute
     // addresses derived from v1.05.01 RVAs. Each is now resolved through
@@ -663,7 +663,7 @@ namespace Transmog
     };
 
     // -----------------------------------------------------------------------
-    // PrefabWrapperSwap module function targets (audit 2026-05-08 part 2).
+    // PrefabWrapperSwap module function targets.
     //
     // Four function-target cascades migrated out of prefab_wrapper_swap.cpp
     // where they previously lived as single-anchor inline constexpr arrays.
@@ -895,7 +895,7 @@ namespace Transmog
     };
 
     // -----------------------------------------------------------------------
-    // ItemNameTable bounded-window anchor patterns (audit 2026-05-08 part 3).
+    // ItemNameTable bounded-window anchor patterns.
     //
     // These are NOT cascades: they are pattern strings handed to
     // `DMK::Scanner::find_pattern` for a 0x40--0x80-byte LOCAL scan inside

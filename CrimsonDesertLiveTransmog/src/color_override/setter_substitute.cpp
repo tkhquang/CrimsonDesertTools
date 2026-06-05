@@ -2,7 +2,6 @@
 #include "color_carrier_set.hpp"
 #include "color_matinst_owner.hpp"
 #include "color_pending_overrides.hpp"
-#include "color_picker_state.hpp"
 #include "color_state.hpp"
 #include "color_swatch_table.hpp"
 #include "color_token_discovery.hpp"
@@ -87,11 +86,10 @@ namespace Transmog::ColorOverride::SetterSubstitute
         OneShotLogSet<std::uint32_t, 64> g_seenTokens;
         OneShotLogSet<std::uintptr_t, 16> g_seenVtables;
         // Diagnostic: dump the first 8 distinct property-descriptor
-        // shapes the setter sees. Lets us confirm where the real
-        // 16-bit interner token id lives in the descriptor (we
-        // currently read `*(rdx-8+0x28)` as u32, which gives -1 layer
-        // for tokens that ARE in the discovered slots -- suggesting
-        // wrong field).
+        // shapes the setter sees. The 16-bit interner token id lives
+        // at descriptor +0x28 (read as u32 via `*(rdx-8+0x28)`); this
+        // bounded one-shot dump is the field-layout validation aid for
+        // confirming that offset still holds after a major patch.
         OneShotLogSet<std::uintptr_t, 8> g_seenDescShapes;
         // First-fire-per-(slot, content_hash) dedup. Logged once per
         // distinct (slot, hash) so a new region shows up exactly one
@@ -104,24 +102,16 @@ namespace Transmog::ColorOverride::SetterSubstitute
         // address in one slot doesn't abort the whole row.
         std::uint32_t seh_read_u32(std::uintptr_t addr) noexcept
         {
-            __try
-            {
-                return *reinterpret_cast<const std::uint32_t *>(addr);
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                return 0;
-            }
+            return DMKMemory::seh_read<std::uint32_t>(addr).value_or(0);
         }
 
         // Diagnostic: print the descriptor at `dst_prop` as a row of
         // u32 at +0x00..+0x3C. Used on the first 8 distinct descriptor
         // addresses to locate per-class fields.
         //
-        // Field-offset map (identified during the 2026-05-25
-        // publish-chain RE; offsets are STRUCT-RELATIVE so they're
+        // Field-offset map. Offsets are STRUCT-RELATIVE so they're
         // patch-stable, unlike the RVAs of the functions that touch
-        // them):
+        // them:
         //   +0x00 = vtbl (qword). The "Color permutations" descriptor
         //           class is identified via its constructor's call
         //           to a string-interner helper with the literal
@@ -175,21 +165,18 @@ namespace Transmog::ColorOverride::SetterSubstitute
         {
             if (a2 == 0)
                 return false;
-            __try
-            {
-                const auto dst_prop = a2 - 8;
-                out = *reinterpret_cast<const std::uint32_t *>(dst_prop + 0x28);
-                // One-shot diagnostic: dump 16 u32s of the first 8
-                // distinct descriptor shapes. SEH-guarded helpers, so
-                // failure on any slot just yields 0 in that column.
-                if (g_seenDescShapes.insert_unique(dst_prop))
-                    log_descriptor_shape(dst_prop);
-                return true;
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
+            const auto dst_prop = a2 - 8;
+            const auto tok =
+                DMKMemory::seh_read<std::uint32_t>(dst_prop + 0x28);
+            if (!tok)
                 return false;
-            }
+            out = *tok;
+            // One-shot diagnostic: dump 16 u32s of the first 8 distinct
+            // descriptor shapes. The dump's reads are SEH-guarded per
+            // u32, so failure on any slot just yields 0 in that column.
+            if (g_seenDescShapes.insert_unique(dst_prop))
+                log_descriptor_shape(dst_prop);
+            return true;
         }
 
         // Per-thread BGRA override buffer. Engine reads 4 bytes from
@@ -201,19 +188,17 @@ namespace Transmog::ColorOverride::SetterSubstitute
         thread_local std::uint8_t s_overrideBuf[4]{};
 
         // SEH-guarded property-size read (from the descriptor at rcx).
+        // Returns false on fault so a fault is never conflated with a
+        // real zero size (which selects the callback dispatch path).
         bool read_desc_size(std::uintptr_t rcx,
                             std::uint32_t &out) noexcept
         {
-            __try
-            {
-                out = *reinterpret_cast<const std::uint32_t *>(
-                    rcx + kDesc_Size);
-                return true;
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
+            const auto v =
+                DMKMemory::seh_read<std::uint32_t>(rcx + kDesc_Size);
+            if (!v)
                 return false;
-            }
+            out = *v;
+            return true;
         }
 
         // SEH-guarded read of the 4 BGRA bytes the engine is about to
@@ -223,18 +208,7 @@ namespace Transmog::ColorOverride::SetterSubstitute
         {
             if (r8 == 0)
                 return false;
-            __try
-            {
-                out[0] = *reinterpret_cast<const std::uint8_t *>(r8 + 0);
-                out[1] = *reinterpret_cast<const std::uint8_t *>(r8 + 1);
-                out[2] = *reinterpret_cast<const std::uint8_t *>(r8 + 2);
-                out[3] = *reinterpret_cast<const std::uint8_t *>(r8 + 3);
-                return true;
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                return false;
-            }
+            return DMKMemory::seh_read_bytes(r8, out, 4);
         }
 
         // matInst probe + submesh-name read live in

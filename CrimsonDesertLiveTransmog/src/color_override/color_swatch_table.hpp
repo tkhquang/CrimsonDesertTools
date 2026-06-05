@@ -54,8 +54,7 @@ namespace Transmog::ColorOverride::SwatchTable
 
         // Reinit-pruned ghost row. Set true by Reinit::Finalize on
         // identities that didn't appear in all 3 capture passes.
-        // While true, the row is excluded from active_swatch_set AND
-        // the setter's substitute path bails on it.
+        // While true, the setter's substitute path bails on it.
         std::atomic<bool>          frozen_hidden{false};
     };
 
@@ -157,7 +156,7 @@ namespace Transmog::ColorOverride::SwatchTable
 
     /// Quick check: is any row's override_active flag set for the
     /// given slot? The setter uses this together with the per-slot
-    /// PickerState::is_slot_override_active gate to bail before
+    /// master-enable gate (`slot_enabled_get`) to bail before
     /// reading the full row.
     bool any_override_active_in_slot(int slot) noexcept;
 
@@ -223,22 +222,14 @@ namespace Transmog::ColorOverride::SwatchTable
     // ---- Per-slot DyeSlot view ---------------------------------------
     //
     // UI-facing view over the per-slot swatch storage.
-    // `slot_enabled` is the per-slot override master switch (paired
-    // with PickerState); `swatches_data`/`swatches_size` expose a
-    // span over the per-row SwatchOverride storage. Read-only from
-    // the UI side except for `slot_enabled`, which routes writes
-    // back to PickerState.
+    // `slot_enabled` is the per-slot override master switch. The
+    // picker reads the per-row SwatchOverride storage directly via
+    // `dye_state()[slot].swatches[idx]`.
 
     /// Per-slot master-enable gate. The UI binds an ImGui::Checkbox
-    /// to the returned reference; writes propagate to
-    /// `PickerState::set_slot_override_active`.
+    /// to the returned reference.
     bool slot_enabled_get(int slot) noexcept;
     void slot_enabled_set(int slot, bool v) noexcept;
-
-    /// Direct array-style access to the per-row SwatchOverride
-    /// storage. The picker addresses rows as `dyeSlot.swatches[idx]`.
-    SwatchOverride *swatches_data(int slot) noexcept;
-    std::size_t     swatches_size(int slot) noexcept;
 
     /// Detected swatch count for the slot (the in-use row count).
     /// The picker gates the master Dye checkbox and the "show
@@ -252,20 +243,6 @@ namespace Transmog::ColorOverride::SwatchTable
     void clear_dye_state_for_slot(int slot) noexcept;
 
     // ---- Reinit-aware accessors -------------------------------------
-
-    /// Active row indices for the slot.
-    ///   * Post-reinit lock ON: returns every non-frozen row with a
-    ///     valid identity (UI-stable, doesn't flicker on per-frame
-    ///     `active_this_apply` flips).
-    ///   * Otherwise: returns rows with `active_this_apply` set
-    ///     (ghost-prune-by-skip behaviour).
-    /// Hidden rows (`frozen_hidden`) are always excluded.
-    struct ActiveSwatchSet
-    {
-        std::size_t count = 0;
-        int         indices[k_dyeSwatchesPerSlot]{};
-    };
-    ActiveSwatchSet active_swatch_set(int slot) noexcept;
 
     /// Wipe ALL rows + override choices for slot. Use when the
     /// transmog target item changes so stale identities don't bleed
@@ -298,10 +275,6 @@ namespace Transmog::ColorOverride::SwatchTable
     /// Finalize. While the post-reinit lock is true, this also gates
     /// any further inserts.
     std::atomic<bool> &reinit_capture_open(int slot) noexcept;
-
-    /// Convenience: should the setter accept a NEW row insert for
-    /// this slot? False if (post_reinit_lock && !reinit_capture_open).
-    bool inserts_allowed(int slot) noexcept;
 
     /// Convenience: identity tuple snapshot for currently-active rows.
     /// Used by the reinit state machine to capture per-pass keys.

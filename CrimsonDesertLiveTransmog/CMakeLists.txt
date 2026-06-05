@@ -112,7 +112,6 @@ set(COMMON_SOURCES
     src/color_override/color_carrier_set.cpp
     src/color_override/color_swatch_table.cpp
     src/color_override/color_matinst_owner.cpp
-    src/color_override/color_picker_state.cpp
     src/color_override/color_publisher_hook.cpp
     src/color_override/color_reinit.cpp
     src/color_override/color_pending_overrides.cpp

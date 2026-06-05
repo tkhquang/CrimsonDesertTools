@@ -305,14 +305,13 @@ namespace Transmog
             return added;
         }
 
-        // PASS 1c: byte-scan walks the full user-mode address range
-        // (VirtualQuery skips uncommitted regions cheaply). The engine
-        // memory-maps asset bundles to several VA bands -- bag/monster
-        // mesh strings cluster around 0x02-0x03, flowerpot/decoration
-        // strings around 0xEFxxxxxx + 0x12Exxxxxxx + 0x1D8xxxxxxx --
-        // so a fixed low-VA window misses entire families. Scope the
-        // walk via SYSTEM_INFO's max app address. ~2-3x slower than
-        // the bounded scan but still under 2 seconds total.
+        // Bounded byte-scan window for the residual asset-pool pass
+        // (enrich_pool_from_asset_pool). Crimson Desert's heap-loaded
+        // asset strings (gimmick/collection/cd_ex_*/etc.) cluster in
+        // the low 0x01-0x20 VA band, so scanning just this window is
+        // fast and catches the bulk of them; the wider full-VA walk in
+        // recover_phantoms_targeted picks up the families that land
+        // outside it.
         constexpr uintptr_t kAssetScanStart = 0x01000000;
         constexpr uintptr_t kAssetScanEnd = 0x20000000;
 
@@ -359,15 +358,12 @@ namespace Transmog
                 std::memcmp(p + 1, "immick_", 7) == 0)
                 return true;
             // gimmick must be matched first since avail<7 returned;
-            // craft_ and lamp_ are 6-byte prefixes -- check earlier
-            // separately:
+            // craft_ (6 chars) and lamp_ (5 chars) are shorter, so
+            // each is checked below under its own length guard:
             if (avail >= 6) {
                 if ((p[0] == 'c' || p[0] == 'C') &&
                     std::memcmp(p + 1, "raft_", 5) == 0)
                     return true;
-                if ((p[0] == 'l' || p[0] == 'L') &&
-                    std::memcmp(p + 1, "amp_", 4) == 0 && p[5] == '_')
-                    return false; // not actually needed -- "lamp_" is 5
             }
             if (avail >= 5) {
                 if ((p[0] == 'l' || p[0] == 'L') &&
@@ -663,6 +659,9 @@ namespace Transmog
             return;
         }
 
+        // `ok` is reused across these reads and its intermediate values are
+        // deliberately ignored: a faulted read yields 0 via value_or(0), which
+        // the explicit null/zero checks below already reject.
         bool ok = false;
         const uintptr_t iteminfoMgr = read_qword_safe(iteminfoHolderAddr, ok);
         const uintptr_t stringinfoMgr = read_qword_safe(stringinfoHolderAddr, ok);

@@ -456,8 +456,7 @@ namespace CDCore
             const auto bufPtr = DMKMemory::seh_read<std::uintptr_t>(
                                     strStruct + k_offStringBufPtr)
                                     .value_or(0);
-            if (bufPtr >= k_minValidPtr &&
-                bufPtr < k_canonicalUpperPtr)
+            if (DMKMemory::plausible_userspace_ptr(bufPtr))
                 return bufPtr;
             return strStruct; // inline fallback
         }

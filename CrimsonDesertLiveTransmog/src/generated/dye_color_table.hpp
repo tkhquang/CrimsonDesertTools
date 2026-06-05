@@ -2,7 +2,7 @@
 // Source: 00_idea/dyecolorgroupinfo_fields.json (entries=10)
 //
 // Per-group identifiers:
-//   - 'key'        : u32, what the dye record carries (cracked 2026-05-10).
+//   - 'key'        : u32, what the dye record carries.
 //   - 'string_key' : stable internal name from the data file's _stringKey
 //                    field (e.g. "Her_Color_Group_I"). Used as a fallback
 //                    when a stored hash no longer matches in a future

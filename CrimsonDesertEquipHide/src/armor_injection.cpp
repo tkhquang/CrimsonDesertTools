@@ -64,22 +64,28 @@ namespace EquipHide
             auto globalAddr = resolved_addrs().indexedStringGlobal;
             if (!globalAddr)
                 return 0;
-            auto globalPtr = *reinterpret_cast<const uintptr_t *>(globalAddr);
-            if (globalPtr < 0x10000)
-                return 0;
-            auto tablePtr = *reinterpret_cast<const uintptr_t *>(globalPtr + 0x58);
-            if (tablePtr < 0x10000)
+
+            // Walk globalAddr -> [+0] -> [+0x58] to the bucket table.
+            // The trailing 0 dereferences the +0x58 link so the result
+            // is the table pointer itself; without it the chain would
+            // stop at the slot address and corrupt every bucket key.
+            auto tbl = DMKMemory::seh_resolve_chain(globalAddr, {0x00, 0x58, 0x00});
+            if (!tbl)
             {
                 static std::atomic<bool> s_logOnce{false};
                 if (!s_logOnce.exchange(true, std::memory_order_relaxed))
                     DMK::Logger::get_instance().warning(
                         "compute_bucket_key: tablePtr=NULL "
-                        "(globalAddr=0x{:X} globalPtr=0x{:X} +0x58)",
-                        globalAddr, globalPtr);
+                        "(globalAddr=0x{:X} +0x58)",
+                        globalAddr);
                 return 0;
             }
-            return *reinterpret_cast<const uint32_t *>(
-                tablePtr + 16ULL * partHash + 8);
+
+            // 16-byte stride table indexed by part hash; the bucket key
+            // lives at +8 within the entry. Kept as a separate typed read
+            // (not a chain offset) so the indexed arithmetic stays explicit.
+            return DMKMemory::seh_read<uint32_t>(*tbl + 16ULL * partHash + 8)
+                .value_or(0);
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
@@ -318,24 +324,21 @@ namespace EquipHide
             /* Per-player SEH so one bad pointer does not skip the rest. */
             __try
             {
-                auto comp = read_ptr_unsafe(vc, 0x58);
-                if (!comp)
-                {
-                    logger.trace("ArmorInject [{}]: vc=0x{:X} comp=NULL (+0x58)",
-                                 i, vc);
-                    continue;
-                }
-                auto descNode = read_ptr_unsafe(comp, 0x218);
+                // Read the descriptor node value at vc->+0x58->+0x218 under one
+                // fault guard. seh_read_chain dereferences the terminal +0x218
+                // link (seh_resolve_chain would stop at its address), so mapBase
+                // keeps its original meaning: *(*(vc+0x58)+0x218) + 0x20.
+                auto descNode = DMKMemory::seh_read_chain<std::uintptr_t>(vc, {0x58, 0x218});
                 if (!descNode)
                 {
-                    logger.trace("ArmorInject [{}]: vc=0x{:X} comp=0x{:X} "
-                                 "descNode=NULL (+0x218)", i, vc, comp);
+                    logger.trace("ArmorInject [{}]: vc=0x{:X} descNode=NULL "
+                                 "(+0x58 -> +0x218)", i, vc);
                     continue;
                 }
-                auto mapBase = descNode + 0x20;
-                logger.trace("ArmorInject [{}]: vc=0x{:X} comp=0x{:X} "
-                             "descNode=0x{:X} mapBase=0x{:X} char_idx={}",
-                             i, vc, comp, descNode, mapBase, charIdx);
+                auto mapBase = *descNode + 0x20;
+                logger.trace("ArmorInject [{}]: vc=0x{:X} descNode=0x{:X} "
+                             "mapBase=0x{:X} char_idx={}",
+                             i, vc, *descNode, mapBase, charIdx);
 
                 int result = inject_armor_entries_for_map(mapBase, charIdx);
                 if (result >= 0)

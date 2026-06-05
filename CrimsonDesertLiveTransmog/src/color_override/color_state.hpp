@@ -24,12 +24,6 @@ namespace Transmog::ColorOverride::State
     // setter substitutes drop after this passes.
     std::atomic<std::int64_t> &active_apply_valid_until_ms() noexcept;
 
-    // Per-slot apply-begin timestamp.
-    std::atomic<std::int64_t> &apply_begin_ms(int slot) noexcept;
-
-    // Per-slot first-publisher-fire timestamp.
-    std::atomic<std::int64_t> &first_pub_fire_ms(int slot) noexcept;
-
     // Per-slot freeze: locks the swatch-insert path so the engine's
     // unrelated render writes can't grow the table mid-flight.
     std::atomic<bool> &swatch_frozen(int slot) noexcept;

@@ -238,7 +238,7 @@ namespace EquipHide
         }
 
         auto r10 = ctx.r10;
-        if (r10 < 0x10000)
+        if (!DMK::Memory::plausible_userspace_ptr(r10))
             return;
 
         auto partHash = *reinterpret_cast<const uint32_t *>(r10);
@@ -252,7 +252,7 @@ namespace EquipHide
 
         // PartInOut struct pointer is in RAX (loaded from [rbp+5F] before hook).
         auto partInOut = ctx.rax;
-        if (partInOut < 0x10000)
+        if (!DMK::Memory::plausible_userspace_ptr(partInOut))
             return;
 
         const bool cascadeOn = flag_cascade_fix().load(std::memory_order_relaxed);
@@ -365,15 +365,13 @@ namespace EquipHide
     /* SEH wrapper: separate function because MSVC SEH cannot coexist with
        C++ destructors in the same frame. Swallows faults if the mod is
        outdated and register layout has changed -- don't crash the game. */
-    static int seh_filter(unsigned int /*code*/) { return EXCEPTION_EXECUTE_HANDLER; }
-
     static void on_vis_check(SafetyHookContext &ctx)
     {
         __try
         {
             on_vis_check_impl(ctx);
         }
-        __except (seh_filter(GetExceptionCode()))
+        __except (EXCEPTION_EXECUTE_HANDLER)
         {
         }
     }

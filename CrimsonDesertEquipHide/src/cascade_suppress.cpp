@@ -15,6 +15,13 @@ namespace EquipHide
     // (necklace=9, mask=18, etc.) don't affect chest lock state.
     static constexpr uint16_t k_chestSlot = 4;
 
+    // BatchEquip dispatch-entry layout used to read the per-entry slot id.
+    // NOTE: cdcore/anchors.hpp documents a different (216-byte) BatchEquip
+    // entry layout. These literal values must be confirmed against the
+    // shipping build via live CE/x64dbg before being changed.
+    static constexpr std::size_t k_equipSwapEntryStride = 232;
+    static constexpr std::size_t k_equipSwapSlotOffset = 208;
+
     // --- VisualEquipChange hook (equip/unequip) ---
 
     static VisualEquipChangeFn s_originalVisualEquipChange = nullptr;
@@ -76,7 +83,8 @@ namespace EquipHide
                 for (uint32_t i = 0; i < count && i < 16; ++i)
                 {
                     auto slot = *reinterpret_cast<const uint16_t *>(
-                        base + 232 * i + 208);
+                        base + k_equipSwapEntryStride * i +
+                        k_equipSwapSlotOffset);
                     logger.trace("EquipSwap: slot={}", slot);
                     if (slot == k_chestSlot)
                         hasChest = true;

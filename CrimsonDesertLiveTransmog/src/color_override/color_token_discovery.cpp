@@ -83,19 +83,6 @@ namespace Transmog::ColorOverride::TokenSlotDiscovery
             }
         }
 
-        std::uint32_t read_slot_value(
-            std::uintptr_t addr) noexcept
-        {
-            __try
-            {
-                return *reinterpret_cast<const std::uint32_t *>(addr);
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                return 0;
-            }
-        }
-
         // SEH-guarded helper to read a name-string preview from a
         // resolved descriptor address. `out` is a fixed-size buffer
         // filled with up-to-32 printable chars + NUL. Non-printable
@@ -534,7 +521,9 @@ namespace Transmog::ColorOverride::TokenSlotDiscovery
         const auto t = tok & 0xFFFFu;
         for (const auto &s : g_slots)
         {
-            const auto live = read_slot_value(s.slot_addr) & 0xFFFFu;
+            const auto live =
+                DMKMemory::seh_read<std::uint32_t>(s.slot_addr)
+                    .value_or(0) & 0xFFFFu;
             if (live != 0u && live == t) return s.layer;
         }
         return -1;
@@ -546,7 +535,9 @@ namespace Transmog::ColorOverride::TokenSlotDiscovery
         const auto t = tok & 0xFFFFu;
         for (const auto &s : g_slots)
         {
-            const auto live = read_slot_value(s.slot_addr) & 0xFFFFu;
+            const auto live =
+                DMKMemory::seh_read<std::uint32_t>(s.slot_addr)
+                    .value_or(0) & 0xFFFFu;
             if (live != 0u && live == t) return s.channel;
         }
         return -1;
@@ -560,7 +551,9 @@ namespace Transmog::ColorOverride::TokenSlotDiscovery
         {
             if (std::strcmp(s.name, name) == 0)
             {
-                const auto v = read_slot_value(s.slot_addr);
+                const auto v =
+                    DMKMemory::seh_read<std::uint32_t>(s.slot_addr)
+                        .value_or(0);
                 if (v != 0u && v != 0xFFFFFFFFu) return v;
             }
         }
@@ -573,7 +566,9 @@ namespace Transmog::ColorOverride::TokenSlotDiscovery
         const auto t = tok & 0xFFFFu;
         for (const auto &s : g_slots)
         {
-            const auto live = read_slot_value(s.slot_addr) & 0xFFFFu;
+            const auto live =
+                DMKMemory::seh_read<std::uint32_t>(s.slot_addr)
+                    .value_or(0) & 0xFFFFu;
             if (live != 0u && live == t) return s.name;
         }
         return nullptr;

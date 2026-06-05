@@ -275,16 +275,11 @@ namespace Transmog
             bool ruleHasHighToken = false;
             for (std::uint32_t j = 0; j < clsCount; ++j)
             {
-                std::uint16_t cls = 0;
-                __try
-                {
-                    cls = *reinterpret_cast<const std::uint16_t *>(
-                        clsPtr + 2ull * j);
-                }
-                __except (EXCEPTION_EXECUTE_HANDLER)
-                {
+                const auto clsOpt =
+                    DMKMemory::seh_read<std::uint16_t>(clsPtr + 2ull * j);
+                if (!clsOpt)
                     break;
-                }
+                const std::uint16_t cls = *clsOpt;
                 bits |= k_bodyBitHasTokens;
                 if (cls >= k_nonHumanoidTokenThreshold)
                 {
@@ -894,16 +889,18 @@ namespace Transmog
         for (uint32_t id = 0; id < count; ++id)
         {
             const uintptr_t descPtr = read_qword_safe(ptrArray + id * 8ull, ok);
-            if (!ok || descPtr < 0x10000)
+            if (!ok || !DMKMemory::plausible_userspace_ptr(descPtr))
                 continue;
 
-            const uintptr_t wrapper = read_qword_safe(descPtr + 8, ok);
-            if (!ok || wrapper < 0x10000)
+            // descPtr is reused by four downstream reads (metaPtr,
+            // item_body_bits, equipType@+0x42, typeCode@+0x44), so it is
+            // resolved separately; only the wrapper -> string pointer hops
+            // (descPtr -> +0x8 -> +0x0) are folded into one guarded walk.
+            const auto strPtrOpt =
+                DMKMemory::seh_read_chain<uintptr_t>(descPtr, {0x8, 0x0});
+            if (!strPtrOpt || !DMKMemory::plausible_userspace_ptr(*strPtrOpt))
                 continue;
-
-            const uintptr_t strPtr = read_qword_safe(wrapper + 0, ok);
-            if (!ok || strPtr < 0x10000)
-                continue;
+            const uintptr_t strPtr = *strPtrOpt;
 
             const auto len = read_cstring_safe(strPtr, buf, sizeof(buf));
             if (len == 0 || len >= k_maxNameLen)
@@ -1234,8 +1231,8 @@ namespace Transmog
         const std::string &charName) noexcept
     {
         // Male: Kliff, Oongka (their native rule sets include male-body
-        //       tokens {0x0018, 0x0058, 0x02E3}).
-        // Female: Damiane (tokens {0x0072, 0x0382, 0x0300}).
+        //       tokens -- see k_maleBodyTokens above).
+        // Female: Damiane (see k_femaleBodyTokens above).
         // Unknown characters default to Generic -- we don't know their
         // body, so treat every item as potentially compatible rather
         // than silently hiding their picker.
@@ -1258,17 +1255,9 @@ namespace Transmog
         if (desc == 0)
             return false; // can't read -- default to direct apply
 
-        __try
-        {
-            const auto eType =
-                *reinterpret_cast<const volatile std::uint16_t *>(
-                    desc + k_equipTypeOffset);
-            return eType != k_playerEquipType;
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER)
-        {
-            return false;
-        }
+        bool ok = false;
+        const auto eType = read_u16_safe(desc + k_equipTypeOffset, ok);
+        return ok && eType != k_playerEquipType;
     }
 
     const std::vector<ItemNameTable::Entry> &

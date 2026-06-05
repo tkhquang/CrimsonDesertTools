@@ -1141,8 +1141,8 @@ namespace Transmog
         // LT's hook is cosmetic polish, EH's is user-visible
         // functionality -- when both are present, yield to EH.
         //
-        // DMK 3.2.2 ships HookManager::is_target_already_hooked() for the
-        // managed-hook-vs-managed-hook collision case, but the substring
+        // A managed-hook-vs-managed-hook collision check covers only the
+        // case where both sides hook via the same hook manager. The substring
         // module-name match here covers the orthogonal scenario where EH
         // has been loaded but has not yet installed its hook (load-order
         // race during the worker thread's init pass) or hooks via a

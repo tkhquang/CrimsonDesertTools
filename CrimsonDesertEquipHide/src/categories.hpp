@@ -57,7 +57,7 @@ namespace EquipHide
     inline constexpr std::size_t CATEGORY_COUNT =
         static_cast<std::size_t>(Category::COUNT);
 
-    constexpr std::string_view category_section(Category cat)
+    [[nodiscard]] constexpr std::string_view category_section(Category cat) noexcept
     {
         constexpr std::string_view names[] = {
             "OneHandWeapons", "TwoHandWeapons", "Shields", "Bows",
@@ -77,13 +77,8 @@ namespace EquipHide
         return names[idx];
     }
 
-    constexpr uint8_t default_show_value([[maybe_unused]] Category cat)
-    {
-        return 0;
-    }
-
     /** @brief Returns true if the category is a user-defined preset. */
-    constexpr bool is_user_preset(Category cat)
+    [[nodiscard]] constexpr bool is_user_preset(Category cat) noexcept
     {
         return cat >= Category::UserPreset1 && cat <= Category::UserPreset10;
     }
@@ -94,7 +89,7 @@ namespace EquipHide
      *          modification. User presets may contain armor parts, so they
      *          are included.
      */
-    constexpr bool is_armor_category(Category cat)
+    [[nodiscard]] constexpr bool is_armor_category(Category cat) noexcept
     {
         switch (cat)
         {
@@ -153,19 +148,6 @@ namespace EquipHide
     std::vector<std::string> get_unresolved_parts(
         const std::unordered_map<std::string, uint32_t> &resolved);
 
-    /**
-     * @brief Returns the minimum hash value of the contiguous block.
-     * @details Loaded with relaxed ordering; stale bounds only widen the range
-     *          check, causing harmless extra map lookups.
-     */
-    uint32_t hash_range_min() noexcept;
-
-    /** @brief Returns the maximum hash value of the contiguous block. */
-    uint32_t hash_range_max() noexcept;
-
-    /** @brief Returns true if the hash is a registered outlier (outside the contiguous range). */
-    bool is_outlier_hash(uint32_t hash) noexcept;
-
     // --- Part classification ---
 
     /** @brief Parse a "Parts" string and register all contained IDs for the given category.
@@ -208,7 +190,7 @@ namespace EquipHide
     using CategoryMask = uint32_t;
 
     /** @brief Returns a bitmask with only the given category's bit set. */
-    constexpr CategoryMask category_bit(Category cat)
+    [[nodiscard]] constexpr CategoryMask category_bit(Category cat) noexcept
     {
         return CategoryMask{1} << static_cast<uint8_t>(cat);
     }

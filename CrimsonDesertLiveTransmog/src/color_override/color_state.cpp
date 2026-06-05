@@ -9,8 +9,6 @@ namespace Transmog::ColorOverride::State
     {
         std::atomic<int> g_activeApplySlot{-1};
         std::atomic<std::int64_t> g_activeApplyValidUntilMs{0};
-        std::array<std::atomic<std::int64_t>, k_slotCount> g_applyBeginMs{};
-        std::array<std::atomic<std::int64_t>, k_slotCount> g_firstPubFireMs{};
         std::array<std::atomic<bool>, k_slotCount> g_swatchFrozen{};
         std::atomic<std::int64_t> g_blockPublisherInsertsUntilMs{0};
         std::array<std::atomic<std::int64_t>, k_slotCount> g_hashSetLastAddMs{};
@@ -28,14 +26,6 @@ namespace Transmog::ColorOverride::State
     std::atomic<std::int64_t> &active_apply_valid_until_ms() noexcept
     {
         return g_activeApplyValidUntilMs;
-    }
-    std::atomic<std::int64_t> &apply_begin_ms(int slot) noexcept
-    {
-        return g_applyBeginMs[static_cast<std::size_t>(slot)];
-    }
-    std::atomic<std::int64_t> &first_pub_fire_ms(int slot) noexcept
-    {
-        return g_firstPubFireMs[static_cast<std::size_t>(slot)];
     }
     std::atomic<bool> &swatch_frozen(int slot) noexcept
     {
