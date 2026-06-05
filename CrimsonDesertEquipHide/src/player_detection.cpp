@@ -19,8 +19,8 @@ namespace EquipHide
     static uintptr_t s_prevVisCtrls[k_maxProtagonists]{};
     static int s_prevCount = 0;
 
-    /* Per-body vc cache. v1.05 zeroes body+0x68 (and downstream) for
-       inactive protagonists, so the live chain walk only succeeds
+    /* Per-body vc cache. The engine zeroes body+0x68 (and downstream)
+       for inactive protagonists, so the live chain walk only succeeds
        for the currently-controlled body. The vis_ctrl pointer itself
        stays valid across swaps within a session, so caching the last
        successful resolution per body lets the resolver publish all
@@ -83,8 +83,12 @@ namespace EquipHide
         if (!body)
             return 0;
 
-        auto inner = read_ptr_unsafe(body, 0x68);
-        if (!inner)
+        // body -> +0x68 (inner) -> +0x40 (sub) -> *(sub+0xE8) (vc). The chain
+        // walk dereferences each link and reads the terminal vc value under a
+        // single fault guard; a broken link falls through to the per-body LRU.
+        const auto vcOpt = DMK::Memory::seh_read_chain<uintptr_t>(
+            body, {0x68, 0x40, 0xE8});
+        if (!vcOpt)
         {
             for (const auto &e : s_body2vcLru)
             {
@@ -92,24 +96,11 @@ namespace EquipHide
                     return e.vc;
             }
             DMK::Logger::get_instance().trace(
-                "body_to_vis_ctrl: body=0x{:X} inner=NULL (+0x68), no cache",
+                "body_to_vis_ctrl: body=0x{:X} chain broken, no cache",
                 body);
             return 0;
         }
-        auto sub = read_ptr_unsafe(inner, 0x40);
-        if (!sub)
-        {
-            for (const auto &e : s_body2vcLru)
-            {
-                if (e.body == body && e.vc != 0)
-                    return e.vc;
-            }
-            DMK::Logger::get_instance().trace(
-                "body_to_vis_ctrl: body=0x{:X} inner=0x{:X} sub=NULL (+0x40), "
-                "no cache", body, inner);
-            return 0;
-        }
-        auto vc = read_ptr_unsafe(sub, 0xE8);
+        const auto vc = *vcOpt;
 
         // Update LRU on success and dedupe trace logging.
         for (auto &e : s_body2vcLru)
@@ -121,8 +112,8 @@ namespace EquipHide
         s_body2vcNext = (s_body2vcNext + 1) % k_maxProtagonists;
 
         DMK::Logger::get_instance().trace(
-            "body_to_vis_ctrl: body=0x{:X} inner=0x{:X} sub=0x{:X} vc=0x{:X}",
-            body, inner, sub, vc);
+            "body_to_vis_ctrl: body=0x{:X} vc=0x{:X}",
+            body, vc);
         return vc;
     }
 
@@ -185,9 +176,10 @@ namespace EquipHide
             /* Character-swap / save-load invalidation, split by
                transition type:
 
-               1. controlledActor X -> 0  (entering load screen). v1.05
-                  preserves the UserActor singleton across save-load,
-                  so the s_prevUser branch above does NOT fire. The
+               1. controlledActor X -> 0  (entering load screen). The
+                  engine preserves the UserActor singleton across
+                  save-load, so the s_prevUser branch above does NOT
+                  fire. The
                   only reliable signal that the world is being torn
                   down is user+0xD8 going NULL. We mark a deferred
                   reload; the actual cache wipe happens on the
@@ -198,7 +190,7 @@ namespace EquipHide
                   together drop every dangling vc pointer that would
                   otherwise alias into the next save's freshly
                   reallocated arena -- DirectWrite stomping a freed
-                  vc was the v1.05 post-load regression.
+                  vc otherwise causes a post-load visibility regression.
 
                2. controlledActor 0 -> Y  (load screen -> new save).
                   Drain the deferred reload flag: full invalidation +
@@ -496,7 +488,7 @@ namespace EquipHide
 
     bool check_player_filter(uintptr_t a1) noexcept
     {
-        if (a1 < 0x10000)
+        if (!DMK::Memory::plausible_userspace_ptr(a1))
             return false;
 
         auto &ps = player_state();
@@ -506,64 +498,66 @@ namespace EquipHide
             /* Actor type byte: *(*(actor+0x88)+1). Value 1 = local player,
                3-6 = party members. Same mechanism the headgear visibility
                system uses. */
-            auto comp = read_ptr_unsafe(a1, 0x58);
-            if (comp)
+            // Resolve a1 -> +0x58 -> +0x08 -> +0x88 and read the type byte at
+            // +1, all under fault guards. seh_read_chain dereferences the
+            // terminal +0x88 link, so typePtr carries *(actor+0x88); the byte
+            // lives at typePtr+1. This fallback runs when the global chain-walk
+            // AOB failed at init, so the downstream links are not proven live.
+            const auto typePtr =
+                DMKMemory::seh_read_chain<std::uintptr_t>(a1, {0x58, 0x08, 0x88});
+            if (typePtr)
             {
-                auto actor = read_ptr_unsafe(comp, 0x08);
-                if (actor)
+                const auto typeByteOpt =
+                    DMKMemory::seh_read<std::uint8_t>(*typePtr + 1);
+                if (typeByteOpt)
                 {
-                    auto typePtr = read_ptr_unsafe(actor, 0x88);
-                    if (typePtr)
+                    const std::uint8_t typeByte = *typeByteOpt;
                     {
-                        auto typeByte = *reinterpret_cast<const uint8_t *>(typePtr + 1);
+                        static std::atomic<int> s_fbLog{0};
+                        if (s_fbLog.fetch_add(1, std::memory_order_relaxed) < 5)
+                            DMK::Logger::get_instance().trace(
+                                "Fallback chain: a1=0x{:X} typePtr=0x{:X} type={}",
+                                a1, *typePtr, typeByte);
+                    }
+                    bool isProtagonist = (typeByte == 1) ||
+                                         (typeByte >= 3 && typeByte <= 6);
+                    if (isProtagonist)
+                    {
+                        const auto n = ps.count.load(std::memory_order_relaxed);
+                        bool alreadyCached = false;
+                        for (int i = 0; i < n; ++i)
                         {
-                            static std::atomic<int> s_fbLog{0};
-                            if (s_fbLog.fetch_add(1, std::memory_order_relaxed) < 5)
-                                DMK::Logger::get_instance().trace(
-                                    "Fallback chain: a1=0x{:X} comp=0x{:X} "
-                                    "actor=0x{:X} typePtr=0x{:X} type={}",
-                                    a1, comp, actor, typePtr, typeByte);
-                        }
-                        bool isProtagonist = (typeByte == 1) ||
-                                             (typeByte >= 3 && typeByte <= 6);
-                        if (isProtagonist)
-                        {
-                            const auto n = ps.count.load(std::memory_order_relaxed);
-                            bool alreadyCached = false;
-                            for (int i = 0; i < n; ++i)
+                            if (ps.visCtrls[i].load(std::memory_order_relaxed) == a1)
                             {
-                                if (ps.visCtrls[i].load(std::memory_order_relaxed) == a1)
-                                {
-                                    alreadyCached = true;
-                                    break;
-                                }
+                                alreadyCached = true;
+                                break;
                             }
-                            if (!alreadyCached && n < k_maxProtagonists)
+                        }
+                        if (!alreadyCached && n < k_maxProtagonists)
+                        {
+                            int expected = n;
+                            if (ps.count.compare_exchange_weak(
+                                    expected, n + 1, std::memory_order_relaxed))
                             {
-                                int expected = n;
-                                if (ps.count.compare_exchange_weak(
-                                        expected, n + 1, std::memory_order_relaxed))
-                                {
-                                    ps.visCtrls[n].store(a1, std::memory_order_relaxed);
-                                    /* Fallback path runs when the global
-                                       chain-walk AOB failed at init, so
-                                       the body pointer underlying `a1`
-                                       is not directly reachable -- mark
-                                       the slot's identity as unknown.
-                                       Consumers fall back to the active
-                                       character's hide mask, mirroring
-                                       single-character semantics for
-                                       unidentified slots. */
-                                    ps.visCharIdx[n].store(-1, std::memory_order_relaxed);
-                                    ps.primaryVisCtrl.store(
-                                        ps.visCtrls[0].load(std::memory_order_relaxed),
-                                        std::memory_order_relaxed);
-                                    needs_direct_write().store(true, std::memory_order_relaxed);
-                                    DMK::Logger::get_instance().debug(
-                                        "Fallback: cached protagonist vis ctrl at slot {} "
-                                        "(0x{:X}, type={})",
-                                        n, a1, typeByte);
-                                }
+                                ps.visCtrls[n].store(a1, std::memory_order_relaxed);
+                                /* Fallback path runs when the global
+                                   chain-walk AOB failed at init, so
+                                   the body pointer underlying `a1`
+                                   is not directly reachable -- mark
+                                   the slot's identity as unknown.
+                                   Consumers fall back to the active
+                                   character's hide mask, mirroring
+                                   single-character semantics for
+                                   unidentified slots. */
+                                ps.visCharIdx[n].store(-1, std::memory_order_relaxed);
+                                ps.primaryVisCtrl.store(
+                                    ps.visCtrls[0].load(std::memory_order_relaxed),
+                                    std::memory_order_relaxed);
+                                needs_direct_write().store(true, std::memory_order_relaxed);
+                                DMK::Logger::get_instance().debug(
+                                    "Fallback: cached protagonist vis ctrl at slot {} "
+                                    "(0x{:X}, type={})",
+                                    n, a1, typeByte);
                             }
                         }
                     }

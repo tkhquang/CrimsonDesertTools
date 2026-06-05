@@ -28,24 +28,18 @@ namespace Transmog
         // the transmog hooks -- misclassification produces a harmless
         // no-op apply (no presets exist for unknown chars).
         //
-        // DMK::Memory::read_ptr_unsafe is SEH-protected on MSVC and
-        // VirtualQuery-guarded on MinGW; on fault it returns 0, which
-        // the < 0x10000 guard rejects. This avoids the SEH-vs-C++-
-        // destructors restriction that would otherwise require this
-        // whole chain to live inside a single __try frame.
+        // DMK::Memory::seh_read_chain walks a1+8 -> +0x88 -> +8 under a
+        // single SEH frame, screening each link with plausible_userspace_ptr
+        // and reading the terminal ActorManager pointer. On any faulted or
+        // implausible link it returns nullopt, which the >= 0x10000 guard
+        // rejects. This keeps the whole chain in one fault frame without the
+        // SEH-vs-C++-destructors restriction that a hand-rolled __try imposes.
         if (a1 < 0x10000)
             return false;
 
-        const auto actor = static_cast<__int64>(
-            DMK::Memory::read_ptr_unsafe(static_cast<uintptr_t>(a1), 8));
-        if (actor < 0x10000)
-            return false;
-        const auto typeEntry = DMK::Memory::read_ptr_unsafe(
-            static_cast<uintptr_t>(actor), 0x88);
-        if (typeEntry < 0x10000)
-            return false;
-        const auto actorMgr = DMK::Memory::read_ptr_unsafe(typeEntry, 8);
-        return actorMgr >= 0x10000;
+        const auto actorMgr = DMK::Memory::seh_read_chain<uintptr_t>(
+            static_cast<uintptr_t>(a1), {0x8, 0x88, 0x8});
+        return actorMgr.has_value() && *actorMgr >= 0x10000;
     }
 
     // --- VEC hook (sub_14076D520) ---
@@ -186,10 +180,13 @@ namespace Transmog
                     fa[i] = true;
             }
 
-            DMK::Logger::get_instance().info(
+            DMK::Logger::get_instance().debug(
                 "BatchEquip[player]: a1={:#018x}, *(a1+8)={:#018x}, scheduling transmog",
                 static_cast<uint64_t>(a1),
-                a1 > 0x10000 ? static_cast<uint64_t>(*reinterpret_cast<uintptr_t *>(a1 + 8)) : 0ULL);
+                a1 > 0x10000
+                    ? static_cast<uint64_t>(
+                          DMK::Memory::seh_read<uintptr_t>(static_cast<uintptr_t>(a1) + 8).value_or(0))
+                    : 0ULL);
             schedule_transmog(a1, 0);
         }
 

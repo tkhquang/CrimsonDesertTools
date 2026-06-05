@@ -1,7 +1,6 @@
 #include "color_swatch_table.hpp"
 #include "color_carrier_set.hpp"
 #include "color_pending_overrides.hpp"
-#include "color_picker_state.hpp"
 #include "color_state.hpp"
 #include "color_token_table.hpp"
 
@@ -363,7 +362,7 @@ namespace Transmog::ColorOverride::SwatchTable
         }
         // Strict-init policy: default to LOCKED so unrelated engine
         // writes can't add rows outside an explicit Reinit cycle.
-        // Reinit::start_slot_reinit re-opens the gate when needed.
+        // Reinit::start_slot_reinit_once re-opens the gate when needed.
         for (auto &b : g_postReinitLock)
             b.store(true, std::memory_order_relaxed);
         for (auto &b : g_reinitCaptureOpen)
@@ -371,44 +370,6 @@ namespace Transmog::ColorOverride::SwatchTable
     }
 
     // ---- Reinit-aware accessors -------------------------------------
-
-    ActiveSwatchSet active_swatch_set(int slot) noexcept
-    {
-        ActiveSwatchSet out{};
-        if (!valid_slot(slot)) return out;
-        const auto s = static_cast<std::size_t>(slot);
-        const auto cnt = g_count[s].load(std::memory_order_acquire);
-        const auto upper =
-            (cnt < k_dyeSwatchesPerSlot) ? cnt : k_dyeSwatchesPerSlot;
-        const bool locked = g_postReinitLock[s].load(
-            std::memory_order_acquire);
-        for (std::size_t i = 0; i < upper; ++i)
-        {
-            auto &e = g_table[s][i];
-            if (e.frozen_hidden.load(std::memory_order_acquire))
-                continue;
-            if (locked)
-            {
-                // Post-reinit / post-seed: show every non-frozen row
-                // with a valid identity; ignore active_this_apply so
-                // the UI stays stable across normal applies. A row
-                // with a token_id is renderable; placeholder rows
-                // (content_hash == 0, set by populate_from_persisted)
-                // count as "valid" because their submesh_name +
-                // token_id form a real identity that may promote on
-                // the next engine write. Without including them, the
-                // picker is invisible immediately after a preset
-                // switch's seed.
-                const auto tok = e.token_id.load(std::memory_order_relaxed);
-                if (tok == 0) continue;
-                out.indices[out.count++] = static_cast<int>(i);
-                continue;
-            }
-            if (e.active_this_apply.load(std::memory_order_acquire))
-                out.indices[out.count++] = static_cast<int>(i);
-        }
-        return out;
-    }
 
     void wipe_swatch_table_for_slot(int slot) noexcept
     {
@@ -487,16 +448,6 @@ namespace Transmog::ColorOverride::SwatchTable
         return g_reinitCaptureOpen[static_cast<std::size_t>(slot)];
     }
 
-    bool inserts_allowed(int slot) noexcept
-    {
-        if (!valid_slot(slot)) return false;
-        const auto s = static_cast<std::size_t>(slot);
-        if (g_postReinitLock[s].load(std::memory_order_acquire)
-            && !g_reinitCaptureOpen[s].load(std::memory_order_acquire))
-            return false;
-        return true;
-    }
-
     std::size_t snapshot_active_identities(int slot,
                                            SwatchIdentity *out,
                                            std::size_t out_cap) noexcept
@@ -534,22 +485,6 @@ namespace Transmog::ColorOverride::SwatchTable
     {
         if (!valid_slot(slot)) return;
         dye_state()[static_cast<std::size_t>(slot)].slot_enabled = v;
-        // Keep PickerState's per-slot gate in sync so the setter
-        // substitute path's coarse check (any_override_active) still
-        // works.
-        PickerState::set_slot_override_active(slot, v);
-    }
-
-    SwatchOverride *swatches_data(int slot) noexcept
-    {
-        if (!valid_slot(slot)) return nullptr;
-        return dye_state()[static_cast<std::size_t>(slot)].swatches.data();
-    }
-
-    std::size_t swatches_size(int slot) noexcept
-    {
-        if (!valid_slot(slot)) return 0;
-        return k_dyeSwatchesPerSlot;
     }
 
     std::size_t detected_swatch_count(int slot) noexcept
@@ -559,15 +494,13 @@ namespace Transmog::ColorOverride::SwatchTable
 
     void clear_dye_state_for_slot(int slot) noexcept
     {
-        // Reset the carrier set, hash set, freeze timers and
-        // per-slot apply-window timestamps so the next apply has a
-        // clean capture state. Does NOT wipe the swatch table rows
-        // or user override RGB / override_active choices -- those
-        // survive untick/retick of the same item.
+        // Reset the carrier set, hash-set burst-lock timestamp and
+        // freeze flag so the next apply has a clean capture state.
+        // Does NOT wipe the swatch table rows or user override RGB /
+        // override_active choices -- those survive untick/retick of
+        // the same item.
         if (!valid_slot(slot)) return;
         CarrierSet::clear_slot(slot);
-        State::apply_begin_ms(slot).store(0, std::memory_order_release);
-        State::first_pub_fire_ms(slot).store(0, std::memory_order_release);
         State::hash_set_last_add_ms(slot).store(
             0, std::memory_order_release);
         State::swatch_frozen(slot).store(false, std::memory_order_release);

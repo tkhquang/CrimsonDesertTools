@@ -78,21 +78,18 @@ namespace EquipHide
             const int charIdx =
                 ps.visCharIdx[i].load(std::memory_order_relaxed);
 
-            auto comp = read_ptr_unsafe(vc, 0x58);
-            if (!comp)
-            {
-                logger.trace("DirectWrite [{}]: vc=0x{:X} comp=NULL (+0x58)",
-                             i, vc);
-                continue;
-            }
-            auto descNode = read_ptr_unsafe(comp, 0x218);
+            // Read the descriptor node value at vc->+0x58->+0x218 under one
+            // fault guard. seh_read_chain dereferences the terminal +0x218 link
+            // (seh_resolve_chain would stop at its address), so mapBase keeps
+            // its original meaning: *(*(vc+0x58)+0x218) + 0x20.
+            auto descNode = DMKMemory::seh_read_chain<std::uintptr_t>(vc, {0x58, 0x218});
             if (!descNode)
             {
-                logger.trace("DirectWrite [{}]: vc=0x{:X} comp=0x{:X} "
-                             "descNode=NULL (+0x218)", i, vc, comp);
+                logger.trace("DirectWrite [{}]: vc=0x{:X} descNode=NULL "
+                             "(+0x58 -> +0x218)", i, vc);
                 continue;
             }
-            auto mapBase = descNode + 0x20;
+            auto mapBase = *descNode + 0x20;
 
             /* Choose the character-specific map for the iteration.
                charIdx == -1 routes to the active-character map so a

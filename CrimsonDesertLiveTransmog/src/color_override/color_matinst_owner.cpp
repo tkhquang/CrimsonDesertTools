@@ -14,7 +14,6 @@ namespace Transmog::ColorOverride::MatInstOwner
             std::atomic<int>             slot{-1};
         };
         std::array<Entry, k_capacity> g_map{};
-        std::atomic<std::size_t>      g_size{0};
 
         std::size_t hash_mi(std::uintptr_t mi) noexcept
         {
@@ -44,7 +43,6 @@ namespace Transmog::ColorOverride::MatInstOwner
                     e.expected_hash.store(expected_hash,
                                           std::memory_order_relaxed);
                     e.slot.store(slot, std::memory_order_release);
-                    g_size.fetch_add(1, std::memory_order_relaxed);
                     return;
                 }
                 cur = e.mi.load(std::memory_order_acquire);
@@ -105,6 +103,5 @@ namespace Transmog::ColorOverride::MatInstOwner
             e.expected_hash.store(0, std::memory_order_relaxed);
             e.slot.store(-1, std::memory_order_relaxed);
         }
-        g_size.store(0, std::memory_order_release);
     }
 }

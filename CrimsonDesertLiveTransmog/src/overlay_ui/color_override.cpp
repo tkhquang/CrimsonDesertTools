@@ -12,7 +12,6 @@
 #include "color_override/color_matinst_owner.hpp"
 #include "color_override/color_override.hpp"
 #include "color_override/color_pending_overrides.hpp"
-#include "color_override/color_picker_state.hpp"
 #include "color_override/color_reinit.hpp"
 #include "color_override/color_state.hpp"
 #include "color_override/color_swatch_table.hpp"
@@ -129,10 +128,8 @@ true, std::memory_order_release);
                 // Per-slot single-pass swatch re-init. Drives one
                 // clear + apply cycle (~1.5s) and keeps whatever rows
                 // were captured. Use when the swatch list is empty
-                // and you'd otherwise untick-retick by hand. The
-                // legacy 3-pass ghost-filter variant
-                // (`start_slot_reinit`) is no longer wired from the
-                // UI -- one pass is enough for the common case.
+                // and you'd otherwise untick-retick by hand. One pass
+                // is enough for the common case.
                 ImGui::SameLine(0.0f, 6.0f);
                 const bool reinitActive =
                     Transmog::ColorOverride::Reinit::is_slot_reinit_active(
@@ -287,9 +284,9 @@ if (v > 1.0f) v = 1.0f;
 return static_cast<std::uint8_t>(v * 255.0f + 0.5f);
                     };
 
-                    // 2026-04-29 UX rewrite: per-submesh + per-token
-                    // granularity gives ~9 swatches per submesh, which
-                    // gets unwieldy fast. New layout:
+                    // Per-submesh + per-token granularity gives ~9
+                    // swatches per submesh, which gets unwieldy fast.
+                    // Layout:
                     //   - Group rows by (submesh_stable_id, template_id)
                     //     into collapsible "Region N" cards.
                     //   - Within each region, group by layer

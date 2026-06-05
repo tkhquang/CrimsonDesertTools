@@ -54,8 +54,7 @@ namespace Transmog
         //     tag and cannot disambiguate which UI slot the user
         //     targeted. Need to identify the disambiguator field on
         //     the swap-entry record (likely a sub-index byte at a
-        //     yet-unmapped offset; engine slot taxonomy memory file
-        //     2026-05-07 has the candidate offsets).
+        //     yet-unmapped offset).
         //
         // Both classes are flipped back on by replacing `false` with
         // `true` in the row below AND landing the corresponding

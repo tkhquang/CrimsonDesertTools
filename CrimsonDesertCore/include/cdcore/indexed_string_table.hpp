@@ -33,15 +33,15 @@ namespace CDCore
         // Hash range to sweep. The default covers the full observed bucket
         // space; callers should only narrow it when a specific patch is
         // known to keep the relevant entries inside a tighter window and
-        // scan cost is a concern. Per-version bucket drift (seen between
-        // v1.02.00, v1.03.01 and v1.04.00) means any narrow default has
-        // to be revisited every major patch; keeping it wide is the
-        // self-healing choice.
+        // scan cost is a concern. Per-version bucket drift across patches
+        // means any narrow default has to be revisited every major patch;
+        // keeping it wide is the self-healing choice.
         std::uint32_t tableScanMin = 1;
         std::uint32_t tableScanMax = 0x1FFFF;
 
         // Offset of the table_array pointer inside the globalPtr struct.
-        // Runtime-data layout, resolved by IDA on v1.02.00. No AOB.
+        // Runtime-data layout offset (no AOB backs it, so confirm it after
+        // a major patch).
         std::ptrdiff_t tableArrayOffset = 0x58;
 
         // Label used in log lines. Change it to distinguish per-mod scans

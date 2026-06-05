@@ -2,7 +2,7 @@
 
 #include <DetourModKit.hpp>
 
-#include <Windows.h>
+#include <excpt.h>
 
 #include <chrono>
 #include <cstring>
@@ -92,8 +92,11 @@ namespace CDCore
         const auto globalPtrAddr = static_cast<std::uintptr_t>(
             static_cast<std::int64_t>(instrEnd) + disp);
 
+        // globalPtrAddr is a RIP-resolved module slot; guard the read so a
+        // build whose layout shifted it outside committed memory yields 0
+        // (handled as "not yet initialized") rather than faulting.
         const auto globalPtr =
-            *reinterpret_cast<const std::uintptr_t *>(globalPtrAddr);
+            DMKMemory::seh_read<std::uintptr_t>(globalPtrAddr).value_or(0);
         if (globalPtr < 0x10000)
         {
             logger.trace(
@@ -102,8 +105,12 @@ namespace CDCore
             return nameToHash;
         }
 
-        const auto tableArray = *reinterpret_cast<const std::uintptr_t *>(
-            globalPtr + cfg.tableArrayOffset);
+        // globalPtr is a live game heap pointer that can tear or relocate
+        // across a world reload; a faulting read yields 0 and routes to the
+        // "offset moved" warning below instead of crashing the caller.
+        const auto tableArray =
+            DMKMemory::seh_read<std::uintptr_t>(globalPtr + cfg.tableArrayOffset)
+                .value_or(0);
         if (tableArray < 0x10000)
         {
             logger.warning(

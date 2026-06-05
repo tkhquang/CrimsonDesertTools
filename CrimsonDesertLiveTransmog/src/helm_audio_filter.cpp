@@ -297,27 +297,13 @@ namespace Transmog::HelmAudioFilter
             if (record < 0x10000)
                 return false;
 
-            const auto levelTable =
-                DMKMemory::seh_read<std::uintptr_t>(
-                    static_cast<std::uintptr_t>(record) + 0x18)
-                    .value_or(0);
-            if (levelTable < 0x10000)
-                return false;
-
-            const auto innerArr =
-                DMKMemory::seh_read<std::uintptr_t>(levelTable)
-                    .value_or(0);
-            if (innerArr < 0x10000)
-                return false;
-
-            const auto firstEntry =
-                DMKMemory::seh_read<std::uintptr_t>(innerArr)
-                    .value_or(0);
-            if (firstEntry < 0x10000)
-                return false;
-
+            // record +0x18 -> +0x0 -> +0x0 -> +0x0 dereferences the
+            // per-level table, first inner ptr, level-1 entry, then the
+            // entry's class vtable. seh_read_chain screens each link with
+            // plausible_userspace_ptr and reads the terminal vtable value.
             const auto vtable =
-                DMKMemory::seh_read<std::uintptr_t>(firstEntry)
+                DMKMemory::seh_read_chain<std::uintptr_t>(
+                    static_cast<std::uintptr_t>(record), {0x18, 0x0, 0x0, 0x0})
                     .value_or(0);
             return vtable == g_gameAudioEffectVtable;
         }
@@ -422,27 +408,18 @@ namespace Transmog::HelmAudioFilter
                 outMatchedAsset[0] = '\0';
             if (host < 0x10000)
                 return CDCore::ControlledCharacter::Unknown;
-            const auto tbl =
-                DMKMemory::seh_read<std::uintptr_t>(
-                    host + k_offComponentTable)
-                    .value_or(0);
-            if (tbl < 0x10000)
-                return CDCore::ControlledCharacter::Unknown;
-            const auto ctl =
-                DMKMemory::seh_read<std::uintptr_t>(
-                    tbl + k_offCharCtlSlot)
-                    .value_or(0);
-            if (ctl < 0x10000)
-                return CDCore::ControlledCharacter::Unknown;
-            const auto inner =
-                DMKMemory::seh_read<std::uintptr_t>(
-                    ctl + k_offCharCtlToInner)
-                    .value_or(0);
-            if (inner < 0x10000)
-                return CDCore::ControlledCharacter::Unknown;
+
+            // host +0x68 -> +0x40 -> +0x40 -> +0x38 dereferences the
+            // component table, character-controller slot, inner record,
+            // then the CharacterAssets pointer. The trailing 0 forces the
+            // +0x38 link to be dereferenced so the result is the assets
+            // base the slot-scan loop below indexes. Each link is screened
+            // by plausible_userspace_ptr.
             const auto assets =
-                DMKMemory::seh_read<std::uintptr_t>(
-                    inner + k_offInnerToAssets)
+                DMKMemory::seh_resolve_chain(
+                    host,
+                    {k_offComponentTable, k_offCharCtlSlot,
+                     k_offCharCtlToInner, k_offInnerToAssets, 0})
                     .value_or(0);
             if (assets < 0x10000)
                 return CDCore::ControlledCharacter::Unknown;
@@ -495,8 +472,8 @@ namespace Transmog::HelmAudioFilter
 
         // Walk the engine player-static chain to the currently-
         // controlled protagonist's pa::ServerChildOnlyInGameActor.
-        // Each step SEH-guarded via DMKMemory::seh_read; returns 0 on
-        // fault or pre-world.
+        // The whole walk runs under one SEH frame via
+        // DMKMemory::seh_read_chain; returns 0 on fault or pre-world.
         //
         //   *(g_playerStatic) -> root container
         //   *(root + 0x18)    -> pa::NwVirtualAsyncSession
@@ -506,23 +483,15 @@ namespace Transmog::HelmAudioFilter
         {
             if (g_playerStatic == 0)
                 return 0;
-            const auto root =
-                DMKMemory::seh_read<std::uintptr_t>(g_playerStatic)
-                    .value_or(0);
-            if (root < 0x10000)
-                return 0;
-            const auto nwSes =
-                DMKMemory::seh_read<std::uintptr_t>(root + 0x18)
-                    .value_or(0);
-            if (nwSes < 0x10000)
-                return 0;
-            const auto srvUA =
-                DMKMemory::seh_read<std::uintptr_t>(nwSes + 0xA0)
-                    .value_or(0);
-            if (srvUA < 0x10000)
-                return 0;
+
+            // Leading 0 dereferences g_playerStatic to the root container,
+            // then +0x18 -> +0xA0 -> +0xD0 walks to the controlled host,
+            // dereferencing the +0xD0 link to read the host pointer value.
+            // Each link is screened by plausible_userspace_ptr; a fault or
+            // implausible link returns 0.
             const auto host =
-                DMKMemory::seh_read<std::uintptr_t>(srvUA + 0xD0)
+                DMKMemory::seh_read_chain<std::uintptr_t>(
+                    g_playerStatic, {0x0, 0x18, 0xA0, 0xD0})
                     .value_or(0);
             if (host < 0x10000)
                 return 0;

@@ -324,20 +324,6 @@ namespace EquipHide
         s_nameToHashBuilt = false;
     }
 
-    // --- Dynamic hash range bounds ---
-    static std::atomic<uint32_t> s_hashRangeMin{0};
-    static std::atomic<uint32_t> s_hashRangeMax{0};
-
-    uint32_t hash_range_min() noexcept
-    {
-        return s_hashRangeMin.load(std::memory_order_relaxed);
-    }
-
-    uint32_t hash_range_max() noexcept
-    {
-        return s_hashRangeMax.load(std::memory_order_relaxed);
-    }
-
     std::string default_parts_string(Category cat)
     {
         std::string result;
@@ -597,15 +583,16 @@ namespace EquipHide
     }
 
     // ---------------------------------------------------------------------
-    // Per-character part maps (Phase 3 option (a) -- per-character
-    // unordered_map). Rationale: hot path is classify_part_for() called
+    // Per-character part maps, keyed as a separate per-character
+    // unordered_map. Rationale: hot path is classify_part_for() called
     // from apply_direct_vis_write per (vis_ctrl, hash) pair on every
-    // schedule. Option (b) would tag every entry of the merged map with
-    // an array<CategoryMask, kCharIdxCount> (12 bytes per value vs 4),
-    // tripling the cache footprint of the inner walk that already
-    // dominates direct-write latency. Option (a) pays a small rebuild
-    // cost on character swap / INI reload (rare, off the hot path) in
-    // exchange for one map lookup keyed on charIdx during direct write.
+    // schedule. Tagging every entry of a single merged map with an
+    // array<CategoryMask, kCharIdxCount> (12 bytes per value vs 4) would
+    // triple the cache footprint of the inner walk that already
+    // dominates direct-write latency. The per-character-map approach
+    // pays a small rebuild cost on character swap / INI reload (rare,
+    // off the hot path) in exchange for one map lookup keyed on charIdx
+    // during direct write.
     //
     // The per-character maps are built alongside the active-map double-
     // buffer flip in build_part_lookup() so all consumers see the same
@@ -630,17 +617,6 @@ namespace EquipHide
     static constexpr std::size_t k_maxOutliers = 8;
     static std::atomic<uint32_t> s_outliers[k_maxOutliers]{};
     static std::atomic<int>      s_outlierCount{0};
-
-    bool is_outlier_hash(uint32_t hash) noexcept
-    {
-        const auto n = s_outlierCount.load(std::memory_order_acquire);
-        for (int i = 0; i < n; ++i)
-        {
-            if (s_outliers[i].load(std::memory_order_relaxed) == hash)
-                return true;
-        }
-        return false;
-    }
 
     void build_part_lookup()
     {
@@ -717,8 +693,6 @@ namespace EquipHide
             }
         }
 
-        s_hashRangeMin.store(rangeMin, std::memory_order_relaxed);
-        s_hashRangeMax.store(rangeMax, std::memory_order_relaxed);
         s_outlierCount.store(outlierCount, std::memory_order_release);
 
         auto& logger = DMK::Logger::get_instance();

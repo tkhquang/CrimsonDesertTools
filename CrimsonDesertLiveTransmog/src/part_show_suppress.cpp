@@ -178,7 +178,9 @@ namespace Transmog::PartShowSuppress
 
         if (suppress)
         {
-            DMK::Logger::get_instance().info(
+            // Per-suppress diagnostic kept at trace level -- this fires on
+            // the hot PartAddShow dispatch path, so INFO would flood the log.
+            DMK::Logger::get_instance().trace(
                 "[dispatch] PartAddShow suppressed hash=0x{:04X}", idx);
             return 0;
         }

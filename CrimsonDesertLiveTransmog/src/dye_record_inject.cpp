@@ -395,10 +395,14 @@ namespace Transmog::DyeRecordInject
         for (auto &c : out)
             c = ChannelState{};
 
+        // entryBase points into the live auth/dye table, which can tear or
+        // relocate on a world reload or arena flip. Both call sites invoke this
+        // outside an SEH frame, so every read here is self-guarded: a faulting
+        // header read yields 0 and the entry is treated as having no records.
         const auto data =
-            *reinterpret_cast<std::uintptr_t *>(entryBase + 0x78);
+            DMKMemory::seh_read<std::uintptr_t>(entryBase + 0x78).value_or(0);
         auto count =
-            *reinterpret_cast<std::uint32_t *>(entryBase + 0x80);
+            DMKMemory::seh_read<std::uint32_t>(entryBase + 0x80).value_or(0);
         if (data < 0x10000 || count == 0)
             return 0;
         if (count > k_dyeChannelCount)
@@ -408,21 +412,29 @@ namespace Transmog::DyeRecordInject
         for (std::uint32_t i = 0; i < count; ++i)
         {
             const auto rec = data + i * 16;
-            const auto group_hash =
-                *reinterpret_cast<std::uint32_t *>(rec + 0);
+            // Copy the whole 16-byte record under one fault guard, then parse
+            // from the local buffer so a torn record cannot fault mid-field.
+            std::uint8_t buf[16];
+            if (!DMKMemory::seh_read_bytes(rec, buf, sizeof(buf)))
+                continue;
+
+            std::uint32_t group_hash = 0;
+            std::memcpy(&group_hash, buf + 0, sizeof(group_hash));
             if (group_hash == 0)
                 continue;
-            const auto channel_idx =
-                *reinterpret_cast<std::uint8_t *>(rec + 6);
+            const std::uint8_t channel_idx = buf[6];
             if (channel_idx >= k_dyeChannelCount)
                 continue;
+
+            std::uint16_t material_id = 0;
+            std::memcpy(&material_id, buf + 4, sizeof(material_id));
             out[channel_idx] = ChannelState{
                 group_hash,
-                *reinterpret_cast<std::uint8_t *>(rec + 7),  // r
-                *reinterpret_cast<std::uint8_t *>(rec + 8),  // g
-                *reinterpret_cast<std::uint8_t *>(rec + 9),  // b
-                *reinterpret_cast<std::uint16_t *>(rec + 4), // material_id
-                *reinterpret_cast<std::uint8_t *>(rec + 11), // repair_byte
+                buf[7],  // r
+                buf[8],  // g
+                buf[9],  // b
+                material_id, // material_id
+                buf[11], // repair_byte
             };
             ++filled;
         }

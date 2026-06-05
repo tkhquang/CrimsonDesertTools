@@ -11,6 +11,8 @@
 // All readers are SEH-guarded and `noexcept`. Bad pointers / freed
 // memory return `false`; no exception escapes.
 
+#include <DetourModKit.hpp>
+
 #include <cstddef>
 #include <cstdint>
 
@@ -34,25 +36,25 @@ namespace Transmog::ColorOverride::MatInstProbe
 
     // ---- Address range sanity ----------------------------------------
     //
-    // Engine heap pool sits above `0x200000000`; the EXE image is
-    // mapped at `0x140000000` with no ASLR shift in shipped builds.
-    // The upper module bound is set to `0x160000000` to cover the
-    // shipped image (~410 MB) plus headroom for future patches that
-    // grow the module without forcing every dependent check to
-    // update.
+    // The engine heap pool sits above `0x200000000`; this floor is
+    // stricter than the generic user-space lower bound and screens out
+    // bogus-low pointers that the weaker `plausible_userspace_ptr`
+    // floor (0x10000) would let through.
     inline constexpr std::uintptr_t k_heapFloor   = 0x200000000ULL;
     inline constexpr std::uintptr_t k_heapCeiling = 0x800000000000ULL;
-    inline constexpr std::uintptr_t k_moduleLow   = 0x140000000ULL;
-    inline constexpr std::uintptr_t k_moduleHigh  = 0x160000000ULL;
 
     inline bool is_likely_heap(std::uintptr_t p) noexcept
     {
         return p >= k_heapFloor && p < k_heapCeiling;
     }
 
+    // True when @p p lies inside the host EXE's mapped PE range
+    // (exact SizeOfImage, magic-static cached). Catches stale-pointer
+    // reads where freed heap memory was overwritten with non-vtable
+    // garbage that still happens to be mapped.
     inline bool is_module_resident(std::uintptr_t p) noexcept
     {
-        return p >= k_moduleLow && p < k_moduleHigh;
+        return DMKMemory::contains(DMKMemory::host_module_range(), p);
     }
 
     // ---- Identity probe ----------------------------------------------

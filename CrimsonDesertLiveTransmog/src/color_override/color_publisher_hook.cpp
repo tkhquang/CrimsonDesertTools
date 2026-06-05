@@ -40,18 +40,13 @@ namespace Transmog::ColorOverride::PublisherHook
         std::atomic<std::uint64_t> g_arecRejects{0};
 
         // SEH-guarded read of the permutations-token field (matInst+0x70).
-        // Returns 0 on fault.
+        // The guard is required, not optional: probe_matinst never
+        // validates +0x70. Returns 0 on fault.
         std::uint16_t read_permut_token(std::uintptr_t mi) noexcept
         {
-            __try
-            {
-                return *reinterpret_cast<const std::uint16_t *>(
-                    mi + MatInstProbe::k_offMi_PermutTok);
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                return 0;
-            }
+            return DMK::Memory::seh_read<std::uint16_t>(
+                       mi + MatInstProbe::k_offMi_PermutTok)
+                .value_or(0);
         }
 
         // Per-matInst validate + capture. Identity is established via

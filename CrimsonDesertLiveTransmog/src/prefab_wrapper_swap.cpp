@@ -252,10 +252,6 @@ namespace Transmog::PrefabWrapperSwap
 
     // --- SEH-isolated read/write helpers ---
 
-    
-
-    
-
     static bool write_qword_seh(void *p, std::uint64_t value) noexcept
     {
         bool ok = false;
@@ -285,8 +281,6 @@ namespace Transmog::PrefabWrapperSwap
         }();
         return len;
     }
-
-    
 
     // Bumps a wrapper's refcount via Interlocked, gated on the same
     // condition sub_14079DA20 uses (refcount field >= 0). No-op if

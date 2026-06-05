@@ -58,9 +58,6 @@ namespace Transmog::ColorOverride
         State::active_apply_valid_until_ms().store(
             State::now_ms() + State::k_batchApplyExtendMs,
             std::memory_order_release);
-        State::apply_begin_ms(slot).store(State::now_ms(),
-                                          std::memory_order_release);
-        State::first_pub_fire_ms(slot).store(0, std::memory_order_release);
         State::hash_set_last_add_ms(slot).store(0, std::memory_order_release);
         SwatchTable::mark_all_inactive(slot);
     }

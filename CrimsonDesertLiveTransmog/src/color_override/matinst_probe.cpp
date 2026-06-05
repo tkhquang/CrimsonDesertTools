@@ -9,26 +9,34 @@ namespace Transmog::ColorOverride::MatInstProbe
         out = {};
         if (!is_likely_heap(mi))
             return false;
-        __try
-        {
-            out.mi = mi;
-            out.vtable = *reinterpret_cast<const std::uintptr_t *>(mi);
-            out.template_id = *reinterpret_cast<const std::uint16_t *>(
-                mi + k_offMi_TemplateId);
-            out.stable_id = *reinterpret_cast<const std::uint64_t *>(
-                mi + k_offMi_StableId);
-            const auto arec = *reinterpret_cast<const std::uintptr_t *>(
-                mi + k_offMi_ArecBackref);
-            if (!is_likely_heap(arec))
-                return false;
-            out.content_hash = *reinterpret_cast<const std::uint32_t *>(
-                arec + k_offArec_ContentHash);
-            return true;
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER)
-        {
+
+        const auto vtable = DMKMemory::seh_read<std::uintptr_t>(mi);
+        const auto template_id =
+            DMKMemory::seh_read<std::uint16_t>(mi + k_offMi_TemplateId);
+        const auto stable_id =
+            DMKMemory::seh_read<std::uint64_t>(mi + k_offMi_StableId);
+        if (!vtable || !template_id || !stable_id)
             return false;
-        }
+
+        // Resolve the arec backref EXPLICITLY (not via seh_read_chain):
+        // its `is_likely_heap` floor (0x200000000) is stricter than the
+        // chain primitive's `plausible_userspace_ptr` floor (0x10000),
+        // which would let a bogus-low arec through.
+        const auto arec =
+            DMKMemory::seh_read<std::uintptr_t>(mi + k_offMi_ArecBackref);
+        if (!arec || !is_likely_heap(*arec))
+            return false;
+        const auto content_hash = DMKMemory::seh_read<std::uint32_t>(
+            *arec + k_offArec_ContentHash);
+        if (!content_hash)
+            return false;
+
+        out.mi = mi;
+        out.vtable = *vtable;
+        out.template_id = *template_id;
+        out.stable_id = *stable_id;
+        out.content_hash = *content_hash;
+        return true;
     }
 
     bool probe_from_wrapper(std::uintptr_t wrapper,
@@ -37,16 +45,9 @@ namespace Transmog::ColorOverride::MatInstProbe
         out = {};
         if (wrapper == 0)
             return false;
-        std::uintptr_t mi = 0;
-        __try
-        {
-            mi = *reinterpret_cast<const std::uintptr_t *>(
-                wrapper + k_offMat_WrapperBackref);
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER)
-        {
-            return false;
-        }
+        const auto mi = DMKMemory::seh_read<std::uintptr_t>(
+                            wrapper + k_offMat_WrapperBackref)
+                            .value_or(0);
         return probe_matinst(mi, out);
     }
 

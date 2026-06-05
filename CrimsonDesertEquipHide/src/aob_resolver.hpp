@@ -108,24 +108,24 @@ namespace EquipHide
      *       follows the vtable store. Wildcarding its opcode loses
      *       uniqueness on the live build (5 matches without it). If a
      *       future compiler flips this jmp to the 6-byte E9 rel32 form,
-     *       P2 will stop matching -- P1 and P3 pick up the slack. P1 no
-     *       longer crosses the jmp (truncated 2026-04-19) so it is
+     *       P2 will stop matching -- P1 and P3 pick up the slack. P1 is
+     *       truncated so it does not cross the jmp, making it
      *       encoding-independent. P3 wildcards the preceding 74 ?? jz
      *       pair as ?? ?? so it only declares a 2-byte slot, not the
      *       rel8 opcode literal.
      */
     inline constexpr AddrCandidate k_childActorVtblCandidates[] = {
-        // P1 -- truncated 2026-04-19: ends at the mov [rsi], rax that
-        // stores the vtable. Does NOT cross the trailing EB 03 jmp, so
-        // it survives a Jcc-encoding flip.
+        // P1 -- truncated: ends at the mov [rsi], rax that stores the
+        // vtable. Does NOT cross the trailing EB 03 jmp, so it survives
+        // a Jcc-encoding flip.
         {"ChildActorVtbl_P1_AllocCtor",
          "48 8B 55 ?? 48 89 F1 E8 ?? ?? ?? ?? 90 48 8D 05 ?? ?? ?? ?? 48 89 06",
          ResolveMode::RipRelative, 16, 20},
 
         // P2 -- retains the trailing EB ?? 4C: without the 4C byte
         // of the post-jmp mov rsi, r13 continuation, the lead-in is
-        // structurally shared with 4 other ctor sites (CE aob_scan
-        // 2026-04-19: 5 hits). Tied to the 2-byte jmp encoding.
+        // structurally shared with 4 other ctor sites (5 matches total).
+        // Tied to the 2-byte jmp encoding.
         {"ChildActorVtbl_P2_CtorStore",
          "48 89 F1 E8 ?? ?? ?? ?? 90 48 8D 05 ?? ?? ?? ?? 48 89 06 EB ?? 4C",
          ResolveMode::RipRelative, 12, 16},
@@ -184,13 +184,6 @@ namespace EquipHide
      *   [RBP+0x67] = a4 (transition type byte, saved from R9B at prologue)
      *   [RBP+0x4F] = a1 context pointer
      *
-     * Register layout at hook point (v1.02.00 -- legacy):
-     *   R10 = pointer to part hash DWORD
-     *   R13 = pointer to PartInOutSocket struct (Visible byte at +0x1C)
-     *   R8B = exclusion-list flag
-     *   [RBP+0x67] = a4 (transition type byte, saved from R9B at prologue)
-     *   [RBP+0x4F] = a1 context pointer
-     *
      * Register layout at hook point (v1.08.00):
      *   v1.08 spills the visibility byte itself to a stack arg slot
      *   (default `[rsp+0x20]`) before the cmp; the `mov r8b, 1` that
@@ -198,14 +191,12 @@ namespace EquipHide
      *   PartInOutSocket struct is no longer dereferenced inline at the
      *   hook point, only by the surrounding code that fed the spill.
      *
-     * Cascade contract: 1-hit-only on the current target build. Older
-     * `mov rax,[rbp+0x5F] ; movzx eax,byte [rax+0x1C]` candidates from
-     * the v1.04 / v1.05 era are intentionally NOT retained: most go
-     * 0-hit on v1.08, but the wider-context shape still resolved once
-     * on v1.08 with its disp_offset landing MID-INSTRUCTION because
-     * the function body shifted. Re-adding a legacy tier requires
-     * per-version CE verification of both match count AND the
-     * match-to-hook displacement against the target build.
+     * Cascade contract: 1-hit-only on the current target build.
+     * Re-adding a legacy tier requires per-version CE verification of
+     * both match count AND the match-to-hook displacement against the
+     * target build, because a wider-context shape can still resolve once
+     * with its disp_offset landing mid-instruction when the function
+     * body shifts.
      */
     inline constexpr AddrCandidate k_hookSiteCandidates[] = {
         // PN1 -- v1.08.00. The PartInOutSocket arg-passing convention

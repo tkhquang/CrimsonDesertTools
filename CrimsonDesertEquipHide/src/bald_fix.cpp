@@ -12,28 +12,24 @@ namespace EquipHide
     static PostfixEvalFn s_originalPostfixEval = nullptr;
 
     // Player-vs-prefab-instantiation identity is decided by a call-graph
-    // landmark: CE capture on 2026-04-22 (Kliff session 194 hits, Oongka
-    // session 173 hits) showed every PostfixEval invocation that came
-    // through the engine's `createPrefabFromPartPrefab` path (sub_14261B6C0,
-    // which IDA confirms allocates the 240-byte prefab instance then
-    // invokes the rule pipeline via sub_1402E1430) carried the
-    // post-call return address at ResolvedAddresses::npcPfeReturnAddr on
-    // its stack. Player-side PostfixEval invocations run from the
-    // equipment-visibility update loop and never include that address
-    // (196/196 player-context hits across both sessions). At hook entry
-    // we scan a small stack window; if the landmark is present, we defer
-    // to the original evaluator without mutating any item bitmasks. No
-    // ctx caching, no frequency threshold, no per-item hash heuristic.
-    // The scan window must be deep enough to span every wrapper frame
-    // between PostfixEval and the prefab-build call site. v1.05 added at
-    // least one additional frame on the NPC path: a 24-slot window left
-    // the landmark out of reach and the override applied to NPCs. 64
-    // slots covers the new depth with margin.
+    // landmark: every PostfixEval invocation that comes through the
+    // engine's `createPrefabFromPartPrefab` path (sub_14261B6C0, which
+    // allocates the 240-byte prefab instance then invokes the rule
+    // pipeline via sub_1402E1430) carries the post-call return address
+    // at ResolvedAddresses::npcPfeReturnAddr on its stack. Player-side
+    // PostfixEval invocations run from the equipment-visibility update
+    // loop and never include that address. At hook entry we scan a small
+    // stack window; if the landmark is present, we defer to the original
+    // evaluator without mutating any item bitmasks. No ctx caching, no
+    // frequency threshold, no per-item hash heuristic. The scan window
+    // must be deep enough to span every wrapper frame between PostfixEval
+    // and the prefab-build call site; 64 slots covers that depth with
+    // margin.
     static constexpr int k_stackScanDepth = 64;
 
     // Dedup tables so the trace log fires at most once per ever-seen ctx.
-    // Sized generously: the live build has at most 3 player protagonists
-    // and typically <10 NPC prefab-instantiation contexts per load zone.
+    // Sized generously: there are at most 3 player protagonists and
+    // typically <10 NPC prefab-instantiation contexts per load zone.
     // Tables never evict; if they saturate, further contexts silently
     // stop logging. Entries are zero-initialised (0 sentinel = empty).
     static constexpr int k_logDedupSize = 16;

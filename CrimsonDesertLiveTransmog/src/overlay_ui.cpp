@@ -33,7 +33,6 @@
 #include "overlay_ui/state.hpp"
 #include "overlay_ui/transmog_tab.hpp"
 #include "color_override/color_pending_overrides.hpp"
-#include "color_override/color_picker_state.hpp"
 #include "color_override/color_reinit.hpp"
 #include "color_override/color_swatch_table.hpp"
 #include "color_override/color_token_table.hpp"
@@ -706,7 +705,7 @@ static void draw_overlay_content()
 
             // --- Dye picker (per-slot per-mod color override) ---
             //
-            // Cracked 2026-05-10 PM: dye record bytes +7/+8/+9 are
+            // Dye record bytes +7/+8/+9 are
             // literal R/G/B of the picked shade. Each slot has up to
             // 16 ARMOR_MOD records (channels). The popup lists all
             // 16 mods as inline-expandable rows; expanding a row

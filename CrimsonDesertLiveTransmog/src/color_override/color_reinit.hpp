@@ -1,18 +1,17 @@
 #pragma once
 
-// Per-slot 3-pass swatch reinit + single-pass color-commit retick.
+// Per-slot single-pass swatch reinit + color-commit retick.
 //
 // The state machine drives an automatic
 //   teardown (untick + apply) -> wait -> retick (untick + apply) -> wait
-// cycle, repeats it three times, and intersects the identity tuples
-// captured across all three passes. Rows whose identity didn't appear
-// in every pass are marked frozen_hidden -- the UI hides them and the
-// setter substitute path bails on them. The intersection prunes
-// transient ghost rows that only appear on some passes (e.g. world
-// detail meshes the engine briefly binds during slot rebuild).
+// cycle once, then Finalize captures the identity tuples seen on that
+// pass. Finalize's intersection degenerates to "keep everything
+// captured this pass" when only one pass is populated, so no ghost
+// pruning happens in single-pass mode; the setter substitute path
+// still bails on any frozen_hidden row.
 //
 // schedule_color_commit_retick() reuses the same machine in
-// single-pass mode (mode=ModeCommitRetick): no capture, no pruning,
+// commit-retick mode (mode=ModeCommitRetick): no capture, no pruning,
 // no lock -- just a tear-down + reapply so the engine re-instantiates
 // the carrier matInsts and the substitute path picks up freshly-
 // committed user colours from SwatchOverride.
@@ -34,17 +33,13 @@ namespace Transmog::ColorOverride::Reinit
     /// frame from the overlay render path.
     void tick() noexcept;
 
-    /// Begin a 3-pass reinit on `slot`. Returns false if the slot
-    /// has no active transmog target or is already mid-reinit.
-    bool start_slot_reinit(int slot) noexcept;
-
-    /// Begin a single-pass reinit on `slot`. Same teardown + capture
-    /// cycle as the 3-pass version but Finalize-after-one-pass, so
-    /// captured rows are kept as-is (no ghost intersection). Used as
-    /// the auto-trigger when the user first switches to the Color
-    /// Override tab on an empty slot -- one pass is enough to
-    /// populate the swatch grid; users can still hit Re-init for the
-    /// 3-pass ghost-filtered variant.
+    /// Begin a single-pass reinit on `slot`. Runs one teardown +
+    /// capture cycle, then Finalize keeps the captured rows as-is (no
+    /// ghost intersection). Returns false if the slot has no active
+    /// transmog target or is already mid-reinit. Used as the
+    /// auto-trigger when the user first switches to the Color Override
+    /// tab on an empty slot -- one pass is enough to populate the
+    /// swatch grid.
     bool start_slot_reinit_once(int slot) noexcept;
 
     /// Schedule a single-pass tear-down + reapply on `slot` so the
@@ -54,9 +49,6 @@ namespace Transmog::ColorOverride::Reinit
 
     bool is_slot_reinit_active(int slot) noexcept;
     bool is_color_commit_retick_active(int slot) noexcept;
-
-    /// 0..2 -- pass index for the 3-pass cycle. UI shows pass+1.
-    int  slot_reinit_pass(int slot) noexcept;
 
     bool any_slot_reinit_active() noexcept;
 
