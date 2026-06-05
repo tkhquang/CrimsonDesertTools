@@ -2,6 +2,15 @@
 
 All notable changes to the CrimsonDesertLiveTransmog mod will be documented in this file.
 
+## [0.12.4] - Crimson Desert 1.10.00 support
+
+- Updated the mod to work with Crimson Desert version 1.10.00.
+- Fixed saved outfits not applying to your characters after the game update.
+- Fixed items whose names use special characters (such as Roman numerals) being missing from the item catalog.
+- Fixed the item catalog showing the wrong model for some character-specific gear (male, female, and orc versions).
+- Hardened the mod under the hood for better stability and resilience to game updates.
+- Updated the mod's underlying framework (DetourModKit) to v3.4.0 for better stability and future compatibility.
+
 ## [0.12.3] - Sturdier helmet voice-unmuffle
 
 - Improved Unmuffle Helm Voice so it better survives future game updates.
@@ -226,6 +235,7 @@ All notable changes to the CrimsonDesertLiveTransmog mod will be documented in t
 - Modular code split: `transmog_apply` (apply/clear logic), `transmog_hooks` (VEC/BatchEquip callbacks), `transmog_worker` (debounce/load-detect/nametable threads), `shared_state` (cross-TU atomics)
 - Docs clarify ReShade is required for GUI; without it, users edit JSON manually via Capture hotkey
 
+[0.12.4]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.12.4
 [0.12.3]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.12.3
 [0.12.2]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.12.2
 [0.12.1]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.12.1
