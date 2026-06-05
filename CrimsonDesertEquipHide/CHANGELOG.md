@@ -2,6 +2,14 @@
 
 All notable changes to the CrimsonDesertEquipHide mod will be documented in this file.
 
+## [0.8.2] - Crimson Desert 1.10.00 support
+
+- Updated the mod to work with Crimson Desert version 1.10.00.
+- Fixed hidden gear not following the character you control after the game update.
+- Oongka now hides the same one-handed weapons and tools as Kliff by default.
+- Hardened the mod under the hood for better stability and resilience to game updates.
+- Updated the mod's underlying framework (DetourModKit) to v3.4.0 for better stability and future compatibility.
+
 ## [0.8.1] - Maintenance and reliability
 
 - Upgraded DetourModKit dependency from v3.2.3 to v3.3.0.
@@ -253,6 +261,7 @@ All notable changes to the CrimsonDesertEquipHide mod will be documented in this
 - Customizable part lists per category via INI configuration
 - Configurable init delay and log level
 
+[0.8.2]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/equip-hide/v0.8.2
 [0.8.1]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/equip-hide/v0.8.1
 [0.8.0]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/equip-hide/v0.8.0
 [0.7.3]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/equip-hide/v0.7.3
