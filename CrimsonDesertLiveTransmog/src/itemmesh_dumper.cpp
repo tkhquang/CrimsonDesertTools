@@ -662,19 +662,25 @@ namespace Transmog
         }
 
         // Resolve the item's primary body-mesh prefab from its rule chain.
-        // Returns the mesh whose rig-stripped name equals @p iconStem -- the
-        // same logical item in its actual wearer rig -- which lets rig
-        // variants link to cd_phw / cd_pom instead of the shared cd_phm
-        // icon. Sub-part meshes (e.g. `..._wire_0001_r`) have a different
-        // stem and are skipped. Returns "" when the rule chain is absent or
-        // no mesh matches, so the caller keeps the icon-derived prefab; for
-        // an ordinary item the matching mesh equals the icon prefab, so the
-        // result is identical and only genuine rig variants change.
+        // With a non-empty @p iconStem, returns the mesh whose rig-stripped
+        // name equals it -- the same logical item in its actual wearer rig --
+        // which lets rig variants link to cd_phw / cd_pom instead of the
+        // shared cd_phm icon. Sub-part meshes (e.g. `..._wire_0001_r`) have a
+        // different stem and are skipped; for an ordinary item the matching
+        // mesh equals the icon prefab, so the result is identical and only
+        // genuine rig variants change.
+        //
+        // When @p iconStem is empty -- the item's icon string is missing or a
+        // bare `ItemIcon_` stub, so there is nothing to match against -- fall
+        // back to the first asset-prefab mesh named in the rule chain. The
+        // item still owns a real mesh there, so this links it to its prefab
+        // instead of leaving that prefab orphaned. Returns "" only when no
+        // usable mesh is found, so the caller keeps the icon-derived prefab.
         std::string resolve_rule_body_mesh(uintptr_t desc, uintptr_t stringArr,
                                            uint32_t stringCount,
                                            std::string_view iconStem) noexcept
         {
-            if (!desc || !stringArr || iconStem.empty())
+            if (!desc || !stringArr)
                 return {};
             bool ok = false;
             const uintptr_t ruleList =
@@ -683,6 +689,7 @@ namespace Transmog
                 read_u32_safe(desc + kOffDescRuleCount, ok);
             if (!ruleList || ruleCount == 0 || ruleCount > kRuleScanCap)
                 return {};
+            std::string firstBodyMesh;
             for (uint32_t r = 0; r < ruleCount; ++r)
             {
                 const uintptr_t rule =
@@ -702,11 +709,21 @@ namespace Transmog
                     const uintptr_t wrap = read_qword_safe(
                         stringArr + static_cast<uintptr_t>(mslot) * 8, ok);
                     std::string mesh = to_lower(read_wrapper_string(wrap));
-                    if (!mesh.empty() && strip_rig_prefix(mesh) == iconStem)
-                        return mesh;
+                    if (mesh.empty())
+                        continue;
+                    if (!iconStem.empty())
+                    {
+                        if (strip_rig_prefix(mesh) == iconStem)
+                            return mesh;
+                    }
+                    else if (firstBodyMesh.empty() &&
+                             starts_with_asset_prefix(mesh))
+                    {
+                        firstBodyMesh = std::move(mesh);
+                    }
                 }
             }
-            return {};
+            return firstBodyMesh;
         }
 
         // ----- per-item record collected from iteminfo/stringinfo -----
