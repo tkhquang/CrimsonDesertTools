@@ -33,8 +33,11 @@ namespace Transmog::ColorOverride::TokenTable
         // tokens not covered by the static registrar tables that
         // TokenSlotDiscovery walks.
         const bool internerOk = InternerHook::init();
+        // ready=false here is expected: the engine publishes the interner
+        // state lazily, so it is captured on first interner use via the
+        // setter retry path rather than at startup.
         DMK::Logger::get_instance().info(
-            "[color-tokens] interner hook: install={} captured={}",
+            "[color-tokens] interner hook: ready={} captured={}",
             internerOk, InternerHook::capture_count());
     }
 

@@ -138,22 +138,29 @@ namespace Transmog
     // two of each set are secondary. All three female markers must be matched
     // because some female items carry only the primary 0x1D with neither
     // 0x37E nor 0x2FC. Every value drifts on a game update; re-derive then.
+    //
+    // To re-derive after a drift, read the rule cls array
+    // (desc+0x248 -> rule+0x20, see item_body_bits) of a known male and a
+    // known female armor item; those cls values are the male and female
+    // token sets. The deltas are not uniform across patches, so map by
+    // inspection rather than a fixed offset. The male markers do not appear
+    // in clean female items, so the OR-any-token classification stays sound.
     static constexpr std::uint16_t k_maleBodyTokens[] = {
-        0x0012, 0x0054, 0x02DF,
+        0x0011, 0x005E, 0x02E9,
     };
     static constexpr std::uint16_t k_femaleBodyTokens[] = {
-        0x001D, 0x037E, 0x02FC,
+        0x001C, 0x0388, 0x0306,
     };
-    // Shared / NPC-body token (0x0399 on v1.09.00). Carried as a secondary
-    // tag by most male (cd_phm_*) human armor alongside a male token, and in
-    // isolation (no human gender token) by a handful of NPC/demon-body items
-    // whose mesh is cd_ndm_*/cd_pdm_*. The mesh body code's last letter is the
-    // true gender (m=male, w=female), and every isolated-0x399 armor item
-    // resolves to a *dm (male) body, so an item carrying only 0x399 is
-    // classified Male (see sorted_entries). Items that also carry a real male
-    // token classify Male from that token, so this fallback never alters them.
+    // Shared / NPC-body token. Carried as a secondary tag by most male
+    // (cd_phm_*) human armor alongside a male token, and in isolation (no
+    // human gender token) by a handful of NPC/demon-body items whose mesh is
+    // cd_ndm_*/cd_pdm_*. The mesh body code's last letter is the true gender
+    // (m=male, w=female), and every isolated-shared-token armor item resolves
+    // to a *dm (male) body, so an item carrying only this token is classified
+    // Male (see sorted_entries). Items that also carry a real male token
+    // classify Male from that token, so this fallback never alters them.
     static constexpr std::uint16_t k_sharedBodyTokens[] = {
-        0x0399,
+        0x03A3, // *dm (male) NPC/demon body marker; drifts on game updates
     };
     // Body bits.
     //   Male / Female  -- a male/female token appeared in ANY rule (OR across

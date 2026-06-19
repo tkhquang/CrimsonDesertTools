@@ -297,13 +297,17 @@ namespace Transmog
      * recompile cannot break all three.
      */
     inline constexpr AddrCandidate k_stringInfoVtableCandidates[] = {
-        // P1 -- xref in sub_1402F58A0 (0x17b0 bytes, large method).
-        // `mov ecx, [rbp+0x1C0]; call rel32; lea r15, [rip+disp32];
-        //  mov [rbp+0x1C0], r15`. The 0x1C0 stack-frame offset is
-        // sufficiently distinctive in this 6kB function.
+        // P1 -- xref in the large StringInfo-assign method:
+        // `mov rcx, [rbp+0xE8]; call rel32; lea r15, [rip+vtable];
+        // mov [rbp+0xE8], r15; test bl,bl`. The frame slot shrank
+        // (0x1C0 -> 0xE8) and the load widened to 64-bit (mov ecx ->
+        // mov rcx), so the scan window opens one byte into the `48 8B 8D`
+        // after the REX prefix; the trailing `84 DB` (test bl,bl)
+        // disambiguates from a byte-identical 0xE8-slot site that assigns
+        // a different vtable.
         {"StringInfoVtable_P1_LargeMethodAssign",
-         "8B 8D C0 01 00 00 E8 ?? ?? ?? ?? 4C 8D 3D ?? ?? ?? ?? "
-         "4C 89 BD C0 01 00 00",
+         "8B 8D E8 00 00 00 E8 ?? ?? ?? ?? 4C 8D 3D ?? ?? ?? ?? "
+         "4C 89 BD E8 00 00 00 84 DB",
          ResolveMode::RipRelative, 14, 18},
 
         // P2 -- xref in sub_1403174F0 (0x535 bytes). Init block:
@@ -545,30 +549,34 @@ namespace Transmog
      * registers pushed, so prologue is highly distinctive.
      */
     inline constexpr AddrCandidate k_naturalPipelineCandidates[] = {
-        // P1 -- full prologue + chkstk preamble. The 80 18 00 00 (mov
-        // eax, 0x1880) is the stack reservation passed to __chkstk.
-        // Stable for this exact function shape -- B8 imm32 will only
-        // change if the stack-allocation grows past 4kb.
+        // P1 -- full prologue + chkstk preamble + post-alloca arg
+        // shuffle. The stack reservation grew across patches (0x1880 ->
+        // 0x1C80), sinking the old hardcoded B8/lea immediates; they are
+        // now wildcarded, and the frame-independent
+        // `48 2B E0 4D 8B E8 48 8B DA 4C 8B F9 41 83 78` body shuffle
+        // (a3->r13, a2->rbx, a1->rdi, cmp [a3+8]) carries the uniqueness.
         {"NaturalPipeline_P1_FullPrologueChkstk",
          "48 89 5C 24 10 4C 89 4C 24 20 4C 89 44 24 18 48 89 4C 24 08 "
-         "55 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 80 E8 FF FF "
-         "B8 80 18 00 00",
+         "55 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 ?? ?? FF FF "
+         "B8 ?? ?? 00 00 E8 ?? ?? ?? ?? "
+         "48 2B E0 4D 8B E8 48 8B DA 4C 8B F9 41 83 78",
          ResolveMode::Direct, 0, 0},
 
-        // P2 -- post-arg-spill prologue. Anchors past the four arg-
-        // home stores and on the lea rbp,[rsp-0x1780]+chkstk pair.
-        // Walk-back -5 = past `48 89 5C 24 10` to function start.
+        // P2 -- post-arg-spill prologue. Anchors past the first arg-
+        // home store onto the (wildcarded) lea rbp + chkstk pair and the
+        // body shuffle. Walk-back -5 = past `48 89 5C 24 10` to start.
         {"NaturalPipeline_P2_PostArgSpill",
          "4C 89 4C 24 20 4C 89 44 24 18 48 89 4C 24 08 "
-         "55 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 80 E8 FF FF "
-         "B8 80 18 00 00",
+         "55 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 ?? ?? FF FF "
+         "B8 ?? ?? 00 00 E8 ?? ?? ?? ?? "
+         "48 2B E0 4D 8B E8 48 8B DA 4C 8B F9 41 83 78",
          ResolveMode::Direct, -0x05, 0},
 
-        // P3 -- chkstk + stack adjustment + arg-shuffle. The
-        // 48 2B E0 (sub rsp, rax) is the conventional __chkstk
-        // post-call. Walk-back -0x27 to function start.
+        // P3 -- chkstk size (wildcarded) + stack adjustment + arg-
+        // shuffle. The 48 2B E0 (sub rsp, rax) is the conventional
+        // __chkstk post-call. Walk-back -0x27 to function start.
         {"NaturalPipeline_P3_PostChkstkArgShuffle",
-         "B8 80 18 00 00 E8 ?? ?? ?? ?? 48 2B E0 4D 8B E8 48 8B DA "
+         "B8 ?? ?? 00 00 E8 ?? ?? ?? ?? 48 2B E0 4D 8B E8 48 8B DA "
          "4C 8B F9 41 83 78",
          ResolveMode::Direct, -0x27, 0},
     };
@@ -697,46 +705,50 @@ namespace Transmog
      * container at loader+0x08. The hook is one-shot; subsequent calls
      * are pass-throughs.
      *
-     * If these break: the function pushes all 8 callee-saved registers
-     * (push rbp/rbx/rsi/rdi/r12-r15 = `40 55 53 56 57 41 54 41 55 41 56
-     * 41 57`) and then sets up a 0xF8-byte stack frame. That 13-byte
-     * push run + the chkstk-free `48 81 EC F8 00 00 00` direct alloc are
-     * the two distinguishing prologue features. Re-anchor by combining
-     * either with one of the early-body markers (TLS slot 0x58 read or
-     * the constant `204h` payload size).
+     * This is a lean re-initializer, not a big-prologue function: the
+     * prologue is `48 89 5C 24 10 / 48 89 74 24 18 / 48 89 4C 24 08 / 57 /
+     * 48 83 EC 20 / 48 8B D9 (mov rbx,a1) / 33 FF`, followed by three
+     * `48 89 3D` RIP-relative global zero-stores and a
+     * `mov rcx,[a1+0x80]; test; jz` teardown walk of the member chain
+     * a1+0x80..a1+0x28 (a1+0x28 is the ResMgr the hook snapshots). The
+     * per-thread scratch id (mov r12d,<id>) is not build-stable, so the
+     * old scratch/TLS body anchor is avoided. Re-anchor on the prologue +
+     * global-zero run (P1/P2) or the member-teardown offset cascade
+     * 0x80->0x78->0x70 (P3).
      */
     inline constexpr AddrCandidate k_apptResMgrInitCandidates[] = {
-        // P1 -- full prologue (8 callee-saved push run + lea rbp + direct
-        // 0xF8 alloc + arg shuffle). 1 hit on v1.05.01 .text. No RIP-rel
-        // bytes inside the window so wildcards are not needed.
+        // P1 -- full prologue (3 arg-home stores + push rdi + 0x20 frame
+        // + mov rbx,a1 + xor edi,edi) extending into the three RIP-rel
+        // global zero-stores and the first member-teardown test. The
+        // RIP-rel disp32s are wildcarded; the `48 8B 89 80 00 00 00 /
+        // 48 85 C9 / 74 0C` (mov rcx,[a1+0x80]; test; jz) tail pins
+        // uniqueness.
         {"PrefabWrapperSwap_ApptResMgrInit_P1_FullPrologue",
-         "40 55 53 56 57 41 54 41 55 41 56 41 57 "
-         "48 8D 6C 24 E1 "
-         "48 81 EC F8 00 00 00 "
-         "4C 8B FA 4C 8B F1",
+         "48 89 5C 24 10 48 89 74 24 18 48 89 4C 24 08 57 "
+         "48 83 EC 20 48 8B D9 33 FF "
+         "48 89 3D ?? ?? ?? ?? 48 89 3D ?? ?? ?? ?? 48 89 3D ?? ?? ?? ?? "
+         "48 8B 89 80 00 00 00 48 85 C9 74 0C",
          ResolveMode::Direct, 0, 0},
 
-        // P2 -- mid-prologue: lea rbp,[rsp-0x1F] + direct alloc + arg
-        // shuffle + xor r13d,r13d. Walk-back -0x0D to function start.
-        // 1 hit on v1.05.01 .text. Survives a future build that adds or
-        // reorders early callee-save pushes (because the lea-rbp marker
-        // pins frame setup, not which regs were pushed first).
-        {"PrefabWrapperSwap_ApptResMgrInit_P2_PostPushAlloca",
-         "48 8D 6C 24 E1 48 81 EC F8 00 00 00 "
-         "4C 8B FA 4C 8B F1 45 33 ED",
-         ResolveMode::Direct, -0x0D, 0},
+        // P2 -- post-arg-spill variant: drops the leading rbx/rsi home
+        // stores so a future reorder of the spill block does not sink it.
+        // Walk-back -0x0A = past the first two home stores to start.
+        {"PrefabWrapperSwap_ApptResMgrInit_P2_PostArgSpill",
+         "48 89 4C 24 08 57 48 83 EC 20 48 8B D9 33 FF "
+         "48 89 3D ?? ?? ?? ?? 48 89 3D ?? ?? ?? ?? 48 89 3D ?? ?? ?? ?? "
+         "48 8B 89 80 00 00 00 48 85 C9 74 0C",
+         ResolveMode::Direct, -0x0A, 0},
 
-        // P3 -- TLS-canary load body anchor. The unique `mov r12d, 204h ;
-        // mov rax, gs:58h ; add r12, [rax]` sequence reads the TLS slot
-        // into r12 to use as a per-thread scratch base (shape only this
-        // function emits in v1.05.01 -- the 204h immediate is a
-        // build-stable scratch-arena ID). Walk-back -0x2D to function
-        // start. Anchors past the prologue entirely so a prologue-shape
-        // shuffle does not sink P3.
-        {"PrefabWrapperSwap_ApptResMgrInit_P3_TlsScratchSetup",
-         "41 BC 04 02 00 00 65 48 8B 04 25 58 00 00 00 "
-         "4C 03 20 41 8D 55 10 8D 4A 30",
-         ResolveMode::Direct, -0x2D, 0},
+        // P3 -- body anchor on the member-teardown offset cascade
+        // 0x80 -> 0x78 -> 0x70 (mov rcx,[a1+0x80]; cond-dtor; zero
+        // [a1+0x80]; lea [a1+0x78]; dtor; mov rcx,[a1+0x70]). This object
+        // layout is function-specific; the scratch/TLS idiom that the old
+        // P3 used is NOT unique on 1.10.00 (100+ generic hits) so it was
+        // dropped. Call disp32s wildcarded. Walk-back -0x2E to start.
+        {"PrefabWrapperSwap_ApptResMgrInit_P3_MemberTeardown",
+         "48 8B 89 80 00 00 00 48 85 C9 74 0C E8 ?? ?? ?? ?? "
+         "48 89 BB 80 00 00 00 48 8D 4B 78 E8 ?? ?? ?? ?? 90 48 8B 4B 70",
+         ResolveMode::Direct, -0x2E, 0},
     };
 
     /**
@@ -1309,12 +1321,14 @@ namespace Transmog
      * bytes) and includes a once-only `lock cmpxchg` guarded init path
      * that allocates the hash table, sets the bucket-prime count
      * (0x8E = 142) and sentinel cap (0x2FFFF), and publishes the state
-     * pointer to qword_145E15620. Subsequent calls take the table
-     * lock, look up the name, and return either the existing token or
-     * a freshly minted one.
+     * pointer to a module global (qword_145E15620 in v1.06;
+     * 0x145F52510 in 1.10.00 -- the InternerHook computes it from the
+     * publish store's RIP displacement, never hardcoded). Subsequent
+     * calls take the table lock, look up the name, and return either
+     * the existing token or a freshly minted one.
      *
      * Resolution lets ColorOverride::InternerHook walk the body to
-     * locate the `qword_145E15620 = v10` store and reach the
+     * locate the `qword = state` publish store and reach the
      * entries-array without scanning E8 trampolines through a
      * registrar call site.
      */
@@ -1825,18 +1839,19 @@ namespace Transmog
     // -----------------------------------------------------------------------
     inline constexpr AddrCandidate k_playerStaticCandidates[] = {
         // P1 -- unique writer site at sub_1420D0470. Carries the
-        // distinctive `mov r12d, 0x204` initialisation tag immediately
+        // distinctive `mov r12d, <scratch-id>` init tag immediately
         // after the writer, plus a follow-on load from [rdi+0xF8].
-        // Both the SEMANTIC constant 0x204 and the +0xF8 ABI offset
-        // are kept literal; the rel8 of the trailing jcc is wildcarded.
+        // The scratch-id is NOT build-stable across patches, so the imm32
+        // is wildcarded; the +0xF8 ABI offset and the writer+test shape
+        // keep the site unique. rel8 of the trailing jcc is wildcarded.
         {"PlayerStatic_P1_WriterSite",
          "4C 89 3D ?? ?? ?? ?? 48 8B 8F F8 00 00 00 "
-         "41 BC 04 02 00 00 48 85 C9 ??",
+         "41 BC ?? ?? 00 00 48 85 C9 ??",
          ResolveMode::RipRelative, 3, 7},
 
         // P2 -- writer site extended through the TLS-guard tail. Same
         // store as P1 (`mov [rip+disp32], r15`) followed by the
-        // [rdi+0xF8] field load and the 0x204 init tag, then continues
+        // [rdi+0xF8] field load and the (wildcarded) scratch-id tag, then continues
         // past the `74 ??` short-jz into the TIB load and the per-
         // thread flag-byte compare:
         //   74 ??                          jz   short <skip>          ; rel8 wildcarded
@@ -1844,15 +1859,15 @@ namespace Transmog
         //   48 8B 10                       mov  rdx, [rax]            ; TLS block
         //   45 38 3C 14                    cmp  [r12+rdx], r15b       ; flag test
         // The rel8 jz byte is wildcarded for encoding-flip safety.
-        // The trailing TLS+compare shape is unique-text in v1.08.00
-        // .text and pins the writer even if the 0x204 immediate ever
-        // shifts.
+        // The trailing TLS+compare shape is unique-text and pins the
+        // writer; the scratch-id imm32 is wildcarded because it shifts
+        // across patches (0x204 -> 0x203 on 1.10.00).
         // RipRelative offsets are unchanged from P1 (disp_offset = 3,
         // instr_end_offset = 7) because the store is still the first
         // instruction in the window.
         {"PlayerStatic_P2_WriterSiteTlsTail",
          "4C 89 3D ?? ?? ?? ?? 48 8B 8F F8 00 00 00 "
-         "41 BC 04 02 00 00 48 85 C9 74 ?? "
+         "41 BC ?? ?? 00 00 48 85 C9 74 ?? "
          "65 48 8B 04 25 58 00 00 00 "
          "48 8B 10 "
          "45 38 3C 14",

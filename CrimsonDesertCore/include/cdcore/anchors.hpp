@@ -244,9 +244,15 @@ namespace CDCore::Anchors
     //       __int64** a3_old,
     //       __int64** a4_new)
     //
-    // 4-tier cascade: P1 = full prologue, P2 = push frame only, P3 = post-
-    // alloca register shuffle, P4 = deepest body anchor past the on-stack
-    // scratch zero-init.
+    // 3-tier cascade: P1 = full prologue, P2 = post-alloca register
+    // shuffle, P3 = deepest body anchor past the on-stack scratch
+    // zero-init.
+    //
+    // The engine's arg shuffle assigns a1 to r14 (a naive prologue would
+    // expect rsi: `48 8B F1` -> `4C 8B F1`) and reads [a1+8] into r13
+    // (was r14: `4C 8B 71 08` -> `4C 8B 69 08`). Instruction lengths are
+    // unchanged, so the -0x22 / -0x25 walk-backs still resolve to the
+    // function start. Frame/function-size immediates stay wildcarded per §2.
     // -----------------------------------------------------------------------
     inline constexpr AddrCandidate k_batchEquipCandidates[] = {
         // P1 -- full prologue: save rbx, push 7 callee-saves, lea rbp,
@@ -254,16 +260,16 @@ namespace CDCore::Anchors
         // post-alloca register moves, extending into the body shuffle --
         // the wildcarded stack-size and function-size slots alone match 5
         // unrelated prologues; the
-        // `48 2B E0 4D 8B F8 4C 8B E2 48 8B F1` tail restores
+        // `48 2B E0 4D 8B F8 4C 8B E2 4C 8B F1 4C 8B 69 08` tail restores
         // uniqueness without a hardcoded stack frame (§2).
         {"BatchEquip_P1_FullPrologue",
          "48 89 5C 24 10 55 56 57 41 54 41 55 41 56 41 57 "
          "48 8D AC 24 ?? ?? ?? ?? B8 ?? ?? ?? ?? "
-         "E8 ?? ?? ?? ?? 48 2B E0 4D 8B F8 4C 8B E2 48 8B F1",
+         "E8 ?? ?? ?? ?? 48 2B E0 4D 8B F8 4C 8B E2 4C 8B F1 4C 8B 69 08",
          ResolveMode::Direct, 0, 0},
 
         // P2 -- post-alloca register shuffle (sub rsp,rax; mov r15,r8;
-        // mov r12,rdx; mov rsi,rcx; mov r14,[rcx+8]) + the on-stack
+        // mov r12,rdx; mov r14,rcx; mov r13,[rcx+8]) + the on-stack
         // scratch prep (lea rax,[rbp+X]; mov [rbp+Y],rax; xor ecx,ecx).
         // Stack disp8 offsets wildcarded per §2. Offset -0x22 backs up
         // to function start.
@@ -271,7 +277,7 @@ namespace CDCore::Anchors
         // A push-frame-only candidate here is non-unique once its stack
         // disp32 is wildcarded; P1 already covers the push-frame region.
         {"BatchEquip_P2_PostAlloca",
-         "48 2B E0 4D 8B F8 4C 8B E2 48 8B F1 4C 8B 71 08 "
+         "48 2B E0 4D 8B F8 4C 8B E2 4C 8B F1 4C 8B 69 08 "
          "48 8D 45 ?? 48 89 45 ?? 33 C9",
          ResolveMode::Direct, -0x22, 0},
 
@@ -282,7 +288,7 @@ namespace CDCore::Anchors
         // init flag), kept literal per §2 exception for semantic
         // constants. Offset -0x25 backs up to function start.
         {"BatchEquip_P3_BodyZeroInit",
-         "4D 8B F8 4C 8B E2 48 8B F1 4C 8B 71 08 "
+         "4D 8B F8 4C 8B E2 4C 8B F1 4C 8B 69 08 "
          "48 8D 45 ?? 48 89 45 ?? 33 C9 89 4D ?? C7 45 ?? 02 00 00 00",
          ResolveMode::Direct, -0x25, 0},
     };
