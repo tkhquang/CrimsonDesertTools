@@ -28,7 +28,9 @@ on:
 
 jobs:
   build-and-release:
-    runs-on: windows-latest
+    # Pinned: windows-latest now images windows-2025-vs2026 (VS 2026, no VS 2022),
+    # which breaks the "Visual Studio 17 2022" CMake generator used below.
+    runs-on: windows-2022
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
