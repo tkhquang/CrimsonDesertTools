@@ -1,3 +1,5 @@
-## Updated for 1.12.00
+## [Title for next release]
 
-- Updated for 1.12.00
+- New feature
+- Bug fix
+- Improvement
