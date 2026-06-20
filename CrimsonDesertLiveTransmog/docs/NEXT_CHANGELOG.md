@@ -1,3 +1,5 @@
-## Reliable body-mesh prefab picks
+## [Title for next release]
 
-- Fixed body-mesh prefab picks not applying when the character had no saved preset
+- New feature
+- Bug fix
+- Improvement
