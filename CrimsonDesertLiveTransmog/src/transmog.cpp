@@ -237,22 +237,6 @@ namespace Transmog
 
     namespace
     {
-        // Map PresetManager character names to the 1-based char-idx
-        // CDCore::snapshot_body_cache emits (1=Kliff, 2=Damiane,
-        // 3=Oongka). Returns 0 for unknown names so the targeted-apply
-        // path can refuse to schedule rather than guess.
-        std::uint32_t char_idx_for_preset_name(
-            const std::string &name) noexcept
-        {
-            if (name == "Kliff")
-                return 1;
-            if (name == "Damiane")
-                return 2;
-            if (name == "Oongka")
-                return 3;
-            return 0;
-        }
-
         // Editing-target gate consulted by every overlay-UI entry point
         // (manual_apply, manual_apply_slot, manual_clear). Returns
         // true if the caller should proceed with `schedule_transmog_*`;
@@ -276,7 +260,7 @@ namespace Transmog
                 return true;
 
             const std::string editName{pm.editing_character()};
-            const auto idx = char_idx_for_preset_name(editName);
+            const auto idx = CDCore::character_idx_from_name(editName);
             if (idx == 0)
                 return true; // Unknown character name; fall back to default.
 

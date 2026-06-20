@@ -153,6 +153,23 @@ namespace CDCore
         ControlledCharacter ch) noexcept;
 
     /**
+     * @brief Inverse of controlled_character_name: resolve a short
+     *        codename ("Kliff" / "Damiane" / "Oongka") back to its enum.
+     * @return Unknown for any other string.
+     */
+    [[nodiscard]] ControlledCharacter character_from_name(
+        std::string_view name) noexcept;
+
+    /**
+     * @brief One-based index for a character codename.
+     * @return 1 Kliff, 2 Damiane, 3 Oongka, 0 otherwise. Matches the
+     *         sentinel of current_controlled_character_idx() so name- and
+     *         live-derived indices are interchangeable.
+     */
+    [[nodiscard]] std::uint32_t character_idx_from_name(
+        std::string_view name) noexcept;
+
+    /**
      * @brief Convenience wrapper that returns the live name.
      * @return Short name of the controlled character, or an empty view if
      *         unknown.

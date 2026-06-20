@@ -564,6 +564,25 @@ namespace CDCore
         }
     }
 
+    ControlledCharacter character_from_name(std::string_view name) noexcept
+    {
+        if (name == "Kliff")   return ControlledCharacter::Kliff;
+        if (name == "Damiane") return ControlledCharacter::Damiane;
+        if (name == "Oongka")  return ControlledCharacter::Oongka;
+        return ControlledCharacter::Unknown;
+    }
+
+    std::uint32_t character_idx_from_name(std::string_view name) noexcept
+    {
+        switch (character_from_name(name))
+        {
+        case ControlledCharacter::Kliff:   return 1;
+        case ControlledCharacter::Damiane: return 2;
+        case ControlledCharacter::Oongka:  return 3;
+        default:                           return 0;
+        }
+    }
+
     std::string_view current_controlled_character_name() noexcept
     {
         return controlled_character_name(current_controlled_character());

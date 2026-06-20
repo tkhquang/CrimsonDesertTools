@@ -26,22 +26,6 @@
 
 namespace Transmog
 {
-    namespace
-    {
-        // Map PresetManager character names to the 1-based char-idx
-        // CDCore::snapshot_body_cache emits (1=Kliff, 2=Damiane,
-        // 3=Oongka). Returns 0 for unknown names so the per-body
-        // hydrate/capture helpers no-op safely on caller mistakes.
-        std::uint32_t char_idx_for_preset_name(
-            const std::string &name) noexcept
-        {
-            if (name == "Kliff")   return 1;
-            if (name == "Damiane") return 2;
-            if (name == "Oongka")  return 3;
-            return 0;
-        }
-    } // namespace
-
     // --- Deferred item-name catalog scan ---
     //
     // The game populates the iteminfo global (`qword_145CEF370`) some
@@ -601,7 +585,7 @@ namespace Transmog
         // fill(0)-style wipe. Mid-session re-applies (e.g., roster-
         // grew on follower summon) preserve the prior installed-state
         // so Phase A teardown still functions across iterations.
-        const auto idx = char_idx_for_preset_name(name);
+        const auto idx = CDCore::character_idx_from_name(name);
         rehydrate_applied_state_for_char(idx);
 
         bool faulted = false;
@@ -723,7 +707,7 @@ namespace Transmog
             m.targetItemId = 0;
         }
         pm.apply_to_state();
-        const auto idx = char_idx_for_preset_name(controlledName);
+        const auto idx = CDCore::character_idx_from_name(controlledName);
         rehydrate_applied_state_for_char(idx);
     }
 
