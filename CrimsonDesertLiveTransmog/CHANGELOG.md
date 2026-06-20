@@ -2,6 +2,10 @@
 
 All notable changes to the CrimsonDesertLiveTransmog mod will be documented in this file.
 
+## [0.12.6] - Reliable body-mesh prefab picks
+
+- Fixed body-mesh prefab picks not applying when the character had no saved preset
+
 ## [0.12.5] - Updated for 1.12.00
 
 - Updated for 1.12.00
@@ -239,6 +243,7 @@ All notable changes to the CrimsonDesertLiveTransmog mod will be documented in t
 - Modular code split: `transmog_apply` (apply/clear logic), `transmog_hooks` (VEC/BatchEquip callbacks), `transmog_worker` (debounce/load-detect/nametable threads), `shared_state` (cross-TU atomics)
 - Docs clarify ReShade is required for GUI; without it, users edit JSON manually via Capture hotkey
 
+[0.12.6]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.12.6
 [0.12.5]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.12.5
 [0.12.4]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.12.4
 [0.12.3]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.12.3
