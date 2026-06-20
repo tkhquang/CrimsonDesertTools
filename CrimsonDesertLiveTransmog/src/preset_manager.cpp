@@ -12,6 +12,8 @@
 #include "transmog_apply.hpp"
 #include "transmog_map.hpp"
 
+#include <cdcore/controlled_char.hpp>
+
 #include <DetourModKit.hpp>
 #include <nlohmann/json.hpp>
 
@@ -1483,6 +1485,22 @@ namespace Transmog
 
     void PresetManager::apply_to_state() const
     {
+        namespace PWS = Transmog::PrefabWrapperSwap;
+
+        // Bind the editing character into PWS before the active_preset()
+        // early-out below. Only apply_to_state() binds s_activeCharIdx;
+        // the picker's body-mesh path (set_selection plus the Instant-
+        // Apply manual_apply) never does. For a character with no saved
+        // preset (active_preset() == nullptr) the bind therefore has to
+        // happen here, ahead of the early return -- otherwise the
+        // prefab-swap map stays unbound, apply_selections_to_swap_map()
+        // bails at its activeIdx < 1 guard, and the picked body mesh
+        // renders as the bare carrier instead of the chosen prefab. The
+        // bind is independent of the preset, so set_selection can still
+        // mirror picks into the correct per-char row and the swap arms.
+        PWS::set_active_char_idx(
+            CDCore::character_idx_from_name(m_editingCharacter));
+
         const auto *p = active_preset();
         if (!p)
             return;
@@ -1552,23 +1570,6 @@ namespace Transmog
         // resolution silently misses; the boot thread re-runs
         // apply_to_state when populate_slot_catalogs finishes so the
         // selection lands as soon as the data is available.
-        namespace PWS = Transmog::PrefabWrapperSwap;
-
-        // Bind the editing character into PWS first so subsequent
-        // set_selection calls mirror into the correct per-char row
-        // and the active-editing-view globals reflect that
-        // character's previously-saved selections. Without this
-        // binding the writes would leak into whatever bucket was
-        // last bound, and switching the editing character would
-        // silently drop the outgoing character's body-mesh picks.
-        {
-            std::uint32_t editIdx = 0;
-            if (m_editingCharacter == "Kliff")   editIdx = 1;
-            else if (m_editingCharacter == "Damiane") editIdx = 2;
-            else if (m_editingCharacter == "Oongka")  editIdx = 3;
-            PWS::set_active_char_idx(editIdx);
-        }
-
         for (std::size_t i = 0; i < k_slotCount; ++i)
         {
             const auto tslot = static_cast<TransmogSlot>(i);
