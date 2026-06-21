@@ -4,7 +4,7 @@
 
 namespace Transmog::Version
 {
-    void logVersionInfo()
+    void log_version_info()
     {
         auto &logger = DMK::Logger::get_instance();
         logger.info("----------------------------------------------------------");

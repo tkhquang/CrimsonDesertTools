@@ -6,9 +6,8 @@ namespace EquipHide
 {
     /**
      * @brief Postfix rule evaluator hook callback.
-     * @details Temporarily overrides item priority bitmasks so PostfixEval
-     *          treats head-covering items as inactive, preventing hair-hiding
-     *          when Helm/Cloak/Mask is hidden.  Only applies to the player context.
+     * @details Temporarily overrides item priority bitmasks so PostfixEval treats head-covering items as inactive,
+     *          preventing hair-hiding when Helm/Cloak/Mask is hidden. Only applies to the player context.
      */
     using PostfixEvalFn = __int64(__fastcall *)(__int64, __int64);
 

@@ -1,24 +1,16 @@
 {
   "version": "0.2.0",
+  // The C++ mods (CrimsonDesertEquipHide, CrimsonDesertLiveTransmog) build as
+  // injected DLLs (.asi loader + logic DLL) with no standalone executable, so
+  // debugging means attaching the MSVC debugger to the running game once a mod has
+  // loaded. Build a dev preset first (msvc-dev is RelWithDebInfo and emits PDBs) so
+  // the symbols match the loaded binary.
   "configurations": [
     {
-      "name": "C/C++ Runner: Debug Session",
-      "type": "cppdbg",
-      "request": "launch",
-      "args": [],
-      "stopAtEntry": false,
-      "externalConsole": true,
-      "cwd": "d:/Workspace/CrimsonDesertTools/CrimsonDesertEquipHide/src",
-      "program": "d:/Workspace/CrimsonDesertTools/CrimsonDesertEquipHide/build/Debug/outDebug",
-      "MIMode": "gdb",
-      "miDebuggerPath": "gdb",
-      "setupCommands": [
-        {
-          "description": "Enable pretty-printing for gdb",
-          "text": "-enable-pretty-printing",
-          "ignoreFailures": true
-        }
-      ]
+      "name": "Attach to game (MSVC)",
+      "type": "cppvsdbg",
+      "request": "attach",
+      "processId": "${command:pickProcess}"
     }
   ]
 }

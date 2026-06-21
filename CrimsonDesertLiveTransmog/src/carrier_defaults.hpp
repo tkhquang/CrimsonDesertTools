@@ -9,8 +9,8 @@
 
 namespace Transmog
 {
-    // Per-(character, slot) default carrier item used by LT's transmog
-    // apply path AND by the prefab-wrapper-swap picker.
+    // Per-(character, slot) default carrier item used by LT's transmog apply path AND by the prefab-wrapper-swap
+    // picker.
     //
     //   itemName   -- resolved through ItemNameTable::id_of() at runtime
     //                 to produce a uint16_t carrier itemId. Drives
@@ -24,18 +24,17 @@ namespace Transmog
     //                 this slot/character (the carrier still works as
     //                 a plain itemId; just no prefab-level intercept).
     //
-    // Both fields refer to the SAME logical default item per (char, slot).
-    // Centralising them here prevents the drift class where one was
-    // updated and the other forgotten (e.g. the spear-carrier test that
-    // failed because PWS src still pointed at sword_0015).
+    // Both fields refer to the SAME logical default item per (char, slot). Centralising them here prevents the drift
+    // class where one was updated and the other forgotten (e.g. the spear-carrier test that failed because PWS src
+    // still pointed at sword_0015).
     struct CarrierDefault
     {
         const char *itemName;
         const char *prefabName;
     };
 
-    // Character axis. Order is fixed; CarrierChar(i) maps to
-    // k_carriers[i]. New characters append at the end before Count.
+    // Character axis. Order is fixed; CarrierChar(i) maps to k_carriers[i]. New characters append at the end before
+    // Count.
     enum class CarrierChar : std::size_t
     {
         Kliff = 0,
@@ -44,24 +43,22 @@ namespace Transmog
         Count
     };
 
-    inline constexpr std::size_t k_carrierCharCount =
-        static_cast<std::size_t>(CarrierChar::Count);
+    inline constexpr std::size_t k_carrierCharCount = static_cast<std::size_t>(CarrierChar::Count);
 
-    // 2D table indexed [character][slot]. Adding a slot = one column
-    // in each character row. Adding a character = one new row.
+    // 2D table indexed [character][slot]. Adding a slot = one column in each character row. Adding a character = one
+    // new row.
     // clang-format off
     inline constexpr CarrierDefault k_carriers[k_carrierCharCount][k_slotCount] = {
         // ============================================================
-        // Kliff (male). Default carriers per slot from the live
-        // slot-discovery dump; prefabName values from the in-game
+        // Kliff (male). Default carriers per slot from the live slot-discovery dump; prefabName values from the in-game
         // item-mesh mapping.
         // ============================================================
         {
-            { "Scovi_Fabric_Helm",                       "cd_phm_00_hel_0122"                }, // Helm
-            { "Mercenary_Leather_Armor",                      "cd_phm_00_ub_00_0054"              }, // Chest
-            { "Mercenary_Leather_Cloak",                      "cd_phm_00_cloak_00_0054_s"         }, // Cloak
-            { "Mercenary_Gloves",                     "cd_phm_00_hand_0054"               }, // Gloves
-            { "Mercenary_Leather_Boots",                           "cd_phm_00_foot_0054"               }, // Boots
+            { "Scovi_Fabric_Helm",                           "cd_phm_00_hel_0122"                }, // Helm
+            { "Mercenary_Leather_Armor",                     "cd_phm_00_ub_00_0054"              }, // Chest
+            { "Mercenary_Leather_Cloak",                     "cd_phm_00_cloak_00_0054_s"         }, // Cloak
+            { "Mercenary_Gloves",                            "cd_phm_00_hand_0054"               }, // Gloves
+            { "Mercenary_Leather_Boots",                     "cd_phm_00_foot_0054"               }, // Boots
             { "Hexe_Earring",                                "cd_phm_00_earring_0013_l"          }, // Earring1
             { "Ancient_People_Earring",                      "cd_phm_00_earring_0004_r"          }, // Earring2
             { "Titan_Necklace",                              "cd_phm_00_necklace_0017"           }, // Necklace
@@ -81,13 +78,10 @@ namespace Transmog
 
         // ============================================================
         // Damiane (female). Demeniss Elite/Uniform Leather armor set +
-        // Pattern jewelry set + Damian_OneHandPistol Ranged. prefab
-        // values derived from `00_idea/items_to_prefabs_v105_01.tsv`.
-        // Engine uses cd_phw_* for female-specific assets and cd_phm_*
-        // for shared accessories. Some armor pieces use _index##
-        // variants -- LT's prefab-wrapper hook registers all variants
-        // of the base prefab so any one variant works as the picker
-        // default seed.
+        // Pattern jewelry set + Damian_OneHandPistol Ranged. prefab values derived from
+        // `00_idea/items_to_prefabs_v105_01.tsv`. Engine uses cd_phw_* for female-specific assets and cd_phm_* for
+        // shared accessories. Some armor pieces use _index## variants -- LT's prefab-wrapper hook registers all
+        // variants of the base prefab so any one variant works as the picker default seed.
         // ============================================================
         {
             { "Demian_PlateArmor_Helm_VII",                  "cd_phw_00_hel_00_0162"             }, // Helm
@@ -113,18 +107,16 @@ namespace Transmog
         },
 
         // ============================================================
-        // Oongka (male orc). prefabName values derived from the
-        // save-editor companion repo's iteminfo dump. Orc-tribe assets
-        // share the cd_phm_* family (orc model is male-tier). Bilibili
-        // earring/ring use _index## minor variants; LT's body-mesh
-        // hook registers all variants of the base prefab.
+        // Oongka (male orc). prefabName values derived from the save-editor companion repo's iteminfo dump. Orc-tribe
+        // assets share the cd_phm_* family (orc model is male-tier). Bilibili earring/ring use _index## minor variants;
+        // LT's body-mesh hook registers all variants of the base prefab.
         // ============================================================
         {
-            { "Lardein_Fabric_Helm",                   "cd_phm_00_hel_0122_01_index01"                }, // Helm
-            { "Oongka_Basic_Leather_Armor",                      "cd_phm_00_ub_00_0056"              }, // Chest
-            { "Oongka_Basic_Leather_Cloak",                      "cd_phm_00_cloak_00_0056_t"         }, // Cloak
-            { "Oongka_Basic_Leather_Gloves",                     "cd_phm_00_hand_00_0056"               }, // Gloves
-            { "Langust_Leather_Boots",                           "cd_phm_00_foot_0056"               }, // Boots
+            { "Lardein_Fabric_Helm",                         "cd_phm_00_hel_0122_01_index01"     }, // Helm
+            { "Oongka_Basic_Leather_Armor",                  "cd_phm_00_ub_00_0056"              }, // Chest
+            { "Oongka_Basic_Leather_Cloak",                  "cd_phm_00_cloak_00_0056_t"         }, // Cloak
+            { "Oongka_Basic_Leather_Gloves",                 "cd_phm_00_hand_00_0056"            }, // Gloves
+            { "Langust_Leather_Boots",                       "cd_phm_00_foot_0056"               }, // Boots
             { "Bilibili_Earring",                            "cd_phm_00_earring_0008_l_index02"  }, // Earring1
             { "WhiteHorn_Earring",                           "cd_phm_00_earring_0014_l"          }, // Earring2
             { "Bilibili_Necklace",                           "cd_phm_00_necklace_0004_index02"   }, // Necklace
@@ -146,8 +138,7 @@ namespace Transmog
 
     // Lookup helpers ----------------------------------------------------
 
-    inline std::optional<CarrierChar>
-    carrier_char_from_name(std::string_view name) noexcept
+    inline std::optional<CarrierChar> carrier_char_from_name(std::string_view name) noexcept
     {
         if (name == "Kliff")
             return CarrierChar::Kliff;
@@ -158,10 +149,8 @@ namespace Transmog
         return std::nullopt;
     }
 
-    inline constexpr const CarrierDefault &
-    carrier_for(CarrierChar c, TransmogSlot s) noexcept
+    inline constexpr const CarrierDefault &carrier_for(CarrierChar c, TransmogSlot s) noexcept
     {
-        return k_carriers[static_cast<std::size_t>(c)]
-                         [static_cast<std::size_t>(s)];
+        return k_carriers[static_cast<std::size_t>(c)][static_cast<std::size_t>(s)];
     }
 } // namespace Transmog

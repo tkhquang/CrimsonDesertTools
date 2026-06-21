@@ -328,6 +328,10 @@ cmake --build build/dev-msvc --config RelWithDebInfo --parallel
 
 The loader (`CrimsonDesertEquipHide.asi`) and logic DLL (`CrimsonDesertEquipHide_Logic.dll`) are deployed directly to the game's plugin directory via a post-build step. Press **Numpad 0** in-game to trigger a reload after rebuilding.
 
+### Code style
+
+The C++ sources follow a hard 120-column baseline and DetourModKit's coding conventions ([AGENTS.md](https://github.com/tkhquang/DetourModKit/blob/main/AGENTS.md)), codified in `.clang-format` (clang-format 20), `.editorconfig`, and an advisory `.clang-tidy`. Run the formatter over any changed sources before committing and keep it idempotent (`clang-format --dry-run --Werror` must be silent). Editor IntelliSense and build tasks are configured at the repository-root `.vscode/`, not under `CrimsonDesertEquipHide/`.
+
 ## Credits
 
 - [ThirteenAG](https://github.com/ThirteenAG) -- for the Ultimate ASI Loader

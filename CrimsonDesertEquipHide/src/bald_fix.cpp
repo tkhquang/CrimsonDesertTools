@@ -11,35 +11,26 @@ namespace EquipHide
 {
     static PostfixEvalFn s_originalPostfixEval = nullptr;
 
-    // Player-vs-prefab-instantiation identity is decided by a call-graph
-    // landmark: every PostfixEval invocation that comes through the
-    // engine's `createPrefabFromPartPrefab` path (sub_14261B6C0, which
-    // allocates the 240-byte prefab instance then invokes the rule
-    // pipeline via sub_1402E1430) carries the post-call return address
-    // at ResolvedAddresses::npcPfeReturnAddr on its stack. Player-side
-    // PostfixEval invocations run from the equipment-visibility update
-    // loop and never include that address. At hook entry we scan a small
-    // stack window; if the landmark is present, we defer to the original
-    // evaluator without mutating any item bitmasks. No ctx caching, no
-    // frequency threshold, no per-item hash heuristic. The scan window
-    // must be deep enough to span every wrapper frame between PostfixEval
-    // and the prefab-build call site; 64 slots covers that depth with
-    // margin.
+    // Player-vs-prefab-instantiation identity is decided by a call-graph landmark: every PostfixEval invocation that
+    // comes through the engine's `createPrefabFromPartPrefab` path (sub_14261B6C0, which allocates the 240-byte prefab
+    // instance then invokes the rule pipeline via sub_1402E1430) carries the post-call return address at
+    // ResolvedAddresses::npcPfeReturnAddr on its stack. Player-side PostfixEval invocations run from the
+    // equipment-visibility update loop and never include that address. At hook entry we scan a small stack window; if
+    // the landmark is present, we defer to the original evaluator without mutating any item bitmasks. No ctx caching,
+    // no frequency threshold, no per-item hash heuristic. The scan window must be deep enough to span every wrapper
+    // frame between PostfixEval and the prefab-build call site; 64 slots covers that depth with margin.
     static constexpr int k_stackScanDepth = 64;
 
-    // Dedup tables so the trace log fires at most once per ever-seen ctx.
-    // Sized generously: there are at most 3 player protagonists and
-    // typically <10 NPC prefab-instantiation contexts per load zone.
-    // Tables never evict; if they saturate, further contexts silently
-    // stop logging. Entries are zero-initialised (0 sentinel = empty).
+    // Dedup tables so the trace log fires at most once per ever-seen ctx. Sized generously: there are at most 3 player
+    // protagonists and typically <10 NPC prefab-instantiation contexts per load zone. Tables never evict; if they
+    // saturate, further contexts silently stop logging. Entries are zero-initialised (0 sentinel = empty).
     static constexpr int k_logDedupSize = 16;
     static std::atomic<uintptr_t> s_loggedAcceptCtxs[k_logDedupSize]{};
     static std::atomic<uintptr_t> s_loggedRejectCtxs[k_logDedupSize]{};
 
-    /* Returns true exactly once per (table, ctx) pair -- on the first
-       call that inserts ctx into a free slot. Safe under contention:
-       compare_exchange distinguishes "we inserted" from "lost the race
-       to the same ctx". Lock-free, no per-call allocation. */
+    /* Returns true exactly once per (table, ctx) pair -- on the first call that inserts ctx into a free slot. Safe
+       under contention: compare_exchange distinguishes "we inserted" from "lost the race to the same ctx". Lock-free,
+       no per-call allocation. */
     static bool log_dedup_claim(std::atomic<uintptr_t> *table, uintptr_t ctx) noexcept
     {
         for (int i = 0; i < k_logDedupSize; ++i)
@@ -50,10 +41,8 @@ namespace EquipHide
             if (v == 0)
             {
                 uintptr_t expected = 0;
-                if (table[i].compare_exchange_strong(
-                        expected, ctx,
-                        std::memory_order_relaxed,
-                        std::memory_order_relaxed))
+                if (table[i].compare_exchange_strong(expected, ctx, std::memory_order_relaxed,
+                                                     std::memory_order_relaxed))
                     return true;
                 /* Race: another thread claimed this slot. If with same
                    ctx we're done; otherwise keep scanning. */
@@ -73,14 +62,13 @@ namespace EquipHide
     //   bits 16-22: "priority level exists"
     //   bits  0-6:  "priority level active"
     //
-    // Bit 19 = priority 3 exists.  Without bit 3 (active), PostfixEval
-    // sees priority 3 as highest but inactive -> rule doesn't match ->
-    // hair stays visible.  Official HideAlways does the same:
+    // Bit 19 = priority 3 exists. Without bit 3 (active), PostfixEval sees priority 3 as highest but inactive -> rule
+    // doesn't match -> hair stays visible. Official HideAlways does the same:
     // 0x00010001 -> 0x00090001.
 
     static constexpr uint32_t k_priorityBit = 0x00080000u; // bit 19
-    static constexpr uint32_t k_activeBit   = 0x00000008u; // bit 3
-    static constexpr int      k_maxItems    = 128;
+    static constexpr uint32_t k_activeBit = 0x00000008u;   // bit 3
+    static constexpr int k_maxItems = 128;
 
     static bool is_hair_hiding_rule(__int64 ruleObj) noexcept
     {
@@ -110,25 +98,25 @@ namespace EquipHide
         }
     }
 
-    /* Build a bitmask of hidden head-covering categories for per-item
-       filtering.  Only items belonging to a hidden category get the
-       priority override -- items for shown categories keep their original
-       bitmask so PostfixEval still hides hair/beard under them. */
+    /* Build a bitmask of hidden head-covering categories for per-item filtering. Only items belonging to a hidden
+       category get the priority override -- items for shown categories keep their original bitmask so PostfixEval still
+       hides hair/beard under them. */
     static CategoryMask hidden_headgear_mask() noexcept
     {
         CategoryMask mask = 0;
-        if (is_category_hidden(Category::Helm))  mask |= category_bit(Category::Helm);
-        if (is_category_hidden(Category::Cloak)) mask |= category_bit(Category::Cloak);
-        if (is_category_hidden(Category::Mask))  mask |= category_bit(Category::Mask);
+        if (is_category_hidden(Category::Helm))
+            mask |= category_bit(Category::Helm);
+        if (is_category_hidden(Category::Cloak))
+            mask |= category_bit(Category::Cloak);
+        if (is_category_hidden(Category::Mask))
+            mask |= category_bit(Category::Mask);
         return mask;
     }
 
-    /* Returns true if the current call stack came through the NPC-side
-       PostfixEval caller. Scans a small window of stack slots looking
-       for resolved_addrs().npcPfeReturnAddr as a return address; the
-       landmark always sits at a predictable depth within the captured
-       window, so bounded scanning is sufficient (and cheap). SEH wraps
-       the walk in case an unusually deep call trimmed the frame. */
+    /* Returns true if the current call stack came through the NPC-side PostfixEval caller. Scans a small window of
+       stack slots looking for resolved_addrs().npcPfeReturnAddr as a return address; the landmark always sits at a
+       predictable depth within the captured window, so bounded scanning is sufficient (and cheap). SEH wraps the walk
+       in case an unusually deep call trimmed the frame. */
     static bool is_npc_call_stack(uintptr_t landmark) noexcept
     {
         if (!landmark)
@@ -159,19 +147,16 @@ namespace EquipHide
        through the validator must not be able to crash the game via a
        bad deref. Restoration is also SEH-wrapped so a fault on item[N]
        does not skip restoring item[N+1..]. */
-    static __int64 eval_with_priority_override(
-        __int64 ruleObj, __int64 context) noexcept
+    static __int64 eval_with_priority_override(__int64 ruleObj, __int64 context) noexcept
     {
         auto itemsPtr = *reinterpret_cast<uintptr_t *>(context + 0x58);
         auto itemCount = *reinterpret_cast<uint32_t *>(context + 0x60);
 
         if (itemsPtr < 0x10000 || itemCount == 0 || itemCount > k_maxItems)
         {
-            // Snapshot guards a teardown race: shutdown's remove_hook()
-            // disables the detour while a game thread may still be
-            // mid-call here. NULL means SafetyHook has already restored
-            // the prologue and torn the trampoline down; returning 0
-            // matches the rule-evaluator's "no rule fired" shape.
+            // Snapshot guards a teardown race: shutdown's remove_hook() disables the detour while a game thread may
+            // still be mid-call here. NULL means SafetyHook has already restored the prologue and torn the trampoline
+            // down; returning 0 matches the rule-evaluator's "no rule fired" shape.
             auto trampoline = s_originalPostfixEval;
             if (!trampoline)
                 return 0;
@@ -181,8 +166,8 @@ namespace EquipHide
         auto hiddenMask = hidden_headgear_mask();
 
         uintptr_t patchedItems[k_maxItems];
-        uint32_t  originalValues[k_maxItems];
-        int       patchCount = 0;
+        uint32_t originalValues[k_maxItems];
+        int patchCount = 0;
 
         auto *itemArray = reinterpret_cast<uintptr_t *>(itemsPtr);
 
@@ -196,8 +181,7 @@ namespace EquipHide
                 if (*reinterpret_cast<uint8_t *>(item + 0x88) == 0)
                     continue;
 
-                /* Only override items whose part hash belongs to a hidden
-                   head-covering category. */
+                /* Only override items whose part hash belongs to a hidden head-covering category. */
                 auto partHash = *reinterpret_cast<uint32_t *>(item + 0x48);
                 if (!needs_classification(partHash))
                     continue;
@@ -221,10 +205,9 @@ namespace EquipHide
             }
         }
 
-        // Snapshot guards a teardown race (see early-out branch above).
-        // If we got this far we already mutated patchCount item bytes
-        // and must run the restore loop regardless, so a NULL trampoline
-        // returns a zero result without skipping cleanup.
+        // Snapshot guards a teardown race (see early-out branch above). If we got this far we already mutated
+        // patchCount item bytes and must run the restore loop regardless, so a NULL trampoline returns a zero result
+        // without skipping cleanup.
         auto trampoline = s_originalPostfixEval;
         __int64 result = trampoline ? trampoline(ruleObj, context) : 0;
 
@@ -232,8 +215,7 @@ namespace EquipHide
         {
             __try
             {
-                *reinterpret_cast<uint32_t *>(patchedItems[i] + 0x70) =
-                    originalValues[i];
+                *reinterpret_cast<uint32_t *>(patchedItems[i] + 0x70) = originalValues[i];
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
@@ -251,14 +233,10 @@ namespace EquipHide
             {
                 auto ctx = static_cast<uintptr_t>(context);
 
-                /* Only consider overrides for hair-hiding rules + any
-                   head-covering gear hidden. These gates are cheap and
-                   ordered first so most calls exit without touching the
-                   stack-walk filter. */
-                if (ctx > 0x10000 &&
-                    is_hair_hiding_rule(ruleObj) &&
-                    (is_category_hidden(Category::Helm) ||
-                     is_category_hidden(Category::Cloak) ||
+                /* Only consider overrides for hair-hiding rules + any head-covering gear hidden. These gates are cheap
+                   and ordered first so most calls exit without touching the stack-walk filter. */
+                if (ctx > 0x10000 && is_hair_hiding_rule(ruleObj) &&
+                    (is_category_hidden(Category::Helm) || is_category_hidden(Category::Cloak) ||
                      is_category_hidden(Category::Mask)))
                 {
                     auto &logger = DMK::Logger::get_instance();
@@ -266,14 +244,14 @@ namespace EquipHide
                     {
                         if (log_dedup_claim(s_loggedRejectCtxs, ctx))
                             logger.trace("BaldFix: filtered prefab-instantiation "
-                                         "call (ctx=0x{:X})", ctx);
+                                         "call (ctx=0x{:X})",
+                                         ctx);
                         /* Fall through to original evaluator untouched. */
                     }
                     else
                     {
                         if (log_dedup_claim(s_loggedAcceptCtxs, ctx))
-                            logger.trace("BaldFix: override active (ctx=0x{:X})",
-                                         ctx);
+                            logger.trace("BaldFix: override active (ctx=0x{:X})", ctx);
                         return eval_with_priority_override(ruleObj, context);
                     }
                 }

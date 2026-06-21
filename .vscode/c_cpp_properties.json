@@ -1,15 +1,85 @@
 {
+  // One configuration per C++ module. The C++ extension applies one active
+  // configuration at a time, so pick the one matching the module you are editing
+  // from the C/C++ config selector in the status bar (an EquipHide config cannot
+  // resolve LiveTransmog's ImGui includes, and vice versa). CrimsonDesertCore
+  // sources resolve under either. The modules build with the Visual Studio 2022
+  // generator (no compile_commands.json), so each include root and define is
+  // listed explicitly. DetourModKit and its submodules are vendored once under
+  // CrimsonDesertCore/external; the generated dependency headers live under each
+  // module's build/dev-msvc, so configure the preset once (cmake --preset
+  // msvc-dev) before IntelliSense can resolve them.
   "configurations": [
     {
-      "name": "windows-msvc-x64",
+      "name": "CrimsonDesertEquipHide (MSVC)",
       "includePath": [
         "${workspaceFolder}/CrimsonDesertEquipHide/src",
-        "${workspaceFolder}/CrimsonDesertEquipHide/external/DetourModKit/include",
-        "${workspaceFolder}/**"
+        "${workspaceFolder}/CrimsonDesertCore/include",
+        "${workspaceFolder}/CrimsonDesertCore/external/DetourModKit/include",
+        "${workspaceFolder}/CrimsonDesertCore/external/DetourModKit/external/DirectXMath/Inc",
+        "${workspaceFolder}/CrimsonDesertCore/external/DetourModKit/external/simpleini",
+        "${workspaceFolder}/CrimsonDesertCore/external/DetourModKit/external/safetyhook/include",
+        "${workspaceFolder}/CrimsonDesertEquipHide/build/dev-msvc/CrimsonDesertCore/external/DetourModKit/generated",
+        "${workspaceFolder}/CrimsonDesertEquipHide/build/dev-msvc/_deps/zydis-src/include",
+        "${workspaceFolder}/CrimsonDesertEquipHide/build/dev-msvc/_deps/zydis-build",
+        "${workspaceFolder}/CrimsonDesertEquipHide/build/dev-msvc/_deps/zydis-src/dependencies/zycore/include",
+        "${workspaceFolder}/CrimsonDesertEquipHide/build/dev-msvc/_deps/zydis-build/zycore"
       ],
-      "defines": ["_DEBUG", "UNICODE", "_UNICODE", "WIN32", "_WINDOWS"],
+      "defines": [
+        "_DEBUG",
+        "WIN32",
+        "_WINDOWS",
+        "NOMINMAX",
+        "WIN32_LEAN_AND_MEAN",
+        "WINVER=0x0A00",
+        "_WIN32_WINNT=0x0A00",
+        "_XM_SSE_INTRINSICS_",
+        "SAFETYHOOK_NO_DLL",
+        "ZYCORE_STATIC_BUILD",
+        "ZYDIS_STATIC_BUILD",
+        "EQUIPHIDE_DEV_BUILD"
+      ],
       "compilerPath": "cl.exe",
-      "cStandard": "c17",
+      "cStandard": "c23",
+      "cppStandard": "c++23",
+      "intelliSenseMode": "windows-msvc-x64"
+    },
+    {
+      "name": "CrimsonDesertLiveTransmog (MSVC)",
+      "includePath": [
+        "${workspaceFolder}/CrimsonDesertLiveTransmog/src",
+        "${workspaceFolder}/CrimsonDesertCore/include",
+        "${workspaceFolder}/CrimsonDesertCore/external/DetourModKit/include",
+        "${workspaceFolder}/CrimsonDesertCore/external/DetourModKit/external/DirectXMath/Inc",
+        "${workspaceFolder}/CrimsonDesertCore/external/DetourModKit/external/simpleini",
+        "${workspaceFolder}/CrimsonDesertCore/external/DetourModKit/external/safetyhook/include",
+        "${workspaceFolder}/CrimsonDesertLiveTransmog/external/reshade-sdk/include",
+        "${workspaceFolder}/CrimsonDesertLiveTransmog/external/reshade-sdk/source",
+        "${workspaceFolder}/CrimsonDesertLiveTransmog/build/dev-msvc/CrimsonDesertCore/external/DetourModKit/generated",
+        "${workspaceFolder}/CrimsonDesertLiveTransmog/build/dev-msvc/_deps/nlohmann_json-src/include",
+        "${workspaceFolder}/CrimsonDesertLiveTransmog/build/dev-msvc/_deps/imgui-src",
+        "${workspaceFolder}/CrimsonDesertLiveTransmog/build/dev-msvc/_deps/imgui-src/backends",
+        "${workspaceFolder}/CrimsonDesertLiveTransmog/build/dev-msvc/_deps/zydis-src/include",
+        "${workspaceFolder}/CrimsonDesertLiveTransmog/build/dev-msvc/_deps/zydis-build",
+        "${workspaceFolder}/CrimsonDesertLiveTransmog/build/dev-msvc/_deps/zydis-src/dependencies/zycore/include",
+        "${workspaceFolder}/CrimsonDesertLiveTransmog/build/dev-msvc/_deps/zydis-build/zycore"
+      ],
+      "defines": [
+        "_DEBUG",
+        "WIN32",
+        "_WINDOWS",
+        "NOMINMAX",
+        "WIN32_LEAN_AND_MEAN",
+        "WINVER=0x0A00",
+        "_WIN32_WINNT=0x0A00",
+        "_XM_SSE_INTRINSICS_",
+        "SAFETYHOOK_NO_DLL",
+        "ZYCORE_STATIC_BUILD",
+        "ZYDIS_STATIC_BUILD",
+        "TRANSMOG_DEV_BUILD"
+      ],
+      "compilerPath": "cl.exe",
+      "cStandard": "c23",
       "cppStandard": "c++23",
       "intelliSenseMode": "windows-msvc-x64"
     }

@@ -1,0 +1,23 @@
+# Conservative, advisory static-analysis profile for CrimsonDesertEquipHide.
+# Mirrors the DetourModKit profile this mod is built against. Start from nothing
+# and opt into high-signal families. Win32, SEH, and low-level pointer idioms are
+# intentional in a game-memory mod, so the checks that flag them are disabled
+# rather than worked around at the call site.
+Checks: >
+  -*,
+  bugprone-*,
+  performance-*,
+  modernize-use-nullptr,
+  modernize-use-override,
+  modernize-use-equals-default,
+  modernize-use-using,
+  cppcoreguidelines-pro-type-member-init,
+  cppcoreguidelines-slicing,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-reserved-identifier,
+  -bugprone-assignment-in-if-condition
+# Advisory only: never fail a build on a tidy finding.
+WarningsAsErrors: ''
+# Only diagnose this project's own headers (src/), not external/ submodules.
+HeaderFilterRegex: 'src/.*\.hpp$'
+FormatStyle: file

@@ -4,8 +4,7 @@
 
 namespace EquipHide
 {
-    std::unordered_map<std::string, std::uint32_t> scan_indexed_string_table(
-        std::uintptr_t mapLookupFunc)
+    std::unordered_map<std::string, std::uint32_t> scan_indexed_string_table(std::uintptr_t mapLookupFunc)
     {
         CDCore::IndexedStringScanConfig cfg;
         cfg.logLabel = "IndexedStringA scan [EH]";

@@ -12,27 +12,21 @@
 namespace Transmog
 {
     /**
-     * @brief Stable string<->id catalog built from the game's item descriptor
-     *        table (`qword_145CEF370` / iteminfo).
+     * @brief Stable string<->id catalog built from the game's item descriptor table (`qword_145CEF370` / iteminfo).
      *
-     * Each item has an internal name string (e.g. "Kliff_PlateArmor_Helm",
-     * "Marni_Laser_Helm_Upgrade") stored in a refcounted string wrapper at
-     * descriptor+8. These names are baked game data and are ORDERS OF
-     * MAGNITUDE more stable across game patches than the raw uint16
-     * itemId (which is a per-record descriptor index that can shift on any
-     * content patch).
+     * Each item has an internal name string (e.g. "Kliff_PlateArmor_Helm", "Marni_Laser_Helm_Upgrade") stored in a
+     * refcounted string wrapper at descriptor+8. These names are baked game data and are ORDERS OF MAGNITUDE more
+     * stable across game patches than the raw uint16 itemId (which is a per-record descriptor index that can shift on
+     * any content patch).
      *
      * Resolution chain (verified against v1.02.00 via IDA + CE):
      *
      *   1. AOB-scan `sub_14076D950` (SlotPopulator translator -- unique 1-hit).
-     *   2. Bounded AOB scan of the first 0x80 bytes of sub_14076D950 for a
-     *      unique 14-byte anchor preceding `E8 disp32` -> `sub_141D45270`
-     *      (item descriptor initializer). Offset NOT hardcoded.
-     *   3. Decode first `E8` call inside `sub_141D45270` ->
-     *      `sub_1402D75D0` (iteminfo descriptor accessor).
-     *   4. Bounded AOB scan of the first 0x40 bytes of sub_1402D75D0 for a
-     *      local anchor preceding `48 8B 1D disp32` (mov rbx, [rip+disp]) ->
-     *      `qword_145CEF370` = iteminfo global pointer holder.
+     *   2. Bounded AOB scan of the first 0x80 bytes of sub_14076D950 for a unique 14-byte anchor preceding `E8 disp32`
+     *      -> `sub_141D45270` (item descriptor initializer). Offset NOT hardcoded.
+     *   3. Decode first `E8` call inside `sub_141D45270` -> `sub_1402D75D0` (iteminfo descriptor accessor).
+     *   4. Bounded AOB scan of the first 0x40 bytes of sub_1402D75D0 for a local anchor preceding `48 8B 1D disp32`
+     *      (mov rbx, [rip+disp]) -> `qword_145CEF370` = iteminfo global pointer holder.
      *   5. `*(qword_145CEF370)` = globalPtr (6024-entry item container).
      *   6. `*(globalPtr + 8)` = entry count (dword).
      *   7. `*(globalPtr + 80)` = descriptor pointer array base.
@@ -50,101 +44,78 @@ namespace Transmog
         static ItemNameTable &instance();
 
         /**
-         * @brief Return value for build(), distinguishing retryable
-         *        (global pointer not yet initialized) from fatal
+         * @brief Return value for build(), distinguishing retryable (global pointer not yet initialized) from fatal
          *        (address chain broken or decoder mismatch).
          */
         enum class BuildResult
         {
             Ok,       // Catalog walked successfully, table populated.
             Deferred, // Address chain resolved but the iteminfo
-                      // global is still null -- retry later on a
-                      // background thread.
+                      // global is still null -- retry later on a background thread.
             Fatal,    // Address resolution failed (bounded AOB
-                      // anchor missed, no relative call found, etc).
-                      // Do not retry -- address chain is broken.
+                      // anchor missed, no relative call found, etc). Do not retry -- address chain is broken.
         };
 
         /**
          * @brief Build the table from the item descriptor catalog.
          *
-         * @param subTranslatorAddr Address of `sub_14076D950` (the
-         *        SlotPopulator item-id translator), resolved via AOB.
-         * @return BuildResult describing the outcome. Retryable when
-         *         `Deferred`; final on `Ok` or `Fatal`.
+         * @param subTranslatorAddr Address of `sub_14076D950` (the SlotPopulator item-id translator), resolved via AOB.
+         * @return BuildResult describing the outcome. Retryable when `Deferred`; final on `Ok` or `Fatal`.
          *
-         * On `Ok`, `size()` reflects the ingested entry count. On
-         * `Deferred`/`Fatal`, the table is left empty. Thread-safe to
-         * call from a background scan thread; internal state is
-         * guarded so `ready()` and `sorted_entries()` observe a
-         * consistent snapshot.
+         * On `Ok`, `size()` reflects the ingested entry count. On `Deferred`/`Fatal`, the table is left empty.
+         * Thread-safe to call from a background scan thread; internal state is guarded so `ready()` and
+         * `sorted_entries()` observe a consistent snapshot.
          */
         BuildResult build(uintptr_t subTranslatorAddr);
 
         /**
-         * @brief Look up an item name by id.
-         *        Returns an empty string if the id is unknown.
+         * @brief Look up an item name by id. Returns an empty string if the id is unknown.
          */
         std::string name_of(uint16_t itemId) const;
 
         /**
-         * @brief Resolve a previously-saved item name back to its current id.
-         *        Returns std::nullopt on miss.
+         * @brief Resolve a previously-saved item name back to its current id. Returns std::nullopt on miss.
          */
         std::optional<uint16_t> id_of(const std::string &name) const;
 
         /**
-         * @brief True if the item's descriptor has a non-sentinel
-         *        pointer at the variant-metadata slot (see
-         *        `k_descVariantMetaOffset` in item_name_table.cpp for
-         *        the per-version offset: +0x3A0 on v1.02.00, +0x3C8 on
-         *        v1.04.00).
+         * @brief True if the item's descriptor has a non-sentinel pointer at the variant-metadata slot (see
+         *        `k_descVariantMetaOffset` in item_name_table.cpp for the per-version offset: +0x3A0 on v1.02.00,
+         *        +0x3C8 on v1.04.00).
          *
-         * Items with this flag set are members of an engine-internal
-         * linked list threaded via that slot. Across the 14 labeled
-         * armor samples we tested live, flagged items all failed to
-         * render via runtime transmog on the player. The exact semantic
-         * meaning of the meta struct is not fully mapped -- users see
-         * these as "damaged" in-game but the catalog-wide population
-         * (~2399/6024 items on v1.02.00) includes non-armor readables
-         * too, so the label is intentionally mechanism-neutral. The
-         * overlay treats this as "may not render" and warns in the
-         * picker.
+         * Items with this flag set are members of an engine-internal linked list threaded via that slot. Across the 14
+         * labeled armor samples we tested live, flagged items all failed to render via runtime transmog on the player.
+         * The exact semantic meaning of the meta struct is not fully mapped -- users see these as "damaged" in-game but
+         * the catalog-wide population (~2399/6024 items on v1.02.00) includes non-armor readables too, so the label is
+         * intentionally mechanism-neutral. The overlay treats this as "may not render" and warns in the picker.
          *
-         * Detector: the sentinel pointer is resolved STATISTICALLY at
-         * build() time as the mode of `*(desc+k_descVariantMetaOffset)`
-         * across all valid descriptors (~60% share it on v1.02.00). No
-         * hardcoded RVA, so the detector self-heals across future
-         * .data shuffles. Returns false for unknown ids or when the
-         * catalog isn't yet built.
+         * Detector: the sentinel pointer is resolved STATISTICALLY at build() time as the mode of
+         * `*(desc+k_descVariantMetaOffset)` across all valid descriptors (~60% share it on v1.02.00). No hardcoded RVA,
+         * so the detector self-heals across future .data shuffles. Returns false for unknown ids or when the catalog
+         * isn't yet built.
          */
         bool has_variant_meta(uint16_t itemId) const;
 
         /**
          * @brief True if the item is safe to equip on the player.
          *
-         * Player-compatible means at least one of the item's rules in the
-         * descriptor rule list at `+0x248` carries a male body-type token.
-         * The default player (Kliff) uses the male humanoid skeleton; items
-         * whose rules use only non-player classifiers (horse/mount/pet tack,
-         * wagon gear) are flagged unsafe -- binding them to a player body
+         * Player-compatible means at least one of the item's rules in the descriptor rule list at `+0x248` carries a
+         * male body-type token. The default player (Kliff) uses the male humanoid skeleton; items whose rules use only
+         * non-player classifiers (horse/mount/pet tack, wagon gear) are flagged unsafe -- binding them to a player body
          * crashes the mesh binder downstream.
          *
-         * Unknown ids and items with no rules default to `true`: the picker
-         * prefers to surface inert cosmetics rather than hide them
-         * accidentally. See `k_maleBodyTokens` in the .cpp for the token set
-         * and how to re-derive it after a game patch.
+         * Unknown ids and items with no rules default to `true`: the picker prefers to surface inert cosmetics rather
+         * than hide them accidentally. See `k_maleBodyTokens` in the .cpp for the token set and how to re-derive it
+         * after a game patch.
          */
         bool is_player_compatible(uint16_t itemId) const;
 
         /**
-         * @brief True if the item's equip-type u16 at desc+0x42 differs
-         *        from the player's value (0x0004 for Kliff).
+         * @brief True if the item's equip-type u16 at desc+0x42 differs from the player's value (0x0004 for Kliff).
          *
-         * Items with NPC equip-type need the carrier path even when their
-         * classifier array includes player tokens (is_player_compatible).
-         * The equip-type controls downstream VEC processing gates that
-         * reject non-Kliff types.  Live read via descriptor_of().
+         * Items with NPC equip-type need the carrier path even when their classifier array includes player tokens
+         * (is_player_compatible). The equip-type controls downstream VEC processing gates that reject non-Kliff types.
+         * Live read via descriptor_of().
          */
         bool has_npc_equip_type(uint16_t itemId) const noexcept;
 
@@ -154,19 +125,17 @@ namespace Transmog
         /**
          * @brief Read the live descriptor pointer for an item.
          *
-         * Dereferences the iteminfo global cached during build(), walks
-         * `*(globalPtr + 0x50)` (ptrArray) and returns `ptrArray[itemId*8]`.
-         * Returns 0 on any fault or if the catalog is not yet built.
-         * Thread-safe (reads only; no mutation).
+         * Dereferences the iteminfo global cached during build(), walks `*(globalPtr + 0x50)` (ptrArray) and returns
+         * `ptrArray[itemId*8]`. Returns 0 on any fault or if the catalog is not yet built. Thread-safe (reads only; no
+         * mutation).
          */
         uintptr_t descriptor_of(uint16_t itemId) const noexcept;
 
         /**
          * @brief Live ptrArray base and entry count.
          *
-         * Returns {ptrArray, count}. Either or both may be 0 if the
-         * catalog global is not yet initialized. Callers MUST check
-         * both > 0 before indexing.
+         * Returns {ptrArray, count}. Either or both may be 0 if the catalog global is not yet initialized. Callers MUST
+         * check both > 0 before indexing.
          */
         struct CatalogInfo
         {
@@ -176,56 +145,45 @@ namespace Transmog
         CatalogInfo catalog_info() const noexcept;
 
         /**
-         * @brief Address of sub_1402D75D0 (IndexedStringA short->hash
-         *        lookup), cached during the build() chain walk.
+         * @brief Address of sub_1402D75D0 (IndexedStringA short->hash lookup), cached during the build() chain walk.
          *
-         * This function has 50+ byte-identical template-instantiation
-         * siblings in v1.02.00, so it cannot be AOB-located directly.
-         * Instead it is reached via the same bounded-AOB chain the
-         * catalog walk uses (subTranslator anchor -> sub_141D45270
-         * -> first relative call). Returns 0 if no
-         * successful resolve_chain call has landed yet (either before
-         * the first build() or after a fatal decoder mismatch).
+         * This function has 50+ byte-identical template-instantiation siblings in v1.02.00, so it cannot be AOB-located
+         * directly. Instead it is reached via the same bounded-AOB chain the catalog walk uses (subTranslator anchor ->
+         * sub_141D45270 -> first relative call). Returns 0 if no successful resolve_chain call has landed yet (either
+         * before the first build() or after a fatal decoder mismatch).
          *
-         * Thread-safe after a successful build() or deferred-scan
-         * retry. The chain walk only reads static exe bytes and does
-         * NOT depend on the iteminfo global being initialized, so this
-         * address becomes valid even on the first BuildResult::Deferred
-         * return.
+         * Thread-safe after a successful build() or deferred-scan retry. The chain walk only reads static exe bytes and
+         * does NOT depend on the iteminfo global being initialized, so this address becomes valid even on the first
+         * BuildResult::Deferred return.
          */
         uintptr_t indexed_string_lookup_addr() const noexcept;
 
         /**
          * @brief Flat, alphabetically-sorted entry list for UI iteration.
          *
-         * Rebuilt lazily on first access after build(); stable thereafter.
-         * Returned by const reference so the overlay can hold onto it
-         * without copying the 6000+ entries per frame.
+         * Rebuilt lazily on first access after build(); stable thereafter. Returned by const reference so the overlay
+         * can hold onto it without copying the 6000+ entries per frame.
          *
-         * `category` is the transmog slot derived from the canonical
-         * item-type code at `desc+0x44` (see `category_of` below), or
-         * `TransmogSlot::Count` if the item is not a transmog-eligible
-         * armor slot (weapon, shield, horse armor, quest item, etc).
+         * `category` is the transmog slot derived from the canonical item-type code at `desc+0x44` (see `category_of`
+         * below), or `TransmogSlot::Count` if the item is not a transmog-eligible armor slot (weapon, shield, horse
+         * armor, quest item, etc).
          */
-        /// Body-type classification derived from an item's rule
-        /// classifier tokens. Drives the
-        /// picker's per-character visibility: an item rendered on the
-        /// wrong body produces broken meshes, so the filter hides
-        /// opposite-body items by default.
-        ///
-        ///   Generic:     no classifier tokens at all (rule-less items)
-        ///   Male:        has a male token   (k_maleBodyTokens)
-        ///   Female:      has a female token (k_femaleBodyTokens)
-        ///   Both:        rare -- has both male and female tokens
-        ///   Ambiguous:   humanoid-range tokens only, but not in the
-        ///                male or female body sets (e.g. NPC-specific
-        ///                variants like `0x012F`-only items --
-        ///                Antumbra/Badran/Luka gloves). Picker shows
-        ///                with an amber badge because render fidelity
-        ///                is inconsistent -- some work, some break.
-        ///   NonHumanoid: has any token >= 0x1000 (mount/pet/wagon/
-        ///                dragon armors). Hidden from all human-
-        ///                character pickers.
+        /**
+         * Body-type classification derived from an item's rule classifier tokens. Drives the picker's per-character
+         * visibility: an item rendered on the wrong body produces broken meshes, so the filter hides opposite-body
+         * items by default.
+         *
+         *   Generic:     no classifier tokens at all (rule-less items)
+         *   Male:        has a male token   (k_maleBodyTokens)
+         *   Female:      has a female token (k_femaleBodyTokens)
+         *   Both:        rare -- has both male and female tokens
+         *   Ambiguous:   humanoid-range tokens only, but not in the
+         *                male or female body sets (e.g. NPC-specific variants like `0x012F`-only items --
+         *                Antumbra/Badran/Luka gloves). Picker shows with an amber badge because render fidelity is
+         *                inconsistent -- some work, some break.
+         *   NonHumanoid: has any token >= 0x1000 (mount/pet/wagon/
+         *                dragon armors). Hidden from all human-character pickers.
+         */
         enum class BodyKind : std::uint8_t
         {
             Generic = 0,
@@ -242,8 +200,9 @@ namespace Transmog
             TransmogSlot category;
             bool hasVariantMeta;
             bool isPlayerCompatible;
-            /// Raw equip-type u16 from desc+0x42. Informational only;
-            /// the primary compatibility signal is `bodyKind`.
+            /**
+             * Raw equip-type u16 from desc+0x42. Informational only; the primary compatibility signal is `bodyKind`.
+             */
             uint16_t equipType;
             BodyKind bodyKind;
             std::string name;
@@ -251,65 +210,63 @@ namespace Transmog
         };
         const std::vector<Entry> &sorted_entries() const;
 
-        /// Raw equip-type u16 for a specific item. Returns 0 if unknown
-        /// (catalog not ready or item never seen).
+        /**
+         * Raw equip-type u16 for a specific item. Returns 0 if unknown (catalog not ready or item never seen).
+         */
         std::uint16_t equip_type_of(std::uint16_t itemId) const noexcept;
 
-        /// Map character name -> body kind. Returns `BodyKind::Generic`
-        /// for unknown names so future characters produce a wide-open
-        /// picker instead of an empty one.
-        static BodyKind body_kind_for_character(
-            const std::string &charName) noexcept;
+        /**
+         * Map character name -> body kind. Returns `BodyKind::Generic`
+         * for unknown names so future characters produce a wide-open picker instead of an empty one.
+         */
+        static BodyKind body_kind_for_character(const std::string &charName) noexcept;
 
         /**
          * @brief Look up the transmog slot for an item id.
          *
-         * Driven by the canonical item-type code at `desc+0x44` captured
-         * during the catalog build; `desc+0x44` is the canonical
-         * game-side classifier. See `slot_from_type_code` for the
-         * authoritative typeCode->slot table (cloak spans 0x45-0x47).
+         * Driven by the canonical item-type code at `desc+0x44` captured during the catalog build; `desc+0x44` is the
+         * canonical game-side classifier. See `slot_from_type_code` for the authoritative typeCode->slot table (cloak
+         * spans 0x45-0x47).
          *
-         * Every code that does not map to a transmog-eligible armor slot
-         * (shields, horse armor, quest items, ...) or an unknown id
-         * returns `TransmogSlot::Count`.
+         * Every code that does not map to a transmog-eligible armor slot (shields, horse armor, quest items, ...) or an
+         * unknown id returns `TransmogSlot::Count`.
          */
         TransmogSlot category_of(uint16_t itemId) const noexcept;
 
-        /// Raw item-type code u16 at `desc+0x44` for the given item, or
-        /// 0xFFFF if unknown. Useful for slot-discovery research --
-        /// printing it next to the live engine slot tag reveals the
-        /// (typeCode -> slot) mapping that drives `slot_from_type_code`,
-        /// so accessory and weapon codes can be added without static
-        /// guessing.
+        /**
+         * Raw item-type code u16 at `desc+0x44` for the given item, or 0xFFFF if unknown. Useful for slot-discovery
+         * research -- printing it next to the live engine slot tag reveals the
+         * (typeCode -> slot) mapping that drives `slot_from_type_code`,
+         * so accessory and weapon codes can be added without static guessing.
+         */
         std::uint16_t type_code_of(std::uint16_t itemId) const noexcept;
 
-        /// Record an observed `(itemId -> slot)` binding seen in the
-        /// engine's live auth-table. The runtime map is consulted by
-        /// `category_of()` BEFORE the static type-code map, so any
-        /// item the engine has actually equipped becomes correctly
-        /// categorized for the picker even when its `desc+0x44`
-        /// type-code isn't yet listed in the static switch. Slot ==
-        /// `TransmogSlot::Count` clears the entry. Thread-safe; cheap
-        /// (one hash insert per call).
-        void record_observed_slot(std::uint16_t itemId,
-                                  TransmogSlot slot) noexcept;
+        /**
+         * Record an observed `(itemId -> slot)` binding seen in the
+         * engine's live auth-table. The runtime map is consulted by `category_of()` BEFORE the static type-code map, so
+         * any item the engine has actually equipped becomes correctly categorized for the picker even when its
+         * `desc+0x44` type-code isn't yet listed in the static switch. Slot == `TransmogSlot::Count` clears the entry.
+         * Thread-safe; cheap (one hash insert per call).
+         */
+        void record_observed_slot(std::uint16_t itemId, TransmogSlot slot) noexcept;
 
-        /// Number of currently-recorded runtime slot observations.
-        /// Diagnostic only.
+        /**
+         * Number of currently-recorded runtime slot observations. Diagnostic only.
+         */
         std::size_t observed_slot_count() const noexcept;
 
-        /// Dump the full catalog to a TSV file next to the game exe.
-        /// Columns: ItemID, Slot, Variant, PlayerSafe, Name.
+        /**
+         * Dump the full catalog to a TSV file next to the game exe.
+         * Columns: ItemID, Slot, Variant, PlayerSafe, Name.
+         */
         void dump_catalog_tsv() const;
 
         /**
          * @brief Load human-readable display names from a TSV file.
          *
-         * Each line is `internalName<TAB>displayName`. Keys are
-         * lowercased at load time for case-insensitive matching.
-         * Must be called after a successful build(). Invalidates the
-         * sorted cache so the next sorted_entries() picks up display
-         * names.
+         * Each line is `internalName<TAB>displayName`. Keys are lowercased at load time for case-insensitive matching.
+         * Must be called after a successful build(). Invalidates the sorted cache so the next sorted_entries() picks up
+         * display names.
          *
          * @param tsvPath Path to the display names TSV file.
          */
@@ -319,11 +276,9 @@ namespace Transmog
          * @brief Look up a display name by internal name.
          *
          * @param internalName The item's internal catalog name.
-         * @return The human-readable display name, or empty string
-         *         if no mapping exists.
+         * @return The human-readable display name, or empty string if no mapping exists.
          */
-        [[nodiscard]] std::string display_name_of(
-            std::string_view internalName) const;
+        [[nodiscard]] std::string display_name_of(std::string_view internalName) const;
 
     private:
         ItemNameTable() = default;
@@ -336,19 +291,16 @@ namespace Transmog
         std::unordered_map<uint16_t, uint8_t> m_bodyBits;
         std::unordered_map<uint16_t, uint16_t> m_typeCode; // desc+0x44 canonical item-type code
         // Runtime-learned `itemId -> TransmogSlot` map. Populated by
-        // `record_observed_slot` (called from the slot-discovery dump
-        // when it observes live auth-table bindings). Authoritative
-        // override for the static type-code switch -- if the engine
-        // has actually equipped an item in a given slot, we trust that
-        // over any heuristic. Session-scoped (no disk persistence).
+        // `record_observed_slot` (called from the slot-discovery dump when it observes live auth-table bindings).
+        // Authoritative override for the static type-code switch -- if the engine has actually equipped an item in a
+        // given slot, we trust that over any heuristic. Session-scoped (no disk persistence).
         std::unordered_map<uint16_t, TransmogSlot> m_observedSlot;
         std::unordered_map<std::string, std::string> m_displayNames; // lowercase internal -> display
         mutable std::vector<Entry> m_sortedCache;
 
-        // Stability detector: tracks the valid count from the previous
-        // build() attempt.  The catalog is accepted only when two
-        // consecutive scans produce the same count, meaning the game
-        // has finished populating the descriptor pointer array.
+        // Stability detector: tracks the valid count from the previous build() attempt. The catalog is accepted only
+        // when two consecutive scans produce the same count, meaning the game has finished populating the descriptor
+        // pointer array.
         uint32_t m_lastBuildValid = 0;
     };
 

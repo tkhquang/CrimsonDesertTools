@@ -14,19 +14,17 @@
 namespace
 {
     // Module handle captured at attach. The lifecycle worker spawned by
-    // Bootstrap::on_dll_attach runs init_fn off the loader lock; the
-    // overlay needs the host module handle to register a Win32 hook
-    // class, so we cache it here.
+    // Bootstrap::on_dll_attach runs init_fn off the loader lock; the overlay needs the host module handle to register a
+    // Win32 hook class, so we cache it here.
     HMODULE s_hModule = nullptr;
 
     // Init body invoked on the worker thread (off loader lock).
     bool init_mod()
     {
         auto &logger = DetourModKit::Logger::get_instance();
-        Transmog::Version::logVersionInfo();
+        Transmog::Version::log_version_info();
 
-        const auto runtimeDir =
-            DetourModKit::Filesystem::get_runtime_directory_utf8();
+        const auto runtimeDir = DetourModKit::Filesystem::get_runtime_directory_utf8();
         logger.info("DLL loaded, runtime dir: {}", runtimeDir);
 
         if (!Transmog::init())
@@ -61,15 +59,10 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
         asyncCfg.overflow_policy = DetourModKit::OverflowPolicy::SyncFallback;
 
         const DetourModKit::Bootstrap::ModInfo info{
-            "Transmog",
-            Transmog::LOG_FILE,
-            Transmog::GAME_PROCESS_NAME,
-            "CrimsonDesertLiveTransmog_",
-            asyncCfg,
+            "Transmog", Transmog::LOG_FILE, Transmog::GAME_PROCESS_NAME, "CrimsonDesertLiveTransmog_", asyncCfg,
         };
 
-        return DetourModKit::Bootstrap::on_dll_attach(
-            hModule, info, &init_mod, &shutdown_mod);
+        return DetourModKit::Bootstrap::on_dll_attach(hModule, info, &init_mod, &shutdown_mod);
     }
 
     case DLL_PROCESS_DETACH:

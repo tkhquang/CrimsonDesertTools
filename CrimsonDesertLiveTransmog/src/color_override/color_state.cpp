@@ -12,17 +12,18 @@ namespace Transmog::ColorOverride::State
         std::array<std::atomic<bool>, k_slotCount> g_swatchFrozen{};
         std::atomic<std::int64_t> g_blockPublisherInsertsUntilMs{0};
         std::array<std::atomic<std::int64_t>, k_slotCount> g_hashSetLastAddMs{};
-    }
+    } // namespace
 
     std::int64_t now_ms() noexcept
     {
         using namespace std::chrono;
-        return duration_cast<milliseconds>(
-            steady_clock::now().time_since_epoch())
-            .count();
+        return duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
     }
 
-    std::atomic<int> &active_apply_slot() noexcept { return g_activeApplySlot; }
+    std::atomic<int> &active_apply_slot() noexcept
+    {
+        return g_activeApplySlot;
+    }
     std::atomic<std::int64_t> &active_apply_valid_until_ms() noexcept
     {
         return g_activeApplyValidUntilMs;
@@ -39,4 +40,4 @@ namespace Transmog::ColorOverride::State
     {
         return g_hashSetLastAddMs[static_cast<std::size_t>(slot)];
     }
-}
+} // namespace Transmog::ColorOverride::State

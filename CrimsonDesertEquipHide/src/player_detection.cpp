@@ -19,16 +19,12 @@ namespace EquipHide
     static uintptr_t s_prevVisCtrls[k_maxProtagonists]{};
     static int s_prevCount = 0;
 
-    /* Per-body vc cache. The engine zeroes body+0x68 (and downstream)
-       for inactive protagonists, so the live chain walk only succeeds
-       for the currently-controlled body. The vis_ctrl pointer itself
-       stays valid across swaps within a session, so caching the last
-       successful resolution per body lets the resolver publish all
-       three protagonists' vcs after the user has cycled through them
-       once. Across save-load the engine reallocates its arenas: the
-       cached vcs are dangling and MUST be wiped or DirectWrite stomps
-       freed memory. File-scope so resolve_player_vis_ctrls can clear
-       it on the save-load transition. */
+    /* Per-body vc cache. The engine zeroes body+0x68 (and downstream) for inactive protagonists, so the live chain walk
+       only succeeds for the currently-controlled body. The vis_ctrl pointer itself stays valid across swaps within a
+       session, so caching the last successful resolution per body lets the resolver publish all three protagonists' vcs
+       after the user has cycled through them once. Across save-load the engine reallocates its arenas: the cached vcs
+       are dangling and MUST be wiped or DirectWrite stomps freed memory. File-scope so resolve_player_vis_ctrls can
+       clear it on the save-load transition. */
     struct Body2VcEntry
     {
         uintptr_t body;
@@ -44,15 +40,11 @@ namespace EquipHide
         s_body2vcNext = 0;
     }
 
-    /* Full save-load wipe shared by the X->0->Y deferred-reload
-       state machine and the atomic-swap fallback (where the engine
-       rotates user+0xD8 between two non-zero values without ever
-       publishing the null window). Both paths land here once the
-       resolver has decided "this is a new world, drop everything":
-       Core's body learning cache, the per-body vc LRU, and the
-       published player_state must all be cleared together so the
-       next resolve cycle rebuilds against the fresh arena instead
-       of stomping freed memory through stale vc pointers. */
+    /* Full save-load wipe shared by the X->0->Y deferred-reload state machine and the atomic-swap fallback (where the
+       engine rotates user+0xD8 between two non-zero values without ever publishing the null window). Both paths land
+       here once the resolver has decided "this is a new world, drop everything": Core's body learning cache, the
+       per-body vc LRU, and the published player_state must all be cleared together so the next resolve cycle rebuilds
+       against the fresh arena instead of stomping freed memory through stale vc pointers. */
     static void apply_full_reload_wipe() noexcept
     {
         CDCore::invalidate_controlled_character();
@@ -71,23 +63,22 @@ namespace EquipHide
         s_prevCount = 0;
     }
 
-    /** @brief Traverse body -> vis_ctrl pointer chain. Caller MUST be SEH-protected.
-     *  @details Trace-logs only when a (body -> vc) mapping is new or has
-     *           changed since the last walk; successful walks with a
-     *           previously-seen mapping are silent. The resolver fires
-     *           hundreds of times per second and a full trace on every call
-     *           floods the log. Chain-broken paths always log since those
-     *           indicate real state transitions worth seeing. */
+    /**
+     * @brief Traverse body -> vis_ctrl pointer chain. Caller MUST be SEH-protected.
+     * @details Trace-logs only when a (body -> vc) mapping is new or has changed since the last walk; successful walks
+     *          with a previously-seen mapping are silent. The resolver fires hundreds of times per second and a full
+     *          trace on every call floods the log. Chain-broken paths always log since those indicate real state
+     *          transitions worth seeing.
+     */
     static uintptr_t body_to_vis_ctrl(uintptr_t body) noexcept
     {
         if (!body)
             return 0;
 
         // body -> +0x68 (inner) -> +0x40 (sub) -> *(sub+0xE8) (vc). The chain
-        // walk dereferences each link and reads the terminal vc value under a
-        // single fault guard; a broken link falls through to the per-body LRU.
-        const auto vcOpt = DMK::Memory::seh_read_chain<uintptr_t>(
-            body, {0x68, 0x40, 0xE8});
+        // walk dereferences each link and reads the terminal vc value under a single fault guard; a broken link falls
+        // through to the per-body LRU.
+        const auto vcOpt = DMK::Memory::seh_read_chain<uintptr_t>(body, {0x68, 0x40, 0xE8});
         if (!vcOpt)
         {
             for (const auto &e : s_body2vcLru)
@@ -95,9 +86,7 @@ namespace EquipHide
                 if (e.body == body && e.vc != 0)
                     return e.vc;
             }
-            DMK::Logger::get_instance().trace(
-                "body_to_vis_ctrl: body=0x{:X} chain broken, no cache",
-                body);
+            DMK::Logger::get_instance().trace("body_to_vis_ctrl: body=0x{:X} chain broken, no cache", body);
             return 0;
         }
         const auto vc = *vcOpt;
@@ -111,9 +100,7 @@ namespace EquipHide
         s_body2vcLru[s_body2vcNext] = {body, vc};
         s_body2vcNext = (s_body2vcNext + 1) % k_maxProtagonists;
 
-        DMK::Logger::get_instance().trace(
-            "body_to_vis_ctrl: body=0x{:X} vc=0x{:X}",
-            body, vc);
+        DMK::Logger::get_instance().trace("body_to_vis_ctrl: body=0x{:X} vc=0x{:X}", body, vc);
         return vc;
     }
 
@@ -126,11 +113,9 @@ namespace EquipHide
         auto &ps = player_state();
 
         // WorldSystem -> ActorManager -> UserActor chain offsets are owned
-        // by CDCore::ActorChainOffsets (controlled_char.hpp), the single
-        // authority shared with background_threads and CDCore's own
-        // resolver, so a manager re-layout is a one-line edit there. This
-        // walk reaches the SAME pa::ClientActorManager that CDCore roots at
-        // the published global slot.
+        // by CDCore::ActorChainOffsets (controlled_char.hpp), the single authority shared with background_threads and
+        // CDCore's own resolver, so a manager re-layout is a one-line edit there. This walk reaches the SAME
+        // pa::ClientActorManager that CDCore roots at the published global slot.
         namespace AC = CDCore::ActorChainOffsets;
 
         __try
@@ -171,11 +156,10 @@ namespace EquipHide
             {
                 if (s_prevUser != 0)
                 {
-                    DMK::Logger::get_instance().info(
-                        "Load detect: UserActor swapped "
-                        "(0x{:X} -> 0x{:X}); invalidating controlled-"
-                        "char cache for save-load transition",
-                        s_prevUser, user);
+                    DMK::Logger::get_instance().info("Load detect: UserActor swapped "
+                                                     "(0x{:X} -> 0x{:X}); invalidating controlled-"
+                                                     "char cache for save-load transition",
+                                                     s_prevUser, user);
                     CDCore::invalidate_controlled_character();
                 }
                 s_prevUser = user;
@@ -226,37 +210,30 @@ namespace EquipHide
             auto controlledActor = read_ptr_unsafe(user, AC::k_userActorToControlled);
             static std::uintptr_t s_prevControlledActor = 0;
             static bool s_pendingReloadInvalidation = false;
-            // CDCore world-generation: bumps when the engine
-            // reallocates Kliff's CCOIA (save-load). Used by the
-            // atomic-X->Y branch below to disambiguate a save-load
-            // from an in-session radial swap.
+            // CDCore world-generation: bumps when the engine reallocates Kliff's CCOIA (save-load). Used by the
+            // atomic-X->Y branch below to disambiguate a save-load from an in-session radial swap.
             //
-            // Init=0 is safe because the atomic-X->Y branch that
-            // consumes the prev value is gated on
+            // Init=0 is safe because the atomic-X->Y branch that consumes the prev value is gated on
             // s_prevControlledActor being non-zero (also static-
             // init=0), so it cannot fire on the very first tick;
-            // by tick 2 s_prevWorldGen has been overwritten with
-            // curWorldGen below.
+            // by tick 2 s_prevWorldGen has been overwritten with curWorldGen below.
             static std::uint64_t s_prevWorldGen = 0;
             const auto curWorldGen = CDCore::world_generation();
             if (controlledActor != s_prevControlledActor)
             {
                 if (controlledActor == 0 && s_prevControlledActor != 0)
                 {
-                    DMK::Logger::get_instance().info(
-                        "Save-load detected: controlled actor "
-                        "(0x{:X} -> 0x0); deferring full cache wipe "
-                        "until new world is live",
-                        s_prevControlledActor);
+                    DMK::Logger::get_instance().info("Save-load detected: controlled actor "
+                                                     "(0x{:X} -> 0x0); deferring full cache wipe "
+                                                     "until new world is live",
+                                                     s_prevControlledActor);
                     s_pendingReloadInvalidation = true;
                 }
-                else if (controlledActor != 0 && s_prevControlledActor == 0 &&
-                         s_pendingReloadInvalidation)
+                else if (controlledActor != 0 && s_prevControlledActor == 0 && s_pendingReloadInvalidation)
                 {
-                    DMK::Logger::get_instance().info(
-                        "Save-load complete: new controlled actor 0x{:X}; "
-                        "wiping body cache + body_to_vis_ctrl LRU",
-                        controlledActor);
+                    DMK::Logger::get_instance().info("Save-load complete: new controlled actor 0x{:X}; "
+                                                     "wiping body cache + body_to_vis_ctrl LRU",
+                                                     controlledActor);
                     apply_full_reload_wipe();
                     s_pendingReloadInvalidation = false;
                 }
@@ -276,42 +253,35 @@ namespace EquipHide
                        existing CCOIA pointers), so an unchanged
                        generation means the rotation is a normal
                        swap and the body_to_vis_ctrl LRU stays valid. */
-                    const bool atomicSaveLoad =
-                        curWorldGen != s_prevWorldGen;
+                    const bool atomicSaveLoad = curWorldGen != s_prevWorldGen;
 
                     if (atomicSaveLoad)
                     {
-                        DMK::Logger::get_instance().info(
-                            "Save-load detected (atomic swap): "
-                            "controlled actor (0x{:X} -> 0x{:X}); "
-                            "world_generation {} -> {}; wiping body "
-                            "cache + body_to_vis_ctrl LRU",
-                            s_prevControlledActor, controlledActor,
-                            s_prevWorldGen, curWorldGen);
+                        DMK::Logger::get_instance().info("Save-load detected (atomic swap): "
+                                                         "controlled actor (0x{:X} -> 0x{:X}); "
+                                                         "world_generation {} -> {}; wiping body "
+                                                         "cache + body_to_vis_ctrl LRU",
+                                                         s_prevControlledActor, controlledActor, s_prevWorldGen,
+                                                         curWorldGen);
                         apply_full_reload_wipe();
-                        /* No X->0 was observed, so the deferred flag
-                           was never latched -- defensively clear so a
-                           later spurious X->0->Y cannot double-fire
-                           against this transition. */
+                        /* No X->0 was observed, so the deferred flag was never latched -- defensively clear so a later
+                           spurious X->0->Y cannot double-fire against this transition. */
                         s_pendingReloadInvalidation = false;
                     }
                     else
                     {
-                        DMK::Logger::get_instance().info(
-                            "Char swap detected: controlled actor "
-                            "(0x{:X} -> 0x{:X}); body cache preserved",
-                            s_prevControlledActor, controlledActor);
+                        DMK::Logger::get_instance().info("Char swap detected: controlled actor "
+                                                         "(0x{:X} -> 0x{:X}); body cache preserved",
+                                                         s_prevControlledActor, controlledActor);
                     }
                 }
                 s_prevControlledActor = controlledActor;
             }
             s_prevWorldGen = curWorldGen;
 
-            /* Bail until the new world has a controlled actor. With
-               s_pendingReloadInvalidation still set, walking the body
-               cache against the next save's bodies before the wipe
-               re-publishes the previous save's vcs (and DirectWrite
-               then stomps freed memory). */
+            /* Bail until the new world has a controlled actor. With s_pendingReloadInvalidation still set, walking the
+               body cache against the next save's bodies before the wipe re-publishes the previous save's vcs (and
+               DirectWrite then stomps freed memory). */
             if (controlledActor == 0)
                 return;
 
@@ -328,25 +298,17 @@ namespace EquipHide
                torn chain reads or an unknown codename. */
             {
                 const auto idxU32 = CDCore::current_controlled_character_idx();
-                const int idx = (idxU32 >= 1 && idxU32 <= 3)
-                                    ? static_cast<int>(idxU32) - 1
-                                    : -1;
+                const int idx = (idxU32 >= 1 && idxU32 <= 3) ? static_cast<int>(idxU32) - 1 : -1;
                 set_active_character(idx);
             }
 
-            /* Build the protagonist vis-ctrl list from the live
-               player-CCOIA snapshot. Core walks the static chain:
-               Kliff is always present at sub-manager+0x30; Damiane
-               and Oongka are pulled from the ClientActorManager
-               +0x130 CCOIA-only actor array and filtered through
-               the appearance-config classifier (NPCs and follower
-               humanoids share the array but fail the codename
-               substring match). Snapshot covers all three
-               protagonists from frame zero without requiring the
-               user to cycle through them first. */
+            /* Build the protagonist vis-ctrl list from the live player-CCOIA snapshot. Core walks the static chain:
+               Kliff is always present at sub-manager+0x30; Damiane and Oongka are pulled from the ClientActorManager
+               +0x130 CCOIA-only actor array and filtered through the appearance-config classifier (NPCs and follower
+               humanoids share the array but fail the codename substring match). Snapshot covers all three protagonists
+               from frame zero without requiring the user to cycle through them first. */
             std::array<CDCore::BodyCacheEntry, k_maxProtagonists> bodyEntries;
-            const auto entryCount = CDCore::snapshot_body_cache(
-                bodyEntries.data(), bodyEntries.size());
+            const auto entryCount = CDCore::snapshot_body_cache(bodyEntries.data(), bodyEntries.size());
 
             int count = 0;
             for (std::size_t i = 0; i < entryCount; ++i)
@@ -355,13 +317,11 @@ namespace EquipHide
                 {
                     break;
                 }
-                if (bodyEntries[i].charIdx < 1 ||
-                    bodyEntries[i].charIdx > 3)
+                if (bodyEntries[i].charIdx < 1 || bodyEntries[i].charIdx > 3)
                 {
                     continue;
                 }
-                /* body_to_vis_ctrl is SEH-protected on its inner reads
-                   but the outer __try wrapping the whole resolve
+                /* body_to_vis_ctrl is SEH-protected on its inner reads but the outer __try wrapping the whole resolve
                    already covers the chase here. */
                 const auto vc = body_to_vis_ctrl(bodyEntries[i].body);
                 if (!vc)
@@ -369,11 +329,9 @@ namespace EquipHide
                     continue;
                 }
 
-                /* Dedupe against earlier entries -- a single body
-                   cannot map to more than one vis-ctrl in practice,
-                   but the dedup guards against a torn-write window
-                   between the body stamp and the body_to_vis_ctrl
-                   walk inside this same resolve cycle. */
+                /* Dedupe against earlier entries -- a single body cannot map to more than one vis-ctrl in practice, but
+                   the dedup guards against a torn-write window between the body stamp and the body_to_vis_ctrl walk
+                   inside this same resolve cycle. */
                 bool dup = false;
                 for (int k = 0; k < count; ++k)
                 {
@@ -400,9 +358,8 @@ namespace EquipHide
                 ps.visCharIdx[i].store(-1, std::memory_order_relaxed);
             }
 
-            ps.primaryVisCtrl.store(
-                count > 0 ? ps.visCtrls[0].load(std::memory_order_relaxed) : 0,
-                std::memory_order_relaxed);
+            ps.primaryVisCtrl.store(count > 0 ? ps.visCtrls[0].load(std::memory_order_relaxed) : 0,
+                                    std::memory_order_relaxed);
 
             for (int i = 0; i < k_maxProtagonists; ++i)
                 ps.armorInjected[i].store(false, std::memory_order_relaxed);
@@ -412,17 +369,14 @@ namespace EquipHide
             {
                 static std::atomic<bool> s_logged{false};
                 if (!s_logged.exchange(true, std::memory_order_relaxed))
-                    DMK::Logger::get_instance().debug(
-                        "Resolve: ws=0x{:X} am=0x{:X} user=0x{:X} count={}",
-                        ws, am, user, count);
+                    DMK::Logger::get_instance().debug("Resolve: ws=0x{:X} am=0x{:X} user=0x{:X} count={}", ws, am, user,
+                                                      count);
             }
             if (count > 0)
             {
                 static std::atomic<bool> s_resolvedLogged{false};
                 if (!s_resolvedLogged.exchange(true, std::memory_order_relaxed))
-                    DMK::Logger::get_instance().info(
-                        "Player set resolved: {} protagonist(s) tracked",
-                        count);
+                    DMK::Logger::get_instance().info("Player set resolved: {} protagonist(s) tracked", count);
             }
             if (count > 0)
             {
@@ -431,12 +385,9 @@ namespace EquipHide
                 auto &mtx = vis_write_mutex();
                 if (mtx.try_lock())
                 {
-                    /* __try/__finally guarantees mtx.unlock() on every
-                       exit path. The outer __try/__except (further
-                       below) catches SEH from the inner body; __finally
-                       handles the C++ exception propagation that MSVC
-                       /EHsc lets through SEH, so the mutex is always
-                       released even when a logger format error or
+                    /* __try/__finally guarantees mtx.unlock() on every exit path. The outer __try/__except (further
+                       below) catches SEH from the inner body; __finally handles the C++ exception propagation that MSVC
+                       /EHsc lets through SEH, so the mutex is always released even when a logger format error or
                        std::bad_alloc unwinds out of the body. */
                     __try
                     {
@@ -503,32 +454,26 @@ namespace EquipHide
 
         if (flag_fallback_mode().load(std::memory_order_relaxed))
         {
-            /* Actor type byte: *(*(actor+0x88)+1). Value 1 = local player,
-               3-6 = party members. Same mechanism the headgear visibility
-               system uses. */
+            /* Actor type byte: *(*(actor+0x88)+1). Value 1 = local player, 3-6 = party members. Same mechanism the
+               headgear visibility system uses. */
             // Resolve a1 -> +0x58 -> +0x08 -> +0x88 and read the type byte at
-            // +1, all under fault guards. seh_read_chain dereferences the
-            // terminal +0x88 link, so typePtr carries *(actor+0x88); the byte
-            // lives at typePtr+1. This fallback runs when the global chain-walk
-            // AOB failed at init, so the downstream links are not proven live.
-            const auto typePtr =
-                DMKMemory::seh_read_chain<std::uintptr_t>(a1, {0x58, 0x08, 0x88});
+            // +1, all under fault guards. seh_read_chain dereferences the terminal +0x88 link, so typePtr carries
+            // *(actor+0x88); the byte lives at typePtr+1. This fallback runs when the global chain-walk AOB failed at
+            // init, so the downstream links are not proven live.
+            const auto typePtr = DMKMemory::seh_read_chain<std::uintptr_t>(a1, {0x58, 0x08, 0x88});
             if (typePtr)
             {
-                const auto typeByteOpt =
-                    DMKMemory::seh_read<std::uint8_t>(*typePtr + 1);
+                const auto typeByteOpt = DMKMemory::seh_read<std::uint8_t>(*typePtr + 1);
                 if (typeByteOpt)
                 {
                     const std::uint8_t typeByte = *typeByteOpt;
                     {
                         static std::atomic<int> s_fbLog{0};
                         if (s_fbLog.fetch_add(1, std::memory_order_relaxed) < 5)
-                            DMK::Logger::get_instance().trace(
-                                "Fallback chain: a1=0x{:X} typePtr=0x{:X} type={}",
-                                a1, *typePtr, typeByte);
+                            DMK::Logger::get_instance().trace("Fallback chain: a1=0x{:X} typePtr=0x{:X} type={}", a1,
+                                                              *typePtr, typeByte);
                     }
-                    bool isProtagonist = (typeByte == 1) ||
-                                         (typeByte >= 3 && typeByte <= 6);
+                    bool isProtagonist = (typeByte == 1) || (typeByte >= 3 && typeByte <= 6);
                     if (isProtagonist)
                     {
                         const auto n = ps.count.load(std::memory_order_relaxed);
@@ -544,28 +489,20 @@ namespace EquipHide
                         if (!alreadyCached && n < k_maxProtagonists)
                         {
                             int expected = n;
-                            if (ps.count.compare_exchange_weak(
-                                    expected, n + 1, std::memory_order_relaxed))
+                            if (ps.count.compare_exchange_weak(expected, n + 1, std::memory_order_relaxed))
                             {
                                 ps.visCtrls[n].store(a1, std::memory_order_relaxed);
-                                /* Fallback path runs when the global
-                                   chain-walk AOB failed at init, so
-                                   the body pointer underlying `a1`
-                                   is not directly reachable -- mark
-                                   the slot's identity as unknown.
-                                   Consumers fall back to the active
-                                   character's hide mask, mirroring
-                                   single-character semantics for
-                                   unidentified slots. */
+                                /* Fallback path runs when the global chain-walk AOB failed at init, so the body pointer
+                                   underlying `a1` is not directly reachable -- mark the slot's identity as unknown.
+                                   Consumers fall back to the active character's hide mask, mirroring single-character
+                                   semantics for unidentified slots. */
                                 ps.visCharIdx[n].store(-1, std::memory_order_relaxed);
-                                ps.primaryVisCtrl.store(
-                                    ps.visCtrls[0].load(std::memory_order_relaxed),
-                                    std::memory_order_relaxed);
+                                ps.primaryVisCtrl.store(ps.visCtrls[0].load(std::memory_order_relaxed),
+                                                        std::memory_order_relaxed);
                                 needs_direct_write().store(true, std::memory_order_relaxed);
-                                DMK::Logger::get_instance().debug(
-                                    "Fallback: cached protagonist vis ctrl at slot {} "
-                                    "(0x{:X}, type={})",
-                                    n, a1, typeByte);
+                                DMK::Logger::get_instance().debug("Fallback: cached protagonist vis ctrl at slot {} "
+                                                                  "(0x{:X}, type={})",
+                                                                  n, a1, typeByte);
                             }
                         }
                     }
@@ -573,25 +510,21 @@ namespace EquipHide
             }
 
             /* Fail-closed: until the fallback path has cached at
-               least one protagonist, do NOT admit the candidate. The
-               historic permissive `<= 0` admitted every actor during
-               the resolve gap, leaking hides onto NPCs that then
-               could not be restored at runtime (their vis ctrls were
-               never in the active set, so the orphan sweep skipped
+               least one protagonist, do NOT admit the candidate.
+               Admitting during the resolve gap leaks hides onto NPCs
+               that then cannot be restored at runtime (their vis ctrls
+               were never in the active set, so the orphan sweep skips
                them). */
-            return ps.count.load(std::memory_order_relaxed) > 0 &&
-                   is_player_vis_ctrl(a1);
+            return ps.count.load(std::memory_order_relaxed) > 0 && is_player_vis_ctrl(a1);
         }
 
         // Global pointer chain mode.
         auto cnt = s_resolveCounter.fetch_add(1, std::memory_order_relaxed);
-        if (ps.count.load(std::memory_order_relaxed) == 0 ||
-            (cnt & (k_resolveInterval - 1)) == 0)
+        if (ps.count.load(std::memory_order_relaxed) == 0 || (cnt & (k_resolveInterval - 1)) == 0)
             resolve_player_vis_ctrls();
 
         /* Fail-closed (see fallback branch above for rationale). */
-        return ps.count.load(std::memory_order_relaxed) > 0 &&
-               is_player_vis_ctrl(a1);
+        return ps.count.load(std::memory_order_relaxed) > 0 && is_player_vis_ctrl(a1);
     }
 
 } // namespace EquipHide

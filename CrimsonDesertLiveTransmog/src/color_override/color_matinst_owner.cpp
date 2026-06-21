@@ -9,9 +9,9 @@ namespace Transmog::ColorOverride::MatInstOwner
     {
         struct Entry
         {
-            std::atomic<std::uintptr_t>  mi{0};
-            std::atomic<std::uint32_t>   expected_hash{0};
-            std::atomic<int>             slot{-1};
+            std::atomic<std::uintptr_t> mi{0};
+            std::atomic<std::uint32_t> expected_hash{0};
+            std::atomic<int> slot{-1};
         };
         std::array<Entry, k_capacity> g_map{};
 
@@ -23,7 +23,7 @@ namespace Transmog::ColorOverride::MatInstOwner
             x ^= x >> 33;
             return static_cast<std::size_t>(x) & (k_capacity - 1);
         }
-    }
+    } // namespace
 
     void set(std::uintptr_t mi, std::uint32_t expected_hash, int slot) noexcept
     {
@@ -37,11 +37,9 @@ namespace Transmog::ColorOverride::MatInstOwner
             if (cur == 0)
             {
                 std::uintptr_t expected = 0;
-                if (e.mi.compare_exchange_strong(expected, mi,
-                                                 std::memory_order_acq_rel))
+                if (e.mi.compare_exchange_strong(expected, mi, std::memory_order_acq_rel))
                 {
-                    e.expected_hash.store(expected_hash,
-                                          std::memory_order_relaxed);
+                    e.expected_hash.store(expected_hash, std::memory_order_relaxed);
                     e.slot.store(slot, std::memory_order_release);
                     return;
                 }
@@ -104,4 +102,4 @@ namespace Transmog::ColorOverride::MatInstOwner
             e.slot.store(-1, std::memory_order_relaxed);
         }
     }
-}
+} // namespace Transmog::ColorOverride::MatInstOwner

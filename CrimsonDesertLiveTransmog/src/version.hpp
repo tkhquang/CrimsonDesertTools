@@ -15,8 +15,8 @@
 #define VERSION_STRINGIFY_IMPL(x) #x
 #define VERSION_STRINGIFY(x) VERSION_STRINGIFY_IMPL(x)
 
-#define VERSION_STRING               \
-    VERSION_STRINGIFY(VERSION_MAJOR) \
+#define VERSION_STRING                                                                                                 \
+    VERSION_STRINGIFY(VERSION_MAJOR)                                                                                   \
     "." VERSION_STRINGIFY(VERSION_MINOR) "." VERSION_STRINGIFY(VERSION_PATCH)
 
 #define VERSION_TAG "v" VERSION_STRING
@@ -43,25 +43,25 @@ namespace Transmog::Version
     inline constexpr const char *BUILD_TIME = __TIME__;
 
     // Static project metadata.
-    inline constexpr const char *MOD_NAME   = "CrimsonDesertLiveTransmog";
-    inline constexpr const char *AUTHOR     = "tkhquang";
+    inline constexpr const char *MOD_NAME = "CrimsonDesertLiveTransmog";
+    inline constexpr const char *AUTHOR = "tkhquang";
     inline constexpr const char *REPOSITORY = "https://github.com/tkhquang/CrimsonDesertTools";
-    inline constexpr const char *NEXUS_URL  = "https://www.nexusmods.com/crimsondesert/mods/1056";
+    inline constexpr const char *NEXUS_URL = "https://www.nexusmods.com/crimsondesert/mods/1056";
 
     /** @brief GitHub release URL matching this version. */
     inline constexpr const char *RELEASE_URL =
         "https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/" VERSION_TAG;
 
     /** @brief Expected artifact filename, e.g. "CrimsonDesertLiveTransmog_v0.5.0.zip". */
-    inline std::string getArtifactName()
+    inline std::string get_artifact_name()
     {
         return std::string(MOD_NAME) + "_" + TAG + ".zip";
     }
 
     /**
-     * @brief Logs mod identity, version, and build timestamp via DMK::Logger.
-     *        Requires the logger to already be configured.
+     * @brief Logs mod identity, version, and build timestamp via DMK::Logger. Requires the logger to already be
+     *        configured.
      */
-    void logVersionInfo();
+    void log_version_info();
 
 } // namespace Transmog::Version

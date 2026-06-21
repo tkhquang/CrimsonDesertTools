@@ -21,16 +21,14 @@ namespace CDCore::Dev
         return _stricmp(exeName, expected) == 0;
     }
 
-    bool acquire_instance_mutex(
-        const wchar_t *prefixW, HANDLE &outHandle) noexcept
+    bool acquire_instance_mutex(const wchar_t *prefixW, HANDLE &outHandle) noexcept
     {
         outHandle = nullptr;
         if (!prefixW || !*prefixW)
             return false;
 
         wchar_t mutexName[96];
-        const int n = wsprintfW(
-            mutexName, L"%s%lu", prefixW, GetCurrentProcessId());
+        const int n = wsprintfW(mutexName, L"%s%lu", prefixW, GetCurrentProcessId());
         if (n <= 0)
             return false;
 

@@ -15,8 +15,7 @@ namespace EquipHide
 {
     /**
      * @brief Equipment category identifiers.
-     * @details Based on IndexedStringA hash ranges.
-     *          See .idea/research/equip_hide_v2.md for full mapping.
+     * @details Based on IndexedStringA hash ranges. See .idea/research/equip_hide_v2.md for full mapping.
      */
     enum class Category : uint8_t
     {
@@ -54,23 +53,18 @@ namespace EquipHide
         COUNT
     };
 
-    inline constexpr std::size_t CATEGORY_COUNT =
-        static_cast<std::size_t>(Category::COUNT);
+    inline constexpr std::size_t CATEGORY_COUNT = static_cast<std::size_t>(Category::COUNT);
 
     [[nodiscard]] constexpr std::string_view category_section(Category cat) noexcept
     {
         constexpr std::string_view names[] = {
-            "OneHandWeapons", "TwoHandWeapons", "Shields", "Bows",
-            "SpecialWeapons", "Tools", "Lanterns",
-            "Helm", "Chest", "Legs", "Underwear", "Gloves", "Boots",
-            "Cloak", "Shoulder", "Mask", "Glasses",
-            "Earrings", "Rings", "Necklace", "Bags",
-            "UserPreset1", "UserPreset2", "UserPreset3",
-            "UserPreset4", "UserPreset5", "UserPreset6",
-            "UserPreset7", "UserPreset8", "UserPreset9",
+            "OneHandWeapons", "TwoHandWeapons", "Shields",     "Bows",        "SpecialWeapons", "Tools",
+            "Lanterns",       "Helm",           "Chest",       "Legs",        "Underwear",      "Gloves",
+            "Boots",          "Cloak",          "Shoulder",    "Mask",        "Glasses",        "Earrings",
+            "Rings",          "Necklace",       "Bags",        "UserPreset1", "UserPreset2",    "UserPreset3",
+            "UserPreset4",    "UserPreset5",    "UserPreset6", "UserPreset7", "UserPreset8",    "UserPreset9",
             "UserPreset10"};
-        static_assert(std::size(names) == CATEGORY_COUNT,
-                      "names[] must match Category enum");
+        static_assert(std::size(names) == CATEGORY_COUNT, "names[] must match Category enum");
         const auto idx = static_cast<std::size_t>(cat);
         if (idx >= CATEGORY_COUNT)
             return "Unknown";
@@ -81,36 +75,6 @@ namespace EquipHide
     [[nodiscard]] constexpr bool is_user_preset(Category cat) noexcept
     {
         return cat >= Category::UserPreset1 && cat <= Category::UserPreset10;
-    }
-
-    /**
-     * @brief Returns true if the category is an armor type.
-     * @details Armor requires map entry injection rather than just vis-byte
-     *          modification. User presets may contain armor parts, so they
-     *          are included.
-     */
-    [[nodiscard]] constexpr bool is_armor_category(Category cat) noexcept
-    {
-        switch (cat)
-        {
-        case Category::Helm:
-        case Category::Chest:
-        case Category::Legs:
-        case Category::Underwear:
-        case Category::Gloves:
-        case Category::Boots:
-        case Category::Cloak:
-        case Category::Shoulder:
-        case Category::Mask:
-        case Category::Glasses:
-        case Category::Earrings:
-        case Category::Rings:
-        case Category::Necklace:
-        case Category::Bags:
-            return true;
-        default:
-            return is_user_preset(cat);
-        }
     }
 
     // --- Per-category runtime state ---
@@ -132,9 +96,8 @@ namespace EquipHide
 
     /**
      * @brief Supply runtime-resolved name-to-hash mappings from the IndexedStringA table.
-     * @details Must be called before load_config / register_parts for runtime
-     *          resolution to take effect. If not called, compile-time fallback
-     *          hashes are used.
+     * @details Must be called before load_config / register_parts for runtime resolution to take effect. If not called,
+     *          compile-time fallback hashes are used.
      */
     void set_runtime_hashes(std::unordered_map<std::string, uint32_t> &&nameToHash);
 
@@ -145,15 +108,15 @@ namespace EquipHide
      * @brief Returns names of known parts not present in the given map.
      * @details Used by the table scanner to track resolution progress.
      */
-    std::vector<std::string> get_unresolved_parts(
-        const std::unordered_map<std::string, uint32_t> &resolved);
+    std::vector<std::string> get_unresolved_parts(const std::unordered_map<std::string, uint32_t> &resolved);
 
     // --- Part classification ---
 
-    /** @brief Parse a "Parts" string and register all contained IDs for the given category.
-     *  @param storeBase If true (default), also caches partsStr as the base Parts for
-     *                   subsequent rebuilds. Set false when applying a per-character
-     *                   override so the base Parts string is preserved. */
+    /**
+     * @brief Parse a "Parts" string and register all contained IDs for the given category.
+     * @param storeBase If true (default), also caches partsStr as the base Parts for subsequent rebuilds. Set false
+     *                  when applying a per-character override so the base Parts string is preserved.
+     */
     void register_parts(Category cat, const std::string &partsStr, bool storeBase = true);
 
     /** @brief Finalize the lookup map and compute hash range bounds. Call after all register_parts(). */
@@ -162,27 +125,29 @@ namespace EquipHide
     // --- Per-character Parts overrides ---
 
     /** @brief Number of supported protagonist identities for per-char overrides. */
-    inline constexpr std::size_t kCharIdxCount = 3;
+    inline constexpr std::size_t k_charIdxCount = 3;
 
-    /** @brief Returns human-readable name for a character index (0=Kliff, 1=Damiane, 2=Oongka).
-     *  @return Non-empty string_view for valid indices, empty view otherwise. */
+    /**
+     * @brief Returns human-readable name for a character index (0=Kliff, 1=Damiane, 2=Oongka).
+     * @return Non-empty string_view for valid indices, empty view otherwise.
+     */
     std::string_view character_name_for_idx(std::size_t idx) noexcept;
 
-    /** @brief Store a per-character Parts override. Empty = inherit from the base [Section].
-     *  @note Does not rebuild; takes effect on the next set_active_character() or rebuild call. */
+    /**
+     * @brief Store a per-character Parts override. Empty = inherit from the base [Section].
+     * @note Does not rebuild; takes effect on the next set_active_character() or rebuild call.
+     */
     void set_per_char_parts(Category cat, std::size_t charIdx, std::string partsStr);
 
-    /** @brief Update the active character index. Triggers rebuild_part_lookup() on change.
-     *  @param charIdx 0..kCharIdxCount-1 for Kliff/Damiane/Oongka, or -1 to use only base Parts. */
+    /**
+     * @brief Update the active character index. Triggers rebuild_part_lookup() on change.
+     * @param charIdx 0..k_charIdxCount-1 for Kliff/Damiane/Oongka, or -1 to use only base Parts.
+     */
     void set_active_character(int charIdx);
-
-    /** @brief Returns the currently active character index, or -1 if using base only. */
-    int get_active_character() noexcept;
 
     /**
      * @brief Re-resolve part names against current runtime hashes and rebuild the lookup map.
-     * @details Used when the deferred table scan completes after config has already
-     *          been loaded with fallback hashes.
+     * @details Used when the deferred table scan completes after config has already been loaded with fallback hashes.
      */
     void rebuild_part_lookup();
 
@@ -203,8 +168,8 @@ namespace EquipHide
 
     /**
      * @brief Fast pre-filter: returns true if a hash has any classification entry.
-     * @details Uses a 64K-bit bitset (8 KB) covering the full 16-bit hash space.
-     *          Single memory access replaces the range check + outlier scan.
+     * @details Uses a 64K-bit bitset (8 KB) covering the full 16-bit hash space. Single memory access replaces the
+     *          range check + outlier scan.
      */
     bool needs_classification(uint32_t hash) noexcept;
 
@@ -215,49 +180,26 @@ namespace EquipHide
     bool is_any_category_hidden(CategoryMask mask);
 
     /**
-     * @brief Returns true if ANY category in the bitmask is hidden FOR a
-     *        specific protagonist idx.
-     * @details Looks up a per-character classification map keyed on charIdx
-     *          (0=Kliff, 1=Damiane, 2=Oongka). Each per-character map
-     *          merges the base [Section] Parts with that character's
-     *          [Section:CharName] Parts overrides exactly as the active-
-     *          character map does, but every map is kept resident
-     *          simultaneously so per-vis-ctrl writes can resolve the
-     *          right hide mask without re-running set_active_character.
+     * @brief Returns true if ANY category in the bitmask is hidden FOR a specific protagonist idx.
+     * @details Looks up a per-character classification map keyed on charIdx (0=Kliff, 1=Damiane, 2=Oongka). Each
+     *          per-character map merges the base [Section] Parts with that character's [Section:CharName] Parts
+     *          overrides exactly as the active-character map does, but every map is kept resident simultaneously so
+     *          per-vis-ctrl writes can resolve the right hide mask without re-running set_active_character.
      *
-     *          charIdx == -1 (unknown body / NPC follower / pre-resolve
-     *          tick) falls back to the active-character map so a slot
-     *          with unresolved identity mirrors the active character's
-     *          hide state (single-character semantics).
-     * @param mask Category bitmask -- the part-classification value
-     *             returned by classify_part.
-     * @param charIdx 0..kCharIdxCount-1 for a known protagonist, or -1
-     *                for the active-character fallback.
+     *          charIdx == -1 (unknown body / NPC follower / pre-resolve tick) falls back to the active-character map so
+     *          a slot with unresolved identity mirrors the active character's hide state (single-character semantics).
+     * @param mask Category bitmask -- the part-classification value returned by classify_part.
+     * @param charIdx 0..k_charIdxCount-1 for a known protagonist, or -1 for the active-character fallback.
      */
-    [[nodiscard]] bool is_any_category_hidden_for(CategoryMask mask,
-                                                  int charIdx) noexcept;
+    [[nodiscard]] bool is_any_category_hidden_for(CategoryMask mask, int charIdx) noexcept;
 
     /**
      * @brief Classify a part hash USING a specific character's part map.
-     * @details Mirror of classify_part keyed on charIdx. charIdx == -1
-     *          falls back to the active-character map so an unidentified
-     *          slot still classifies correctly under single-character
-     *          semantics.
-     * @return 0 if the hash is not tracked in the requested character's
-     *         (or the active character's, on -1) part map.
+     * @details Mirror of classify_part keyed on charIdx. charIdx == -1 falls back to the active-character map so an
+     *          unidentified slot still classifies correctly under single-character semantics.
+     * @return 0 if the hash is not tracked in the requested character's (or the active character's, on -1) part map.
      */
-    [[nodiscard]] CategoryMask classify_part_for(uint32_t partHash,
-                                                 int charIdx) noexcept;
-
-    /**
-     * @brief Per-character variant of needs_classification.
-     * @details Exists for parity with the active-character classification
-     *          fast path. Returns true if hash N has an entry in the
-     *          character-specific part map. Caller is expected to follow
-     *          up with classify_part_for and is_any_category_hidden_for.
-     */
-    [[nodiscard]] bool needs_classification_for(uint32_t hash,
-                                                int charIdx) noexcept;
+    [[nodiscard]] CategoryMask classify_part_for(uint32_t partHash, int charIdx) noexcept;
 
     /** @brief Recompute cached hidden-state masks from category_states(). Call after any mutation. */
     void update_hidden_mask();
@@ -265,23 +207,18 @@ namespace EquipHide
     /**
      * @brief Returns the registered part-hash to category-mask map by reference.
      * @details Double-buffered: readers see the active map while rebuild_part_lookup()
-     *          writes to the inactive one and flips. Safe as long as iteration does
-     *          not overlap a second rebuild.
+     *          writes to the inactive one and flips. Safe as long as iteration does not overlap a second rebuild.
      */
     const std::unordered_map<uint32_t, CategoryMask> &get_part_map();
 
     /**
      * @brief Returns the per-character part map for a specific protagonist idx.
-     * @details Built alongside the active-map double-buffer in
-     *          rebuild_part_lookup(); each character's map is a snapshot of
-     *          (base [Section] Parts merged with that character's
-     *          [Section:CharName] override) at the last rebuild point.
-     *          Caller MUST pass a valid charIdx (0..kCharIdxCount-1);
-     *          the active-character fallback is the consumer's
-     *          responsibility (see is_any_category_hidden_for and the
-     *          direct-write loop for the canonical pattern).
+     * @details Built alongside the active-map double-buffer in rebuild_part_lookup(); each character's map is a
+     *          snapshot of (base [Section] Parts merged with that character's [Section:CharName] override) at the last
+     *          rebuild point. Caller MUST pass a valid charIdx (0..k_charIdxCount-1); the active-character fallback is
+     *          the consumer's responsibility (see is_any_category_hidden_for and the direct-write loop for the
+     *          canonical pattern).
      */
-    [[nodiscard]] const std::unordered_map<uint32_t, CategoryMask> &
-    get_part_map_for(int charIdx) noexcept;
+    [[nodiscard]] const std::unordered_map<uint32_t, CategoryMask> &get_part_map_for(int charIdx) noexcept;
 
 } // namespace EquipHide

@@ -12,117 +12,99 @@ namespace Transmog
     static VisualEquipChangeFn s_origVEC = nullptr;
     static BatchEquipFn s_origBatchEquip = nullptr;
 
-    VisualEquipChangeFn &orig_vec() { return s_origVEC; }
-    BatchEquipFn &orig_batch_equip() { return s_origBatchEquip; }
+    VisualEquipChangeFn &orig_vec()
+    {
+        return s_origVEC;
+    }
+    BatchEquipFn &orig_batch_equip()
+    {
+        return s_origBatchEquip;
+    }
 
     bool is_player_actor(__int64 a1) noexcept
     {
-        // The role byte at typeEntry+1 is character-specific
-        // (Kliff=1, Damiane=4, Oongka unique), not a clean player/NPC
-        // flag, so an equality check would silently reject companions.
+        // The role byte at typeEntry+1 is character-specific (Kliff=1, Damiane=4, Oongka unique), not a clean
+        // player/NPC flag, so an equality check would silently reject companions.
         //
-        // Filter used here: pointer chain is readable AND typeEntry+8
-        // is a non-null pointer. For every party member sampled, this
-        // value is the same ActorManager pointer; for unrelated NPCs
-        // the pointer differs or the chain faults. Good enough for
-        // the transmog hooks -- misclassification produces a harmless
-        // no-op apply (no presets exist for unknown chars).
+        // Filter used here: pointer chain is readable AND typeEntry+8 is a non-null pointer. For every party member
+        // sampled, this value is the same ActorManager pointer; for unrelated NPCs the pointer differs or the chain
+        // faults. Good enough for the transmog hooks -- misclassification produces a harmless no-op apply (no presets
+        // exist for unknown chars).
         //
-        // DMK::Memory::seh_read_chain walks a1+8 -> +0x88 -> +8 under a
-        // single SEH frame, screening each link with plausible_userspace_ptr
-        // and reading the terminal ActorManager pointer. On any faulted or
-        // implausible link it returns nullopt, which the >= 0x10000 guard
-        // rejects. This keeps the whole chain in one fault frame without the
-        // SEH-vs-C++-destructors restriction that a hand-rolled __try imposes.
+        // DMK::Memory::seh_read_chain walks a1+8 -> +0x88 -> +8 under a single SEH frame, screening each link with
+        // plausible_userspace_ptr and reading the terminal ActorManager pointer. On any faulted or implausible link it
+        // returns nullopt, which the >= 0x10000 guard rejects. This keeps the whole chain in one fault frame without
+        // the SEH-vs-C++-destructors restriction that a hand-rolled __try imposes.
         if (a1 < 0x10000)
             return false;
 
-        const auto actorMgr = DMK::Memory::seh_read_chain<uintptr_t>(
-            static_cast<uintptr_t>(a1), {0x8, 0x88, 0x8});
+        const auto actorMgr = DMK::Memory::seh_read_chain<uintptr_t>(static_cast<uintptr_t>(a1), {0x8, 0x88, 0x8});
         return actorMgr.has_value() && *actorMgr >= 0x10000;
     }
 
     // --- VEC hook (sub_14076D520) ---
-    // The set of slot tags LT operates on is owned by slot_from_game_slot
-    // (the single source of truth -- returns nullopt for the engine-
-    // internal 0x0E and Oongka-only 0x15 and a TransmogSlot for every
-    // tag LT manages). The hook below queries it directly.
+    // The set of slot tags LT operates on is owned by slot_from_game_slot (the single source of truth -- returns
+    // nullopt for the engine-internal 0x0E and Oongka-only 0x15 and a TransmogSlot for every tag LT manages). The hook
+    // below queries it directly.
 
     // Returns true iff a1 matches the controlled-character's actor
-    // component (WS → ActorManager+0x30 → UserActor+0x58 → +0xD8).
-    // Early-outs on mismatch prevent LT from re-running its carrier-
-    // apply on every background companion's equip/VEC event -- each
-    // such unintended apply was mutating scene-graph state for the
-    // wrong actor, accumulating dangling pointers and crashing the
-    // game on later traversals (weapon draw, glide, etc.).
+    // component (WS -> ActorManager+0x30 -> UserActor+0x58 -> +0xD8).
+    // Early-outs on mismatch prevent LT from re-running its carrier-apply on every background companion's equip/VEC
+    // event -- each such unintended apply was mutating scene-graph state for the wrong actor, accumulating dangling
+    // pointers and crashing the game on later traversals (weapon draw, glide, etc.).
     static bool is_controlled_actor(__int64 a1) noexcept
     {
         if (a1 < 0x10000)
             return false;
         const auto controlled = resolve_player_component();
         if (!controlled)
-            return true; // can't resolve → don't filter
+            return true; // can't resolve -> don't filter
         return a1 == controlled;
     }
 
     __int64 __fastcall on_vec(__int64 a1, __int16 slotId, __int16 itemId, __int64 a4)
     {
-        // Snapshot the trampoline pointer at entry. Even with SafetyHook
-        // draining in-flight callers under its shared lock during
-        // shutdown, a game thread that re-enters the patched site
-        // between the drain and the DLL unmap can observe a torn
-        // trampoline. A null snapshot means teardown is in progress;
-        // bail with a benign zero return rather than dereferencing
-        // through a dangling pointer.
+        // Snapshot the trampoline pointer at entry. Even with SafetyHook draining in-flight callers under its shared
+        // lock during shutdown, a game thread that re-enters the patched site between the drain and the DLL unmap can
+        // observe a torn trampoline. A null snapshot means teardown is in progress; bail with a benign zero return
+        // rather than dereferencing through a dangling pointer.
         const auto trampoline = s_origVEC;
         if (!trampoline)
             return 0;
 
         // Recursion guard + suppress during clear+apply cycle.
-        if (in_transmog().load(std::memory_order_relaxed) ||
-            suppress_vec().load(std::memory_order_acquire))
+        if (in_transmog().load(std::memory_order_relaxed) || suppress_vec().load(std::memory_order_acquire))
             return trampoline(a1, slotId, itemId, a4);
 
         __int64 ret = trampoline(a1, slotId, itemId, a4);
 
-        // Intentionally NO flag_enabled gate here. When the user
-        // toggles LT off we still need apply_all_transmog to fire
-        // so its stale-fake cleanup pass tears down restore meshes
-        // left over from a prior session. apply_all_transmog has
-        // its own flag_enabled handling: it force-deactivates every
-        // mapping in a local copy when disabled, so no fakes get
-        // applied while still running cleanup. Gating here would
-        // freeze the dispatcher, leaving the prior session's last
-        // fake painted on the actor until the next radial swap.
+        // Intentionally NO flag_enabled gate here. When the user toggles LT off we still need apply_all_transmog to
+        // fire so its stale-fake cleanup pass tears down restore meshes left over from a prior session.
+        // apply_all_transmog has its own flag_enabled handling: it force-deactivates every mapping in a local copy when
+        // disabled, so no fakes get applied while still running cleanup. Gating here would freeze the dispatcher,
+        // leaving the prior session's last fake painted on the actor until the next radial swap.
 
         if (flag_player_only().load(std::memory_order_relaxed) && !is_player_actor(a1))
             return ret;
 
-        // Only schedule apply for the currently-controlled character.
-        // Background companion equip events route through VEC with
-        // their own a1 and must not drive LT's dispatch.
+        // Only schedule apply for the currently-controlled character. Background companion equip events route through
+        // VEC with their own a1 and must not drive LT's dispatch.
         if (!is_controlled_actor(a1))
             return ret;
 
-        // Skip equip events for slot tags LT doesn't manage (e.g. the
-        // engine-internal 0x0E or NPC-only 0x15). We still capture a1
-        // so manual applies have the latest player pointer.
+        // Skip equip events for slot tags LT doesn't manage (e.g. the engine-internal 0x0E or NPC-only 0x15). We still
+        // capture a1 so manual applies have the latest player pointer.
         player_a1().store(a1, std::memory_order_release);
         const auto tslotOpt = slot_from_game_slot(slotId);
         if (!tslotOpt)
             return ret;
 
-        // Force the dispatcher to re-apply this specific slot. Without
-        // this signal, when the user has a transmog already configured
-        // (so wouldBe == prevIds[i]) and the underlying real item
-        // changed on a non-armor slot, the dispatcher's "no state
-        // change" gate would skip -- last_applied_real_ids only tracks
-        // the 5 armor slots, so a real change on Earring/Ring/Lantern/
-        // Glasses/Mask/Backpack/Bracelet/weapon is otherwise invisible
-        // to it. Setting the flag bypasses both the whole-call early-
-        // out and the per-slot one. Phase A `tear_down_fake` then runs
-        // against the prior carrier so the new real item gets re-
-        // dressed cleanly.
+        // Force the dispatcher to re-apply this specific slot. Without this signal, when the user has a transmog
+        // already configured (so wouldBe == prevIds[i]) and the underlying real item changed on a non-armor slot, the
+        // dispatcher's "no state change" gate would skip -- last_applied_real_ids only tracks the 5 armor slots, so a
+        // real change on Earring/Ring/Lantern/ Glasses/Mask/Backpack/Bracelet/weapon is otherwise invisible to it.
+        // Setting the flag bypasses both the whole-call early-out and the per-slot one. Phase A `tear_down_fake` then
+        // runs against the prior carrier so the new real item gets re-dressed cleanly.
         force_apply_pending()[static_cast<std::size_t>(*tslotOpt)] = true;
 
         schedule_transmog(a1, 0);
@@ -132,14 +114,11 @@ namespace Transmog
 
     // --- BatchEquip hook (sub_14075BBF0) ---
 
-    static uint32_t *__fastcall on_batch_equip_impl(
-        __int64 a1, uint32_t *a2, __int64 **a3, __int64 **a4)
+    static uint32_t *__fastcall on_batch_equip_impl(__int64 a1, uint32_t *a2, __int64 **a3, __int64 **a4)
     {
-        // Snapshot the trampoline pointer at entry; see on_vec for the
-        // teardown-window rationale. Returning the caller's a2 buffer
-        // pointer matches the upstream contract for a no-op pass-through
-        // (the game checks the pointer for non-null, not the buffer
-        // contents, when an early bail is needed).
+        // Snapshot the trampoline pointer at entry; see on_vec for the teardown-window rationale. Returning the
+        // caller's a2 buffer pointer matches the upstream contract for a no-op pass-through (the game checks the
+        // pointer for non-null, not the buffer contents, when an early bail is needed).
         const auto trampoline = s_origBatchEquip;
         if (!trampoline)
             return a2;
@@ -149,52 +128,40 @@ namespace Transmog
 
         uint32_t *ret = trampoline(a1, a2, a3, a4);
 
-        // Intentionally NO flag_enabled gate; same reasoning as
-        // on_vec_impl above. apply_all_transmog gates internally
+        // Intentionally NO flag_enabled gate; same reasoning as on_vec_impl above. apply_all_transmog gates internally
         // and runs cleanup-only when the toggle is off.
-        if ((!flag_player_only().load(std::memory_order_relaxed) || is_player_actor(a1)) &&
-            is_controlled_actor(a1))
+        if ((!flag_player_only().load(std::memory_order_relaxed) || is_player_actor(a1)) && is_controlled_actor(a1))
         {
-            // A save-load or zone transition routes a different a1
-            // through this path. Every cached "damaged" flag and
-            // lastAppliedRealIds entry belongs to the previous
-            // incarnation and must be wiped before the next apply.
-            const __int64 prevA1 =
-                player_a1().exchange(a1, std::memory_order_acq_rel);
+            // A save-load or zone transition routes a different a1 through this path. Every cached "damaged" flag and
+            // lastAppliedRealIds entry belongs to the previous incarnation and must be wiped before the next apply.
+            const __int64 prevA1 = player_a1().exchange(a1, std::memory_order_acq_rel);
             if (prevA1 != a1)
             {
                 real_damaged().fill(false);
                 last_applied_real_ids().fill(0);
 
-                // On save-load / zone transition only: force a re-apply
-                // of every slot LT manages. After the wipe above, the
-                // dispatcher's `realChanged` check recovers re-apply
-                // for the 5 armor slots, but any configured transmog
-                // on accessory or weapon slots would otherwise be
-                // missed (last_applied_real_ids is 5-armor-only). For
-                // ordinary equip events the per-slot VEC hook already
-                // sets force_apply_pending for the changed slot, so
-                // BatchEquip does not need to broadcast.
+                // On save-load / zone transition only: force a re-apply of every slot LT manages. After the wipe above,
+                // the dispatcher's `realChanged` check recovers re-apply for the 5 armor slots, but any configured
+                // transmog on accessory or weapon slots would otherwise be missed (last_applied_real_ids is
+                // 5-armor-only). For ordinary equip events the per-slot VEC hook already sets force_apply_pending for
+                // the changed slot, so BatchEquip does not need to broadcast.
                 auto &fa = force_apply_pending();
                 for (std::size_t i = 0; i < k_slotCount; ++i)
                     fa[i] = true;
             }
 
             DMK::Logger::get_instance().debug(
-                "BatchEquip[player]: a1={:#018x}, *(a1+8)={:#018x}, scheduling transmog",
-                static_cast<uint64_t>(a1),
-                a1 > 0x10000
-                    ? static_cast<uint64_t>(
-                          DMK::Memory::seh_read<uintptr_t>(static_cast<uintptr_t>(a1) + 8).value_or(0))
-                    : 0ULL);
+                "BatchEquip[player]: a1={:#018x}, *(a1+8)={:#018x}, scheduling transmog", static_cast<uint64_t>(a1),
+                a1 > 0x10000 ? static_cast<uint64_t>(
+                                   DMK::Memory::seh_read<uintptr_t>(static_cast<uintptr_t>(a1) + 8).value_or(0))
+                             : 0ULL);
             schedule_transmog(a1, 0);
         }
 
         return ret;
     }
 
-    uint32_t *__fastcall on_batch_equip(
-        __int64 a1, uint32_t *a2, __int64 **a3, __int64 **a4)
+    uint32_t *__fastcall on_batch_equip(__int64 a1, uint32_t *a2, __int64 **a3, __int64 **a4)
     {
         __try
         {
@@ -202,9 +169,8 @@ namespace Transmog
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
-            // Mirror the impl's null-snapshot guard: if SEH fires while
-            // the trampoline has just been swapped out, do not deref
-            // through a dangling pointer.
+            // Mirror the impl's null-snapshot guard: if SEH fires while the trampoline has just been swapped out, do
+            // not deref through a dangling pointer.
             const auto trampoline = s_origBatchEquip;
             return trampoline ? trampoline(a1, a2, a3, a4) : a2;
         }

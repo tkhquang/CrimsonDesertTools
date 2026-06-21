@@ -17,35 +17,26 @@ namespace Transmog
 {
     namespace
     {
-        // Process-lifetime stash for the per-binding cancellation
-        // guards returned by register_press_combo. Each guard owns a
-        // shared_ptr<atomic<bool>> that gates the user callback;
-        // dropping the guard cancels the binding. We only need the
-        // guards for shutdown ordering (they release in destructor
-        // order), so a plain vector with reserve is fine.
+        // Process-lifetime stash for the per-binding cancellation guards returned by register_press_combo. Each guard
+        // owns a shared_ptr<atomic<bool>> that gates the user callback; dropping the guard cancels the binding. We only
+        // need the guards for shutdown ordering (they release in destructor order), so a plain vector with reserve is
+        // fine.
         std::vector<DMK::Config::InputBindingGuard> &binding_guards()
         {
             static std::vector<DMK::Config::InputBindingGuard> s_guards;
             return s_guards;
         }
 
-        DMK::Config::InputBindingGuard add_binding(
-            std::string_view section,
-            std::string_view ini_key,
-            std::string_view log_name,
-            std::string_view input_name,
-            std::function<void()> on_press,
-            std::string_view default_value)
+        DMK::Config::InputBindingGuard add_binding(std::string_view section, std::string_view ini_key,
+                                                   std::string_view log_name, std::string_view input_name,
+                                                   std::function<void()> on_press, std::string_view default_value)
         {
-            // Empty / "NONE" INI values are recognised as opt-out sentinels
-            // by DMK::Config::parse_key_combo_list and produce an unbound
-            // binding silently. The binding name remains addressable for a
-            // later non-empty update_binding_combos when the user assigns a
-            // real combo on a live INI reload, with no consumer-side
+            // Empty / "NONE" INI values are recognised as opt-out sentinels by DMK::Config::parse_key_combo_list and
+            // produce an unbound binding silently. The binding name remains addressable for a later non-empty
+            // update_binding_combos when the user assigns a real combo on a live INI reload, with no consumer-side
             // wrapper required.
-            return DMK::Config::register_press_combo(
-                section, ini_key, log_name,
-                input_name, std::move(on_press), default_value);
+            return DMK::Config::register_press_combo(section, ini_key, log_name, input_name, std::move(on_press),
+                                                     default_value);
         }
     } // namespace
 
@@ -60,23 +51,19 @@ namespace Transmog
             "General", "ToggleHotkey", "Toggle Hotkey", "ToggleTransmog",
             []()
             {
-                // flag_enabled() is the single source of truth used by
-                // every hook and the overlay checkbox. The toggle flips
-                // it so all state stays consistent.
+                // flag_enabled() is the single source of truth used by every hook and the overlay checkbox. The toggle
+                // flips it so all state stays consistent.
                 auto &ff = flag_enabled();
-                const bool nowEnabled =
-                    !ff.load(std::memory_order_relaxed);
+                const bool nowEnabled = !ff.load(std::memory_order_relaxed);
                 ff.store(nowEnabled, std::memory_order_relaxed);
                 if (nowEnabled)
                 {
-                    DMK::Logger::get_instance().info(
-                        "Transmog ON (hotkey) -- applying");
+                    DMK::Logger::get_instance().info("Transmog ON (hotkey) -- applying");
                     Transmog::manual_apply();
                 }
                 else
                 {
-                    DMK::Logger::get_instance().info(
-                        "Transmog OFF (hotkey) -- restoring original");
+                    DMK::Logger::get_instance().info("Transmog OFF (hotkey) -- restoring original");
                     Transmog::manual_clear();
                 }
             },
@@ -97,8 +84,7 @@ namespace Transmog
             {
                 // Clear also flips flag_enabled to false so a subsequent
                 // Toggle sees cleared == disabled (avoids 2-press bug).
-                DMK::Logger::get_instance().info(
-                    "Clear hotkey pressed -- disabling transmog");
+                DMK::Logger::get_instance().info("Clear hotkey pressed -- disabling transmog");
                 flag_enabled().store(false, std::memory_order_relaxed);
                 Transmog::manual_clear();
             },
@@ -165,11 +151,7 @@ namespace Transmog
 
         guards.push_back(add_binding(
             "General", "OverlayToggleHotkey", "Overlay Toggle Hotkey", "OverlayToggle",
-            []()
-            {
-                toggle_overlay_visible();
-            },
-            "Home"));
+            []() { toggle_overlay_visible(); }, "Home"));
 
         logger.info("Hotkeys registered: {} binding(s)", guards.size());
     }
