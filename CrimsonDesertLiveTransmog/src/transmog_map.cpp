@@ -25,9 +25,8 @@ namespace Transmog
         {k_hashLowerbody, TransmogSlot::Chest},
     }};
 
-    // Per-slot display names + engine slot tags + prefab prefixes are
-    // sourced from `slot_metadata.hpp::k_slotMetadata`. Each accessor
-    // here is a thin lookup against that single table.
+    // Per-slot display names + engine slot tags + prefab prefixes are sourced from `slot_metadata.hpp::k_slotMetadata`.
+    // Each accessor here is a thin lookup against that single table.
 
     std::optional<TransmogSlot> slot_from_equip_hash(uint32_t hash)
     {
@@ -70,22 +69,21 @@ namespace Transmog
     }
 
     // Engine slot tag -> TransmogSlot. Linear search of k_slotMetadata
-    // (20 entries; cheap; called sparingly). Returns std::nullopt for
-    // tags LT does not manage (e.g. 0x0E or Oongka-only 0x15).
+    // (20 entries; cheap; called sparingly). Returns std::nullopt for tags LT does not manage (e.g. 0x0E or Oongka-only
+    // 0x15).
     std::optional<TransmogSlot> slot_from_game_slot(int16_t gameSlotId)
     {
         return slot_from_game_tag(gameSlotId);
     }
 
-    // Friendly engine-tag name. Looks up the matching SlotMetadata by
-    // gameTag and returns its displayName; "Unknown" for tags without a
-    // managed slot (0x0E, 0x15, anything > 0x15).
+    // Friendly engine-tag name. Looks up the matching SlotMetadata by gameTag and returns its displayName; "Unknown"
+    // for tags without a managed slot (0x0E, 0x15, anything > 0x15).
     const char *game_slot_name(int16_t gameSlotId)
     {
         if (auto s = slot_from_game_tag(gameSlotId))
             return slot_meta(*s).displayName;
-        // Tag 0x15 (OongkaRocket) is intentionally unmanaged but still
-        // shows up in [slot-discovery] dumps for diagnostic purposes.
+        // Tag 0x15 (OongkaRocket) is intentionally unmanaged but still shows up in [slot-discovery] dumps for
+        // diagnostic purposes.
         if (gameSlotId == 0x15)
             return "OongkaRocket";
         return "Unknown";
@@ -115,16 +113,17 @@ namespace Transmog
 
     bool slots_share_picker(TransmogSlot a, TransmogSlot b)
     {
-        if (a == b) return true;
+        if (a == b)
+            return true;
 
-        // Pairs from the engine's typeCode taxonomy. Picker filter
-        // checks both directions so order doesn't matter.
-        const auto eq = [&](TransmogSlot x, TransmogSlot y) {
-            return (a == x && b == y) || (a == y && b == x);
-        };
-        if (eq(TransmogSlot::Earring1,  TransmogSlot::Earring2))  return true;
-        if (eq(TransmogSlot::Ring1,     TransmogSlot::Ring2))     return true;
-        if (eq(TransmogSlot::MainHand, TransmogSlot::OffHand))  return true;
+        // Pairs from the engine's typeCode taxonomy. Picker filter checks both directions so order doesn't matter.
+        const auto eq = [&](TransmogSlot x, TransmogSlot y) { return (a == x && b == y) || (a == y && b == x); };
+        if (eq(TransmogSlot::Earring1, TransmogSlot::Earring2))
+            return true;
+        if (eq(TransmogSlot::Ring1, TransmogSlot::Ring2))
+            return true;
+        if (eq(TransmogSlot::MainHand, TransmogSlot::OffHand))
+            return true;
         return false;
     }
 

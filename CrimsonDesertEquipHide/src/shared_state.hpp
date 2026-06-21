@@ -21,34 +21,28 @@ namespace EquipHide
         uintptr_t mapInsert = 0;
         uintptr_t indexedStringGlobal = 0;
         /**
-         * @brief Return-address landmark inside createPrefabFromPartPrefab
-         *        (sub_14261B6C0), on the instruction right after its
-         *        inner `call sub_1402E1430` (through which PostfixEval
-         *        runs for newly-instantiated prefabs).
+         * @brief Return-address landmark inside createPrefabFromPartPrefab (sub_14261B6C0), on the instruction right
+         *        after its inner `call sub_1402E1430` (through which PostfixEval runs for newly-instantiated prefabs).
          *
-         * Every PostfixEval invocation that comes from prefab
-         * instantiation (NPC creation events at load) carries this
-         * return address on its stack; no player-side invocation does.
-         * BaldFix uses this stack-presence check as a deterministic
-         * call-graph filter -- no ctx caching, no frequency heuristics.
-         * Resolved via an AOB anchor at mod init.
+         * Every PostfixEval invocation that comes from prefab instantiation (NPC creation events at load) carries this
+         * return address on its stack; no player-side invocation does. BaldFix uses this stack-presence check as a
+         * deterministic call-graph filter -- no ctx caching, no frequency heuristics. Resolved via an AOB anchor at mod
+         * init.
          */
         uintptr_t npcPfeReturnAddr = 0;
     };
 
     ResolvedAddresses &resolved_addrs();
 
-    /** @brief Per-protagonist vis_ctrl pointers and injection state.
-     *  @details visCharIdx is parallel to visCtrls: visCharIdx[i] holds
-     *           the 0-based protagonist index (0=Kliff, 1=Damiane,
-     *           2=Oongka) that visCtrls[i] belongs to, or -1 when the
-     *           identity could not be resolved (NPC follower, unknown
-     *           protagonist, or transient torn read just after a swap).
-     *           Entries with idx == -1 fall back to the active-character
-     *           hide-mask in the per-character hide write so old single-
-     *           character behaviour is preserved for unidentified slots.
-     *           Stored as int32 atomics because std::atomic<signed char>
-     *           is not guaranteed lock-free on x64. */
+    /**
+     * @brief Per-protagonist vis_ctrl pointers and injection state.
+     * @details visCharIdx is parallel to visCtrls: visCharIdx[i] holds the 0-based protagonist index (0=Kliff,
+     *          1=Damiane, 2=Oongka) that visCtrls[i] belongs to, or -1 when the identity could not be resolved (NPC
+     *          follower, unknown protagonist, or transient torn read just after a swap). Entries with idx == -1 fall
+     *          back to the active-character hide-mask in the per-character hide write so old single-character behaviour
+     *          is preserved for unidentified slots. Stored as int32 atomics because std::atomic<signed char> is not
+     *          guaranteed lock-free on x64.
+     */
     struct PlayerState
     {
         std::atomic<uintptr_t> visCtrls[k_maxProtagonists]{};
@@ -65,26 +59,19 @@ namespace EquipHide
 
     /**
      * @brief Composite key for the per-(visCtrl, address) original-value map.
-     * @details Keying purely on the vis-byte address makes character-swap
-     *          invalidation lossy: two protagonists sharing the same part
-     *          name resolve to two distinct vis-byte addresses, but
-     *          orphan-restoring "every entry whose hash is not in the
-     *          active map" would also revert the previously-active
-     *          character's vis bytes back to visible because that
-     *          character's vis ctrl no longer ticks through
-     *          apply_direct_vis_write. Including visCtrl in the key
-     *          scopes restore decisions to the matching vis ctrl and
-     *          leaves the inactive character's hide state in place.
+     * @details Keying purely on the vis-byte address makes character-swap invalidation lossy: two protagonists sharing
+     *          the same part name resolve to two distinct vis-byte addresses, but orphan-restoring "every entry whose
+     *          hash is not in the active map" would also revert the previously-active character's vis bytes back to
+     *          visible because that character's vis ctrl no longer ticks through apply_direct_vis_write. Including
+     *          visCtrl in the key scopes restore decisions to the matching vis ctrl and leaves the inactive character's
+     *          hide state in place.
      */
     struct VisKey
     {
         uintptr_t visCtrl;
         uintptr_t addr;
 
-        bool operator==(const VisKey &other) const noexcept
-        {
-            return visCtrl == other.visCtrl && addr == other.addr;
-        }
+        bool operator==(const VisKey &other) const noexcept { return visCtrl == other.visCtrl && addr == other.addr; }
     };
 
     /** @brief Hash for VisKey -- xor mix of the two pointer fields. */
@@ -92,11 +79,9 @@ namespace EquipHide
     {
         std::size_t operator()(const VisKey &k) const noexcept
         {
-            // The two fields are unrelated heap addresses on x64; xor
-            // mix is sufficient because the std lib hashes each field
-            // through a strong integer hash before composition is even
-            // observable. Rotate one half so two pointers that happen
-            // to alias do not collapse to zero.
+            // The two fields are unrelated heap addresses on x64; xor mix is sufficient because the std lib hashes each
+            // field through a strong integer hash before composition is even observable. Rotate one half so two
+            // pointers that happen to alias do not collapse to zero.
             const auto a = std::hash<uintptr_t>{}(k.visCtrl);
             const auto b = std::hash<uintptr_t>{}(k.addr);
             return a ^ (b + 0x9e3779b97f4a7c15ULL + (a << 6) + (a >> 2));
@@ -131,11 +116,12 @@ namespace EquipHide
             .count();
     }
 
-    /** @brief Unsafe pointer read -- use ONLY inside SEH-protected hot paths.
-     *  @details Forwards to DMKMemory::read_ptr_unchecked, which applies the
-     *           same low-address result guard plus a source-address guard and
-     *           an aliasing-safe memcpy read. No OS-level fault protection: the
-     *           caller must keep this inside an SEH frame for stale pointers. */
+    /**
+     * @brief Unsafe pointer read -- use ONLY inside SEH-protected hot paths.
+     * @details Forwards to DMKMemory::read_ptr_unchecked, which applies the same low-address result guard plus a
+     *          source-address guard and an aliasing-safe memcpy read. No OS-level fault protection: the caller must
+     *          keep this inside an SEH frame for stale pointers.
+     */
     inline uintptr_t read_ptr_unsafe(uintptr_t base, ptrdiff_t off) noexcept
     {
         return DMKMemory::read_ptr_unchecked(base, off);

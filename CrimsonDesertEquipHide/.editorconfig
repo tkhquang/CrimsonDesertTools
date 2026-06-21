@@ -1,0 +1,23 @@
+# EditorConfig for CrimsonDesertEquipHide (https://editorconfig.org).
+# Line endings are intentionally left to git's normalization (.gitattributes /
+# core.autocrlf), so this file does not set end_of_line.
+root = true
+
+[*]
+charset = utf-8
+indent_style = space
+indent_size = 4
+trim_trailing_whitespace = true
+insert_final_newline = true
+
+# Data and config files conventionally use two-space indentation.
+[*.{yml,yaml,json}]
+indent_size = 2
+
+# C++ sources follow the 120-column baseline codified in .clang-format.
+[*.{cpp,hpp}]
+max_line_length = 120
+
+# Markdown uses trailing whitespace for hard line breaks.
+[*.md]
+trim_trailing_whitespace = false

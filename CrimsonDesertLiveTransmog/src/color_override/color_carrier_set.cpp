@@ -7,25 +7,21 @@ namespace Transmog::ColorOverride::CarrierSet
 {
     namespace
     {
-        std::array<std::array<std::atomic<std::uintptr_t>, k_maxCarrierMatInst>,
-                   k_slotCount> g_matinst{};
+        std::array<std::array<std::atomic<std::uintptr_t>, k_maxCarrierMatInst>, k_slotCount> g_matinst{};
         std::array<std::atomic<std::size_t>, k_slotCount> g_matinstCount{};
 
-        std::array<std::array<std::atomic<std::uint32_t>, k_maxCarrierHashes>,
-                   k_slotCount> g_hash{};
+        std::array<std::array<std::atomic<std::uint32_t>, k_maxCarrierHashes>, k_slotCount> g_hash{};
         std::array<std::atomic<std::size_t>, k_slotCount> g_hashCount{};
-    }
+    } // namespace
 
     bool add_matinst(int slot, std::uintptr_t mi) noexcept
     {
-        if (mi == 0 || slot < 0
-            || static_cast<std::size_t>(slot) >= k_slotCount)
+        if (mi == 0 || slot < 0 || static_cast<std::size_t>(slot) >= k_slotCount)
             return false;
         auto &matinst = g_matinst[static_cast<std::size_t>(slot)];
-        auto &count   = g_matinstCount[static_cast<std::size_t>(slot)];
+        auto &count = g_matinstCount[static_cast<std::size_t>(slot)];
         const auto cnt = count.load(std::memory_order_acquire);
-        const auto upper = (cnt < k_maxCarrierMatInst) ? cnt
-                                                       : k_maxCarrierMatInst;
+        const auto upper = (cnt < k_maxCarrierMatInst) ? cnt : k_maxCarrierMatInst;
         for (std::size_t i = 0; i < upper; ++i)
         {
             if (matinst[i].load(std::memory_order_relaxed) == mi)
@@ -43,21 +39,18 @@ namespace Transmog::ColorOverride::CarrierSet
 
     bool add_hash(int slot, std::uint32_t hash) noexcept
     {
-        if (hash == 0 || slot < 0
-            || static_cast<std::size_t>(slot) >= k_slotCount)
+        if (hash == 0 || slot < 0 || static_cast<std::size_t>(slot) >= k_slotCount)
             return false;
         auto &hashes = g_hash[static_cast<std::size_t>(slot)];
-        auto &count  = g_hashCount[static_cast<std::size_t>(slot)];
+        auto &count = g_hashCount[static_cast<std::size_t>(slot)];
         const auto cnt = count.load(std::memory_order_acquire);
-        const auto upper = (cnt < k_maxCarrierHashes) ? cnt
-                                                      : k_maxCarrierHashes;
+        const auto upper = (cnt < k_maxCarrierHashes) ? cnt : k_maxCarrierHashes;
         for (std::size_t i = 0; i < upper; ++i)
             if (hashes[i].load(std::memory_order_relaxed) == hash)
                 return true;
 
         const auto now = State::now_ms();
-        const auto last = State::hash_set_last_add_ms(slot).load(
-            std::memory_order_acquire);
+        const auto last = State::hash_set_last_add_ms(slot).load(std::memory_order_acquire);
         if (last != 0 && (now - last) > State::k_hashSetBurstLockMs)
             return false; // burst settled; refuse new growth
 
@@ -78,10 +71,8 @@ namespace Transmog::ColorOverride::CarrierSet
             return -1;
         for (std::size_t s = 0; s < k_slotCount; ++s)
         {
-            const auto cnt =
-                g_hashCount[s].load(std::memory_order_acquire);
-            const auto upper = (cnt < k_maxCarrierHashes) ? cnt
-                                                          : k_maxCarrierHashes;
+            const auto cnt = g_hashCount[s].load(std::memory_order_acquire);
+            const auto upper = (cnt < k_maxCarrierHashes) ? cnt : k_maxCarrierHashes;
             const auto &hashes = g_hash[s];
             for (std::size_t i = 0; i < upper; ++i)
             {
@@ -111,4 +102,4 @@ namespace Transmog::ColorOverride::CarrierSet
         for (std::size_t s = 0; s < k_slotCount; ++s)
             clear_slot(static_cast<int>(s));
     }
-}
+} // namespace Transmog::ColorOverride::CarrierSet

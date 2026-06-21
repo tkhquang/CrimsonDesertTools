@@ -283,6 +283,10 @@ Press **Numpad 0** in-game to trigger a reload after rebuilding.
 
 Built with [DetourModKit](https://github.com/tkhquang/DetourModKit) for core functionality (AOB scanning, hook management, logging, input).
 
+### Code style
+
+The C++ sources follow a hard 120-column baseline and DetourModKit's coding conventions ([AGENTS.md](https://github.com/tkhquang/DetourModKit/blob/main/AGENTS.md)), codified in `.clang-format` (clang-format 20), `.editorconfig`, and an advisory `.clang-tidy`. Run the formatter over any changed sources before committing and keep it idempotent (`clang-format --dry-run --Werror` must be silent). Editor IntelliSense and build tasks are configured at the repository-root `.vscode/`, not under `CrimsonDesertLiveTransmog/`.
+
 ### Credits & acknowledgements
 
 - [Frans 'Otis_Inf' Bouma](https://github.com/FransBouma) - v1.05.00 AOB shift diagnosis, plus modding direction and guidance

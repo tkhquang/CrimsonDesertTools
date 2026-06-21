@@ -14,19 +14,19 @@ namespace EquipHide
 {
     static std::array<CategoryState, CATEGORY_COUNT> s_states{};
 
-    std::array<CategoryState, CATEGORY_COUNT>& category_states()
+    std::array<CategoryState, CATEGORY_COUNT> &category_states()
     {
         return s_states;
     }
 
-    /* Part names and categories. Hashes resolved at runtime via
-       IndexedStringA table scan. See .idea/research/ for full mapping. */
+    /* Part names and categories. Hashes resolved at runtime via IndexedStringA table scan. See .idea/research/ for full
+       mapping. */
 
     // --- Name -> hash table ---
     struct NamedPart
     {
-        const char* name;
-        Category    cat;
+        const char *name;
+        Category cat;
     };
 
     // clang-format off
@@ -218,56 +218,49 @@ namespace EquipHide
     static std::unordered_map<std::string, uint32_t> s_runtimeHashes;
     static bool s_hasRuntimeHashes = false;
 
-    /* Written during init (config load) before hooks; read by rebuild_part_lookup()
-       on the background scan thread. Hook installation provides happens-before. */
+    /* Written during init (config load) before hooks; read by rebuild_part_lookup() on the background scan thread. Hook
+       installation provides happens-before. */
     static std::string s_categoryParts[CATEGORY_COUNT];
 
-    /* Per-character Parts overrides. Empty = inherit from s_categoryParts[cat].
-       Written during config load and never thereafter, so no synchronisation needed
-       beyond the existing s_rebuildMutex guard on rebuild_part_lookup. */
-    static std::string s_categoryPartsPerChar[CATEGORY_COUNT][kCharIdxCount];
+    /* Per-character Parts overrides. Empty = inherit from s_categoryParts[cat]. Written during config load and never
+       thereafter, so no synchronisation needed beyond the existing s_rebuildMutex guard on rebuild_part_lookup. */
+    static std::string s_categoryPartsPerChar[CATEGORY_COUNT][k_charIdxCount];
 
     /* Active character index. -1 = use base Parts only (pre-resolution / unknown). */
     static std::atomic<int> s_activeChar{-1};
 
-    /* Serialises rebuild_part_lookup(): the deferred IndexedStringA scan thread and
-       the player-detection char-swap poll can both trigger rebuilds concurrently. */
+    /* Serialises rebuild_part_lookup(): the deferred IndexedStringA scan thread and the player-detection char-swap poll
+       can both trigger rebuilds concurrently. */
     static std::mutex s_rebuildMutex;
 
     std::string_view character_name_for_idx(std::size_t idx) noexcept
     {
         constexpr std::string_view names[] = {"Kliff", "Damiane", "Oongka"};
-        static_assert(std::size(names) == kCharIdxCount,
-                      "names[] must match kCharIdxCount");
-        return (idx < kCharIdxCount) ? names[idx] : std::string_view{};
+        static_assert(std::size(names) == k_charIdxCount, "names[] must match k_charIdxCount");
+        return (idx < k_charIdxCount) ? names[idx] : std::string_view{};
     }
 
     void set_per_char_parts(Category cat, std::size_t charIdx, std::string partsStr)
     {
-        if (charIdx >= kCharIdxCount)
+        if (charIdx >= k_charIdxCount)
             return;
         s_categoryPartsPerChar[static_cast<std::size_t>(cat)][charIdx] = std::move(partsStr);
     }
 
-    int get_active_character() noexcept
-    {
-        return s_activeChar.load(std::memory_order_acquire);
-    }
-
     /** @brief Pick effective Parts for a category, honouring the active per-char override. */
-    static const std::string& effective_parts_for_category(std::size_t catIdx) noexcept
+    static const std::string &effective_parts_for_category(std::size_t catIdx) noexcept
     {
         const int active = s_activeChar.load(std::memory_order_acquire);
-        if (active >= 0 && active < static_cast<int>(kCharIdxCount))
+        if (active >= 0 && active < static_cast<int>(k_charIdxCount))
         {
-            const auto& override_parts = s_categoryPartsPerChar[catIdx][active];
+            const auto &override_parts = s_categoryPartsPerChar[catIdx][active];
             if (!override_parts.empty())
                 return override_parts;
         }
         return s_categoryParts[catIdx];
     }
 
-    void set_runtime_hashes(std::unordered_map<std::string, uint32_t>&& nameToHash)
+    void set_runtime_hashes(std::unordered_map<std::string, uint32_t> &&nameToHash)
     {
         s_runtimeHashes = std::move(nameToHash);
         s_hasRuntimeHashes = true;
@@ -278,11 +271,10 @@ namespace EquipHide
         return std::size(k_allParts);
     }
 
-    std::vector<std::string> get_unresolved_parts(
-        const std::unordered_map<std::string, uint32_t>& resolved)
+    std::vector<std::string> get_unresolved_parts(const std::unordered_map<std::string, uint32_t> &resolved)
     {
         std::vector<std::string> result;
-        for (const auto& p : k_allParts)
+        for (const auto &p : k_allParts)
         {
             if (!resolved.count(p.name))
                 result.emplace_back(p.name);
@@ -292,17 +284,17 @@ namespace EquipHide
 
     /**
      * @brief Build name->hash lookup, preferring runtime-resolved hashes over fallbacks.
-     * @details Written during init before hooks; read by rebuild_part_lookup()
-     *          after deferred scan. Hook installation provides happens-before.
+     * @details Written during init before hooks; read by rebuild_part_lookup() after deferred scan. Hook installation
+     *          provides happens-before.
      */
     static std::unordered_map<std::string, uint32_t> s_nameToHash;
     static bool s_nameToHashBuilt = false;
 
-    static const std::unordered_map<std::string, uint32_t>& name_to_hash_map()
+    static const std::unordered_map<std::string, uint32_t> &name_to_hash_map()
     {
         if (!s_nameToHashBuilt)
         {
-            auto& logger = DMK::Logger::get_instance();
+            auto &logger = DMK::Logger::get_instance();
 
             if (s_hasRuntimeHashes)
             {
@@ -344,46 +336,43 @@ namespace EquipHide
 
     /**
      * @brief Flat lookup table for the contiguous hash range 0xAD00-0xBFFF.
-     * @details Bounds check + single array read (~3 cycles) replaces
-     *          unordered_map lookup (~20 cycles). Value: 0 = unclassified.
+     * @details Bounds check + single array read (~3 cycles) replaces unordered_map lookup (~20 cycles). Value: 0 =
+     *          unclassified.
      */
-    static constexpr uint32_t k_flatBase  = 0xAC00;
-    static constexpr uint32_t k_flatEnd   = 0xCFFF;
-    static constexpr uint32_t k_flatSize  = k_flatEnd - k_flatBase + 1;
+    static constexpr uint32_t k_flatBase = 0xAC00;
+    static constexpr uint32_t k_flatEnd = 0xCFFF;
+    static constexpr uint32_t k_flatSize = k_flatEnd - k_flatBase + 1;
 
     static std::array<CategoryMask, k_flatSize> s_flatTables[2]{};
 
-    struct OutlierEntry { uint32_t hash; CategoryMask mask; };
+    struct OutlierEntry
+    {
+        uint32_t hash;
+        CategoryMask mask;
+    };
     static std::vector<OutlierEntry> s_outlierTables[2];
 
     /**
      * @brief 64K-bit classification bitset (8 KB) covering hash values 0x0000-0xFFFF.
-     * @details Bit N set = hash N has a classification entry. Single memory
-     *          access replaces range check + outlier scan.
+     * @details Bit N set = hash N has a classification entry. Single memory access replaces range check + outlier scan.
      */
     static constexpr std::size_t k_bitsetWords = 1024;
     static std::array<uint64_t, k_bitsetWords> s_classifyBitsets[2]{};
 
     /**
-     * @brief Parse a Parts= string and write classification entries into
-     *        the supplied target map.
-     * @details Mirrors the body of register_parts() but operates on an
-     *          arbitrary map argument so the same token-parse logic can
-     *          populate either the legacy active-map double-buffer or a
-     *          per-character map without code duplication. Logging is
-     *          suppressed to avoid the per-character build loop spamming
-     *          the same warnings the active-map build already emits.
+     * @brief Parse a Parts= string and write classification entries into the supplied target map.
+     * @details Mirrors the body of register_parts() but operates on an arbitrary map argument so the same token-parse
+     *          logic can populate either the legacy active-map double-buffer or a per-character map without code
+     *          duplication. Logging is suppressed to avoid the per-character build loop spamming the same warnings the
+     *          active-map build already emits.
      */
-    static void register_parts_into(
-        Category cat,
-        const std::string &partsStr,
-        std::unordered_map<uint32_t, CategoryMask> &target)
+    static void register_parts_into(Category cat, const std::string &partsStr,
+                                    std::unordered_map<uint32_t, CategoryMask> &target)
     {
         const auto bit = category_bit(cat);
 
-        // Clear prior entries for this category from the target map so
-        // a per-character rebuild that drops a part still reflects the
-        // removal in the per-character classification.
+        // Clear prior entries for this category from the target map so a per-character rebuild that drops a part still
+        // reflects the removal in the per-character classification.
         for (auto it = target.begin(); it != target.end();)
         {
             it->second &= ~bit;
@@ -396,15 +385,14 @@ namespace EquipHide
         if (partsStr.find_first_not_of(" ,") == std::string::npos)
             return;
 
-        // NONE sentinel: explicitly disables the category for this scope
-        // (per-character override path). Silent return.
+        // NONE sentinel: explicitly disables the category for this scope (per-character override path). Silent return.
         {
             auto first = partsStr.find_first_not_of(" \t,");
-            auto last  = partsStr.find_last_not_of(" \t,");
-            if (first != std::string::npos && last != std::string::npos &&
-                (last - first + 1) == 4)
+            auto last = partsStr.find_last_not_of(" \t,");
+            if (first != std::string::npos && last != std::string::npos && (last - first + 1) == 4)
             {
-                auto ch = [&](std::size_t i) {
+                auto ch = [&](std::size_t i)
+                {
                     char c = partsStr[first + i];
                     return (c >= 'A' && c <= 'Z') ? static_cast<char>(c + 32) : c;
                 };
@@ -453,32 +441,30 @@ namespace EquipHide
             {
                 try
                 {
-                    auto id = static_cast<uint32_t>(
-                        std::stoul(token.substr(2), nullptr, 16));
+                    auto id = static_cast<uint32_t>(std::stoul(token.substr(2), nullptr, 16));
                     target[id] |= bit;
                 }
                 catch (...)
                 {
-                    // Malformed hex IDs are reported by the active-map
-                    // build (register_parts) so suppressing the warning
-                    // here just avoids duplication.
+                    // Malformed hex IDs are reported by the active-map build (register_parts) so suppressing the
+                    // warning here just avoids duplication.
                 }
             }
         }
     }
 
-    void register_parts(Category cat, const std::string& partsStr, bool storeBase)
+    void register_parts(Category cat, const std::string &partsStr, bool storeBase)
     {
         if (storeBase)
             s_categoryParts[static_cast<std::size_t>(cat)] = partsStr;
 
-        auto& logger = DMK::Logger::get_instance();
-        auto& writeMap = s_partMaps[1 - s_activeMap.load(std::memory_order_relaxed)];
+        auto &logger = DMK::Logger::get_instance();
+        auto &writeMap = s_partMaps[1 - s_activeMap.load(std::memory_order_relaxed)];
 
-        // Clear previous entries for this category so that a second callback
-        // (e.g. INI override after default registration) fully replaces them.
+        // Clear previous entries for this category so that a second callback (e.g. INI override after default
+        // registration) fully replaces them.
         const auto bit = category_bit(cat);
-        for (auto it = writeMap.begin(); it != writeMap.end(); )
+        for (auto it = writeMap.begin(); it != writeMap.end();)
         {
             it->second &= ~bit;
             if (it->second == 0)
@@ -494,32 +480,30 @@ namespace EquipHide
             return;
         }
 
-        /* NONE sentinel -- case-insensitive, trimmed -- explicitly disables the
-           category (commonly used in per-character overrides like
-           [Lanterns:Damiane] Parts = NONE). Silent return, no warning. */
+        /* NONE sentinel -- case-insensitive, trimmed -- explicitly disables the category (commonly used in
+           per-character overrides like [Lanterns:Damiane] Parts = NONE). Silent return, no warning. */
         {
             auto first = partsStr.find_first_not_of(" \t,");
-            auto last  = partsStr.find_last_not_of(" \t,");
-            if (first != std::string::npos && last != std::string::npos &&
-                (last - first + 1) == 4)
+            auto last = partsStr.find_last_not_of(" \t,");
+            if (first != std::string::npos && last != std::string::npos && (last - first + 1) == 4)
             {
-                auto ch = [&](std::size_t i) {
+                auto ch = [&](std::size_t i)
+                {
                     char c = partsStr[first + i];
                     return (c >= 'A' && c <= 'Z') ? static_cast<char>(c + 32) : c;
                 };
                 if (ch(0) == 'n' && ch(1) == 'o' && ch(2) == 'n' && ch(3) == 'e')
                 {
-                    logger.debug("{}: NONE (category explicitly disabled for this scope)",
-                                 category_section(cat));
+                    logger.debug("{}: NONE (category explicitly disabled for this scope)", category_section(cat));
                     return;
                 }
             }
         }
 
-        const auto& nameMap = name_to_hash_map();
+        const auto &nameMap = name_to_hash_map();
 
-        // No runtime hashes yet -- store names for deferred resolution only.
-        // rebuild_part_lookup() will re-resolve after the scan completes.
+        // No runtime hashes yet -- store names for deferred resolution only. rebuild_part_lookup() will re-resolve
+        // after the scan completes.
         if (nameMap.empty())
             return;
 
@@ -577,61 +561,47 @@ namespace EquipHide
                 }
             }
 
-            logger.debug("  {} : unknown part '{}' (pending runtime scan?)",
-                         category_section(cat), token);
+            logger.debug("  {} : unknown part '{}' (pending runtime scan?)", category_section(cat), token);
         }
     }
 
     // ---------------------------------------------------------------------
-    // Per-character part maps, keyed as a separate per-character
-    // unordered_map. Rationale: hot path is classify_part_for() called
-    // from apply_direct_vis_write per (vis_ctrl, hash) pair on every
-    // schedule. Tagging every entry of a single merged map with an
-    // array<CategoryMask, kCharIdxCount> (12 bytes per value vs 4) would
-    // triple the cache footprint of the inner walk that already
-    // dominates direct-write latency. The per-character-map approach
-    // pays a small rebuild cost on character swap / INI reload (rare,
-    // off the hot path) in exchange for one map lookup keyed on charIdx
-    // during direct write.
+    // Per-character part maps, keyed as a separate per-character unordered_map. Rationale: hot path is
+    // classify_part_for() called from apply_direct_vis_write per (vis_ctrl, hash) pair on every schedule. Tagging every
+    // entry of a single merged map with an array<CategoryMask, k_charIdxCount> (12 bytes per value vs 4) would triple
+    // the cache footprint of the inner walk that already dominates direct-write latency. The per-character-map approach
+    // pays a small rebuild cost on character swap / INI reload (rare, off the hot path) in exchange for one map lookup
+    // keyed on charIdx during direct write.
     //
-    // The per-character maps are built alongside the active-map double-
-    // buffer flip in build_part_lookup() so all consumers see the same
-    // generation. Each is keyed (hash -> CategoryMask) exactly like the
-    // legacy maps.
+    // The per-character maps are built alongside the active-map double-buffer flip in build_part_lookup() so all
+    // consumers see the same generation. Each is keyed (hash -> CategoryMask) exactly like the legacy maps.
     // ---------------------------------------------------------------------
-    static std::unordered_map<uint32_t, CategoryMask>
-        s_partMapsPerChar[kCharIdxCount];
+    static std::unordered_map<uint32_t, CategoryMask> s_partMapsPerChar[k_charIdxCount];
 
-    // Per-character flat tables and bitsets, mirroring the active-map
-    // fast paths (flat-table for the contiguous range, bitset for the
-    // needs_classification_for fast filter). Outliers are searched off
-    // the per-character unordered_map directly because the per-char
-    // outlier count is small enough that maintaining a sorted vector
-    // alongside is not worth the rebuild cost.
-    static std::array<CategoryMask, k_flatSize>
-        s_flatTablesPerChar[kCharIdxCount]{};
-    static std::array<uint64_t, k_bitsetWords>
-        s_classifyBitsetsPerChar[kCharIdxCount]{};
+    // Per-character flat tables, mirroring the active-map flat-table fast path for the contiguous range. Outliers are
+    // searched off the per-character unordered_map directly because the per-char outlier count is small enough that
+    // maintaining a sorted vector alongside is not worth the rebuild cost.
+    static std::array<CategoryMask, k_flatSize> s_flatTablesPerChar[k_charIdxCount]{};
 
     // --- Outlier hash set ---
     static constexpr std::size_t k_maxOutliers = 8;
     static std::atomic<uint32_t> s_outliers[k_maxOutliers]{};
-    static std::atomic<int>      s_outlierCount{0};
+    static std::atomic<int> s_outlierCount{0};
 
     void build_part_lookup()
     {
         const auto writeIdx = 1 - s_activeMap.load(std::memory_order_relaxed);
-        const auto& writeMap = s_partMaps[writeIdx];
+        const auto &writeMap = s_partMaps[writeIdx];
 
-        auto& flatTable = s_flatTables[writeIdx];
-        auto& outlierTable = s_outlierTables[writeIdx];
-        auto& bitset = s_classifyBitsets[writeIdx];
+        auto &flatTable = s_flatTables[writeIdx];
+        auto &outlierTable = s_outlierTables[writeIdx];
+        auto &bitset = s_classifyBitsets[writeIdx];
 
         flatTable.fill(0);
         outlierTable.clear();
         bitset.fill(0);
 
-        for (const auto& [hash, mask] : writeMap)
+        for (const auto &[hash, mask] : writeMap)
         {
             if (hash >= k_flatBase && hash <= k_flatEnd)
             {
@@ -647,12 +617,11 @@ namespace EquipHide
         }
 
         std::sort(outlierTable.begin(), outlierTable.end(),
-                  [](const OutlierEntry& a, const OutlierEntry& b)
-                  { return a.hash < b.hash; });
+                  [](const OutlierEntry &a, const OutlierEntry &b) { return a.hash < b.hash; });
 
         std::vector<uint32_t> hashes;
         hashes.reserve(writeMap.size());
-        for (const auto& [hash, mask] : writeMap)
+        for (const auto &[hash, mask] : writeMap)
             hashes.push_back(hash);
 
         std::sort(hashes.begin(), hashes.end());
@@ -665,8 +634,8 @@ namespace EquipHide
         {
             constexpr uint32_t k_gapThreshold = 0x100;
             std::size_t bestStart = 0;
-            std::size_t bestLen   = 1;
-            std::size_t curStart  = 0;
+            std::size_t bestLen = 1;
+            std::size_t curStart = 0;
 
             for (std::size_t i = 1; i < hashes.size(); ++i)
             {
@@ -675,7 +644,7 @@ namespace EquipHide
                 if (i - curStart + 1 > bestLen)
                 {
                     bestStart = curStart;
-                    bestLen   = i - curStart + 1;
+                    bestLen = i - curStart + 1;
                 }
             }
 
@@ -687,32 +656,27 @@ namespace EquipHide
                 if (i < bestStart || i >= bestStart + bestLen)
                 {
                     if (outlierCount < static_cast<int>(k_maxOutliers))
-                        s_outliers[outlierCount++].store(
-                            hashes[i], std::memory_order_relaxed);
+                        s_outliers[outlierCount++].store(hashes[i], std::memory_order_relaxed);
                 }
             }
         }
 
         s_outlierCount.store(outlierCount, std::memory_order_release);
 
-        auto& logger = DMK::Logger::get_instance();
-        // Skip the summary emit when the part map is empty. The empty
-        // case is the initial build that runs before any runtime hash
-        // has been resolved; name_to_hash_map() already logs
-        // "No runtime hashes available, part map empty (pending
-        // deferred scan)" for that state, so a "0 entries" companion
-        // here carries no extra signal.
+        auto &logger = DMK::Logger::get_instance();
+        // Skip the summary emit when the part map is empty. The empty case is the initial build that runs before any
+        // runtime hash has been resolved; name_to_hash_map() already logs "No runtime hashes available, part map empty
+        // (pending deferred scan)" for that state, so a "0 entries" companion here carries no extra signal.
         if (!writeMap.empty())
         {
             const char *verb = s_nameToHashBuilt ? "rebuilt" : "built";
 
-            // Catalog parts with a runtime-hash mapping. Reported as
-            // the "{resolved}/{total} resolved" field of the
+            // Catalog parts with a runtime-hash mapping. Reported as the "{resolved}/{total} resolved" field of the
             // consolidated INFO line below.
             int resolved = 0;
             if (s_hasRuntimeHashes)
             {
-                for (const auto& p : k_allParts)
+                for (const auto &p : k_allParts)
                 {
                     if (s_nameToHash.count(p.name))
                         ++resolved;
@@ -721,9 +685,8 @@ namespace EquipHide
 
             logger.info("Part lookup {}: {} entries across {} categories "
                         "({}/{} resolved, range 0x{:X}-0x{:X}, {} outliers)",
-                        verb, writeMap.size(), CATEGORY_COUNT,
-                        resolved, std::size(k_allParts),
-                        rangeMin, rangeMax, outlierCount);
+                        verb, writeMap.size(), CATEGORY_COUNT, resolved, std::size(k_allParts), rangeMin, rangeMax,
+                        outlierCount);
 
             if (outlierCount > 0 && logger.is_enabled(DMK::LogLevel::Debug))
             {
@@ -731,10 +694,9 @@ namespace EquipHide
                 list.reserve(outlierCount * 8);
                 for (int i = 0; i < outlierCount; ++i)
                 {
-                    if (i > 0) list += ", ";
-                    list += std::format(
-                        "0x{:X}",
-                        s_outliers[i].load(std::memory_order_relaxed));
+                    if (i > 0)
+                        list += ", ";
+                    list += std::format("0x{:X}", s_outliers[i].load(std::memory_order_relaxed));
                 }
                 logger.debug("  outliers: {}", list);
             }
@@ -746,54 +708,39 @@ namespace EquipHide
     /**
      * @brief Rebuild the per-character classification maps + flat tables
      *        + bitsets for every supported protagonist.
-     * @details Independent of the active-map double-buffer flip so the
-     *          per-character maps are a stable side store: a swap to a
-     *          different active character does not have to relink the
-     *          per-character data, only the read pointer for the legacy
-     *          active-map fast paths. Called from rebuild_part_lookup
-     *          while s_rebuildMutex is held, so concurrent reads of the
-     *          per-character data through the lookup helpers are
-     *          serialised by the rebuild path.
+     * @details Independent of the active-map double-buffer flip so the per-character maps are a stable side store: a
+     *          swap to a different active character does not have to relink the per-character data, only the read
+     *          pointer for the legacy active-map fast paths. Called from rebuild_part_lookup while s_rebuildMutex is
+     *          held, so concurrent reads of the per-character data through the lookup helpers are serialised by the
+     *          rebuild path.
      */
     static void build_per_char_part_maps()
     {
-        for (std::size_t c = 0; c < kCharIdxCount; ++c)
+        for (std::size_t c = 0; c < k_charIdxCount; ++c)
         {
             auto &map = s_partMapsPerChar[c];
             map.clear();
 
             for (std::size_t catIdx = 0; catIdx < CATEGORY_COUNT; ++catIdx)
             {
-                // Effective Parts for character c = the per-character
-                // override if non-empty, else the base [Section] Parts.
-                // Mirrors effective_parts_for_category() but parameterised
-                // on c instead of the active character.
+                // Effective Parts for character c = the per-character override if non-empty, else the base [Section]
+                // Parts. Mirrors effective_parts_for_category() but parameterised on c instead of the active character.
                 const auto &override_parts = s_categoryPartsPerChar[catIdx][c];
-                const auto &effective =
-                    !override_parts.empty()
-                        ? override_parts
-                        : s_categoryParts[catIdx];
+                const auto &effective = !override_parts.empty() ? override_parts : s_categoryParts[catIdx];
                 if (effective.empty())
                     continue;
-                register_parts_into(static_cast<Category>(catIdx),
-                                    effective, map);
+                register_parts_into(static_cast<Category>(catIdx), effective, map);
             }
 
-            // Rebuild the per-character flat table + bitset from the
-            // freshly-populated map. Same flat-base / flat-end window as
-            // the active-map path so the contiguous-range fast path is
-            // structurally identical.
+            // Rebuild the per-character flat table from the freshly-populated map. Same flat-base / flat-end window as
+            // the active-map path so the contiguous-range fast path is structurally identical.
             auto &flat = s_flatTablesPerChar[c];
-            auto &bits = s_classifyBitsetsPerChar[c];
             flat.fill(0);
-            bits.fill(0);
 
             for (const auto &[hash, mask] : map)
             {
                 if (hash >= k_flatBase && hash <= k_flatEnd)
                     flat[hash - k_flatBase] = mask;
-                if (hash < 0x10000)
-                    bits[hash / 64] |= (1ULL << (hash % 64));
             }
         }
     }
@@ -806,51 +753,41 @@ namespace EquipHide
 
         for (std::size_t i = 0; i < CATEGORY_COUNT; ++i)
         {
-            const auto& parts = effective_parts_for_category(i);
+            const auto &parts = effective_parts_for_category(i);
             if (!parts.empty())
                 register_parts(static_cast<Category>(i), parts, /*storeBase=*/false);
         }
 
         build_part_lookup();
-        // Per-character maps are an additive structure: the active-map
-        // double-buffer above keeps the legacy (active-character)
-        // semantics alive for callers that have not been migrated, while
-        // the per-character maps make swap-time identity preserved at
-        // each vis ctrl. Building them here ensures both views stay in
-        // sync across every rebuild trigger (init, INI auto-reload,
-        // set_active_character, deferred IndexedString scan completion).
+        // Per-character maps are an additive structure: the active-map double-buffer above keeps the legacy
+        // (active-character) semantics alive for callers that have not been migrated, while the per-character maps make
+        // swap-time identity preserved at each vis ctrl. Building them here ensures both views stay in sync across
+        // every rebuild trigger (init, INI auto-reload, set_active_character, deferred IndexedString scan completion).
         build_per_char_part_maps();
 
-        // Per-category TRACE summary. Runs at the tail of every
-        // rebuild_part_lookup() caller (init post-scan, deferred-scan
-        // converge, lazy-probe progress, set_active_character, INI
-        // auto-reload) so the reported counts reflect the part map
-        // that was just published.
-        auto& logger = DMK::Logger::get_instance();
+        // Per-category TRACE summary. Runs at the tail of every rebuild_part_lookup() caller (init post-scan,
+        // deferred-scan converge, lazy-probe progress, set_active_character, INI auto-reload) so the reported counts
+        // reflect the part map that was just published.
+        auto &logger = DMK::Logger::get_instance();
         if (logger.get_log_level() <= DMK::LogLevel::Trace)
         {
-            const auto& partMap = s_partMaps[
-                s_activeMap.load(std::memory_order_relaxed)];
+            const auto &partMap = s_partMaps[s_activeMap.load(std::memory_order_relaxed)];
             for (std::size_t i = 0; i < CATEGORY_COUNT; ++i)
             {
                 const auto cat = static_cast<Category>(i);
                 const auto bit = category_bit(cat);
                 int count = 0;
-                for (const auto& [hash, mask] : partMap)
+                for (const auto &[hash, mask] : partMap)
                 {
                     if (mask & bit)
                         ++count;
                 }
-                const bool enabled = s_states[i].enabled.load(
-                    std::memory_order_relaxed);
-                const bool hidden = s_states[i].hidden.load(
-                    std::memory_order_relaxed);
+                const bool enabled = s_states[i].enabled.load(std::memory_order_relaxed);
+                const bool hidden = s_states[i].hidden.load(std::memory_order_relaxed);
                 if (!enabled)
-                    logger.trace("Category {}: disabled ({} parts registered)",
-                                 category_section(cat), count);
+                    logger.trace("Category {}: disabled ({} parts registered)", category_section(cat), count);
                 else
-                    logger.trace("Category {}: enabled, default={} ({} parts)",
-                                 category_section(cat),
+                    logger.trace("Category {}: enabled, default={} ({} parts)", category_section(cat),
                                  hidden ? "hidden" : "visible", count);
             }
         }
@@ -858,16 +795,14 @@ namespace EquipHide
 
     void set_active_character(int newIdx)
     {
-        const int clamped =
-            (newIdx < -1 || newIdx >= static_cast<int>(kCharIdxCount)) ? -1 : newIdx;
+        const int clamped = (newIdx < -1 || newIdx >= static_cast<int>(k_charIdxCount)) ? -1 : newIdx;
         const int prev = s_activeChar.exchange(clamped, std::memory_order_acq_rel);
         if (prev == clamped)
             return;
 
-        auto& logger = DMK::Logger::get_instance();
+        auto &logger = DMK::Logger::get_instance();
         if (clamped >= 0)
-            logger.info("Active character -> {} (idx={})",
-                        character_name_for_idx(static_cast<std::size_t>(clamped)),
+            logger.info("Active character -> {} (idx={})", character_name_for_idx(static_cast<std::size_t>(clamped)),
                         clamped);
         else
             logger.info("Active character -> (base, no override)");
@@ -884,12 +819,11 @@ namespace EquipHide
             return s_flatTables[idx][hash - k_flatBase];
 
         // Slow path: binary search through sorted outlier array
-        const auto& outliers = s_outlierTables[idx];
+        const auto &outliers = s_outlierTables[idx];
         if (!outliers.empty())
         {
-            auto it = std::lower_bound(
-                outliers.begin(), outliers.end(), hash,
-                [](const OutlierEntry& e, uint32_t h) { return e.hash < h; });
+            auto it = std::lower_bound(outliers.begin(), outliers.end(), hash,
+                                       [](const OutlierEntry &e, uint32_t h) { return e.hash < h; });
             if (it != outliers.end() && it->hash == hash)
                 return it->mask;
         }
@@ -908,9 +842,8 @@ namespace EquipHide
     bool is_category_hidden(Category cat)
     {
         const auto idx = static_cast<std::size_t>(cat);
-        const auto& st = s_states[idx];
-        return st.enabled.load(std::memory_order_relaxed) &&
-               st.hidden.load(std::memory_order_relaxed);
+        const auto &st = s_states[idx];
+        return st.enabled.load(std::memory_order_relaxed) && st.hidden.load(std::memory_order_relaxed);
     }
 
     // Single atomic load replaces per-category iteration in the hot path.
@@ -960,64 +893,47 @@ namespace EquipHide
         return (mask & s_hiddenMask.load(std::memory_order_relaxed)) != 0;
     }
 
-    const std::unordered_map<uint32_t, CategoryMask>& get_part_map()
+    const std::unordered_map<uint32_t, CategoryMask> &get_part_map()
     {
         return s_partMaps[s_activeMap.load(std::memory_order_acquire)];
     }
 
-    bool needs_classification_for(uint32_t hash, int charIdx) noexcept
-    {
-        if (charIdx < 0 || charIdx >= static_cast<int>(kCharIdxCount))
-            return needs_classification(hash);
-        if (hash >= 0x10000)
-            return false;
-        const auto &bits = s_classifyBitsetsPerChar[
-            static_cast<std::size_t>(charIdx)];
-        return (bits[hash / 64] & (1ULL << (hash % 64))) != 0;
-    }
-
     CategoryMask classify_part_for(uint32_t hash, int charIdx) noexcept
     {
-        if (charIdx < 0 || charIdx >= static_cast<int>(kCharIdxCount))
+        if (charIdx < 0 || charIdx >= static_cast<int>(k_charIdxCount))
             return classify_part(hash);
 
         const auto c = static_cast<std::size_t>(charIdx);
 
-        // Flat-table fast path for the contiguous range, mirroring the
-        // active-map classify_part hot path.
+        // Flat-table fast path for the contiguous range, mirroring the active-map classify_part hot path.
         if (hash >= k_flatBase && hash <= k_flatEnd)
             return s_flatTablesPerChar[c][hash - k_flatBase];
 
-        // Outliers: search the per-character unordered_map directly.
-        // Keeping a sorted outlier vector per character would shave a
-        // few cycles off the rare miss but doubles the per-rebuild cost
-        // for a path that fires only on outlier hashes.
+        // Outliers: search the per-character unordered_map directly. Keeping a sorted outlier vector per character
+        // would shave a few cycles off the rare miss but doubles the per-rebuild cost for a path that fires only on
+        // outlier hashes.
         const auto &map = s_partMapsPerChar[c];
         const auto it = map.find(hash);
         return (it != map.end()) ? it->second : CategoryMask{0};
     }
 
-    const std::unordered_map<uint32_t, CategoryMask> &
-    get_part_map_for(int charIdx) noexcept
+    const std::unordered_map<uint32_t, CategoryMask> &get_part_map_for(int charIdx) noexcept
     {
-        // Out-of-range fallback returns the active-character map so any
-        // accidental misuse stays observably correct (legacy behaviour)
-        // rather than crashing.
-        if (charIdx < 0 || charIdx >= static_cast<int>(kCharIdxCount))
+        // Out-of-range fallback returns the active-character map so any accidental misuse stays observably correct
+        // (legacy behaviour) rather than crashing.
+        if (charIdx < 0 || charIdx >= static_cast<int>(k_charIdxCount))
             return get_part_map();
         return s_partMapsPerChar[static_cast<std::size_t>(charIdx)];
     }
 
     bool is_any_category_hidden_for(CategoryMask mask, int charIdx) noexcept
     {
-        // The hidden-state masks (s_activePresetMask, s_presetHiddenMask,
-        // s_hiddenMask) are global -- they reflect the user's per-
-        // category Hidden / Enabled toggles, NOT the per-character Parts
-        // overrides. The per-character split happens in classify_part_for
+        // The hidden-state masks (s_activePresetMask, s_presetHiddenMask, s_hiddenMask) are global -- they reflect the
+        // user's per-category Hidden / Enabled toggles, NOT the per-character Parts overrides. The per-character split
+        // happens in classify_part_for
         // (different hashes -> different category bits). Hidden-state
-        // computation can therefore reuse the active-character helper
-        // verbatim once the caller has classified through the per-
-        // character map.
+        // computation can therefore reuse the active-character helper verbatim once the caller has classified through
+        // the per-character map.
         (void)charIdx;
         return is_any_category_hidden(mask);
     }

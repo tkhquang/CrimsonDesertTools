@@ -2,10 +2,9 @@
  * @file logic_exports.cpp
  * @brief Logic DLL entry point for hot-reload dev builds.
  *
- * Only compiled when TRANSMOG_DEV_BUILD is set by the dev preset.
- * Includes use explicit `../` relative paths so IntelliSense resolves
- * them even when parsing the file standalone (i.e. when the current
- * CMake-Tools preset is prod and this file has no compile_commands entry).
+ * Only compiled when TRANSMOG_DEV_BUILD is set by the dev preset. Includes use explicit `../` relative paths so
+ * IntelliSense resolves them even when parsing the file standalone (i.e. when the current CMake-Tools preset is prod
+ * and this file has no compile_commands entry).
  */
 
 #include "../constants.hpp"
@@ -24,9 +23,8 @@ static HANDLE g_instanceMutex = nullptr;
 
 extern "C" __declspec(dllexport) bool Init()
 {
-    // Process gate -- UAL loads ASIs into ALL processes in the game
-    // directory, including crashpad_handler.exe. Bail immediately if
-    // we're not in the real game.
+    // Process gate -- UAL loads ASIs into ALL processes in the game directory, including crashpad_handler.exe. Bail
+    // immediately if we're not in the real game.
     if (!CDCore::Dev::is_target_process(Transmog::GAME_PROCESS_NAME))
         return false;
 
@@ -38,12 +36,11 @@ extern "C" __declspec(dllexport) bool Init()
     logger.enable_async_mode(asyncCfg);
 
     logger.info("[DEV] Logic DLL Init() called");
-    Transmog::Version::logVersionInfo();
+    Transmog::Version::log_version_info();
 
-    // Per-PID mutex -- prevents duplicate ASI loading within the same
-    // process (e.g. old production ASI alongside the dev build).
-    if (!CDCore::Dev::acquire_instance_mutex(
-            Transmog::INSTANCE_MUTEX_PREFIX, g_instanceMutex))
+    // Per-PID mutex -- prevents duplicate ASI loading within the same process (e.g. old production ASI alongside the
+    // dev build).
+    if (!CDCore::Dev::acquire_instance_mutex(Transmog::INSTANCE_MUTEX_PREFIX, g_instanceMutex))
     {
         logger.error("Another instance of CrimsonDesertLiveTransmog is "
                      "already loaded. Check for duplicate .asi files.");
@@ -83,17 +80,13 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID /*lpRese
     }
     else if (ul_reason_for_call == DLL_PROCESS_DETACH)
     {
-        // Safety net: if the loader failed to call our exported
-        // `Shutdown()` before FreeLibrary (or Shutdown() hung and the
-        // loader's post-shutdown sleep elapsed), the hooks we installed
-        // would remain patched-in-place while our trampoline memory
-        // unmaps. A fresh reload of this logic DLL would then scan the
-        // still-patched prologues, install new hooks on top, and every
-        // future call through BatchEquip/VEC would chain into freed
-        // memory and crash. DMK_Shutdown is idempotent and detects the
-        // Windows loader-lock path internally (detaches worker threads
-        // instead of joining), so calling it here is safe even when the
-        // exported Shutdown() already ran.
+        // Safety net: if the loader failed to call our exported `Shutdown()` before FreeLibrary (or Shutdown() hung and
+        // the loader's post-shutdown sleep elapsed), the hooks we installed would remain patched-in-place while our
+        // trampoline memory unmaps. A fresh reload of this logic DLL would then scan the still-patched prologues,
+        // install new hooks on top, and every future call through BatchEquip/VEC would chain into freed memory and
+        // crash. DMK_Shutdown is idempotent and detects the
+        // Windows loader-lock path internally (detaches worker threads instead of joining), so calling it here is safe
+        // even when the exported Shutdown() already ran.
         DMK_Shutdown();
     }
 

@@ -1,0 +1,55 @@
+---
+# Formatting rules that codify CrimsonDesertLiveTransmog's existing C++23 style.
+# Mirrors the DetourModKit baseline (the library this mod consumes) so the two
+# trees format identically; derived from the current tree, not from any
+# external/ submodule.
+Language: Cpp
+BasedOnStyle: LLVM
+# The project is C++23. clang-format has no explicit c++23 enum yet, so Latest
+# selects the newest standard it knows and parses C++23 syntax correctly.
+Standard: Latest
+# Hard 120-column baseline for code and comments. String literals are the one
+# sanctioned exception: log and error messages read and grep better as a single
+# literal, so BreakStringLiterals below keeps the formatter from splitting them
+# and a line whose excess is inside one literal is left alone.
+ColumnLimit: 120
+ReflowComments: Always
+# ReflowComments: Always otherwise re-wraps the deep hang-indented continuation lines of a /** */ Doxygen block and
+# mangles them (collapsing the alignment under the @tag, occasionally emitting a stray "* *"). CommentPragmas marks
+# comment lines that must never be reflowed: matching 3+ leading content spaces (the hang indent under a Doxygen tag)
+# protects every continuation line, which inhibits reflow of the whole block, so hand-wrapped doc-blocks stay intact.
+# Plain // implementation comments carry no such indent and are still reflowed to the column limit. The IWYU default
+# pattern is preserved.
+CommentPragmas: '^ IWYU pragma:|^ {3,}'
+BreakStringLiterals: false
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+ContinuationIndentWidth: 4
+AccessModifierOffset: -4
+NamespaceIndentation: All
+# Allman braces for functions, classes, and namespaces; K&R-style indented
+# blocks inside function bodies.
+BreakBeforeBraces: Allman
+# East-side pointers and references (int *p), matching the whole tree. Do NOT
+# switch to Left: submodules under external/ (DetourModKit's safetyhook) use Left
+# and that config must not be copied here.
+PointerAlignment: Right
+ReferenceAlignment: Right
+# Keep trivial inline accessors on one line; everything else expands.
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortBlocksOnASingleLine: Never
+AllowShortIfStatementsOnASingleLine: false
+AllowShortLoopsOnASingleLine: false
+AllowShortCaseLabelsOnASingleLine: false
+# Single-statement control bodies stay optionally braced: InsertBraces is deliberately left unset, so a brace-less
+# guard clause (if (cond) return;) is preserved and never force-braced, while any multi-line or non-obvious body is
+# braced by hand. Enabling InsertBraces would mechanically rewrite every brace-less guard in the tree and is rejected
+# in favour of the by-hand convention recorded in AGENTS.md.
+# InsertBraces: <intentionally unset>
+# Includes are grouped by hand (project, then external, then standard); the
+# formatter must not reorder or regroup them.
+SortIncludes: Never
+IncludeBlocks: Preserve
+SpaceAfterTemplateKeyword: true
+FixNamespaceComments: true

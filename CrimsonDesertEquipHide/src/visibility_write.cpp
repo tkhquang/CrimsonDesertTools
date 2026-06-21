@@ -36,9 +36,8 @@ namespace EquipHide
     /* File-scope active vis-ctrl scratch for the orphan sweep. */
     static std::array<std::uintptr_t, k_maxProtagonists> s_activeVisCtrls{};
 
-    /* Stateless less-than comparator on (vis_ctrl, addr) lexicographic
-       order. Free function (not a lambda) so it can sit alongside __try
-       without tripping C2712 on captured lambdas. */
+    /* Stateless less-than comparator on (vis_ctrl, addr) lexicographic order. Free function (not a lambda) so it can
+       sit alongside __try without tripping C2712 on captured lambdas. */
     static bool vis_key_less(const VisKey &a, const VisKey &b) noexcept
     {
         if (a.visCtrl != b.visCtrl)
@@ -46,15 +45,12 @@ namespace EquipHide
         return a.addr < b.addr;
     }
 
-    /* Self-healing PartInOut vis-byte offset. The hooked EquipVisCheck
-       instruction reads the vis byte as `movzx eax, byte [r12+0x20]`, and the
-       engine builds the decision struct that instruction sees by copying the
-       IndexedString map entry field-for-field (the +0x20 vis byte included), so
-       the displacement in that one instruction is the vis-byte offset shared by
-       both the mid-hook write (partInOut) and the direct-write path (map entry).
-       Decoding it value-agnostically lets a future PartInOut re-layout
-       self-correct; 0x20 is the validated nominal kept on any miss. Mirrors the
-       BatchEquip stride/slot self-heal in cascade_suppress.cpp. */
+    /* Self-healing PartInOut vis-byte offset. The hooked EquipVisCheck instruction reads the vis byte as `movzx eax,
+       byte [r12+0x20]`, and the engine builds the decision struct that instruction sees by copying the IndexedString
+       map entry field-for-field (the +0x20 vis byte included), so the displacement in that one instruction is the
+       vis-byte offset shared by both the mid-hook write (partInOut) and the direct-write path (map entry). Decoding it
+       value-agnostically lets a future PartInOut re-layout self-correct; 0x20 is the validated nominal kept on any
+       miss. Mirrors the BatchEquip stride/slot self-heal in cascade_suppress.cpp. */
     std::size_t vis_byte_offset() noexcept
     {
         static const std::size_t value = []() noexcept -> std::size_t
@@ -72,9 +68,8 @@ namespace EquipHide
                 if (decoded.has_value() && *decoded >= 0x10 && *decoded <= 0x40)
                 {
                     const auto off = static_cast<std::size_t>(*decoded);
-                    // A live value != nominal means the PartInOut layout drifted
-                    // on a patch; the decode self-healed it, but surface it as a
-                    // WARNING so the offset change is easy to spot in the log.
+                    // A live value != nominal means the PartInOut layout drifted on a patch; the decode self-healed it,
+                    // but surface it as a WARNING so the offset change is easy to spot in the log.
                     if (off != k_nominal)
                         DMK::Logger::get_instance().warning(
                             "PartInOut vis-byte offset DRIFTED: live={:#x} nominal={:#x} -- self-healed "
@@ -86,8 +81,7 @@ namespace EquipHide
                     return off;
                 }
                 DMK::Logger::get_instance().warning(
-                    "PartInOut vis-byte offset live-decode out of range/unavailable; using nominal {:#x}",
-                    k_nominal);
+                    "PartInOut vis-byte offset live-decode out of range/unavailable; using nominal {:#x}", k_nominal);
             }
             catch (...)
             {
@@ -97,15 +91,11 @@ namespace EquipHide
         return value;
     }
 
-    /* Implementation body extracted out of the SEH-wrapped public entry
-       point so MSVC's C2712 ("Cannot use __try in functions that require
-       object unwinding") does not fire. The new per-(vis_ctrl, addr)
-       keyed map and the per-character map selection both introduce
-       hidden temporaries (VisKey rvalues, conditional reference
-       materialisation, structured-binding pair access on a map keyed by
-       a class type) that MSVC reports as object unwinding requirements
-       and refuses to combine with __try. Pattern mirrors
-       equip_hide.cpp::on_vis_check_impl. */
+    /* Implementation body extracted out of the SEH-wrapped public entry point so MSVC's C2712 ("Cannot use __try in
+       functions that require object unwinding") does not fire. The new per-(vis_ctrl, addr) keyed map and the
+       per-character map selection both introduce hidden temporaries (VisKey rvalues, conditional reference
+       materialisation, structured-binding pair access on a map keyed by a class type) that MSVC reports as object
+       unwinding requirements and refuses to combine with __try. Pattern mirrors equip_hide.cpp::on_vis_check_impl. */
     static void apply_direct_vis_write_impl() noexcept
     {
         auto &addrs = resolved_addrs();
@@ -123,32 +113,28 @@ namespace EquipHide
             if (!vc)
                 continue;
 
-            /* Per-slot character idx. -1 (unknown body, fallback path,
-               pre-resolve) collapses to the active character's map via
-               classify_part_for / is_any_category_hidden_for so
-               unidentified slots preserve single-character semantics. */
-            const int charIdx =
-                ps.visCharIdx[i].load(std::memory_order_relaxed);
+            /* Per-slot character idx. -1 (unknown body, fallback path, pre-resolve) collapses to the active character's
+               map via classify_part_for / is_any_category_hidden_for so unidentified slots preserve single-character
+               semantics. */
+            const int charIdx = ps.visCharIdx[i].load(std::memory_order_relaxed);
 
-            // Read the descriptor node value at vc->+0x58->+0x218 under one
-            // fault guard. seh_read_chain dereferences the terminal +0x218 link
-            // (seh_resolve_chain would stop at its address), so mapBase keeps
-            // its original meaning: *(*(vc+0x58)+0x218) + 0x20.
+            // Read the descriptor node value at vc->+0x58->+0x218 under one fault guard. seh_read_chain dereferences
+            // the terminal +0x218 link (seh_resolve_chain would stop at its address), so mapBase keeps its original
+            // meaning: *(*(vc+0x58)+0x218) + 0x20.
             auto descNode = DMKMemory::seh_read_chain<std::uintptr_t>(vc, {0x58, 0x218});
             if (!descNode)
             {
                 logger.trace("DirectWrite [{}]: vc=0x{:X} descNode=NULL "
-                             "(+0x58 -> +0x218)", i, vc);
+                             "(+0x58 -> +0x218)",
+                             i, vc);
                 continue;
             }
             auto mapBase = *descNode + 0x20;
 
-            // A drifted +0x58 / +0x218 chain offset can yield a non-faulting
-            // garbage mapBase (the SEH chain read only traps an actual fault, not
-            // a wrong-but-mapped pointer). Reject an implausible base so a future
-            // layout shift skips just this vis-controller instead of letting the
-            // per-part lookup walk a wrong map -- or fault and abort the whole
-            // pass for every character.
+            // A drifted +0x58 / +0x218 chain offset can yield a non-faulting garbage mapBase (the SEH chain read only
+            // traps an actual fault, not a wrong-but-mapped pointer). Reject an implausible base so a future layout
+            // shift skips just this vis-controller instead of letting the per-part lookup walk a wrong map -- or fault
+            // and abort the whole pass for every character.
             if (!DMKMemory::plausible_userspace_ptr(mapBase))
             {
                 logger.trace("DirectWrite [{}]: vc=0x{:X} implausible mapBase=0x{:X} "
@@ -157,25 +143,19 @@ namespace EquipHide
                 continue;
             }
 
-            /* Choose the character-specific map for the iteration.
-               charIdx == -1 routes to the active-character map so a
-               slot we could not identify still cycles through the
-               full active-character part list. */
-            const auto *partMapPtr =
-                (charIdx >= 0 && charIdx < static_cast<int>(kCharIdxCount))
-                    ? &get_part_map_for(charIdx)
-                    : &get_part_map();
+            /* Choose the character-specific map for the iteration. charIdx == -1 routes to the active-character map so
+               a slot we could not identify still cycles through the full active-character part list. */
+            const auto *partMapPtr = (charIdx >= 0 && charIdx < static_cast<int>(k_charIdxCount))
+                                         ? &get_part_map_for(charIdx)
+                                         : &get_part_map();
 
-            // Per-protagonist TRACE accumulators -- emitted as one
-            // comma-joined line per state at the end of this outer
-            // iteration. Cheap to maintain even when TRACE is off;
-            // only the join + emit at the bottom is gated.
+            // Per-protagonist TRACE accumulators -- emitted as one comma-joined line per state at the end of this outer
+            // iteration. Cheap to maintain even when TRACE is off; only the join + emit at the bottom is gated.
             std::vector<uint32_t> v_hidden;
             std::vector<uint32_t> v_forceShown;
             std::vector<std::pair<uint32_t, uint8_t>> v_restored;
 
-            for (auto pmIt = partMapPtr->begin();
-                 pmIt != partMapPtr->end(); ++pmIt)
+            for (auto pmIt = partMapPtr->begin(); pmIt != partMapPtr->end(); ++pmIt)
             {
                 const auto hash = pmIt->first;
                 const auto mask = pmIt->second;
@@ -189,14 +169,10 @@ namespace EquipHide
                 s_touchedVisKeys.push_back(key);
                 auto *visPtr = reinterpret_cast<uint8_t *>(visAddr);
 
-                /* Per-character hidden-state lookup: classify_part_for
-                   has already produced `mask` from the per-character
-                   map. is_any_category_hidden_for currently mirrors
-                   the active-character helper because the Hidden /
-                   Enabled toggles are global -- only the parts list
-                   is per-character. Plumbed regardless so a future
-                   per-character Hidden / Enabled overlay slots in
-                   without re-touching this hot path. */
+                /* Per-character hidden-state lookup: classify_part_for has already produced `mask` from the
+                   per-character map. is_any_category_hidden_for currently mirrors the active-character helper because
+                   the Hidden / Enabled toggles are global -- only the parts list is per-character. Plumbed regardless
+                   so a future per-character Hidden / Enabled overlay slots in without re-touching this hot path. */
                 if (is_any_category_hidden_for(mask, charIdx))
                 {
                     if (origVis.find(key) == origVis.end())
@@ -207,12 +183,9 @@ namespace EquipHide
                 }
                 else
                 {
-                    /* Always force vis=0 for visible parts. Cached
-                       origVis values cannot be restored verbatim:
-                       the engine writes its own state into this byte
-                       (sample values 0xE6, 0xF6 observed in trace)
-                       with the hidden-bit (0x02) set, so restoring
-                       the cached value keeps the part hidden. */
+                    /* Always force vis=0 for visible parts. Cached origVis values cannot be restored verbatim: the
+                       engine writes its own state into this byte (sample values 0xE6, 0xF6 observed in trace) with the
+                       hidden-bit (0x02) set, so restoring the cached value keeps the part hidden. */
                     *visPtr = 0;
                     auto it = origVis.find(key);
                     if (it != origVis.end())
@@ -228,28 +201,26 @@ namespace EquipHide
                 }
             }
 
-            // Per-protagonist compact TRACE summary. One line per state
-            // instead of one per hash (the per-hash emits historically
-            // produced 50+ near-identical lines per direct-write tick).
+            // Per-protagonist compact TRACE summary. One line per state instead of one per hash (the per-hash emits
+            // historically produced 50+ near-identical lines per direct-write tick).
             if (logger.is_enabled(DMK::LogLevel::Trace))
             {
-                auto join_hex = [](const std::vector<uint32_t> &v) {
+                auto join_hex = [](const std::vector<uint32_t> &v)
+                {
                     std::string s;
                     s.reserve(v.size() * 8);
                     for (std::size_t k = 0; k < v.size(); ++k)
                     {
-                        if (k > 0) s += ", ";
+                        if (k > 0)
+                            s += ", ";
                         s += std::format("0x{:04X}", v[k]);
                     }
                     return s;
                 };
                 if (!v_hidden.empty())
-                    logger.trace("  [{}] hidden char_idx={} ({}): {}",
-                                 i, charIdx, v_hidden.size(),
-                                 join_hex(v_hidden));
+                    logger.trace("  [{}] hidden char_idx={} ({}): {}", i, charIdx, v_hidden.size(), join_hex(v_hidden));
                 if (!v_forceShown.empty())
-                    logger.trace("  [{}] force-shown char_idx={} ({}): {}",
-                                 i, charIdx, v_forceShown.size(),
+                    logger.trace("  [{}] force-shown char_idx={} ({}): {}", i, charIdx, v_forceShown.size(),
                                  join_hex(v_forceShown));
                 if (!v_restored.empty())
                 {
@@ -257,13 +228,11 @@ namespace EquipHide
                     s.reserve(v_restored.size() * 14);
                     for (std::size_t k = 0; k < v_restored.size(); ++k)
                     {
-                        if (k > 0) s += ", ";
-                        s += std::format("0x{:04X}(orig=0x{:02X})",
-                                         v_restored[k].first,
-                                         v_restored[k].second);
+                        if (k > 0)
+                            s += ", ";
+                        s += std::format("0x{:04X}(orig=0x{:02X})", v_restored[k].first, v_restored[k].second);
                     }
-                    logger.trace("  [{}] restored char_idx={} ({}): {}",
-                                 i, charIdx, v_restored.size(), s);
+                    logger.trace("  [{}] restored char_idx={} ({}): {}", i, charIdx, v_restored.size(), s);
                 }
             }
         }
@@ -287,8 +256,7 @@ namespace EquipHide
            Sort + binary_search on composite keys: lexicographic
            (vis_ctrl, addr) ordering keeps the active-vis-ctrl set
            clustered and matches the equality semantics of VisKey. */
-        std::sort(s_touchedVisKeys.begin(), s_touchedVisKeys.end(),
-                  vis_key_less);
+        std::sort(s_touchedVisKeys.begin(), s_touchedVisKeys.end(), vis_key_less);
 
         s_activeVisCtrls.fill(0);
         int activeCount = 0;
@@ -315,41 +283,32 @@ namespace EquipHide
             }
             if (!vcIsActive)
             {
-                /* vis_ctrl is no longer tracked -- this entry's
-                   character has been swapped out or the player set
-                   changed shape entirely. Leave the vis byte alone so
-                   the inactive character's hide state survives the
-                   swap; cleanup_vis_bytes() at shutdown handles the
-                   final restore. */
+                /* vis_ctrl is no longer tracked -- this entry's character has been swapped out or the player set
+                   changed shape entirely. Leave the vis byte alone so the inactive character's hide state survives the
+                   swap; cleanup_vis_bytes() at shutdown handles the final restore. */
                 ++it;
                 continue;
             }
-            if (std::binary_search(s_touchedVisKeys.begin(),
-                                   s_touchedVisKeys.end(), entryKey,
-                                   vis_key_less))
+            if (std::binary_search(s_touchedVisKeys.begin(), s_touchedVisKeys.end(), entryKey, vis_key_less))
             {
                 ++it;
                 continue;
             }
 
             auto *visPtr = reinterpret_cast<uint8_t *>(entryKey.addr);
-            // Cached origVis values can carry the engine's own
-            // hidden-bit (0x02). Restoring verbatim keeps the part
-            // hidden, so write a literal 0 (same reasoning as the
-            // main restore branch above).
+            // Cached origVis values can carry the engine's own hidden-bit (0x02). Restoring verbatim keeps the part
+            // hidden, so write a literal 0 (same reasoning as the main restore branch above).
             *visPtr = 0;
             it = origVis.erase(it);
             ++orphanRestored;
         }
         if (orphanRestored > 0)
-            logger.debug(
-                "DirectWrite: {} orphan vis bytes restored "
-                "(category change for active vis ctrls)",
-                orphanRestored);
+            logger.debug("DirectWrite: {} orphan vis bytes restored "
+                         "(category change for active vis ctrls)",
+                         orphanRestored);
         restoredCount += orphanRestored;
 
-        logger.info("DirectWrite: {} protagonists, {} hidden, {} restored",
-                    n, hiddenCount, restoredCount);
+        logger.info("DirectWrite: {} protagonists, {} hidden, {} restored", n, hiddenCount, restoredCount);
     }
 
     void apply_direct_vis_write() noexcept
@@ -357,28 +316,21 @@ namespace EquipHide
         auto &addrs = resolved_addrs();
         if (!addrs.mapLookup)
             return;
-        /* Manual lock/unlock: MSVC SEH does not run C++ destructors on
-           unwind under /EHsc, so an RAII lock would stay held after a
-           caught fault. The __try/__finally wrapper below provides the
-           same guarantee in SEH terms: __finally runs on every exit
-           path (normal return, SEH propagation, C++ exception unwind
-           through the noexcept barrier) so the mutex is always
-           released even if mtx.unlock() itself raises SEH or if the
-           impl propagates an uncaught C++ exception. Without this the
-           mid-hook re-fires the work on every frame, producing a
-           tight try_lock failure spam loop. */
+        /* Manual lock/unlock: MSVC SEH does not run C++ destructors on unwind under /EHsc, so an RAII lock would stay
+           held after a caught fault. The __try/__finally wrapper below provides the same guarantee in SEH terms:
+           __finally runs on every exit path (normal return, SEH propagation, C++ exception unwind through the noexcept
+           barrier) so the mutex is always released even if mtx.unlock() itself raises SEH or if the impl propagates an
+           uncaught C++ exception. Without this the mid-hook re-fires the work on every frame, producing a tight
+           try_lock failure spam loop. */
         auto &mtx = vis_write_mutex();
         if (!mtx.try_lock())
         {
-            /* Lost the lock race against another writer (mid-hook,
-               resolve poll, or a second input-thread tick). Republish
-               the work-pending signal so the mid-hook re-runs us on
-               the next game frame; without this the toggle that
-               triggered this call would be silently dropped and the
-               user-visible vis byte would not flip. */
+            /* Lost the lock race against another writer (mid-hook, resolve poll, or a second input-thread tick).
+               Republish the work-pending signal so the mid-hook re-runs us on the next game frame; without this the
+               toggle that triggered this call would be silently dropped and the user-visible vis byte would not flip.
+             */
             needs_direct_write().store(true, std::memory_order_release);
-            DMK::Logger::get_instance().trace(
-                "DirectWrite: try_lock failed, deferred to mid-hook");
+            DMK::Logger::get_instance().trace("DirectWrite: try_lock failed, deferred to mid-hook");
             return;
         }
 
@@ -394,8 +346,7 @@ namespace EquipHide
             {
                 static std::atomic<bool> s_crashLogged{false};
                 if (!s_crashLogged.exchange(true, std::memory_order_relaxed))
-                    DMK::Logger::get_instance().warning(
-                        "DirectWrite: SEH caught crash");
+                    DMK::Logger::get_instance().warning("DirectWrite: SEH caught crash");
             }
         }
         __finally
@@ -404,10 +355,9 @@ namespace EquipHide
         }
     }
 
-    /* Implementation body for cleanup_vis_bytes(): structured binding on
-       map<VisKey, ...> creates the same hidden-temporary issue
-       apply_direct_vis_write_impl works around. Same _impl pattern
-       keeps the SEH wrapper free of unwind state. */
+    /* Implementation body for cleanup_vis_bytes(): structured binding on map<VisKey, ...> creates the same
+       hidden-temporary issue apply_direct_vis_write_impl works around. Same _impl pattern keeps the SEH wrapper free of
+       unwind state. */
     static void cleanup_vis_bytes_impl() noexcept
     {
         auto &origVis = original_vis_map();
@@ -420,8 +370,7 @@ namespace EquipHide
         }
         origVis.clear();
 
-        DMK::Logger::get_instance().debug(
-            "Cleanup: {} vis bytes restored", restoredCount);
+        DMK::Logger::get_instance().debug("Cleanup: {} vis bytes restored", restoredCount);
     }
 
     void cleanup_vis_bytes() noexcept
@@ -429,11 +378,9 @@ namespace EquipHide
         auto &mtx = vis_write_mutex();
         mtx.lock();
 
-        /* __try/__finally so the unlock runs even if cleanup_vis_bytes_impl
-           propagates a C++ exception (logger format error, bad_alloc) that
-           the SEH __except below does not catch under /EHsc, or if
-           mtx.unlock() itself raises an SEH. Either path would leak the
-           lock and stall every subsequent try_lock from the mid-hook. */
+        /* __try/__finally so the unlock runs even if cleanup_vis_bytes_impl propagates a C++ exception (logger format
+           error, bad_alloc) that the SEH __except below does not catch under /EHsc, or if mtx.unlock() itself raises an
+           SEH. Either path would leak the lock and stall every subsequent try_lock from the mid-hook. */
         __try
         {
             __try

@@ -11,16 +11,13 @@ namespace CDCore
 {
     static constexpr std::size_t k_maxStringLen = 64;
 
-    static std::size_t read_table_entry(
-        std::uintptr_t tableArray, std::uint32_t hash,
-        char *buf, std::size_t bufSize) noexcept
+    static std::size_t read_table_entry(std::uintptr_t tableArray, std::uint32_t hash, char *buf,
+                                        std::size_t bufSize) noexcept
     {
         __try
         {
-            const auto entryAddr =
-                tableArray + static_cast<std::uintptr_t>(hash) * 16;
-            const auto strPtr =
-                *reinterpret_cast<const std::uintptr_t *>(entryAddr);
+            const auto entryAddr = tableArray + static_cast<std::uintptr_t>(hash) * 16;
+            const auto strPtr = *reinterpret_cast<const std::uintptr_t *>(entryAddr);
             if (strPtr < 0x10000)
                 return 0;
 
@@ -40,8 +37,7 @@ namespace CDCore
         }
     }
 
-    static bool matches_prefix(
-        const char *buf, std::size_t len, const char *prefix) noexcept
+    static bool matches_prefix(const char *buf, std::size_t len, const char *prefix) noexcept
     {
         if (!prefix || !*prefix)
             return true;
@@ -51,9 +47,8 @@ namespace CDCore
         return std::memcmp(buf, prefix, plen) == 0;
     }
 
-    std::unordered_map<std::string, std::uint32_t> scan_indexed_string_table(
-        std::uintptr_t mapLookupFunc,
-        const IndexedStringScanConfig &cfg)
+    std::unordered_map<std::string, std::uint32_t> scan_indexed_string_table(std::uintptr_t mapLookupFunc,
+                                                                             const IndexedStringScanConfig &cfg)
     {
         auto &logger = DMK::Logger::get_instance();
         std::unordered_map<std::string, std::uint32_t> nameToHash;
@@ -61,80 +56,60 @@ namespace CDCore
         if (!mapLookupFunc)
             return nameToHash;
 
-        // Locate `48 8B 05 <disp32>` inside the first 0x40 bytes of
-        // mapLookupFunc. Bounded scan -- global uniqueness irrelevant.
-        const auto funcStart =
-            reinterpret_cast<const std::byte *>(mapLookupFunc);
+        // Locate `48 8B 05 <disp32>` inside the first 0x40 bytes of mapLookupFunc. Bounded scan -- global uniqueness
+        // irrelevant.
+        const auto funcStart = reinterpret_cast<const std::byte *>(mapLookupFunc);
         auto ripAob = DMK::Scanner::parse_aob("48 8B 05 ?? ?? ?? ??");
         if (!ripAob)
         {
-            logger.warning(
-                "{}: parse_aob failed for mapLookup rip-anchor",
-                cfg.logLabel);
+            logger.warning("{}: parse_aob failed for mapLookup rip-anchor", cfg.logLabel);
             return nameToHash;
         }
-        const auto *ripMatch =
-            DMK::Scanner::find_pattern(funcStart, 0x40, *ripAob);
+        const auto *ripMatch = DMK::Scanner::find_pattern(funcStart, 0x40, *ripAob);
         if (!ripMatch)
         {
-            logger.warning(
-                "{}: `48 8B 05` rip-instruction not found in first 0x40 "
-                "bytes of mapLookupFunc (0x{:X})",
-                cfg.logLabel, mapLookupFunc);
+            logger.warning("{}: `48 8B 05` rip-instruction not found in first 0x40 "
+                           "bytes of mapLookupFunc (0x{:X})",
+                           cfg.logLabel, mapLookupFunc);
             return nameToHash;
         }
         const auto ripInstr = reinterpret_cast<std::uintptr_t>(ripMatch);
 
         std::int32_t disp = 0;
-        std::memcpy(&disp, reinterpret_cast<const void *>(ripInstr + 3),
-                    sizeof(std::int32_t));
+        std::memcpy(&disp, reinterpret_cast<const void *>(ripInstr + 3), sizeof(std::int32_t));
         const auto instrEnd = ripInstr + 7;
-        const auto globalPtrAddr = static_cast<std::uintptr_t>(
-            static_cast<std::int64_t>(instrEnd) + disp);
+        const auto globalPtrAddr = static_cast<std::uintptr_t>(static_cast<std::int64_t>(instrEnd) + disp);
 
-        // globalPtrAddr is a RIP-resolved module slot; guard the read so a
-        // build whose layout shifted it outside committed memory yields 0
-        // (handled as "not yet initialized") rather than faulting.
-        const auto globalPtr =
-            DMKMemory::seh_read<std::uintptr_t>(globalPtrAddr).value_or(0);
+        // globalPtrAddr is a RIP-resolved module slot; guard the read so a build whose layout shifted it outside
+        // committed memory yields 0 (handled as "not yet initialized") rather than faulting.
+        const auto globalPtr = DMKMemory::seh_read<std::uintptr_t>(globalPtrAddr).value_or(0);
         if (globalPtr < 0x10000)
         {
-            logger.trace(
-                "{}: global pointer not yet initialized (0x{:X})",
-                cfg.logLabel, globalPtr);
+            logger.trace("{}: global pointer not yet initialized (0x{:X})", cfg.logLabel, globalPtr);
             return nameToHash;
         }
 
-        // globalPtr is a live game heap pointer that can tear or relocate
-        // across a world reload; a faulting read yields 0 and routes to the
-        // "offset moved" warning below instead of crashing the caller.
-        const auto tableArray =
-            DMKMemory::seh_read<std::uintptr_t>(globalPtr + cfg.tableArrayOffset)
-                .value_or(0);
+        // globalPtr is a live game heap pointer that can tear or relocate across a world reload; a faulting read yields
+        // 0 and routes to the "offset moved" warning below instead of crashing the caller.
+        const auto tableArray = DMKMemory::seh_read<std::uintptr_t>(globalPtr + cfg.tableArrayOffset).value_or(0);
         if (tableArray < 0x10000)
         {
-            logger.warning(
-                "{}: tableArray is null/invalid (0x{:X}) -- offset 0x{:X} "
-                "inside globalPtr may have moved",
-                cfg.logLabel, tableArray,
-                static_cast<std::int64_t>(cfg.tableArrayOffset));
+            logger.warning("{}: tableArray is null/invalid (0x{:X}) -- offset 0x{:X} "
+                           "inside globalPtr may have moved",
+                           cfg.logLabel, tableArray, static_cast<std::int64_t>(cfg.tableArrayOffset));
             return nameToHash;
         }
 
-        logger.trace(
-            "{}: globalPtr=0x{:X} tableArray=0x{:X} range=0x{:X}-0x{:X}",
-            cfg.logLabel, globalPtr, tableArray,
-            cfg.tableScanMin, cfg.tableScanMax);
+        logger.trace("{}: globalPtr=0x{:X} tableArray=0x{:X} range=0x{:X}-0x{:X}", cfg.logLabel, globalPtr, tableArray,
+                     cfg.tableScanMin, cfg.tableScanMax);
 
         const auto t0 = std::chrono::steady_clock::now();
         std::uint32_t entries = 0;
         char buf[k_maxStringLen + 1];
 
-        for (std::uint32_t hash = cfg.tableScanMin;
-             hash <= cfg.tableScanMax; ++hash)
+        for (std::uint32_t hash = cfg.tableScanMin; hash <= cfg.tableScanMax; ++hash)
         {
-            const auto len = read_table_entry(
-                tableArray, hash, buf, sizeof(buf));
+            const auto len = read_table_entry(tableArray, hash, buf, sizeof(buf));
             if (len == 0 || len >= k_maxStringLen)
                 continue;
             if (!matches_prefix(buf, len, cfg.prefix))
@@ -145,30 +120,23 @@ namespace CDCore
         }
 
         const auto t1 = std::chrono::steady_clock::now();
-        const auto ms =
-            std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0)
-                .count();
+        const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
 
         if (entries == 0)
         {
-            logger.warning(
-                "{}: 0 entries matching prefix '{}' found in range "
-                "0x{:X}..0x{:X} -- table not yet populated or prefix "
-                "missing from this build; deferring feature",
-                cfg.logLabel, cfg.prefix ? cfg.prefix : "",
-                cfg.tableScanMin, cfg.tableScanMax);
+            logger.warning("{}: 0 entries matching prefix '{}' found in range "
+                           "0x{:X}..0x{:X} -- table not yet populated or prefix "
+                           "missing from this build; deferring feature",
+                           cfg.logLabel, cfg.prefix ? cfg.prefix : "", cfg.tableScanMin, cfg.tableScanMax);
         }
         else
         {
-            // Per-scan summary stays at TRACE so the deferred-scan poll
-            // path (called every 2s until table stability) does not flood
-            // the INFO stream. Call sites that want a one-shot INFO line
-            // emit their own at init-time decision points.
-            logger.trace(
-                "{}: {} entries for prefix '{}' in range 0x{:X}..0x{:X} "
-                "in {}ms",
-                cfg.logLabel, entries, cfg.prefix ? cfg.prefix : "",
-                cfg.tableScanMin, cfg.tableScanMax, ms);
+            // Per-scan summary stays at TRACE so the deferred-scan poll path (called every 2s until table stability)
+            // does not flood the INFO stream. Call sites that want a one-shot INFO line emit their own at init-time
+            // decision points.
+            logger.trace("{}: {} entries for prefix '{}' in range 0x{:X}..0x{:X} "
+                         "in {}ms",
+                         cfg.logLabel, entries, cfg.prefix ? cfg.prefix : "", cfg.tableScanMin, cfg.tableScanMax, ms);
         }
 
         return nameToHash;

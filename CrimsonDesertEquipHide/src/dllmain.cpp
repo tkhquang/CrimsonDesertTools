@@ -15,10 +15,9 @@ namespace
     bool init_mod()
     {
         auto &logger = DetourModKit::Logger::get_instance();
-        EquipHide::Version::logVersionInfo();
+        EquipHide::Version::log_version_info();
 
-        const auto runtimeDir =
-            DetourModKit::Filesystem::get_runtime_directory_utf8();
+        const auto runtimeDir = DetourModKit::Filesystem::get_runtime_directory_utf8();
         logger.info("DLL loaded, runtime dir: {}", runtimeDir);
 
         if (!EquipHide::init())
@@ -47,15 +46,10 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
         asyncCfg.overflow_policy = DetourModKit::OverflowPolicy::SyncFallback;
 
         const DetourModKit::Bootstrap::ModInfo info{
-            "EquipHide",
-            EquipHide::LOG_FILE,
-            EquipHide::GAME_PROCESS_NAME,
-            "CrimsonDesertEquipHide_",
-            asyncCfg,
+            "EquipHide", EquipHide::LOG_FILE, EquipHide::GAME_PROCESS_NAME, "CrimsonDesertEquipHide_", asyncCfg,
         };
 
-        return DetourModKit::Bootstrap::on_dll_attach(
-            hModule, info, &init_mod, &shutdown_mod);
+        return DetourModKit::Bootstrap::on_dll_attach(hModule, info, &init_mod, &shutdown_mod);
     }
 
     case DLL_PROCESS_DETACH:

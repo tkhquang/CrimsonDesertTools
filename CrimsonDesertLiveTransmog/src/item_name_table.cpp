@@ -18,22 +18,18 @@
 
 namespace Transmog
 {
-    // Sensible upper bound on item descriptor catalog size.
-    // v1.02.00 ships ~6024 entries; guard generously.
+    // Sensible upper bound on item descriptor catalog size. v1.02.00 ships ~6024 entries; guard generously.
     static constexpr uint32_t k_maxCatalogSize = 0x20000;
 
     static constexpr std::size_t k_maxNameLen = 96;
 
-    // Variant-metadata detection (see item_name_table.hpp::has_variant_meta).
-    // Clean base items have `*(desc+<offset>) == <sentinel>` where
-    // <sentinel> is a shared empty-object pointer (IDA: off_1459D0B38 on
-    // v1.02.00 -- an IRefCounted vtable in the exe's .data section).
-    // Non-sentinel values point to a per-item metadata struct threaded
-    // through a catalog-wide linked list; members of this list failed to
-    // render via runtime transmog on all tested samples.
+    // Variant-metadata detection (see item_name_table.hpp::has_variant_meta). Clean base items have `*(desc+<offset>)
+    // == <sentinel>` where <sentinel> is a shared empty-object pointer (IDA: off_1459D0B38 on v1.02.00 -- an
+    // IRefCounted vtable in the exe's .data section). Non-sentinel values point to a per-item metadata struct threaded
+    // through a catalog-wide linked list; members of this list failed to render via runtime transmog on all tested
+    // samples.
     //
-    // The field offset shifts across major game revisions as the
-    // descriptor struct grows:
+    // The field offset shifts across major game revisions as the descriptor struct grows:
     //
     //   v1.02.00 -- +0x3A0 (original)
     //   v1.04.00 -- +0x3C8 (descriptor gained 0x28 bytes of new fields
@@ -46,38 +42,31 @@ namespace Transmog
     //               heap pointer for carrier-required items"). Anchor
     //               sentinel observed at 0x145BC3638.
     //
-    // The sentinel value itself is also unstable (any .data reshuffle
-    // moves it). Rather than hardcoding either the offset or the
-    // sentinel RVA, the builder resolves the sentinel statistically at
-    // catalog-build time: scan every valid descriptor's qword at this
-    // offset, the value that appears in the clear majority of items
-    // (~3-5k of ~6k) IS the sentinel. Self-heals across future game
-    // updates as long as the catalog stays statistically dominated by
-    // base items.
+    // The sentinel value itself is also unstable (any .data reshuffle moves it). Rather than hardcoding either the
+    // offset or the sentinel RVA, the builder resolves the sentinel statistically at catalog-build time: scan every
+    // valid descriptor's qword at this offset, the value that appears in the clear majority of items (~3-5k of ~6k) IS
+    // the sentinel. Self-heals across future game updates as long as the catalog stays statistically dominated by base
+    // items.
     static constexpr std::ptrdiff_t k_descVariantMetaOffset = 0x3D0;
 
     // --- iteminfo (qword_145CEF370) container layout, v1.02.00 ---
-    // Source: IDA sub_1402D75D0 + static analysis. These are runtime data
-    // offsets (not code) so they cannot be AOB-scanned; if a future patch
-    // reshapes the struct the catalog walk will produce an implausible
-    // count/ptrArray and bail at the existing sanity checks below.
+    // Source: IDA sub_1402D75D0 + static analysis. These are runtime data offsets (not code) so they cannot be
+    // AOB-scanned; if a future patch reshapes the struct the catalog walk will produce an implausible count/ptrArray
+    // and bail at the existing sanity checks below.
     static constexpr std::ptrdiff_t k_iteminfoCountOffset = 0x08;    // dword entry count
     static constexpr std::ptrdiff_t k_iteminfoPtrArrayOffset = 0x50; // 80: qword base of descriptor ptr array
 
-    // Resolved sentinel, cached after first successful build().
-    // 0 means "not yet resolved" -- has_variant_meta() falls back to false
-    // (preferring to let a bad item through rather than mis-flag a clean
-    // one) until the next build() populates it.
+    // Resolved sentinel, cached after first successful build(). 0 means "not yet resolved" -- has_variant_meta() falls
+    // back to false (preferring to let a bad item through rather than mis-flag a clean one) until the next build()
+    // populates it.
     static std::atomic<uintptr_t> s_variantMetaSentinel{0};
 
     // --- Safe memory helpers ---
     //
-    // The `(value, bool& ok)` shape distinguishes a faulted read from a
-    // legitimate zero result, which matters at call sites where 0 is a
-    // valid value (e.g. slot index 0 versus unread slot field).
-    // `DMKMemory::seh_read<T>` is the underlying SEH-protected primitive;
-    // these adapters fold its `std::optional<T>` return into the local
-    // shape used by the rest of this translation unit.
+    // The `(value, bool& ok)` shape distinguishes a faulted read from a legitimate zero result, which matters at call
+    // sites where 0 is a valid value (e.g. slot index 0 versus unread slot field). `DMKMemory::seh_read<T>` is the
+    // underlying SEH-protected primitive; these adapters fold its `std::optional<T>` return into the local shape used
+    // by the rest of this translation unit.
 
     static uint8_t read_u8_safe(uintptr_t addr, bool &ok) noexcept
     {
@@ -116,49 +105,45 @@ namespace Transmog
 
     // --- Body-type classification via rule-classifier tokens ---
     //
-    // Every armor descriptor at +0x248 holds a stride-0x38 rule list (count
-    // at +0x250). Each rule's classifier array at rule+0x20 (count at
-    // rule+0x28) is a list of u16 body-type tokens the engine's rule
-    // evaluator accepts for that item. Mount/pet/non-humanoid gear (horse
-    // tack, wagon gear, dragon armor) uses a disjoint, high-valued token pool
+    // Every armor descriptor at +0x248 holds a stride-0x38 rule list (count at +0x250). Each rule's classifier array at
+    // rule+0x20 (count at rule+0x28) is a list of u16 body-type tokens the engine's rule evaluator accepts for that
+    // item. Mount/pet/non-humanoid gear (horse tack, wagon gear, dragon armor) uses a disjoint, high-valued token pool
     // and crashes the mesh binder if bound to a player body.
     //
-    // The class-enum is re-keyed across major game versions; the descriptor
-    // layout (the offsets above, 0x38 stride) is stable, only the enum values
-    // move. Token sets per version, kept for drift tracking:
+    // The class-enum is re-keyed across major game versions; the descriptor layout (the offsets above, 0x38 stride) is
+    // stable, only the enum values move. Token sets per version, kept for drift tracking:
     //
     //   v1.03.01:  male {0x0018,0x0058,0x02E3}  female {0x0072,0x0382,0x0300}
     //   v1.04.00:  male {0x0019,0x0059,0x02E5}  female {0x0073,0x0384,0x0302}
     //   v1.08.00:  male {0x0012,0x0052,0x02DE}  female {0x006C,0x037D,0x02FB}
     //   v1.09.00:  male {0x0012,0x0054,0x02DF}  female {0x001D,0x037E,0x02FC}
     //
-    // Each body has three interchangeable markers; an armor item may carry
-    // any subset (r0{0x12} and r0{0x12,0x54,0x2DF} are both male). 0x12 and
-    // 0x1D are the male/female primary markers and counterparts; the other
-    // two of each set are secondary. All three female markers must be matched
-    // because some female items carry only the primary 0x1D with neither
-    // 0x37E nor 0x2FC. Every value drifts on a game update; re-derive then.
+    // Each body has three interchangeable markers; an armor item may carry any subset (r0{0x12} and r0{0x12,0x54,0x2DF}
+    // are both male). 0x12 and 0x1D are the male/female primary markers and counterparts; the other two of each set are
+    // secondary. All three female markers must be matched because some female items carry only the primary 0x1D with
+    // neither 0x37E nor 0x2FC. Every value drifts on a game update; re-derive then.
     //
     // To re-derive after a drift, read the rule cls array
     // (desc+0x248 -> rule+0x20, see item_body_bits) of a known male and a
-    // known female armor item; those cls values are the male and female
-    // token sets. The deltas are not uniform across patches, so map by
-    // inspection rather than a fixed offset. The male markers do not appear
-    // in clean female items, so the OR-any-token classification stays sound.
+    // known female armor item; those cls values are the male and female token sets. The deltas are not uniform across
+    // patches, so map by inspection rather than a fixed offset. The male markers do not appear in clean female items,
+    // so the OR-any-token classification stays sound.
     static constexpr std::uint16_t k_maleBodyTokens[] = {
-        0x0011, 0x005E, 0x02E9,
+        0x0011,
+        0x005E,
+        0x02E9,
     };
     static constexpr std::uint16_t k_femaleBodyTokens[] = {
-        0x001C, 0x0388, 0x0306,
+        0x001C,
+        0x0388,
+        0x0306,
     };
-    // Shared / NPC-body token. Carried as a secondary tag by most male
-    // (cd_phm_*) human armor alongside a male token, and in isolation (no
-    // human gender token) by a handful of NPC/demon-body items whose mesh is
-    // cd_ndm_*/cd_pdm_*. The mesh body code's last letter is the true gender
-    // (m=male, w=female), and every isolated-shared-token armor item resolves
-    // to a *dm (male) body, so an item carrying only this token is classified
-    // Male (see sorted_entries). Items that also carry a real male token
-    // classify Male from that token, so this fallback never alters them.
+    // Shared / NPC-body token. Carried as a secondary tag by most male (cd_phm_*) human armor alongside a male token,
+    // and in isolation (no human gender token) by a handful of NPC/demon-body items whose mesh is cd_ndm_*/cd_pdm_*.
+    // The mesh body code's last letter is the true gender (m=male, w=female), and every isolated-shared-token armor
+    // item resolves to a *dm (male) body, so an item carrying only this token is classified
+    // Male (see sorted_entries). Items that also carry a real male token classify Male from that token, so this
+    // fallback never alters them.
     static constexpr std::uint16_t k_sharedBodyTokens[] = {
         0x03A3, // *dm (male) NPC/demon body marker; drifts on game updates
     };
@@ -210,26 +195,22 @@ namespace Transmog
     static constexpr std::uint8_t k_bodyBitFemale = 0x02;
     static constexpr std::uint8_t k_bodyBitHasTokens = 0x04;
     static constexpr std::uint8_t k_bodyBitNonHumanoid = 0x08;
-    // Set when the item has >= 2 rules that each contain a body token (male
-    // or female) -- separate male and female rule definitions, each gated on
-    // that rule's own identity tokens. Correlates with "needs the carrier
-    // mechanism to render on an off-native-class character"; an item with a
-    // single body-bearing rule direct-wears on every protagonist.
+    // Set when the item has >= 2 rules that each contain a body token (male or female) -- separate male and female rule
+    // definitions, each gated on that rule's own identity tokens. Correlates with "needs the carrier mechanism to
+    // render on an off-native-class character"; an item with a single body-bearing rule direct-wears on every
+    // protagonist.
     static constexpr std::uint8_t k_bodyBitMultiBodyRules = 0x10;
-    // Set when a k_sharedBodyTokens entry (0x399) is seen. Used only as a
-    // classification fallback for items that carry it WITHOUT any gendered
-    // human body token (NPC/demon-body carrier items) -- see sorted_entries.
+    // Set when a k_sharedBodyTokens entry (0x399) is seen. Used only as a classification fallback for items that carry
+    // it WITHOUT any gendered human body token (NPC/demon-body carrier items) -- see sorted_entries.
     static constexpr std::uint8_t k_bodyBitSharedBody = 0x20;
-    // Clean gender = gender seen in a rule that has NO NPC-identity/high token
-    // (>= k_nonHumanoidTokenThreshold). A clean rule reflects a real player
-    // mesh; an NPC-gated rule is just an acceptance gate. BodyKind prefers
-    // clean gender (see sorted_entries); is_player_compatible / multi-body use
-    // the OR-ed Male/Female bits above. See the bit-doc block for rationale.
+    // Clean gender = gender seen in a rule that has NO NPC-identity/high token (>= k_nonHumanoidTokenThreshold). A
+    // clean rule reflects a real player mesh; an NPC-gated rule is just an acceptance gate. BodyKind prefers clean
+    // gender (see sorted_entries); is_player_compatible / multi-body use the OR-ed Male/Female bits above. See the
+    // bit-doc block for rationale.
     static constexpr std::uint8_t k_bodyBitCleanMale = 0x40;
     static constexpr std::uint8_t k_bodyBitCleanFemale = 0x80;
-    // Any classifier token >= this threshold is treated as non-humanoid
-    // (horse saddles, dragon armors, pet harnesses); every humanoid token
-    // observed sits well below it.
+    // Any classifier token >= this threshold is treated as non-humanoid (horse saddles, dragon armors, pet harnesses);
+    // every humanoid token observed sits well below it.
     static constexpr std::uint16_t k_nonHumanoidTokenThreshold = 0x1000;
 
     static constexpr std::ptrdiff_t k_ruleListPtrOffset = 0x248;
@@ -240,21 +221,17 @@ namespace Transmog
     static constexpr std::uint32_t k_maxPlausibleRuleCount = 64;
     static constexpr std::uint32_t k_maxPlausibleClassCount = 32;
 
-    // Walk an item's rule-classifier arrays once and return the packed
-    // body-kind bit mask documented with the k_bodyBit* constants above
-    // (Male / Female / HasTokens / NonHumanoid / MultiBodyRules / SharedBody
-    // / CleanMale / CleanFemale). Items with no rules (or unreadable fields)
-    // return 0 (Generic) -- the picker treats Generic as "accepted by every
-    // body", matching the engine's observed behaviour for rule-less cosmetics.
+    // Walk an item's rule-classifier arrays once and return the packed body-kind bit mask documented with the
+    // k_bodyBit* constants above (Male / Female / HasTokens / NonHumanoid / MultiBodyRules / SharedBody / CleanMale /
+    // CleanFemale). Items with no rules (or unreadable fields) return 0 (Generic) -- the picker treats Generic as
+    // "accepted by every body", matching the engine's observed behaviour for rule-less cosmetics.
     static std::uint8_t item_body_bits(uintptr_t descPtr) noexcept
     {
         bool ok = false;
-        const auto rulesPtr = read_qword_safe(
-            descPtr + k_ruleListPtrOffset, ok);
+        const auto rulesPtr = read_qword_safe(descPtr + k_ruleListPtrOffset, ok);
         if (!ok || rulesPtr < 0x10000)
             return 0;
-        const auto ruleCount = read_u32_safe(
-            descPtr + k_ruleListCountOffset, ok);
+        const auto ruleCount = read_u32_safe(descPtr + k_ruleListCountOffset, ok);
         if (!ok || ruleCount == 0 || ruleCount > k_maxPlausibleRuleCount)
             return 0;
 
@@ -264,26 +241,22 @@ namespace Transmog
         for (std::uint32_t i = 0; i < ruleCount; ++i)
         {
             const auto rule = rulesPtr + i * k_ruleStride;
-            const auto clsPtr = read_qword_safe(
-                rule + k_ruleClassPtrOffset, ok);
+            const auto clsPtr = read_qword_safe(rule + k_ruleClassPtrOffset, ok);
             if (!ok || clsPtr < 0x10000)
                 continue;
-            const auto clsCount = read_u32_safe(
-                rule + k_ruleClassCountOffset, ok);
+            const auto clsCount = read_u32_safe(rule + k_ruleClassCountOffset, ok);
             if (!ok || clsCount == 0 || clsCount > k_maxPlausibleClassCount)
                 continue;
 
             bool ruleHasMale = false;
             bool ruleHasFemale = false;
-            // A token >= k_nonHumanoidTokenThreshold inside a gender rule is
-            // an NPC-identity gate (e.g. Samuel 0x1E8C/0x1F46), not a player
-            // body. A rule carrying one is NOT "clean" -- its gender tokens
-            // are an acceptance gate, not a real player mesh.
+            // A token >= k_nonHumanoidTokenThreshold inside a gender rule is an NPC-identity gate (e.g. Samuel
+            // 0x1E8C/0x1F46), not a player body. A rule carrying one is NOT "clean" -- its gender tokens are an
+            // acceptance gate, not a real player mesh.
             bool ruleHasHighToken = false;
             for (std::uint32_t j = 0; j < clsCount; ++j)
             {
-                const auto clsOpt =
-                    DMKMemory::seh_read<std::uint16_t>(clsPtr + 2ull * j);
+                const auto clsOpt = DMKMemory::seh_read<std::uint16_t>(clsPtr + 2ull * j);
                 if (!clsOpt)
                     break;
                 const std::uint16_t cls = *clsOpt;
@@ -310,9 +283,8 @@ namespace Transmog
                     }
                 }
                 // Shared / NPC-body token. Tracked globally (not per-rule):
-                // it must not count toward the multi-body-rules heuristic and
-                // is only a fallback in sorted_entries when no gendered human
-                // token classified the item.
+                // it must not count toward the multi-body-rules heuristic and is only a fallback in sorted_entries when
+                // no gendered human token classified the item.
                 for (const auto st : k_sharedBodyTokens)
                 {
                     if (cls == st)
@@ -330,11 +302,9 @@ namespace Transmog
             // A gender-bearing rule contributes to the multi-body count.
             if (ruleHasMale || ruleHasFemale)
                 ++bodyBearingRuleCount;
-            // "Clean" gender = a gender rule with NO NPC-identity/high token.
-            // These reflect a real player mesh; NPC-gated rules (Samuel,
-            // Heisellen, etc.) are excluded. BodyKind prefers clean gender so
-            // a male item with an NPC-gated female rule stays Male, while a
-            // protagonist item with a clean female rule (Demian_Greyfur_*
+            // "Clean" gender = a gender rule with NO NPC-identity/high token. These reflect a real player mesh;
+            // NPC-gated rules (Samuel, Heisellen, etc.) are excluded. BodyKind prefers clean gender so a male item with
+            // an NPC-gated female rule stays Male, while a protagonist item with a clean female rule (Demian_Greyfur_*
             // cloak) shows for female.
             if (!ruleHasHighToken)
             {
@@ -345,19 +315,17 @@ namespace Transmog
             }
         }
 
-        // Dual-body NPC item: male and female variants split across
-        // separate rules, each identity-gated. Render fidelity on an
-        // off-native character requires the carrier mechanism.
+        // Dual-body NPC item: male and female variants split across separate rules, each identity-gated. Render
+        // fidelity on an off-native character requires the carrier mechanism.
         if (bodyBearingRuleCount >= 2)
             bits |= k_bodyBitMultiBodyRules;
 
         return bits;
     }
 
-
     /**
-     * Decode a relative-call instruction ( `E8 disp32` ) at the given
-     * address and return its target. Returns 0 on failure.
+     * Decode a relative-call instruction ( `E8 disp32` ) at the given address and return its target. Returns 0 on
+     * failure.
      */
     static uintptr_t decode_rel_call(uintptr_t callSite) noexcept
     {
@@ -372,11 +340,10 @@ namespace Transmog
     }
 
     /**
-     * Scan the first `scanBytes` of a function for the first `E8 disp32`
-     * call and return its target. Returns 0 on failure.
+     * Scan the first `scanBytes` of a function for the first `E8 disp32` call and return its target. Returns 0 on
+     * failure.
      */
-    static uintptr_t first_rel_call_target(uintptr_t funcStart,
-                                           std::size_t scanBytes) noexcept
+    static uintptr_t first_rel_call_target(uintptr_t funcStart, std::size_t scanBytes) noexcept
     {
         for (std::size_t off = 0; off + 5 <= scanBytes; ++off)
         {
@@ -393,8 +360,7 @@ namespace Transmog
     /**
      * Read a null-terminated ASCII string from `strPtr` into `buf`.
      */
-    static std::size_t read_cstring_safe(uintptr_t strPtr, char *buf,
-                                         std::size_t bufSize) noexcept
+    static std::size_t read_cstring_safe(uintptr_t strPtr, char *buf, std::size_t bufSize) noexcept
     {
         __try
         {
@@ -403,12 +369,9 @@ namespace Transmog
             while (len < bufSize - 1 && src[len] != '\0')
             {
                 const auto c = src[len];
-                // Reject control bytes (0x01..0x1F) -- they signal a
-                // misaligned heap read. Accept 0x80..0xFF: some
-                // legitimate string_keys are UTF-8 encoded (e.g. Roman
-                // numerals in Goblin_Merchant_Fabric_Armor_* use the
-                // sequence `E2 85 A2..A5`), so a printable-ASCII-only
-                // filter would silently drop them.
+                // Reject control bytes (0x01..0x1F) -- they signal a misaligned heap read. Accept 0x80..0xFF: some
+                // legitimate string_keys are UTF-8 encoded (e.g. Roman numerals in Goblin_Merchant_Fabric_Armor_* use
+                // the sequence `E2 85 A2..A5`), so a printable-ASCII-only filter would silently drop them.
                 if (static_cast<unsigned char>(c) < 0x20)
                     return 0;
                 buf[len] = c;
@@ -425,19 +388,14 @@ namespace Transmog
 
     // --- Slot classification ---
     //
-    // Driven entirely by the canonical item-type code at desc+0x44 as
-    // captured during the catalog build. Name-parsing heuristics have
-    // been removed -- they produced false positives on non-armor items
-    // whose names happened to contain tokens like "_Armor_" (horse
-    // armors, shields, quest treasure maps, etc.). The game's own
-    // type code is unambiguous; the fallback is to treat anything
-    // unmapped as non-equipment.
+    // Driven entirely by the canonical item-type code at desc+0x44 as captured during the catalog build. Name-parsing
+    // heuristics have been removed -- they produced false positives on non-armor items whose names happened to contain
+    // tokens like "_Armor_" (horse armors, shields, quest treasure maps, etc.). The game's own type code is
+    // unambiguous; the fallback is to treat anything unmapped as non-equipment.
 
-    // Slot mapping for the canonical item-type code at desc+0x44.
-    // Helm/Chest/Gloves/Boots are stable across v1.03.01/v1.04.00. Cloak
-    // shifted from 0x45 to 0x46 on v1.04.00 (a one-code insertion in the
-    // engine enum between Boots and Cloak). Both the legacy and current
-    // values are accepted so the mapping survives patches that have not
+    // Slot mapping for the canonical item-type code at desc+0x44. Helm/Chest/Gloves/Boots are stable across
+    // v1.03.01/v1.04.00. Cloak shifted from 0x45 to 0x46 on v1.04.00 (a one-code insertion in the engine enum between
+    // Boots and Cloak). Both the legacy and current values are accepted so the mapping survives patches that have not
     // shifted the earlier slots.
     //
     // Armor block (existing):
@@ -452,9 +410,8 @@ namespace Transmog
     //   0x43=Backpack
     //   0x47=Bracelet  0x48=Glasses  0x49=Mask
     //
-    // Weapons (typeCode varies by weapon FAMILY and sometimes by
-    // character variant -- all sharing the MainHand/OffHand/Ranged/
-    // SubWeapon/TwoHandWeapon auth-table slots):
+    // Weapons (typeCode varies by weapon FAMILY and sometimes by character variant -- all sharing the
+    // MainHand/OffHand/Ranged/ SubWeapon/TwoHandWeapon auth-table slots):
     //   Weapon families were derived by iterating every descriptor's
     //   typeCode against sample item names. Live-equipped items provided
     //   ground truth for confirmed entries; the rest were classified from
@@ -502,26 +459,20 @@ namespace Transmog
     //     0x60 Notepad/Pen, 0x6A FlatBasket, 0x6B Bucket, 0x6D Pot_Head
     //     0xFFFF Arrow/Quiver/Quest items
     //
-    // The 0x11 vs 0x12 split for 2H bastard swords looks like a
-    // character/gender variant axis -- they're the "same" weapon class
-    // visually but the engine tags them differently per protagonist.
-    // Both go in the TwoHandWeapon slot.
+    // The 0x11 vs 0x12 split for 2H bastard swords looks like a character/gender variant axis -- they're the "same"
+    // weapon class visually but the engine tags them differently per protagonist. Both go in the TwoHandWeapon slot.
     //
-    // More weapon-family typeCodes will surface as users equip new
-    // classes (crossbow, polearm, etc). Runtime `record_observed_slot`
-    // covers any unmapped family automatically once an item appears
-    // in the auth-table.
+    // More weapon-family typeCodes will surface as users equip new classes (crossbow, polearm, etc). Runtime
+    // `record_observed_slot` covers any unmapped family automatically once an item appears in the auth-table.
     //
     // Excluded by design (not LT-targeted):
     //   0x0B=OongkaRocket Helm (the OongkaRocket TransmogSlot is not
     //        mapped; leaving 0x0B unmapped keeps those items out of
     //        every picker).
     //
-    // For paired slots (weapons/earrings/rings) the static map points
-    // at the lower-indexed half of the pair; the picker UI uses
-    // `slots_share_picker` so both halves of a pair show the same
-    // items. The actual auth-table slot used at apply time is whichever
-    // TransmogSlot row the user committed against.
+    // For paired slots (weapons/earrings/rings) the static map points at the lower-indexed half of the pair; the picker
+    // UI uses `slots_share_picker` so both halves of a pair show the same items. The actual auth-table slot used at
+    // apply time is whichever TransmogSlot row the user committed against.
     //
     // Other observed codes explicitly rejected:
     //   0x20=Shield, 0x53/0x54=Horse/mount armor, 0xFFFF=Quest/non-equipment.
@@ -530,84 +481,98 @@ namespace Transmog
         switch (code)
         {
         // Armor
-        case 0x04: return TransmogSlot::Helm;
-        case 0x05: return TransmogSlot::Chest;
-        case 0x06: return TransmogSlot::Gloves;
-        case 0x07: return TransmogSlot::Boots;
-        // Cloak typeCodes span multiple game versions. 0x45 and 0x46
-        // are pre-v1.06.00 values kept for backwards compatibility; 0x47
-        // is the v1.06.00+ value. The +1 shift in v1.06.00 also moved
-        // the older Bracelet code (0x47) into Cloak's range, so the
-        // accessory codes below cannot keep their pre-v1.06.00 values
-        // without colliding with Cloak.
+        case 0x04:
+            return TransmogSlot::Helm;
+        case 0x05:
+            return TransmogSlot::Chest;
+        case 0x06:
+            return TransmogSlot::Gloves;
+        case 0x07:
+            return TransmogSlot::Boots;
+        // Cloak typeCodes span multiple game versions. 0x45 and 0x46 are pre-v1.06.00 values kept for backwards
+        // compatibility; 0x47 is the v1.06.00+ value. The +1 shift in v1.06.00 also moved the older Bracelet code
+        // (0x47) into Cloak's range, so the accessory codes below cannot keep their pre-v1.06.00 values without
+        // colliding with Cloak.
         case 0x45:
         case 0x46:
-        case 0x47: return TransmogSlot::Cloak;
-        // Accessories. Backpack accepts both pre- and post-v1.06.00
-        // codes because 0x43 and 0x44 do not collide with any other
-        // mapping. The remaining accessory cases only accept the
-        // v1.06.00 code; older values now route to Cloak above.
-        case 0x08: return TransmogSlot::Earring1; // shared with Earring2
-        case 0x09: return TransmogSlot::Necklace;
-        case 0x0A: return TransmogSlot::Ring1;    // shared with Ring2
-        case 0x37: return TransmogSlot::Lantern;
+        case 0x47:
+            return TransmogSlot::Cloak;
+        // Accessories. Backpack accepts both pre- and post-v1.06.00 codes because 0x43 and 0x44 do not collide with any
+        // other mapping. The remaining accessory cases only accept the v1.06.00 code; older values now route to Cloak
+        // above.
+        case 0x08:
+            return TransmogSlot::Earring1; // shared with Earring2
+        case 0x09:
+            return TransmogSlot::Necklace;
+        case 0x0A:
+            return TransmogSlot::Ring1; // shared with Ring2
+        case 0x37:
+            return TransmogSlot::Lantern;
         case 0x43:
-        case 0x44: return TransmogSlot::Backpack;
-        case 0x48: return TransmogSlot::Bracelet;
-        case 0x49: return TransmogSlot::Glasses;
-        case 0x4A: return TransmogSlot::Mask;
+        case 0x44:
+            return TransmogSlot::Backpack;
+        case 0x48:
+            return TransmogSlot::Bracelet;
+        case 0x49:
+            return TransmogSlot::Glasses;
+        case 0x4A:
+            return TransmogSlot::Mask;
         // 1H weapons -- all share MainHand (paired with OffHand)
-        case 0x00:                                 // 1H sword
-        case 0x01:                                 // shield (generic)
-        case 0x02:                                 // shield (Damiane variant)
-        case 0x10:                                 // 1H axe
-        case 0x13:                                 // 1H mace
-        case 0x1D:                                 // fist (Item_Fist_*)
-        case 0x20:                                 // tower shield
-        case 0x27:                                 // rapier
-        case 0x30: return TransmogSlot::MainHand; // knuckle / ring drill
+        case 0x00: // 1H sword
+        case 0x01: // shield (generic)
+        case 0x02: // shield (Damiane variant)
+        case 0x10: // 1H axe
+        case 0x13: // 1H mace
+        case 0x1D: // fist (Item_Fist_*)
+        case 0x20: // tower shield
+        case 0x27: // rapier
+        case 0x30:
+            return TransmogSlot::MainHand; // knuckle / ring drill
         // Ranged
-        case 0x03:                                 // bow
-        case 0x0D:                                 // sprayer/utility ranged
-        case 0x22:                                 // pistol
-        case 0x23:                                 // musket
-        case 0x24:                                 // shotgun
-        case 0x25:                                 // 1H cannon
-        case 0x2F:                                 // crossbow
-        case 0x31:                                 // flamethrower
-        case 0x32:                                 // ice thrower
-        case 0x33:                                 // lightning thrower
-        case 0x64: return TransmogSlot::Ranged;    // fishing rod
+        case 0x03: // bow
+        case 0x0D: // sprayer/utility ranged
+        case 0x22: // pistol
+        case 0x23: // musket
+        case 0x24: // shotgun
+        case 0x25: // 1H cannon
+        case 0x2F: // crossbow
+        case 0x31: // flamethrower
+        case 0x32: // ice thrower
+        case 0x33: // lightning thrower
+        case 0x64:
+            return TransmogSlot::Ranged; // fishing rod
         // Sub-weapons
-        case 0x0E: return TransmogSlot::SubWeapon; // dagger
+        case 0x0E:
+            return TransmogSlot::SubWeapon; // dagger
         // 2H weapons (combat + utility tools)
-        case 0x0F:                                     // 2H axe
-        case 0x11:                                     // 2H greatsword A
-        case 0x12:                                     // 2H greatsword B (Damiane/NPC)
-        case 0x14:                                     // war hammer
-        case 0x15:                                     // 2H spear / polearm
-        case 0x1C:                                     // 2H hammer
-        case 0x1E:                                     // drill
-        case 0x1F:                                     // chainsaw
-        case 0x21:                                     // halberd / alebard
-        case 0x26:                                     // 2H cannon
-        case 0x55:                                     // pickaxe
-        case 0x56:                                     // iron chain
-        case 0x57:                                     // rake
-        case 0x58:                                     // felling axe / boss super weapon
-        case 0x59:                                     // shovel
-        case 0x5A:                                     // broom
-        case 0x5B:                                     // hoe
-        case 0x5C:                                     // sickle/scythe
-        case 0x5D:                                     // work hammer
-        case 0x5F:                                     // saw
-        case 0x62:                                     // stick
-        case 0x66:                                     // priest wand
-        case 0x68: return TransmogSlot::TwoHandWeapon; // crutch
-        default:   return TransmogSlot::Count;
+        case 0x0F: // 2H axe
+        case 0x11: // 2H greatsword A
+        case 0x12: // 2H greatsword B (Damiane/NPC)
+        case 0x14: // war hammer
+        case 0x15: // 2H spear / polearm
+        case 0x1C: // 2H hammer
+        case 0x1E: // drill
+        case 0x1F: // chainsaw
+        case 0x21: // halberd / alebard
+        case 0x26: // 2H cannon
+        case 0x55: // pickaxe
+        case 0x56: // iron chain
+        case 0x57: // rake
+        case 0x58: // felling axe / boss super weapon
+        case 0x59: // shovel
+        case 0x5A: // broom
+        case 0x5B: // hoe
+        case 0x5C: // sickle/scythe
+        case 0x5D: // work hammer
+        case 0x5F: // saw
+        case 0x62: // stick
+        case 0x66: // priest wand
+        case 0x68:
+            return TransmogSlot::TwoHandWeapon; // crutch
+        default:
+            return TransmogSlot::Count;
         }
     }
-
 
     // --- Singleton ---
 
@@ -617,16 +582,13 @@ namespace Transmog
         return s;
     }
 
-    // Mutex guarding writes to m_idToName/m_nameToId/m_sortedCache during
-    // a background-thread publish. Readers (name_of/id_of/sorted_entries)
-    // take a shared-ish view via the same mutex; build contention is
-    // limited to the handful of picker-popup calls per frame, so a plain
-    // std::mutex is fine.
+    // Mutex guarding writes to m_idToName/m_nameToId/m_sortedCache during a background-thread publish. Readers
+    // (name_of/id_of/sorted_entries) take a shared-ish view via the same mutex; build contention is limited to the
+    // handful of picker-popup calls per frame, so a plain std::mutex is fine.
     static std::mutex s_tableMtx;
 
-    // Cached intermediate addresses from the 4-hop chain, resolved once
-    // in the first build() call. Keeps retry cost to just the catalog
-    // walk (and the null-check on the global holder).
+    // Cached intermediate addresses from the 4-hop chain, resolved once in the first build() call. Keeps retry cost to
+    // just the catalog walk (and the null-check on the global holder).
     struct ResolvedChain
     {
         bool resolved = false;
@@ -641,8 +603,7 @@ namespace Transmog
     }
 
     // Walk sub_14076D950 -> ... -> qword_145CEF370 address once and cache.
-    // Returns false on fatal decoder mismatch (do not retry). On success
-    // fills cached_chain().globalHolder.
+    // Returns false on fatal decoder mismatch (do not retry). On success fills cached_chain().globalHolder.
     static bool resolve_chain(uintptr_t subTranslatorAddr) noexcept
     {
         auto &logger = DMK::Logger::get_instance();
@@ -656,10 +617,9 @@ namespace Transmog
             return false;
         }
 
-        // Step 1: locate the `call sub_141D45270` inside sub_14076D950.
-        // Historically at fixed offset +0x2A, but compiler prologue
-        // reshuffles drift that offset between patches. Scan a bounded
-        // 0x80-byte window of the function instead.
+        // Step 1: locate the `call sub_141D45270` inside sub_14076D950. Historically at fixed offset +0x2A, but
+        // compiler prologue reshuffles drift that offset between patches. Scan a bounded 0x80-byte window of the
+        // function instead.
         //
         // Two anchor variants are tried (v1.05.00 first, v1.04.00 fallback):
         //   v1.05.00: 41 B8 01 00 00 00 48 8D 55 ?? 48 8D 4C 24 ??
@@ -671,16 +631,12 @@ namespace Transmog
         //   v1.04.00: 41 B8 01 00 00 00 48 8D 55 ?? 48 8D 4D ??
         //             (mov r8d,1 / lea rdx,[rbp+disp8] / lea rcx,[rbp+disp8])
         //
-        // Both disp8 slots are wildcarded so a future stack-frame shift
-        // inside the same function does not require another anchor
-        // variant. The 0x80-byte window keeps a stray match elsewhere in
-        // .text from leaking in.
+        // Both disp8 slots are wildcarded so a future stack-frame shift inside the same function does not require
+        // another anchor variant. The 0x80-byte window keeps a stray match elsewhere in .text from leaking in.
         const auto subTxStart = reinterpret_cast<const std::byte *>(subTranslatorAddr);
 
-        auto anchorV105 =
-            DMK::Scanner::parse_aob(Transmog::k_nametableSubTxV105Anchor);
-        auto anchorV104 =
-            DMK::Scanner::parse_aob(Transmog::k_nametableSubTxV104Anchor);
+        auto anchorV105 = DMK::Scanner::parse_aob(Transmog::k_nametableSubTxV105Anchor);
+        auto anchorV104 = DMK::Scanner::parse_aob(Transmog::k_nametableSubTxV104Anchor);
         if (!anchorV105 || !anchorV104)
         {
             logger.warning("[nametable] parse_aob failed for sub_141D45270 anchors");
@@ -719,18 +675,14 @@ namespace Transmog
             return false;
         }
 
-        // Step 3: locate the `mov rbx, cs:qword_145CEF370` inside
-        // sub_1402D75D0. Historically at fixed offset +0x15. Scan instead:
-        // the `48 8B 1D disp32` is preceded by a distinctive 6-byte
-        // prologue-tail anchor
+        // Step 3: locate the `mov rbx, cs:qword_145CEF370` inside sub_1402D75D0. Historically at fixed offset +0x15.
+        // Scan instead:
+        // the `48 8B 1D disp32` is preceded by a distinctive 6-byte prologue-tail anchor
         //   41 56 48 83 EC 40 0F B7 39
-        // (push r14 / sub rsp,40h / movzx edi,word ptr [rcx]) which
-        // pins the specific call site inside a bounded 0x40-byte scan
-        // of THIS function -- global uniqueness doesn't matter, the
-        // scan is locally bounded.
+        // (push r14 / sub rsp,40h / movzx edi,word ptr [rcx]) which pins the specific call site inside a bounded
+        // 0x40-byte scan of THIS function -- global uniqueness doesn't matter, the scan is locally bounded.
         const auto itemAccessorStart = reinterpret_cast<const std::byte *>(itemAccessor);
-        auto anchor3 =
-            DMK::Scanner::parse_aob(Transmog::k_nametableItemAccessorAnchor);
+        auto anchor3 = DMK::Scanner::parse_aob(Transmog::k_nametableItemAccessorAnchor);
         if (!anchor3)
         {
             logger.warning("[nametable] parse_aob failed for qword_145CEF370 anchor");
@@ -749,17 +701,15 @@ namespace Transmog
         const auto disp = read_i32_safe(ripInstr + 3, ok);
         if (!ok)
         {
-            logger.warning("[nametable] failed to read rip-disp at 0x{:X}",
-                           ripInstr + 3);
+            logger.warning("[nametable] failed to read rip-disp at 0x{:X}", ripInstr + 3);
             return false;
         }
         chain.globalHolder = (ripInstr + 7) + static_cast<intptr_t>(disp);
         chain.itemAccessor = itemAccessor;
         chain.resolved = true;
-        logger.info(
-            "[nametable] chain resolved: qword_145CEF370 holder = 0x{:X}, "
-            "sub_1402D75D0 = 0x{:X}",
-            chain.globalHolder, chain.itemAccessor);
+        logger.info("[nametable] chain resolved: qword_145CEF370 holder = 0x{:X}, "
+                    "sub_1402D75D0 = 0x{:X}",
+                    chain.globalHolder, chain.itemAccessor);
         return true;
     }
 
@@ -784,8 +734,7 @@ namespace Transmog
             info.count = 0;
             return info;
         }
-        info.ptrArray = read_qword_safe(
-            globalPtr + k_iteminfoPtrArrayOffset, ok);
+        info.ptrArray = read_qword_safe(globalPtr + k_iteminfoPtrArrayOffset, ok);
         if (!ok || info.ptrArray < 0x10000)
         {
             info.ptrArray = 0;
@@ -800,8 +749,7 @@ namespace Transmog
         if (ci.ptrArray == 0 || itemId >= ci.count)
             return 0;
         bool ok = false;
-        const uintptr_t desc = read_qword_safe(
-            ci.ptrArray + static_cast<uint64_t>(itemId) * 8, ok);
+        const uintptr_t desc = read_qword_safe(ci.ptrArray + static_cast<uint64_t>(itemId) * 8, ok);
         return (ok && desc > 0x10000) ? desc : 0;
     }
 
@@ -809,15 +757,14 @@ namespace Transmog
     {
         auto &logger = DMK::Logger::get_instance();
 
-        // Step A: resolve and cache the address chain. Fatal on decoder
-        // mismatch -- retries won't help.
+        // Step A: resolve and cache the address chain. Fatal on decoder mismatch -- retries won't help.
         if (!resolve_chain(subTranslatorAddr))
             return BuildResult::Fatal;
 
         const uintptr_t globalHolder = cached_chain().globalHolder;
 
-        // Step B: dereference the holder. Deferred when null -- the
-        // game may not have initialized the iteminfo container yet.
+        // Step B: dereference the holder. Deferred when null -- the game may not have initialized the iteminfo
+        // container yet.
         bool ok = false;
         const uintptr_t globalPtr = read_qword_safe(globalHolder, ok);
         if (!ok || globalPtr < 0x10000)
@@ -837,8 +784,7 @@ namespace Transmog
             return BuildResult::Deferred;
         }
 
-        const uintptr_t ptrArray = read_qword_safe(
-            globalPtr + k_iteminfoPtrArrayOffset, ok);
+        const uintptr_t ptrArray = read_qword_safe(globalPtr + k_iteminfoPtrArrayOffset, ok);
         if (!ok || ptrArray < 0x10000)
         {
             logger.trace("[nametable] iteminfo ptrArray null "
@@ -853,9 +799,8 @@ namespace Transmog
 
         const auto t0 = std::chrono::steady_clock::now();
 
-        // Build into local maps first so the published snapshot is atomic
-        // from any reader's viewpoint. Only copy into the member maps
-        // under the mutex once walking is done.
+        // Build into local maps first so the published snapshot is atomic from any reader's viewpoint. Only copy into
+        // the member maps under the mutex once walking is done.
         std::unordered_map<uint16_t, std::string> idToName;
         std::unordered_map<std::string, uint16_t> nameToId;
         std::unordered_map<uint16_t, uint8_t> variantFlag;
@@ -873,8 +818,8 @@ namespace Transmog
 
         // Pass 1: walk the catalog, collect names + variant-meta pointers
         // + player-classifier flag for every valid descriptor. Variant flag
-        // can't be resolved yet (sentinel is derived statistically in pass 2),
-        // but the player-classifier check is self-contained per item.
+        // can't be resolved yet (sentinel is derived statistically in pass 2), but the player-classifier check is
+        // self-contained per item.
         struct ScratchEntry
         {
             uint16_t id;
@@ -882,8 +827,8 @@ namespace Transmog
             uintptr_t metaPtr; // 0 on read fault
             bool playerCompatible;
             uint16_t equipType; // raw u16 at desc+0x42, 0 on read fault
-            uint8_t bodyBits; // k_bodyBit* mask from item_body_bits()
-            uint16_t typeCode; // desc+0x44 -- canonical item-type code
+            uint8_t bodyBits;   // k_bodyBit* mask from item_body_bits()
+            uint16_t typeCode;  // desc+0x44 -- canonical item-type code
         };
         std::vector<ScratchEntry> scratch;
         scratch.reserve(count);
@@ -899,12 +844,10 @@ namespace Transmog
             if (!ok || !DMKMemory::plausible_userspace_ptr(descPtr))
                 continue;
 
-            // descPtr is reused by four downstream reads (metaPtr,
-            // item_body_bits, equipType@+0x42, typeCode@+0x44), so it is
-            // resolved separately; only the wrapper -> string pointer hops
+            // descPtr is reused by four downstream reads (metaPtr, item_body_bits, equipType@+0x42, typeCode@+0x44), so
+            // it is resolved separately; only the wrapper -> string pointer hops
             // (descPtr -> +0x8 -> +0x0) are folded into one guarded walk.
-            const auto strPtrOpt =
-                DMKMemory::seh_read_chain<uintptr_t>(descPtr, {0x8, 0x0});
+            const auto strPtrOpt = DMKMemory::seh_read_chain<uintptr_t>(descPtr, {0x8, 0x0});
             if (!strPtrOpt || !DMKMemory::plausible_userspace_ptr(*strPtrOpt))
                 continue;
             const uintptr_t strPtr = *strPtrOpt;
@@ -914,30 +857,26 @@ namespace Transmog
                 continue;
 
             const auto id16 = static_cast<uint16_t>(id);
-            const uintptr_t metaPtr = read_qword_safe(
-                descPtr + k_descVariantMetaOffset, ok);
+            const uintptr_t metaPtr = read_qword_safe(descPtr + k_descVariantMetaOffset, ok);
 
-            // Body-bits summary walked once; Kliff "PlayerSafe" is
-            // equivalent to "item has a male-body token".
+            // Body-bits summary walked once; Kliff "PlayerSafe" is equivalent to "item has a male-body token".
             const uint8_t bodyBits = item_body_bits(descPtr);
             const bool playerCompat = (bodyBits & k_bodyBitMale) != 0;
             if (!playerCompat)
                 ++nonPlayerCount;
 
             bool etOk = false;
-            const uint16_t equipType =
-                read_u16_safe(descPtr + 0x42, etOk);
+            const uint16_t equipType = read_u16_safe(descPtr + 0x42, etOk);
 
             // Item-type code at desc+0x44 (u16):
             //   0x04=Helm, 0x05=Chest, 0x06=Gloves, 0x07=Boots,
             //   0x45/0x46=Cloak (shifted +1 on v1.04.00),
             //   0x20=Shield, 0x53/0x54=Horse/mount armor,
             //   0xFFFF=Quest/Non-equipment.
-            // This is the canonical game-side classifier for item category;
-            // slot derivation no longer depends on parsing the item name.
+            // This is the canonical game-side classifier for item category; slot derivation no longer depends on
+            // parsing the item name.
             bool tcOk = false;
-            const uint16_t typeCode =
-                read_u16_safe(descPtr + 0x44, tcOk);
+            const uint16_t typeCode = read_u16_safe(descPtr + 0x44, tcOk);
 
             scratch.push_back({
                 id16,
@@ -951,12 +890,9 @@ namespace Transmog
             ++valid;
         }
 
-        // Pass 2 -- statistically derive the variant-meta sentinel.
-        // The sentinel is the value that appears at
-        // desc+k_descVariantMetaOffset in the clear majority of items
-        // (historically ~60% on v1.02.00). Any other pointer at that
-        // slot = per-item variant metadata and gates out of runtime
-        // transmog.
+        // Pass 2 -- statistically derive the variant-meta sentinel. The sentinel is the value that appears at
+        // desc+k_descVariantMetaOffset in the clear majority of items (historically ~60% on v1.02.00). Any other
+        // pointer at that slot = per-item variant metadata and gates out of runtime transmog.
         //
         // Tally non-zero metaPtr values; the mode is the sentinel.
         uintptr_t resolvedSentinel = 0;
@@ -977,9 +913,8 @@ namespace Transmog
                     resolvedSentinel = kv.first;
                 }
             }
-            // Require the mode to dominate -- at least 1/3 of valid items
-            // must point at it -- otherwise we're looking at garbage and
-            // should not flag anything as variant.
+            // Require the mode to dominate -- at least 1/3 of valid items must point at it -- otherwise we're looking
+            // at garbage and should not flag anything as variant.
             if (valid == 0 || sentinelCount * 3 < valid)
             {
                 logger.debug("[nametable] variant sentinel not dominant "
@@ -993,35 +928,25 @@ namespace Transmog
                 logger.info("[nametable] variant-meta sentinel resolved: "
                             "0x{:X} ({} of {} items)",
                             resolvedSentinel, sentinelCount, valid);
-                s_variantMetaSentinel.store(
-                    resolvedSentinel, std::memory_order_release);
+                s_variantMetaSentinel.store(resolvedSentinel, std::memory_order_release);
             }
         }
 
-        // Pass 3 -- publish the scratch rows into the maps, flagging
-        // variants against the resolved sentinel + the player-classifier
-        // verdict captured in pass 1.
+        // Pass 3 -- publish the scratch rows into the maps, flagging variants against the resolved sentinel + the
+        // player-classifier verdict captured in pass 1.
         std::size_t variantCount = 0;
         for (auto &e : scratch)
         {
             // Item "has variant" (picker shows carrier-color) if either:
-            //   - desc+k_descVariantMetaOffset is non-sentinel
-            //     (traditional catalog-level variant-meta record), OR
-            //   - the item has >= 2 body-bearing classifier rules,
-            //     i.e. separate male + female identity-gated rules.
-            //     Empirically these are dual-body NPC items that need
-            //     the carrier mechanism to render on the off-native
-            //     body (Varantine, Samuel, Heisellen pattern). An item
-            //     with exactly one body-bearing rule (WellsKnight,
-            //     Redknight) direct-wears because every protagonist's
-            //     own class pool covers the identity tokens in that
+            //   - desc+k_descVariantMetaOffset is non-sentinel (traditional catalog-level variant-meta record), OR
+            //   - the item has >= 2 body-bearing classifier rules, i.e. separate male + female identity-gated rules.
+            //     Empirically these are dual-body NPC items that need the carrier mechanism to render on the off-native
+            //     body (Varantine, Samuel, Heisellen pattern). An item with exactly one body-bearing rule (WellsKnight,
+            //     Redknight) direct-wears because every protagonist's own class pool covers the identity tokens in that
             //     single rule.
             const bool hasVariantByMeta =
-                (resolvedSentinel != 0) &&
-                (e.metaPtr != 0) &&
-                (e.metaPtr != resolvedSentinel);
-            const bool hasMultiBodyRules =
-                (e.bodyBits & k_bodyBitMultiBodyRules) != 0;
+                (resolvedSentinel != 0) && (e.metaPtr != 0) && (e.metaPtr != resolvedSentinel);
+            const bool hasMultiBodyRules = (e.bodyBits & k_bodyBitMultiBodyRules) != 0;
             const bool hasVariant = hasVariantByMeta || hasMultiBodyRules;
             if (hasVariant)
                 ++variantCount;
@@ -1038,14 +963,11 @@ namespace Transmog
             typeCodeMap.emplace(e.id, e.typeCode);
         }
 
-        // Stability check: the game sets the iteminfo count to its
-        // final value (6024 on v1.02/v1.03) early but populates the
-        // descriptor pointer array lazily.  Instead of comparing
-        // against a magic "good enough" threshold (the old 50% gate
-        // let a 3432/6024 partial catalog through on v1.03.01), we
-        // wait until two consecutive scans produce the same valid
-        // count -- meaning the array has stopped growing.  This
-        // self-adapts to any catalog size and any game version.
+        // Stability check: the game sets the iteminfo count to its final value (6024 on v1.02/v1.03) early but
+        // populates the descriptor pointer array lazily. Instead of comparing against a magic "good enough" threshold
+        // (the old 50% gate let a 3432/6024 partial catalog through on v1.03.01), we wait until two consecutive scans
+        // produce the same valid count -- meaning the array has stopped growing. This self-adapts to any catalog size
+        // and any game version.
         if (valid == 0)
         {
             logger.trace("[nametable] no valid descriptors -- deferring");
@@ -1062,43 +984,34 @@ namespace Transmog
         }
         // valid > 0 && valid == m_lastBuildValid -> catalog stabilized.
 
-        // Catalog typeCode histogram. Groups every cataloged item by
-        // its `desc+0x44` typeCode and emits one log line per distinct
-        // code: count, current `slot_from_type_code` verdict, and 3
-        // sample item names. Lets the user see the FULL universe of
-        // typeCodes in one game launch instead of having to discover
-        // each one by wearing an item -- unmapped codes show with
-        // their sample names so it's obvious from the names which
-        // slot they belong in (e.g. "samples: Crossbow_Iron_I, ..." =>
-        // crossbow family => Ranged). Runs once per successful build.
+        // Catalog typeCode histogram. Groups every cataloged item by its `desc+0x44` typeCode and emits one log line
+        // per distinct code: count, current `slot_from_type_code` verdict, and 3 sample item names. Lets the user see
+        // the FULL universe of typeCodes in one game launch instead of having to discover each one by wearing an item
+        // -- unmapped codes show with their sample names so it's obvious from the names which slot they belong in (e.g.
+        // "samples: Crossbow_Iron_I, ..." => crossbow family => Ranged). Runs once per successful build.
         {
             std::unordered_map<std::uint16_t, std::vector<std::uint16_t>> bucket;
             bucket.reserve(64);
             for (const auto &kv : typeCodeMap)
                 bucket[kv.second].push_back(kv.first);
 
-            // Sort typeCodes descending by item count so high-volume
-            // codes show first.
+            // Sort typeCodes descending by item count so high-volume codes show first.
             std::vector<std::uint16_t> codes;
             codes.reserve(bucket.size());
             for (const auto &kv : bucket)
                 codes.push_back(kv.first);
             std::sort(codes.begin(), codes.end(),
-                      [&](std::uint16_t a, std::uint16_t b) {
-                          return bucket[a].size() > bucket[b].size();
-                      });
+                      [&](std::uint16_t a, std::uint16_t b) { return bucket[a].size() > bucket[b].size(); });
 
-            logger.trace(
-                "[catalog-histogram] {} distinct typeCodes across {} items"
-                " (unmapped codes show samples so you can identify them "
-                "and add static slot_from_type_code cases)",
-                codes.size(), valid);
+            logger.trace("[catalog-histogram] {} distinct typeCodes across {} items"
+                         " (unmapped codes show samples so you can identify them "
+                         "and add static slot_from_type_code cases)",
+                         codes.size(), valid);
 
             for (std::uint16_t code : codes)
             {
                 auto &ids = bucket[code];
-                // Sort itemIds ascending and pick first 3 names for a
-                // stable sample window.
+                // Sort itemIds ascending and pick first 3 names for a stable sample window.
                 std::sort(ids.begin(), ids.end());
                 const auto take = std::min<std::size_t>(3, ids.size());
 
@@ -1106,20 +1019,17 @@ namespace Transmog
                 for (std::size_t k = 0; k < take; ++k)
                 {
                     auto it = idToName.find(ids[k]);
-                    if (k > 0) samples += ", ";
-                    samples += (it != idToName.end()) ? it->second
-                                                      : "<unknown>";
+                    if (k > 0)
+                        samples += ", ";
+                    samples += (it != idToName.end()) ? it->second : "<unknown>";
                 }
 
                 const TransmogSlot slot = slot_from_type_code(code);
-                const char *slotStr = (slot == TransmogSlot::Count)
-                                      ? "<UNMAPPED>"
-                                      : slot_name(slot);
+                const char *slotStr = (slot == TransmogSlot::Count) ? "<UNMAPPED>" : slot_name(slot);
 
-                logger.trace(
-                    "[catalog-histogram]   typeCode={:#06x} count={:>4} "
-                    "slot={:<13} samples: {}",
-                    code, ids.size(), slotStr, samples);
+                logger.trace("[catalog-histogram]   typeCode={:#06x} count={:>4} "
+                             "slot={:<13} samples: {}",
+                             code, ids.size(), slotStr, samples);
             }
         }
 
@@ -1136,14 +1046,11 @@ namespace Transmog
         }
 
         const auto t1 = std::chrono::steady_clock::now();
-        const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                            t1 - t0)
-                            .count();
+        const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
 
         logger.info("[nametable] built: {}/{} entries ({} name collisions, "
                     "{} variant-meta, {} non-player) in {}ms",
-                    valid, count, collisions, variantCount,
-                    nonPlayerCount, ms);
+                    valid, count, collisions, variantCount, nonPlayerCount, ms);
         return BuildResult::Ok;
     }
 
@@ -1192,13 +1099,10 @@ namespace Transmog
     TransmogSlot ItemNameTable::category_of(uint16_t itemId) const noexcept
     {
         std::lock_guard<std::mutex> lk(s_tableMtx);
-        // Runtime-observed binding wins -- if the engine has actually
-        // equipped this itemId in a slot, we trust that over the static
-        // type-code heuristic. Lets accessory/weapon items show up in
-        // the correct picker the moment they're seen in the auth-table,
-        // even if `slot_from_type_code` doesn't know their typeCode yet.
-        if (auto obs = m_observedSlot.find(itemId);
-            obs != m_observedSlot.end())
+        // Runtime-observed binding wins -- if the engine has actually equipped this itemId in a slot, we trust that
+        // over the static type-code heuristic. Lets accessory/weapon items show up in the correct picker the moment
+        // they're seen in the auth-table, even if `slot_from_type_code` doesn't know their typeCode yet.
+        if (auto obs = m_observedSlot.find(itemId); obs != m_observedSlot.end())
             return obs->second;
 
         auto it = m_typeCode.find(itemId);
@@ -1216,8 +1120,7 @@ namespace Transmog
         return it->second;
     }
 
-    void ItemNameTable::record_observed_slot(std::uint16_t itemId,
-                                             TransmogSlot slot) noexcept
+    void ItemNameTable::record_observed_slot(std::uint16_t itemId, TransmogSlot slot) noexcept
     {
         std::lock_guard<std::mutex> lk(s_tableMtx);
         if (slot == TransmogSlot::Count)
@@ -1234,15 +1137,12 @@ namespace Transmog
         return m_observedSlot.size();
     }
 
-    ItemNameTable::BodyKind ItemNameTable::body_kind_for_character(
-        const std::string &charName) noexcept
+    ItemNameTable::BodyKind ItemNameTable::body_kind_for_character(const std::string &charName) noexcept
     {
         // Male: Kliff, Oongka (their native rule sets include male-body
         //       tokens -- see k_maleBodyTokens above).
-        // Female: Damiane (see k_femaleBodyTokens above).
-        // Unknown characters default to Generic -- we don't know their
-        // body, so treat every item as potentially compatible rather
-        // than silently hiding their picker.
+        // Female: Damiane (see k_femaleBodyTokens above). Unknown characters default to Generic -- we don't know their
+        // body, so treat every item as potentially compatible rather than silently hiding their picker.
         if (charName == "Kliff" || charName == "Oongka")
             return BodyKind::Male;
         if (charName == "Damiane")
@@ -1252,9 +1152,8 @@ namespace Transmog
 
     bool ItemNameTable::has_npc_equip_type(uint16_t itemId) const noexcept
     {
-        // Player (Kliff) equip-type u16 at desc+0x42 is 0x0004.
-        // NPC items use 0x0001. Any value != 0x0004 needs the carrier
-        // path so the pipeline sees a Kliff-compatible descriptor.
+        // Player (Kliff) equip-type u16 at desc+0x42 is 0x0004. NPC items use 0x0001. Any value != 0x0004 needs the
+        // carrier path so the pipeline sees a Kliff-compatible descriptor.
         static constexpr std::ptrdiff_t k_equipTypeOffset = 0x42;
         static constexpr std::uint16_t k_playerEquipType = 0x0004;
 
@@ -1267,8 +1166,7 @@ namespace Transmog
         return ok && eType != k_playerEquipType;
     }
 
-    const std::vector<ItemNameTable::Entry> &
-    ItemNameTable::sorted_entries() const
+    const std::vector<ItemNameTable::Entry> &ItemNameTable::sorted_entries() const
     {
         std::lock_guard<std::mutex> lk(s_tableMtx);
         if (!m_sortedCache.empty() || m_idToName.empty())
@@ -1284,16 +1182,13 @@ namespace Transmog
             auto eit = m_equipType.find(id);
             const uint16_t equipT = (eit != m_equipType.end()) ? eit->second : uint16_t{0};
             auto bit = m_bodyBits.find(id);
-            // Unknown ids default to Generic (bodyBits=0). Picker
-            // shows Generic on every character, matching the engine's
-            // behaviour for rule-less cosmetics.
-            const uint8_t bBits =
-                (bit != m_bodyBits.end()) ? bit->second : uint8_t{0};
+            // Unknown ids default to Generic (bodyBits=0). Picker shows Generic on every character, matching the
+            // engine's behaviour for rule-less cosmetics.
+            const uint8_t bBits = (bit != m_bodyBits.end()) ? bit->second : uint8_t{0};
             BodyKind kind;
-            // BodyKind prefers CLEAN gender (a gender rule with no NPC-identity
-            // token) so NPC armor with an NPC-gated female rule stays Male while
-            // a protagonist item with a clean female rule shows for female.
-            // The OR Male/Female bits are the fallback when no rule is clean.
+            // BodyKind prefers CLEAN gender (a gender rule with no NPC-identity token) so NPC armor with an NPC-gated
+            // female rule stays Male while a protagonist item with a clean female rule shows for female. The OR
+            // Male/Female bits are the fallback when no rule is clean.
             const bool cleanM = (bBits & k_bodyBitCleanMale) != 0;
             const bool cleanF = (bBits & k_bodyBitCleanFemale) != 0;
             const bool anyM = (bBits & k_bodyBitMale) != 0;
@@ -1308,45 +1203,37 @@ namespace Transmog
             else if (cleanF)
                 kind = BodyKind::Female;
             else if (anyM)
-                // Only NPC-gated gender rules. If it has both male and female
-                // NPC rules (Samuel/Heisellen) it defaults Male; a male-only
-                // NPC rule is Male too. Render is via carrier on the native
-                // class; keeping it Male matches "no clean female mesh".
+                // Only NPC-gated gender rules. If it has both male and female NPC rules (Samuel/Heisellen) it defaults
+                // Male; a male-only NPC rule is Male too. Render is via carrier on the native class; keeping it Male
+                // matches "no clean female mesh".
                 kind = BodyKind::Male;
             else if (anyF)
                 kind = BodyKind::Female;
             else if (hasShared)
-                // Shared/NPC-body token (0x399) only, no gendered human token.
-                // Mesh is an NPC/demon body ending in 'm' (cd_ndm_*/cd_pdm_*,
-                // e.g. Greyfur_Fabric_Armor_L, Cantina_ChainMail_Armor) = MALE.
+                // Shared/NPC-body token (0x399) only, no gendered human token. Mesh is an NPC/demon body ending in 'm'
+                // (cd_ndm_*/cd_pdm_*, e.g. Greyfur_Fabric_Armor_L, Cantina_ChainMail_Armor) = MALE.
                 kind = BodyKind::Male;
             else if (hasNH)
-                // Token >= 0x1000 with no humanoid body-token present
-                // => actual mount/pet/wagon/dragon gear. Hide.
+                // Token >= 0x1000 with no humanoid body-token present => actual mount/pet/wagon/dragon gear. Hide.
                 kind = BodyKind::NonHumanoid;
             else if (hasT)
-                // Humanoid-range tokens but no body-specific match --
-                // NPC-variant glove/armor items that carry only
-                // identity tokens like `0x012F`. Render behaviour is
-                // inconsistent so the picker colours these amber.
+                // Humanoid-range tokens but no body-specific match -- NPC-variant glove/armor items that carry only
+                // identity tokens like `0x012F`. Render behaviour is inconsistent so the picker colours these amber.
                 kind = BodyKind::Ambiguous;
             else
                 kind = BodyKind::Generic;
             // Look up display name by lowercased internal name.
             std::string lowerName = name;
             for (auto &c : lowerName)
-                c = static_cast<char>(
-                    std::tolower(static_cast<unsigned char>(c)));
+                c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
             auto dit = m_displayNames.find(lowerName);
-            std::string dispName =
-                (dit != m_displayNames.end()) ? dit->second : std::string();
+            std::string dispName = (dit != m_displayNames.end()) ? dit->second : std::string();
 
-            // Canonical item-type code at desc+0x44 is authoritative.
-            // Unmapped codes (0x20 shield, 0x53 horse armor, 0xFFFF
-            // quest, etc.) map to Count -> item is hidden as non-
-            // equipment. An absent type-code entry also collapses to
-            // Count; there's no name-parsing fallback because the
-            // engine itself reads this field to categorize the item.
+            // Canonical item-type code at desc+0x44 is authoritative. Unmapped codes (0x20 shield, 0x53 horse armor,
+            // 0xFFFF quest, etc.) map to Count -> item is hidden as non-equipment. An absent type-code entry also
+            // collapses to
+            // Count; there's no name-parsing fallback because the engine itself reads this field to categorize the
+            // item.
             TransmogSlot slot = TransmogSlot::Count;
             auto tcit = m_typeCode.find(id);
             if (tcit != m_typeCode.end())
@@ -1367,22 +1254,15 @@ namespace Transmog
         std::sort(m_sortedCache.begin(), m_sortedCache.end(),
                   [](const Entry &a, const Entry &b)
                   {
-                      // Sort by display name when available, else by
-                      // internal name. Case-insensitive so "Kliff" and
+                      // Sort by display name when available, else by internal name. Case-insensitive so "Kliff" and
                       // "kliff" sort together.
-                      const auto &sa = a.displayName.empty()
-                                           ? a.name
-                                           : a.displayName;
-                      const auto &sb = b.displayName.empty()
-                                           ? b.name
-                                           : b.displayName;
+                      const auto &sa = a.displayName.empty() ? a.name : a.displayName;
+                      const auto &sb = b.displayName.empty() ? b.name : b.displayName;
                       const std::size_t n = (std::min)(sa.size(), sb.size());
                       for (std::size_t i = 0; i < n; ++i)
                       {
-                          const auto ca = static_cast<unsigned char>(
-                              std::tolower(static_cast<unsigned char>(sa[i])));
-                          const auto cb = static_cast<unsigned char>(
-                              std::tolower(static_cast<unsigned char>(sb[i])));
+                          const auto ca = static_cast<unsigned char>(std::tolower(static_cast<unsigned char>(sa[i])));
+                          const auto cb = static_cast<unsigned char>(std::tolower(static_cast<unsigned char>(sb[i])));
                           if (ca != cb)
                               return ca < cb;
                       }
@@ -1423,16 +1303,12 @@ namespace Transmog
             if (e.category != TransmogSlot::Count)
                 slotStr = slot_name(e.category);
 
-            out << "0x" << std::hex << std::uppercase << e.id << std::dec
-                << '\t' << slotStr
-                << '\t' << (e.hasVariantMeta ? "yes" : "no")
-                << '\t' << (e.isPlayerCompatible ? "yes" : "no")
-                << '\t' << e.name
+            out << "0x" << std::hex << std::uppercase << e.id << std::dec << '\t' << slotStr << '\t'
+                << (e.hasVariantMeta ? "yes" : "no") << '\t' << (e.isPlayerCompatible ? "yes" : "no") << '\t' << e.name
                 << '\n';
         }
 
-        logger.info("[nametable] dumped {} entries to CrimsonDesertLiveTransmog_items.tsv",
-                    entries.size());
+        logger.info("[nametable] dumped {} entries to CrimsonDesertLiveTransmog_items.tsv", entries.size());
     }
 
     void ItemNameTable::load_display_names(const std::string &tsvPath)
@@ -1442,8 +1318,7 @@ namespace Transmog
         std::ifstream file(tsvPath);
         if (!file.is_open())
         {
-            logger.warning("[nametable] display names file not found: '{}'",
-                           tsvPath);
+            logger.warning("[nametable] display names file not found: '{}'", tsvPath);
             return;
         }
 
@@ -1458,40 +1333,34 @@ namespace Transmog
                 line.pop_back();
 
             const auto tab = line.find('\t');
-            if (tab == std::string::npos || tab == 0 ||
-                tab + 1 >= line.size())
+            if (tab == std::string::npos || tab == 0 || tab + 1 >= line.size())
                 continue;
 
             std::string key = line.substr(0, tab);
             for (auto &c : key)
-                c = static_cast<char>(
-                    std::tolower(static_cast<unsigned char>(c)));
+                c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
             names.emplace(std::move(key), line.substr(tab + 1));
         }
 
         {
             std::lock_guard<std::mutex> lk(s_tableMtx);
             m_displayNames = std::move(names);
-            // Callers must invoke load_display_names() before any
-            // sorted_entries() access (i.e. before dump_catalog_tsv)
-            // so the cache is still empty here -- no re-sort needed.
+            // Callers must invoke load_display_names() before any sorted_entries() access (i.e. before
+            // dump_catalog_tsv) so the cache is still empty here -- no re-sort needed.
             m_sortedCache.clear();
         }
 
-        logger.info("[nametable] loaded {} display names from '{}'",
-                    m_displayNames.size(), tsvPath);
+        logger.info("[nametable] loaded {} display names from '{}'", m_displayNames.size(), tsvPath);
     }
 
-    std::string ItemNameTable::display_name_of(
-        std::string_view internalName) const
+    std::string ItemNameTable::display_name_of(std::string_view internalName) const
     {
-        // Lowercase into a stack buffer to avoid heap allocation.
-        // Item names in the catalog are bounded by k_maxNameLen (256).
+        // Lowercase into a stack buffer to avoid heap allocation. Item names in the catalog are bounded by k_maxNameLen
+        // (256).
         char buf[256];
         const auto len = (std::min)(internalName.size(), sizeof(buf) - 1);
         for (std::size_t i = 0; i < len; ++i)
-            buf[i] = static_cast<char>(
-                std::tolower(static_cast<unsigned char>(internalName[i])));
+            buf[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(internalName[i])));
         buf[len] = '\0';
         const std::string key{buf, len};
 
