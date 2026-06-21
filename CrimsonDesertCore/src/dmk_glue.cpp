@@ -95,6 +95,60 @@ namespace CDCore::Glue
         }
     } // namespace
 
+    void resolve_address_batch(
+        std::span<const BatchRequest> requests,
+        std::span<std::uintptr_t> out) noexcept
+    {
+        // Honour the address-or-zero contract even on an early bail.
+        for (auto &slot : out)
+            slot = 0;
+
+        const std::size_t count = std::min(requests.size(), out.size());
+        if (count == 0)
+            return;
+
+        try
+        {
+            // Each request resolves exactly as resolve_address would: host-EXE
+            // scope (every target lives in CrimsonDesert.exe) plus prologue
+            // fallback (re-match a sibling-stomped prologue). resolve_cascade_batch
+            // dispatches each request to its own worker, so the host-module scans
+            // run concurrently instead of one after another.
+            std::vector<DetourModKit::Scanner::CascadeRequest> batch;
+            batch.reserve(count);
+            for (std::size_t i = 0; i < count; ++i)
+            {
+                DetourModKit::Scanner::CascadeRequest req{};
+                req.candidates = requests[i].candidates;
+                req.label = requests[i].label;
+                req.range = DetourModKit::Memory::host_module_range();
+                req.prologue_fallback = true;
+                batch.push_back(req);
+            }
+
+            const auto results = DetourModKit::Scanner::resolve_cascade_batch(batch);
+            for (std::size_t i = 0; i < count && i < results.size(); ++i)
+            {
+                if (results[i].has_value())
+                {
+                    out[i] = results[i]->address;
+                    continue;
+                }
+                DetourModKit::Logger::get_instance().warning(
+                    "{} resolve cascade failed: {}", requests[i].label,
+                    DetourModKit::Scanner::resolve_error_to_string(results[i].error()));
+            }
+        }
+        catch (...)
+        {
+            // resolve_cascade_batch can throw bad_alloc: it allocates the result
+            // vector and spins a worker pool. Degrade to the serial resolver so a
+            // transient failure loses only the concurrency, never the feature.
+            for (std::size_t i = 0; i < count; ++i)
+                out[i] = resolve_address(requests[i].candidates, requests[i].label);
+        }
+    }
+
     bool is_sibling_mod_loaded(std::string_view needle) noexcept
     {
         if (needle.empty())

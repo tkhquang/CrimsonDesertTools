@@ -66,6 +66,14 @@ namespace Transmog
             "Apply To Selected Character",
             flag_apply_to_editing(), true);
 
+        // Advanced: rtti_dissect self-heal search radius (bytes, per side) for
+        // the manager->userActor offset recovery in CDCore. Default 0x200 (~10x
+        // the worst historical drift); raise toward MAX_HEAL_WINDOW only if a game
+        // patch shifts the field further. Not for normal users.
+        DMK::Config::register_atomic<int>(
+            "Advanced", "SelfHealWindow", "Self Heal Window",
+            CDCore::heal_window_setting(), 0x200);
+
         // When true, always use the standalone transparent overlay window
         // instead of the ReShade addon tab. Useful if ReShade is installed
         // but the user prefers the standalone overlay.
@@ -813,18 +821,29 @@ namespace Transmog
 
         // --- Resolve AOB addresses ---
         //
-        // The game may restart its exe during shader compilation.  If
-        // we load before the code section is fully populated, all scans
-        // fail.  Retry up to 5 times with a 3-second delay if the
-        // critical SlotPopulator pattern isn't found.
+        // These six targets are independent: each scans a static candidate
+        // table and none reads another's resolved address. They all live in the
+        // host EXE, so resolve them in one fork-join batch rather than six serial
+        // host-module scans. Each per-target validation and side-effect block
+        // below is unchanged and runs in the same order; every block touches only
+        // its own address, so hoisting the scans ahead of them is
+        // behaviour-preserving. The initBatch order defines the initAddrs order.
 
         auto &addrs = resolved_addrs();
 
+        const CDCore::Glue::BatchRequest initBatch[] = {
+            {k_slotPopulatorCandidates, "SlotPopulator"},
+            {k_mapLookupCandidates, "MapLookup"},
+            {k_subTranslatorCandidates, "SubTranslator"},
+            {k_safeTearDownCandidates, "SafeTearDown"},
+            {k_initSwapEntryCandidates, "InitSwapEntry"},
+            {k_charClassBypassCandidates, "CharClassBypass"},
+        };
+        std::uintptr_t initAddrs[std::size(initBatch)] = {};
+        CDCore::Glue::resolve_address_batch(initBatch, initAddrs);
+
         // SlotPopulator: the KEY function for transmog.
-        addrs.slotPopulator = resolve_address(
-            k_slotPopulatorCandidates,
-            std::size(k_slotPopulatorCandidates),
-            "SlotPopulator");
+        addrs.slotPopulator = initAddrs[0];
 
         if (!addrs.slotPopulator)
             logger.warning("SlotPopulator AOB scan failed -- transmog will not work");
@@ -832,10 +851,7 @@ namespace Transmog
         // MapLookup: IndexedStringA::lookup. Not hooked -- RIP anchor for
         // scan_indexed_string_table(). Must be resolved before
         // PartShowSuppress::init_slot_hashes.
-        addrs.mapLookup = resolve_address(
-            k_mapLookupCandidates,
-            std::size(k_mapLookupCandidates),
-            "MapLookup");
+        addrs.mapLookup = initAddrs[1];
 
         if (addrs.mapLookup)
         {
@@ -859,10 +875,7 @@ namespace Transmog
         }
 
         // SubTranslator (sub_14076D950): anchor for the item-name catalog scan.
-        addrs.subTranslator = resolve_address(
-            k_subTranslatorCandidates,
-            std::size(k_subTranslatorCandidates),
-            "SubTranslator");
+        addrs.subTranslator = initAddrs[2];
 
         if (addrs.subTranslator)
         {
@@ -928,10 +941,7 @@ namespace Transmog
         }
 
         // SafeTearDown (sub_14075FE60): scene-graph tear-down.
-        addrs.safeTearDown = resolve_address(
-            k_safeTearDownCandidates,
-            std::size(k_safeTearDownCandidates),
-            "SafeTearDown");
+        addrs.safeTearDown = initAddrs[3];
         if (!addrs.safeTearDown)
         {
             logger.warning(
@@ -942,10 +952,7 @@ namespace Transmog
         // InitSwapEntry (sub_141D451B0): zero-init helper for the 0x80-byte
         // swap entry passed to SlotPopulator.
         {
-            auto iseAddr = resolve_address(
-                k_initSwapEntryCandidates,
-                std::size(k_initSwapEntryCandidates),
-                "InitSwapEntry");
+            auto iseAddr = initAddrs[4];
 
             if (iseAddr && !DMK::Scanner::is_likely_function_prologue(iseAddr))
             {
@@ -972,10 +979,7 @@ namespace Transmog
         // CharClassBypass: single-byte patch site in CondPrefab evaluator.
         // Toggled 0x74↔0xEB around each carrier apply so NPC items
         // pass the character-class hash check.
-        addrs.charClassBypass = resolve_address(
-            k_charClassBypassCandidates,
-            std::size(k_charClassBypassCandidates),
-            "CharClassBypass");
+        addrs.charClassBypass = initAddrs[5];
         if (addrs.charClassBypass)
         {
             // Verify the resolved byte is 0x74 (jz). SEH-isolated via
@@ -1291,6 +1295,13 @@ namespace Transmog
 
         logger.info("Transmog initialization complete -- SlotPopulator {}",
                     slot_populator_fn() ? "READY" : "UNAVAILABLE");
+
+        // One-shot DMK health snapshot for at-a-glance per-launch diagnostics:
+        // hook population plus any intentional loader-lock leak/detach events.
+        const auto health = DMK::Diagnostics::collect(DMK::HookManager::get_instance());
+        logger.info("DMK health: hooks total={} active={} disabled={}, intentional-leaks={}",
+                    health.hooks_total, health.hooks_active, health.hooks_disabled,
+                    health.total_intentional_leaks);
 
         return true;
     }

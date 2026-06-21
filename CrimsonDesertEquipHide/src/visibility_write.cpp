@@ -1,4 +1,5 @@
 #include "visibility_write.hpp"
+#include "aob_resolver.hpp"
 #include "categories.hpp"
 #include "shared_state.hpp"
 
@@ -43,6 +44,57 @@ namespace EquipHide
         if (a.visCtrl != b.visCtrl)
             return a.visCtrl < b.visCtrl;
         return a.addr < b.addr;
+    }
+
+    /* Self-healing PartInOut vis-byte offset. The hooked EquipVisCheck
+       instruction reads the vis byte as `movzx eax, byte [r12+0x20]`, and the
+       engine builds the decision struct that instruction sees by copying the
+       IndexedString map entry field-for-field (the +0x20 vis byte included), so
+       the displacement in that one instruction is the vis-byte offset shared by
+       both the mid-hook write (partInOut) and the direct-write path (map entry).
+       Decoding it value-agnostically lets a future PartInOut re-layout
+       self-correct; 0x20 is the validated nominal kept on any miss. Mirrors the
+       BatchEquip stride/slot self-heal in cascade_suppress.cpp. */
+    std::size_t vis_byte_offset() noexcept
+    {
+        static const std::size_t value = []() noexcept -> std::size_t
+        {
+            constexpr std::size_t k_nominal = 0x20;
+            try
+            {
+                DMK::Scanner::CodeConstant cc{};
+                cc.site = k_hookSiteCandidates;
+                cc.kind = DMK::Scanner::OperandKind::MemoryDisplacement;
+                cc.operand_index = 1; // movzx eax, byte [r12+disp]: the memory operand
+                cc.nominal = static_cast<std::int64_t>(k_nominal);
+                cc.has_nominal = true;
+                const auto decoded = DMK::Scanner::read_code_constant(cc);
+                if (decoded.has_value() && *decoded >= 0x10 && *decoded <= 0x40)
+                {
+                    const auto off = static_cast<std::size_t>(*decoded);
+                    // A live value != nominal means the PartInOut layout drifted
+                    // on a patch; the decode self-healed it, but surface it as a
+                    // WARNING so the offset change is easy to spot in the log.
+                    if (off != k_nominal)
+                        DMK::Logger::get_instance().warning(
+                            "PartInOut vis-byte offset DRIFTED: live={:#x} nominal={:#x} -- self-healed "
+                            "(engine layout changed)",
+                            off, k_nominal);
+                    else
+                        DMK::Logger::get_instance().info(
+                            "PartInOut vis-byte offset decoded live: {:#x} (matches nominal)", off);
+                    return off;
+                }
+                DMK::Logger::get_instance().warning(
+                    "PartInOut vis-byte offset live-decode out of range/unavailable; using nominal {:#x}",
+                    k_nominal);
+            }
+            catch (...)
+            {
+            }
+            return k_nominal;
+        }();
+        return value;
     }
 
     /* Implementation body extracted out of the SEH-wrapped public entry
@@ -91,6 +143,20 @@ namespace EquipHide
             }
             auto mapBase = *descNode + 0x20;
 
+            // A drifted +0x58 / +0x218 chain offset can yield a non-faulting
+            // garbage mapBase (the SEH chain read only traps an actual fault, not
+            // a wrong-but-mapped pointer). Reject an implausible base so a future
+            // layout shift skips just this vis-controller instead of letting the
+            // per-part lookup walk a wrong map -- or fault and abort the whole
+            // pass for every character.
+            if (!DMKMemory::plausible_userspace_ptr(mapBase))
+            {
+                logger.trace("DirectWrite [{}]: vc=0x{:X} implausible mapBase=0x{:X} "
+                             "(+0x58 -> +0x218 -> +0x20)",
+                             i, vc, mapBase);
+                continue;
+            }
+
             /* Choose the character-specific map for the iteration.
                charIdx == -1 routes to the active-character map so a
                slot we could not identify still cycles through the
@@ -118,7 +184,7 @@ namespace EquipHide
                 if (!entry)
                     continue;
 
-                const auto visAddr = entry + 0x20;
+                const auto visAddr = entry + vis_byte_offset();
                 const VisKey key{vc, visAddr};
                 s_touchedVisKeys.push_back(key);
                 auto *visPtr = reinterpret_cast<uint8_t *>(visAddr);

@@ -206,6 +206,12 @@ ColorOverride = false
 ; voices keep their vanilla muffle. Off by default; set to true to remove
 ; the muffle. Toggle changes take effect on the next game launch.
 UnmuffleHelmVoice = false
+
+[Advanced]
+; Self-heal search radius (bytes) used to recover an internal game offset
+; after a patch shifts it. Leave at the default; only raise it if a future
+; game update breaks the mod and a maintainer asks you to. Not for normal users.
+SelfHealWindow = 512
 ```
 
 Presets are stored in `CrimsonDesertLiveTransmog_presets.json` (auto-generated alongside the INI).

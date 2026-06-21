@@ -26,3 +26,4 @@ __pycache__/
 docs/live-transmog/catalog.html
 docs/catalog-src/node_modules/
 docs/catalog-src/.vite/
+**/analysis

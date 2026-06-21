@@ -60,8 +60,16 @@ namespace EquipHide
             std::span<const AddrCandidate> candidates,
             std::string_view label)
         {
+            // Host-EXE scope: every target resolves inside CrimsonDesert.exe,
+            // so bounding the scan (and the require_unique count) to
+            // Memory::host_module_range() stops a generic-shaped candidate from
+            // first-matching inside a sibling mod or overlay elsewhere in the
+            // process image. The prologue-fallback variant is retained -- it
+            // re-matches a sibling-stomped prologue, and its rebuilt jump
+            // destination stays unbounded, so a trampoline outside the EXE is
+            // still recovered.
             auto hit =
-                DetourModKit::Scanner::resolve_cascade_with_prologue_fallback(
+                DetourModKit::Scanner::resolve_cascade_in_host_module_with_prologue_fallback(
                     candidates, label);
             if (hit.has_value())
                 return hit->address;
@@ -98,10 +106,13 @@ namespace EquipHide
     // --- EquipHide-only candidate tables ---------------------------------
 
     /**
-     * @brief ChildActor vtable -- static data pointer resolved via three
-     *        nearby RIP-relative loads. All three candidates resolve to the
-     *        same lea rax, [rip+disp32] that loads the vtable base; the
-     *        cascade picks whichever anchor shape survives the current build.
+     * @brief ChildActor (pa::ClientChildOnlyInGameActor) vtable. Resolved by
+     *        RTTI mangled name first (patch-stable, self-healing), with three
+     *        nearby RIP-relative byte loads as fallback. Each byte candidate
+     *        resolves to the lea rax, [rip+disp32] that loads the vtable base,
+     *        which is also the primary (COL.offset == 0) vtable that
+     *        vtable_for_type returns for that class; the cascade picks whichever
+     *        tier survives the current build.
      *
      * Branch-encoding caveat (aob-signatures.md section 8):
      *       P2 anchors on the trailing EB 03 (jmp-over-fallback) that
@@ -115,6 +126,17 @@ namespace EquipHide
      *       rel8 opcode literal.
      */
     inline constexpr AddrCandidate k_childActorVtblCandidates[] = {
+        // Primary -- resolve the vtable by its RTTI mangled name. The
+        // AllocCtor stores ClientChildOnlyInGameActor's primary vtable into
+        // the new object, so vtable_for_type on that class name yields the
+        // exact pointer the byte tiers below recover. The mangled name is
+        // patch-stable, so this tier self-heals across the vtable relocations
+        // and jmp-encoding flips the byte anchors are sensitive to.
+        // require_unique does not apply: the RTTI backend is unique-only and
+        // fails closed on an ambiguous name, falling through to the byte tiers.
+        {"ChildActorVtbl_RTTI", ".?AVClientChildOnlyInGameActor@pa@@",
+         ResolveMode::RttiVtable},
+
         // P1 -- truncated: ends at the mov [rsi], rax that stores the
         // vtable. Does NOT cross the trailing EB 03 jmp, so it survives
         // a Jcc-encoding flip.
@@ -184,12 +206,13 @@ namespace EquipHide
      *   [RBP+0x67] = a4 (transition type byte, saved from R9B at prologue)
      *   [RBP+0x4F] = a1 context pointer
      *
-     * Register layout at hook point (v1.08.00):
-     *   v1.08 spills the visibility byte itself to a stack arg slot
-     *   (default `[rsp+0x20]`) before the cmp; the `mov r8b, 1` that
-     *   sets the exclusion-list flag still precedes the read. The
-     *   PartInOutSocket struct is no longer dereferenced inline at the
-     *   hook point, only by the surrounding code that fed the spill.
+     * Register layout at hook point (v1.08.00 and later):
+     *   The visibility byte is read directly as `movzx eax, byte
+     *   [r12+disp8]; cmp al, 3`. The `44 24` SIB reads as `[rsp]`, but
+     *   the leading `41` REX.B prefix extends the base to R12, so this
+     *   is a struct field load (R12 holds the PartInOut decision
+     *   struct), not a stack-slot spill. The `mov r8b, 1` that sets the
+     *   exclusion-list flag still precedes the read.
      *
      * Cascade contract: 1-hit-only on the current target build.
      * Re-adding a legacy tier requires per-version CE verification of
@@ -202,13 +225,15 @@ namespace EquipHide
         // PN1 -- v1.08.00. The PartInOutSocket arg-passing convention
         // changed: the visibility byte is no longer fetched through
         // `mov rax, [rbp+0x5F] ; movzx eax, byte [rax+0x1C]` (which
-        // anchored P0..P3). The compiler now spills the byte itself to
-        // a stack arg slot and reads it directly: `movzx eax, byte
-        // [rsp+0x20] ; cmp al, 3`. The `mov r8b, 1` (set-exclusion-
+        // anchored P0..P3). The byte is now read directly from the
+        // decision struct: `movzx eax, byte [r12+0x20] ; cmp al, 3`.
+        // The `44 24` SIB reads as `[rsp]`, but the leading `41` REX.B
+        // extends the base to R12, so the disp8 is a struct field
+        // offset, not a stack slot. The `mov r8b, 1` (set-exclusion-
         // list flag) idiom that precedes the load is retained, so we
-        // anchor on the pair: `41 B0 01 41 0F B6 44 24 ?? 3C 03`.
-        // The stack disp8 is wildcarded -- the slot can drift across
-        // builds. Hook lands on the movzx at match + 3 (skip the
+        // anchor on the pair: `41 B0 01 41 0F B6 44 24 ?? 3C 03`. The
+        // struct disp8 is wildcarded so a future re-layout still
+        // matches. Hook lands on the movzx at match + 3 (skip the
         // `41 B0 01`). 1 hit on v1.08.00, 0 on v1.04.00 / v1.05.00.
         {"PartInOut_PN1_v108_StackArgVisRead",
          "41 B0 01 41 0F B6 44 24 ?? 3C 03",
@@ -227,9 +252,11 @@ namespace EquipHide
     /**
      * @brief AOB candidates for the Postfix rule evaluator.
      *
-     * Virtual function at vtable[4] of objects with vtable 0x144CC8248.
-     * Evaluates whether a postfix rule matches currently equipped items.
-     * Returns 1 = rule matches (hide hair), 0 = no match (keep hair).
+     * Evaluates whether a postfix rule matches the currently equipped items.
+     * Returns 1 = rule matches (hide hair), 0 = no match (keep hair). The
+     * engine reaches it through a named method-binding table rather than a
+     * COL-tagged C++ vtable, so there is no RTTI identity to name-resolve --
+     * the prologue cascade below is the strongest available anchor.
      */
     inline constexpr AddrCandidate k_postfixEvalCandidates[] = {
         // P1 -- tight. Full prologue (4 shadow-space saves + 3 pushes +

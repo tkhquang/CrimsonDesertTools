@@ -29,12 +29,14 @@ namespace CDCore::Glue
      * @brief Resolves the first matching candidate from a cascade and
      *        returns the absolute address, or 0 on failure.
      * @details Thin wrapper around
-     *          DetourModKit::Scanner::resolve_cascade_with_prologue_fallback
+     *          DetourModKit::Scanner::resolve_cascade_in_host_module_with_prologue_fallback
      *          that flattens the std::expected return into the legacy
-     *          uintptr_t-or-zero shape used pervasively in CD mods. The
-     *          underlying cascade already logs the success line; on
-     *          failure this wrapper emits a single Warning so caller code
-     *          can stay focused on conditional feature wiring.
+     *          uintptr_t-or-zero shape used pervasively in CD mods. The scan is
+     *          scoped to the host executable because every Crimson Desert
+     *          hook/scan target lives in CrimsonDesert.exe. The underlying
+     *          cascade already logs the success line; on failure this wrapper
+     *          emits a single Warning so caller code can stay focused on
+     *          conditional feature wiring.
      *
      *          Use this for "look up an address, install a hook if it
      *          resolved, otherwise log a warning and continue without the
@@ -47,8 +49,12 @@ namespace CDCore::Glue
         std::span<const DetourModKit::Scanner::AddrCandidate> candidates,
         std::string_view label)
     {
-        auto hit = DetourModKit::Scanner::resolve_cascade_with_prologue_fallback(
-            candidates, label);
+        // Every Crimson Desert hook/scan target lives in the host EXE, so scope
+        // the scan to that image: faster than a whole-process walk and immune to
+        // a coincidental byte match in another injected module.
+        auto hit =
+            DetourModKit::Scanner::resolve_cascade_in_host_module_with_prologue_fallback(
+                candidates, label);
         if (hit.has_value())
             return hit->address;
 
@@ -58,6 +64,51 @@ namespace CDCore::Glue
             DetourModKit::Scanner::resolve_error_to_string(hit.error()));
         return 0;
     }
+
+    /**
+     * @struct BatchRequest
+     * @brief One target for @ref resolve_address_batch: a candidate cascade plus
+     *        the label echoed in log lines. Caller-owned; the candidate span and
+     *        the label must outlive the batch call.
+     */
+    struct BatchRequest
+    {
+        std::span<const DetourModKit::Scanner::AddrCandidate> candidates;
+        std::string_view label;
+    };
+
+    /**
+     * @brief Resolves several independent cascades concurrently, writing each
+     *        absolute address (or 0 on failure) into @p out, parallel to
+     *        @p requests.
+     * @details Fork-join counterpart to @ref resolve_address. Builds one
+     *          host-EXE-scoped, prologue-fallback
+     *          DetourModKit::Scanner::CascadeRequest per entry and resolves the
+     *          whole set in a single DetourModKit::Scanner::resolve_cascade_batch
+     *          pass, so the wall-clock collapses from the sum of the scans to the
+     *          slowest single scan. Per-request resolution is byte-identical to
+     *          resolve_address: same host range, same prologue recovery for a
+     *          sibling-stomped target, same require_unique discipline. Only the
+     *          timing changes, so it is correct only for targets whose resolution
+     *          does not depend on another request's result.
+     *
+     *          Setup/control-plane only. resolve_cascade_batch allocates and
+     *          spins a transient worker pool, so unlike the noexcept single-shot
+     *          resolvers it can throw. This wrapper is noexcept and, on any
+     *          exception, falls back to a serial resolve_address per request, so
+     *          a pool/allocation failure costs only the concurrency and never
+     *          aborts init. Never call it under the loader lock, where worker
+     *          threads cannot start.
+     *
+     *          Each unresolved request is reported as 0 and a single Warning,
+     *          matching resolve_address, so call sites keep the same
+     *          "address-or-zero, gate the feature" shape. Writes
+     *          min(requests.size(), out.size()) entries; any remaining @p out
+     *          slots are left zeroed.
+     */
+    void resolve_address_batch(
+        std::span<const BatchRequest> requests,
+        std::span<std::uintptr_t> out) noexcept;
 
     /**
      * @brief Returns true if any module whose name contains @p needle is

@@ -844,21 +844,22 @@ namespace Transmog::HelmAudioFilter
         // only makes is_audio_muffle_class pass through, so it never blocks
         // hook installation. See ensure_skill_tag_resolver.
 
-        // Resolve the pa::GameAudioEffectBuffData vtable's first vfunc
-        // address. Each instance of that class stores this exact value
-        // in its first qword, so we compare buff_instance[0] against
-        // this to identify muffle-class entries. The AOB anchors at
-        // the vtable header (RTTI metadata ptr + first 2 vfuncs);
-        // dispOffset=+8 advances past the RTTI ptr to vfunc[0]'s
-        // address, which is what objects actually store.
+        // Resolve the pa::GameAudioEffectBuffData vtable. Each instance of
+        // that class stores its vtable base in its first qword, so the filter
+        // compares buff_instance[0] against g_gameAudioEffectVtable to identify
+        // muffle-class entries. The candidate cascade leads with a
+        // ResolveMode::RttiVtable tier (resolve by the patch-stable mangled
+        // name, which self-heals across the vtable relocations that move the
+        // byte ctor-LEA anchors), then falls back to those byte anchors; both
+        // yield the same vtable base.
         const auto vtableAddr = ::Transmog::resolve_address(
             ::Transmog::k_gameAudioEffectVtableCandidates,
             "HelmAudioFilter_GameAudioEffectVtable");
         if (vtableAddr == 0)
         {
             log.warning(
-                "[helm-audio] GameAudioEffectBuffData vtable AOB "
-                "resolve failed; feature disabled");
+                "[helm-audio] GameAudioEffectBuffData vtable resolve failed "
+                "(RTTI name + AOB); feature disabled");
             return false;
         }
         g_gameAudioEffectVtable = vtableAddr;
