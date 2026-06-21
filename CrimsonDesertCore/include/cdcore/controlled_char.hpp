@@ -108,6 +108,23 @@ namespace CDCore
     } // namespace ActorChainOffsets
 
     /**
+     * @brief INI-tunable search radius (bytes, per side) for the rtti_dissect
+     *        self-heal that recovers the manager->userActor offset after a patch
+     *        shifts the struct layout.
+     * @details Returns the atomic a consumer binds with
+     *          DMK::Config::register_atomic("Advanced", "SelfHealWindow", ...).
+     *          The heal reads it once per attempt (not a hot path) and clamps it
+     *          to DMK::Rtti::MAX_HEAL_WINDOW; a non-positive value falls back to
+     *          the built-in default. A wider window reaches a larger insertion
+     *          before the userActor slot; this is a single independent landmark,
+     *          but the manager references pa::ClientUserActor exactly once (the
+     *          next pointer to it is megabytes away), so the 0x200 default is
+     *          decoy-free across the whole heal range. Raise it via the INI only
+     *          if a real patch shifts the field further.
+     */
+    [[nodiscard]] std::atomic<int> &heal_window_setting() noexcept;
+
+    /**
      * @brief Identifies one of the three controlled playable characters.
      * @details Unknown is returned when the static chain has not yet
      *          been populated (cold-load), when it is mid-teardown

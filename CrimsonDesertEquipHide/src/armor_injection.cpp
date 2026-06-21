@@ -336,6 +336,19 @@ namespace EquipHide
                     continue;
                 }
                 auto mapBase = *descNode + 0x20;
+
+                // Reject a non-faulting garbage mapBase from a drifted +0x58 /
+                // +0x218 chain (the SEH read only traps an actual fault, not a
+                // wrong-but-mapped pointer). Skip this vis-controller rather than
+                // inject into a wrong map.
+                if (!DMKMemory::plausible_userspace_ptr(mapBase))
+                {
+                    logger.trace("ArmorInject [{}]: vc=0x{:X} implausible mapBase=0x{:X} "
+                                 "(+0x58 -> +0x218 -> +0x20)",
+                                 i, vc, mapBase);
+                    continue;
+                }
+
                 logger.trace("ArmorInject [{}]: vc=0x{:X} descNode=0x{:X} "
                              "mapBase=0x{:X} char_idx={}",
                              i, vc, *descNode, mapBase, charIdx);

@@ -2205,6 +2205,18 @@ namespace Transmog::PrefabWrapperSwap
                     "-- AppearanceTableLoader enumeration disabled.");
             }
 
+            // Resolve the part-prefab data container vtable by its RTTI name
+            // first: the class name is patch-stable while the vtable address and
+            // the ctor's lea layout move between builds, so reverse RTTI
+            // self-heals where the byte scan below would drift. The lea-walk
+            // fallback runs only when reverse RTTI is unavailable.
+            if (const auto rttiVt =
+                    DetourModKit::Rtti::vtable_for_type(
+                        ".?AV?$ThreadSafeRefCountedContainerBase@VstaticstringA@pa@@VAppearanceTableData@2@UDefaultUserData@2@@pa@@")
+                        .value_or(0)) {
+                s_apptContainerVtable.store(rttiVt, std::memory_order_release);
+                logger.debug("[prefab-swap] ApptContainerVtable via RTTI: 0x{:X}", rttiVt);
+            }
             // ApptContainerVtable: the cascade locates the
             // AppearanceTableLoader ctor (sub_141E2DBB0). Walk
             // forward inside its first 0x400 bytes for the SECOND
@@ -2218,7 +2230,8 @@ namespace Transmog::PrefabWrapperSwap
             const auto ctorAbs = resolve_address(
                 k_apptLoaderCtorCandidates,
                 "ApptLoaderCtor");
-            if (ctorAbs) {
+            if (ctorAbs
+                && s_apptContainerVtable.load(std::memory_order_acquire) == 0) {
                 const auto *body =
                     reinterpret_cast<const std::uint8_t *>(ctorAbs);
                 constexpr std::size_t k_scanLen = 0x400;
@@ -2257,7 +2270,7 @@ namespace Transmog::PrefabWrapperSwap
                         "in 0x{:X} bytes -- vtable filter disabled.",
                         ctorAbs, k_scanLen);
                 }
-            } else {
+            } else if (s_apptContainerVtable.load(std::memory_order_acquire) == 0) {
                 logger.warning(
                     "[prefab-swap] ApptContainerVtable cascade "
                     "FAILED -- container vtable filter disabled.");

@@ -14,6 +14,7 @@
 #include "visibility_write.hpp"
 
 #include <cdcore/controlled_char.hpp>
+#include <cdcore/dmk_glue.hpp>
 
 #include <DetourModKit.hpp>
 
@@ -55,6 +56,14 @@ namespace EquipHide
             flag_independent_toggle(), false);
         DMK::Config::register_atomic<bool>(
             "General", "CascadeFix", "Cascade Fix", flag_cascade_fix(), false);
+
+        // Advanced: rtti_dissect self-heal search radius (bytes, per side) for
+        // the manager->userActor offset recovery in CDCore. Default 0x200 (~10x
+        // the worst historical drift); raise toward MAX_HEAL_WINDOW only if a game
+        // patch shifts the field further. Not for normal users.
+        DMK::Config::register_atomic<int>(
+            "Advanced", "SelfHealWindow", "Self Heal Window",
+            CDCore::heal_window_setting(), 0x200);
 
         // Protagonist codename overrides for CDCore's appearance-config
         // classifier. Each codename is a substring search target inside
@@ -287,7 +296,7 @@ namespace EquipHide
             s_hideLocked[hashIdx] &&
             is_any_category_hidden(mask))
         {
-            auto *visPtr = reinterpret_cast<uint8_t *>(partInOut + 0x20);
+            auto *visPtr = reinterpret_cast<uint8_t *>(partInOut + vis_byte_offset());
             if (s_hideLocked[hashIdx] == 2)
             {
                 *visPtr = 0;
@@ -345,7 +354,7 @@ namespace EquipHide
 
         if (is_any_category_hidden_for(charMask, charIdx))
         {
-            auto *visPtr = reinterpret_cast<uint8_t *>(partInOut + 0x20);
+            auto *visPtr = reinterpret_cast<uint8_t *>(partInOut + vis_byte_offset());
             *visPtr = 2;
             if (cascadeOn && isChest)
             {
@@ -399,21 +408,24 @@ namespace EquipHide
         // resolution. CDCore::controlled_char uses the independent
         // static-chain [moduleBase + 0x5FA0430] anchor and does not
         // need a published holder.
-        addrs.worldSystem = resolve_address(
-            k_worldSystemCandidates, std::size(k_worldSystemCandidates),
-            "WorldSystem");
-
-        addrs.childActorVtbl = resolve_address(
-            k_childActorVtblCandidates, std::size(k_childActorVtblCandidates),
-            "ChildActorVtbl");
-
-        addrs.mapLookup = resolve_address(
-            k_mapLookupCandidates, std::size(k_mapLookupCandidates),
-            "MapLookup");
-
-        addrs.mapInsert = resolve_address(
-            k_mapInsertCandidates, std::size(k_mapInsertCandidates),
-            "MapInsert");
+        // These four targets are independent (no resolution reads another's
+        // result) and all live in the host EXE, so resolve them in one
+        // fork-join batch rather than four serial host-module scans. Each
+        // request keeps the host-scope + prologue-fallback semantics of the
+        // single resolve_address; only the wall-clock collapses to the slowest
+        // single scan. initAddrs is parallel to the request-array order.
+        const CDCore::Glue::BatchRequest initBatch[] = {
+            {k_worldSystemCandidates, "WorldSystem"},
+            {k_childActorVtblCandidates, "ChildActorVtbl"},
+            {k_mapLookupCandidates, "MapLookup"},
+            {k_mapInsertCandidates, "MapInsert"},
+        };
+        std::uintptr_t initAddrs[std::size(initBatch)] = {};
+        CDCore::Glue::resolve_address_batch(initBatch, initAddrs);
+        addrs.worldSystem = initAddrs[0];
+        addrs.childActorVtbl = initAddrs[1];
+        addrs.mapLookup = initAddrs[2];
+        addrs.mapInsert = initAddrs[3];
 
         // Resolve IndexedStringA global from MapLookup: mov rax, [rip+disp] at +20
         if (addrs.mapLookup)
@@ -492,15 +504,19 @@ namespace EquipHide
                 rebuild_part_lookup();
         }
 
-        // Mid-body scan with the shared cascade resolver. The
-        // prologue-fallback variant survives dev hot-reload: when a
-        // prior Logic-DLL load left a SafetyHook detour-jump in place
-        // at this site, every original-bytes candidate fails on rescan,
-        // and the resolver retries each Direct candidate with the first
-        // five byte-tokens replaced by the near-JMP signature
-        // E9 ?? ?? ?? ??. The candidate's disp_offset is preserved, so
-        // the returned address still lands on the original cmp instr.
-        auto hookHit = DMK::Scanner::resolve_cascade_with_prologue_fallback(
+        // Mid-body scan with the host-EXE-scoped, prologue-fallback cascade
+        // resolver. Host scope bounds this safety-critical match -- its
+        // callback writes engine structs (visPtr, ctx.r8) -- to
+        // CrimsonDesert.exe, where the real target provably lives, so a
+        // generic-shaped candidate cannot first-match elsewhere in the
+        // process image. The prologue-fallback variant survives dev
+        // hot-reload: when a prior Logic-DLL load left a SafetyHook
+        // detour-jump in place at this site, every original-bytes candidate
+        // fails on rescan, and the resolver retries each Direct candidate
+        // with the first five byte-tokens replaced by the near-JMP signature
+        // E9 ?? ?? ?? ??. The candidate's disp_offset is preserved, so the
+        // returned address still lands on the original cmp instr.
+        auto hookHit = DMK::Scanner::resolve_cascade_in_host_module_with_prologue_fallback(
             std::span<const AddrCandidate>{k_hookSiteCandidates,
                                            std::size(k_hookSiteCandidates)},
             "EquipVisCheckHookSite");
@@ -512,6 +528,11 @@ namespace EquipHide
         }
 
         const auto hookAddr = hookHit->address;
+
+        // Warm the self-healing vis-byte offset BEFORE installing the mid-hook:
+        // the decode re-resolves the EquipVisCheck instruction by AOB, and the
+        // SafetyHook install about to happen overwrites those bytes with a jmp.
+        (void)vis_byte_offset();
 
         auto &hookMgr = DMK::HookManager::get_instance();
         auto hookResult = hookMgr.create_mid_hook("EquipVisCheck", hookAddr, on_vis_check);
@@ -679,6 +700,14 @@ namespace EquipHide
         else
             logger.info("Equip hide fully initialized ({} parts resolved)",
                         total_part_count());
+
+        // One-shot DMK health snapshot for at-a-glance per-launch diagnostics:
+        // hook population plus any intentional loader-lock leak/detach events.
+        const auto health = DMK::Diagnostics::collect(DMK::HookManager::get_instance());
+        logger.info("DMK health: hooks total={} active={} disabled={}, intentional-leaks={}",
+                    health.hooks_total, health.hooks_active, health.hooks_disabled,
+                    health.total_intentional_leaks);
+
         return true;
     }
 

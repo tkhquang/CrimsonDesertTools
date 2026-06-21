@@ -53,8 +53,16 @@ namespace Transmog
             std::span<const AddrCandidate> candidates,
             std::string_view label)
         {
+            // Host-EXE scope: every target resolves inside CrimsonDesert.exe,
+            // so bounding the scan (and the require_unique count) to
+            // Memory::host_module_range() stops a generic-shaped candidate from
+            // first-matching inside a sibling mod or overlay elsewhere in the
+            // process image. The prologue-fallback variant is retained -- it
+            // re-matches a sibling-stomped prologue, and its rebuilt jump
+            // destination stays unbounded, so a trampoline outside the EXE is
+            // still recovered.
             auto hit =
-                DetourModKit::Scanner::resolve_cascade_with_prologue_fallback(
+                DetourModKit::Scanner::resolve_cascade_in_host_module_with_prologue_fallback(
                     candidates, label);
             if (hit.has_value())
                 return hit->address;
@@ -286,7 +294,8 @@ namespace Transmog
     };
 
     /**
-     * @brief StringInfoVtable sentinel: 0x145BC4638.
+     * @brief StringInfoVtable sentinel (resolved at runtime; no hardcoded
+     *        address -- an absolute vtable value goes stale on every game build).
      *
      * Vtable pointer used as the +0x08 sentinel of every StringInfo
      * entry. PrefabWrapperSwap reads it to filter out non-StringInfo
@@ -1746,6 +1755,17 @@ namespace Transmog
      */
     inline constexpr AddrCandidate
         k_gameAudioEffectVtableCandidates[] = {
+            // Primary -- resolve by RTTI mangled name. Every
+            // pa::GameAudioEffectBuffData instance stores its primary
+            // (COL.offset == 0) vtable base in its first qword, which is
+            // exactly what the byte ctor-LEA tiers below recover. Resolving by
+            // the patch-stable mangled name self-heals across the vtable
+            // relocations that move those byte anchors between builds. The
+            // backend is unique-only and fails closed, so an absent name falls
+            // through to the byte tiers.
+            {"GameAudioEffectVtable_RTTI",
+             ".?AVGameAudioEffectBuffData@pa@@", ResolveMode::RttiVtable},
+
             // P1 -- constructor tail with RIP-rel LEA. 1 unique match
             // in v1.08.00 .text. Resolved disp32 = 0x032CE5FA ->
             // match+14+disp = 0x144CD7B08 (= vfunc[0] address, what

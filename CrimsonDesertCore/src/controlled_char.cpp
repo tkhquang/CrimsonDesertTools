@@ -34,6 +34,23 @@
 
 namespace CDCore
 {
+    // INI-tunable self-heal landmark window (search radius per side, bytes),
+    // bound to [Advanced] SelfHealWindow by each consumer. 0x200 covers ~10x the
+    // worst historical manager drift (+0x30) with margin. The manager references
+    // pa::ClientUserActor exactly once (every neighbouring slot is a different
+    // actor/container type or non-polymorphic, and the next pointer to the user
+    // actor lives megabytes away), so the window is decoy-free across its whole
+    // range -- the size is a realistic-re-layout-reach choice, not a decoy bound.
+    // Raise it via the INI toward MAX_HEAL_WINDOW only if a patch shifts
+    // pa::ClientUserActor further from the nominal slot than this.
+    inline constexpr int k_healWindowDefault = 0x200;
+
+    std::atomic<int> &heal_window_setting() noexcept
+    {
+        static std::atomic<int> s_healWindow{k_healWindowDefault};
+        return s_healWindow;
+    }
+
     namespace
     {
         // Lower bound for "looks like a heap pointer". Catches both real
@@ -50,11 +67,115 @@ namespace CDCore
         // ChildContainer slot, the 100-entry actor-list capacity,
         // the 16-byte ptr+flag stride, and the live-flag value
         // 0x0101 round out the layout.
-        // mgr -> userActor. The canonical offset lives in
-        // controlled_char.hpp (CDCore::ActorChainOffsets), shared with
-        // the LT/EH WorldSystem-rooted resolvers.
-        constexpr std::ptrdiff_t k_offUserActor      =
+        // mgr -> userActor offset plus the sibling actor-array offsets, with
+        // runtime self-heal. The seeds come from controlled_char.hpp / the
+        // layout below; rtti_dissect re-resolves mgr->userActor from the live
+        // pa::ClientActorManager on the first walk, so a future manager
+        // re-layout self-corrects. heal_landmark checks the nominal slot first,
+        // so an unshifted binary short-circuits and the seeds stay (current
+        // behaviour byte-for-byte). The array/cap offsets sit in the same
+        // post-header region and shift by the same delta, so they are derived
+        // from the one healed delta rather than healed independently.
+        constexpr std::ptrdiff_t k_offUserActorNominal =
             ActorChainOffsets::k_actorManagerToUserActor;
+        constexpr std::ptrdiff_t k_offMgrActorArrayNominal    = 0x130;
+        constexpr std::ptrdiff_t k_offMgrActorArrayCapNominal = 0x13C;
+        constexpr std::string_view k_userActorMangled = ".?AVClientUserActor@pa@@";
+
+        std::atomic<std::ptrdiff_t> s_offUserActor{k_offUserActorNominal};
+        std::atomic<std::ptrdiff_t> s_mgrHeaderDelta{0};
+        std::atomic<bool> s_chainOffsetsHealed{false};
+        std::atomic<int> s_chainHealAttempts{0};
+
+        // Resolved self-heal window: the [Advanced] SelfHealWindow value clamped
+        // to the DMK maximum; a non-positive (unset) value falls back to the
+        // default. Read once per heal attempt, never on a hot path.
+        [[nodiscard]] std::size_t heal_window() noexcept
+        {
+            const int configured = heal_window_setting().load(std::memory_order_relaxed);
+            if (configured <= 0)
+                return static_cast<std::size_t>(k_healWindowDefault);
+            const auto w = static_cast<std::size_t>(configured);
+            return w > DMKRtti::MAX_HEAL_WINDOW ? DMKRtti::MAX_HEAL_WINDOW : w;
+        }
+
+        [[nodiscard]] std::ptrdiff_t off_user_actor() noexcept
+        {
+            return s_offUserActor.load(std::memory_order_acquire);
+        }
+
+        [[nodiscard]] std::ptrdiff_t off_mgr_actor_array() noexcept
+        {
+            return k_offMgrActorArrayNominal + s_mgrHeaderDelta.load(std::memory_order_acquire);
+        }
+
+        [[nodiscard]] std::ptrdiff_t off_mgr_actor_array_cap() noexcept
+        {
+            return k_offMgrActorArrayCapNominal + s_mgrHeaderDelta.load(std::memory_order_acquire);
+        }
+
+        // Re-entrant offset self-heal. Latches only on success (or the no-drift
+        // short-circuit inside heal_landmark). Until the player chain is wired the
+        // heal legitimately finds nothing: a user can sit at the main menu, where
+        // no pa::ClientUserActor exists yet, for any length of time. So it NEVER
+        // gives up and NEVER latches on failure -- every walk retries until the
+        // fully-wired chain heals (this also avoids the interner-hook cold-load
+        // latch bug). The nominal seeds carry the meantime, and the walk's own
+        // < k_minValidPtr gate rejects a garbage dereference, so an unhealed state
+        // can never mis-walk -- there is no reason (and it would be wrong) to cap
+        // the attempts.
+        void heal_chain_offsets(std::uintptr_t mgrBase) noexcept
+        {
+            if (s_chainOffsetsHealed.load(std::memory_order_acquire))
+                return;
+
+            DMKRtti::Landmark lm{};
+            lm.base = mgrBase;
+            lm.nominal_offset = k_offUserActorNominal;
+            lm.window = heal_window();
+            lm.expected_mangled = k_userActorMangled;
+            // mgr+0x58 is a qword POINTER to a single-COL pa::ClientUserActor
+            // (COL offset 0, no multiple inheritance), so PointerToObject is the
+            // exact slot shape.
+            lm.indirection = DMKRtti::Indirection::PointerToObject;
+
+            const auto hit = DMKRtti::heal_landmark(lm);
+            if (!hit.has_value())
+            {
+                // NoMatch / Ambiguous / BadDescriptor: keep the nominal seeds and
+                // retry on the next walk. NoMatch is expected and benign before a
+                // save is loaded. Never publish a guessed offset. Surface a
+                // persistent failure only on a geometric schedule (every
+                // power-of-two walk) at DEBUG, so a real patch-day drift stays
+                // diagnosable without spamming the per-walk path or alarming on the
+                // normal main-menu wait.
+                const int n = s_chainHealAttempts.fetch_add(1, std::memory_order_acq_rel) + 1;
+                if ((n & (n - 1)) == 0)
+                    DetourModKit::Logger::get_instance().debug(
+                        "ActorChainOffsets not healed yet after {} walk(s) ({}); using nominal "
+                        "offsets, will keep retrying",
+                        n, DMKRtti::heal_error_to_string(hit.error()));
+                return;
+            }
+
+            const std::ptrdiff_t healed = hit->healed_offset;
+            const std::ptrdiff_t drift = healed - k_offUserActorNominal;
+            s_offUserActor.store(healed, std::memory_order_release);
+            s_mgrHeaderDelta.store(drift, std::memory_order_release);
+            s_chainOffsetsHealed.store(true, std::memory_order_release);
+            // One-shot confirmation that the rtti_dissect path engaged and the
+            // mgr->userActor slot reverse-resolved to pa::ClientUserActor. A
+            // nonzero drift is a manager re-layout that self-corrected on a
+            // patch; surface it as a WARNING so the offset change is easy to spot.
+            if (drift != 0)
+                DetourModKit::Logger::get_instance().warning(
+                    "ActorChainOffsets DRIFTED: mgr->userActor {:#x} nominal {:#x} drift {} -- "
+                    "self-healed (manager layout changed)",
+                    healed, k_offUserActorNominal, drift);
+            else
+                DetourModKit::Logger::get_instance().info(
+                    "ActorChainOffsets self-heal OK: mgr->userActor {:#x} (matches nominal)", healed);
+        }
         constexpr std::ptrdiff_t k_offSubManager     = 0x08; // user +0x08
         constexpr std::ptrdiff_t k_offSubMgrKliff    = 0x30; // sub +0x30
         constexpr std::ptrdiff_t k_offSubMgrCtrl     = 0x38; // sub +0x38
@@ -80,7 +201,8 @@ namespace CDCore
         //   - +0x13C: u32 element capacity of that array (order 1000).
         // These sit in the same post-header region as the userActor
         // field, so a manager re-layout shifts them by the same delta;
-        // keep them in step with k_offUserActor when re-deriving.
+        // off_mgr_actor_array()/_cap() derive that delta from the one
+        // healed mgr->userActor offset above (single source of truth).
         // The array is a DENSE actor vector: every loaded character
         // -- protagonists, companions, AND every humanoid NPC -- is
         // appended here in spawn order. Protagonists do NOT cluster at
@@ -92,8 +214,6 @@ namespace CDCore
         // Non-protagonist entries are rejected by the appearance-config
         // classifier (their path carries no protagonist codename).
         constexpr std::ptrdiff_t k_offCcoiaIdentity    = 0x60;
-        constexpr std::ptrdiff_t k_offMgrActorArray    = 0x130;
-        constexpr std::ptrdiff_t k_offMgrActorArrayCap = 0x13C;
         constexpr std::uint8_t   k_kliffHighByte       = 0xA0;
 
         // Scan bound for the ClientActorManager+0x130 array. We read
@@ -292,8 +412,9 @@ namespace CDCore
                     const volatile std::uintptr_t *>(playerBase);
                 if (mgr < k_minValidPtr)
                     return out;
+                heal_chain_offsets(mgr);
                 const auto userActor = *reinterpret_cast<
-                    const volatile std::uintptr_t *>(mgr + k_offUserActor);
+                    const volatile std::uintptr_t *>(mgr + off_user_actor());
                 if (userActor < k_minValidPtr)
                     return out;
                 const auto subMgr = *reinterpret_cast<
@@ -688,13 +809,13 @@ namespace CDCore
         // below halts the walk as soon as both companions are found,
         // so the full sweep only runs when one is genuinely absent.
         const auto actorArray =
-            DMKMemory::seh_read<std::uintptr_t>(chain.mgr + k_offMgrActorArray)
+            DMKMemory::seh_read<std::uintptr_t>(chain.mgr + off_mgr_actor_array())
                 .value_or(0);
         if (actorArray < k_minValidPtr)
             return written;
 
         const auto rawCap = DMKMemory::seh_read<std::uint32_t>(
-                                chain.mgr + k_offMgrActorArrayCap)
+                                chain.mgr + off_mgr_actor_array_cap())
                                 .value_or(0);
         const std::size_t scanCap =
             (rawCap < k_mgrArrayCapMin)
