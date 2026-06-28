@@ -5,13 +5,16 @@
     "editor.wordWrapColumn": 120
   },
   // Per-module build trees are large and the external/ submodules are never
-  // edited here; keep both out of search results and the file watcher.
+  // edited here; keep both out of search results and the file watcher. The
+  // build/template/ config templates are tracked sources, so re-include them.
   "search.exclude": {
     "**/build/**": true,
+    "**/build/template/**": false,
     "**/external/**": true
   },
   "files.watcherExclude": {
     "**/build/**": true,
+    "**/build/template/**": false,
     "**/external/**": true
   },
   "cmake.sourceDirectory": "D:/Workspace/CrimsonDesertTools/CrimsonDesertLiveTransmog"

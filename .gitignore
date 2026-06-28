@@ -1,6 +1,5 @@
 # IDE / editor
 00_idea
-.vscode/*
 
 # Build artifacts
 CrimsonDesert*/build/*
