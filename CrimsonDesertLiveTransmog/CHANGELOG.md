@@ -2,6 +2,16 @@
 
 All notable changes to the CrimsonDesertLiveTransmog mod will be documented in this file.
 
+## [0.12.7] - Companion transmog fix and stability update
+
+- Fixed companions (such as Oongka and Damiane) showing their default gear instead of your chosen outfit after they leave and return to the scene; their transmog now reapplies on its own
+- Refreshed the color and dye data for game version 1.12.02
+- Updated the underlying framework (DetourModKit) to 3.9.0 for better stability and future compatibility
+- More resilient to future game updates: some internal addresses now self-correct after a patch
+- Added an advanced INI setting (SelfHealWindow) to help the mod recover after a game update
+- Standardised the source-code formatting and added automatic style enforcement for future development
+- Tidied developer comments and documentation for consistency, with no change to in-game behaviour
+
 ## [0.12.6] - Reliable body-mesh prefab picks
 
 - Fixed body-mesh prefab picks not applying when the character had no saved preset
@@ -243,6 +253,7 @@ All notable changes to the CrimsonDesertLiveTransmog mod will be documented in t
 - Modular code split: `transmog_apply` (apply/clear logic), `transmog_hooks` (VEC/BatchEquip callbacks), `transmog_worker` (debounce/load-detect/nametable threads), `shared_state` (cross-TU atomics)
 - Docs clarify ReShade is required for GUI; without it, users edit JSON manually via Capture hotkey
 
+[0.12.7]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.12.7
 [0.12.6]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.12.6
 [0.12.5]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.12.5
 [0.12.4]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.12.4
