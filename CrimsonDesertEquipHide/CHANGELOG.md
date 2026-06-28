@@ -2,6 +2,14 @@
 
 All notable changes to the CrimsonDesertEquipHide mod will be documented in this file.
 
+## [0.8.3] - Stability and framework update
+
+- Updated the underlying framework (DetourModKit) to 3.9.0 for better stability and future compatibility
+- More resilient to future game updates: some internal addresses now self-correct after a patch
+- Added an advanced INI setting (SelfHealWindow) to help the mod recover after a game update
+- Standardised the source-code formatting and added automatic style enforcement for future development
+- Tidied developer comments and documentation for consistency, with no change to in-game behaviour
+
 ## [0.8.2] - Crimson Desert 1.10.00 support
 
 - Updated the mod to work with Crimson Desert version 1.10.00.
@@ -261,6 +269,7 @@ All notable changes to the CrimsonDesertEquipHide mod will be documented in this
 - Customizable part lists per category via INI configuration
 - Configurable init delay and log level
 
+[0.8.3]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/equip-hide/v0.8.3
 [0.8.2]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/equip-hide/v0.8.2
 [0.8.1]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/equip-hide/v0.8.1
 [0.8.0]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/equip-hide/v0.8.0
