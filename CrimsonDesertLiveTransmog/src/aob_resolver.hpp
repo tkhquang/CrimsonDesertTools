@@ -220,6 +220,9 @@ namespace Transmog
      * The 17-slot StringInfo registry struct. +0x08 holds count u32, +0x50 holds the QWORD entry-array pointer.
      * PrefabWrapperSwap walks this registry to resolve prefab NAMES to entry wrapper-ptrs.
      *
+     * Backing registry class is pa::StringInfoManager (StaticInfoManager2<...> family). The MEMORY[0x145EF1DE8]
+     * literal above is a stale navigation breadcrumb; the resolver re-finds the live holder each launch.
+     *
      * All three candidates anchor on a `mov reg, [rip+disp32]` that loads this address. Disp32 wildcarded; rest of the
      * 16+ byte window is unique-text in v1.05.01 .text.
      */
@@ -283,6 +286,9 @@ namespace Transmog
      * The engine's per-process iteminfo registry pointer. `*holder` dereferences to the registry struct; `*holder +
      * 0x08` holds the u32 entry count, `*holder + 0x50` the QWORD entry-array pointer. The runtime item-to-prefab
      * bridge (itemmesh_dumper) reads it to enumerate every loaded item descriptor.
+     *
+     * Backing registry class is pa::ItemInfoManager. The qword_145F2A338 literal above is a stale navigation
+     * breadcrumb; the resolver re-finds the live holder each launch.
      *
      * All three candidates anchor on a `mov rcx, [rip+disp32]` loading this address inside a lookup primitive that
      * follows the standard `add rcx, 0x60; lea rdx, [frame]; call` sequence. The disp32 is wildcarded; surrounding
@@ -394,6 +400,10 @@ namespace Transmog
      * Per sub_141E2DBB0 (AppearanceTableLoader ctor), the loader allocates two containers and assigns final vtables:
      *   a1[0] (_appearanceContainer)     -> &off_144D24308
      *   a1[1] (_partPrefabDataContainer) -> &off_144D24358   <-- our target
+     *
+     * Real class is pa::ThreadSafeRefCountedContainerBase<staticstringA, AppearanceTableData, DefaultUserData>, the
+     * appearance-table cache keyed by staticstringA. The 0x144D243xx literals are stale navigation breadcrumbs; the
+     * resolver walks to the live vtable dynamically.
      *
      * Single-xref site (in sub_141E2DBB0). The vtable-write pattern is a code-generator template emitted for ~9 sibling
      * container types, so anchoring on the lea+mov[rdi] sequence alone is not unique.
@@ -904,6 +914,10 @@ namespace Transmog
      *        loop. ColorOverride installs a MidHook here so every dst matInst exposed during a transmog apply gets its
      *        content_hash and slot cached into MatInstOwner / CarrierSet for the setter substitute to query.
      *
+     * "ColorPublisher" is a mod-internal label; the engine writer family is
+     * pa::ClientFrameEventChange{,Global}MaterialParameter. sub_142F59370 is a stale navigation breadcrumb, resolved by
+     * AOB.
+     *
      * The prologue saves seven callee-saved registers (rbp, rbx, rsi, rdi, r12-r15) and frames with `lea
      * rbp,[rsp-0x1F]; sub rsp, 0xF8`. The wide saved-reg window plus the `lea rax, [rip+disp32]` to a vtable constant
      * make the prologue distinctive enough that a 7-instruction window matches uniquely.
@@ -1029,6 +1043,9 @@ namespace Transmog
      * @brief PropertyByteSetter (sub_140A03810) -- 4-byte property descriptor's BYTE-variant write path. Mid-hooked by
      *        ColorOverride::SetterSubstitute so the engine's per-property color writes can be redirected to user-chosen
      *        RGB values.
+     *
+     * The color descriptors written here are pa::PartPrefabMaterialParemeterSetEventData / ...FloatEventData (the
+     * engine's "Paremeter" misspelling is intentional). "SetterSubstitute" is a mod-internal label.
      *
      * The function tests the descriptor's callback at `[rcx+0x78]`, falls through to a 4-byte equality test when
      * present, and tail-jumps to a downstream writer on mismatch. A sibling at sub_14091CC90 shares the entire
