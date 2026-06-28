@@ -103,6 +103,16 @@ namespace Transmog
     void capture_applied_state_for_char(std::uint32_t idx) noexcept;
 
     /**
+     * Wipe ONE character's buffered snapshot AND the live globals, marking the character as having no installed fakes.
+     * Called by the multi-character auto-apply path when a protagonist's body (CCOIA) has been reallocated -- a
+     * despawn/respawn (off-screen stream-out + return, follower injury cooldown + recall) hands back a fresh body
+     * wearing vanilla gear, so the prior snapshot lists fakes that no longer exist. Without this, apply_all_transmog
+     * would observe preset==last-applied and real==last-real, fire its "no state change, skipping" early-out, and leave
+     * the respawned body un-transmogged. Pass idx 1=Kliff, 2=Damiane, 3=Oongka. Out-of-range idx is a no-op.
+     */
+    void reset_applied_state_for_char(std::uint32_t idx) noexcept;
+
+    /**
      * Wipe both the globals and every per-character buffered snapshot. Called from the save-load wipe path: all bodies
      * have been reallocated by the engine, every fake transmog item from the prior session is gone, so the trackers
      * must reset to match.

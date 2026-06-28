@@ -108,9 +108,13 @@ namespace Transmog::HelmAudioFilter
         //
         //   host
         //     + 0x68 -> component table (64 packed pointer slots)
-        //     + 0x40 -> slot[8] = pa::ServerCharacterControlActor*
+        //     + 0x40 -> slot[8] = pa::ServerCharacterControlActorComponent*
         //     + 0x40 -> (struct, no RTTI vtable in image)
         //     + 0x38 -> CharacterAssets vector base
+        //
+        // Slot[8] is the *Component, not a bare "...Actor": the "...Actor" type carries no RTTI in the image, so the
+        // real polymorphic class is the server analog of the client CharacterControlActorComponent reached at
+        // comp_table+0x40.
         //
         // CharacterAssets is a packed array of MSVC-style std::string entries (0x40-byte stride). Slot content per
         // protagonist:

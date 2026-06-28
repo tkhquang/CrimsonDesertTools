@@ -441,6 +441,12 @@ namespace Transmog
         return true;
     }
 
+    // Per-character applied-CCOIA accessors. The backing state and definitions live with the tracking block further
+    // down (just above rebind_preset_to_controlled); forward-declared here because apply_for_one_char consults them to
+    // decide whether the target body was reallocated since its last successful apply.
+    [[nodiscard]] static std::uintptr_t applied_ccoia_for_char(std::uint32_t idx) noexcept;
+    static void set_applied_ccoia_for_char(std::uint32_t idx, std::uintptr_t ccoia) noexcept;
+
     // --- Multi-character auto-apply (world-generation triggered) ---
     //
     // Apply one character's preset against an explicit equip-slot a1, bypassing the controlled-char-only path that
@@ -489,12 +495,33 @@ namespace Transmog
         }
         pm.apply_to_state();
 
-        // Hydrate the globals from this character's per-body snapshot. On cold-load and after save-load wipes the
-        // bucket is all-zero, so the first apply is equivalent to the old fill(0)-style wipe. Mid-session re-applies
-        // (e.g., roster-grew on follower summon) preserve the prior installed-state so Phase A teardown still functions
-        // across iterations.
+        // Hydrate the globals from this character's snapshot -- but ONLY when re-applying against the SAME body
+        // we last applied to. The four applied-state globals describe the fakes currently installed on a body; they are
+        // the truth source apply_all_transmog's no-change early-out and Phase A teardown consult.
+        //
+        // When this character's CCOIA pointer differs from the one we last successfully applied against, the engine has
+        // reallocated the body (off-screen stream-out + return, follower injury cooldown + recall, or an NPC re-spawned
+        // by a game event). Every fake we installed lives on the now-freed body and is GONE; the freshly-streamed body
+        // wears vanilla gear. Rehydrating the stale snapshot here would make apply_all_transmog see preset==lastIds and
+        // real==lastReal, fire its "no state change, skipping" early-out, and leave the body un-transmogged. Wipe the
+        // snapshot instead so the re-apply runs from a clean slate -- mirrors the load-detect "scene graph is fresh
+        // after reload" reset in load_detect_thread_fn (old fake meshes are gone even though the IDs haven't changed).
         const auto idx = CDCore::character_idx_from_name(name);
-        rehydrate_applied_state_for_char(idx);
+        const auto prevCcoia = applied_ccoia_for_char(idx);
+        const bool bodyReallocated = (ccoia != prevCcoia);
+        if (bodyReallocated)
+        {
+            if (prevCcoia != 0)
+                logger.info("[multi-apply] {} body reallocated (ccoia 0x{:X} -> "
+                            "0x{:X}); wiping stale apply-cache and re-applying "
+                            "from clean slate",
+                            name, static_cast<std::uint64_t>(prevCcoia), static_cast<std::uint64_t>(ccoia));
+            reset_applied_state_for_char(idx);
+        }
+        else
+        {
+            rehydrate_applied_state_for_char(idx);
+        }
 
         bool faulted = false;
         __try
@@ -516,6 +543,9 @@ namespace Transmog
             return false;
         }
         capture_applied_state_for_char(idx);
+        // Record the body we just applied to. A later roster-grew pass that observes this same pointer for this char
+        // skips the work (already applied); a pointer change marks the body reallocated and forces a clean re-apply.
+        set_applied_ccoia_for_char(idx, ccoia);
         logger.debug("[multi-apply] {} a1=0x{:X}", name, static_cast<std::uint64_t>(equipSlot));
         return true;
     }
@@ -535,34 +565,34 @@ namespace Transmog
     static constexpr int k_multiCharMaxRetries = 30;
     static constexpr std::uint64_t k_multiCharRetryMs = 1000;
 
-    // Per-world-generation applied-CCOIA tracking. Cold-load and save-load bump world_generation(), at which point the
-    // tracking resets and every visible player gets re-applied. In-session snapshot-grew triggers (a follower newly
-    // summoned mid-session) only apply for CCOIAs not yet in the applied set -- this avoids re-running
-    // apply_all_transmog on the controlled char (who was already applied at cold-load) just because the user summoned a
-    // companion. Without this gate every roster-grew trigger would re-flip PresetManager's active_character between
-    // each char and incur a full tear-down + carrier-write pass on every already-applied body.
+    // Per-world-generation, per-character applied-CCOIA tracking. Cold-load and save-load bump world_generation(), at
+    // which point the tracking resets and every visible player gets re-applied. In-session snapshot-grew triggers (a
+    // follower summoned mid-session) only re-apply for a character whose CURRENT body pointer differs from the one
+    // we last successfully applied against -- this avoids re-running apply_all_transmog on the controlled char (who was
+    // already applied at cold-load) just because the user summoned a companion.
+    //
+    // Keyed by character index (1=Kliff, 2=Damiane, 3=Oongka), not a flat set of applied pointers. Indexing by
+    // character is what makes a body reallocation observable: when a companion despawns (off-screen stream-out, injury
+    // cooldown) and respawns, the engine hands its CCOIA back at a NEW pointer. Comparing the live pointer against the
+    // per-character record distinguishes "same body, already applied" (skip) from "body reallocated, needs re-apply"
+    // (wipe the stale snapshot in apply_for_one_char and re-run). A flat append-keyed pointer set could not tell those
+    // apart, and had no per-generation bound on distinct pointers, so a respawn could push a fourth entry past the
+    // three-slot array.
     static std::uint64_t s_lastAppliedWorldGen = 0;
-    static std::array<std::uintptr_t, 3> s_appliedCcoias{};
-    static std::size_t s_appliedCcoiaCount = 0;
+    static std::array<std::uintptr_t, 3> s_appliedCcoiaForChar{};
 
-    [[nodiscard]] static bool is_ccoia_already_applied(std::uintptr_t ccoia) noexcept
+    [[nodiscard]] static std::uintptr_t applied_ccoia_for_char(std::uint32_t idx) noexcept
     {
-        if (ccoia == 0)
-            return false;
-        for (std::size_t i = 0; i < s_appliedCcoiaCount; ++i)
-            if (s_appliedCcoias[i] == ccoia)
-                return true;
-        return false;
+        if (idx < 1 || idx > 3)
+            return 0;
+        return s_appliedCcoiaForChar[idx - 1];
     }
 
-    static void mark_ccoia_applied(std::uintptr_t ccoia) noexcept
+    static void set_applied_ccoia_for_char(std::uint32_t idx, std::uintptr_t ccoia) noexcept
     {
-        // The array is sized to the max protagonist count (3), and do_multi_char_apply iterates a 3-slot snapshot, so
-        // the count can never exceed s_appliedCcoias.size(). A bounds check would be unreachable; we only guard against
-        // the null sentinel.
-        if (ccoia == 0)
+        if (idx < 1 || idx > 3)
             return;
-        s_appliedCcoias[s_appliedCcoiaCount++] = ccoia;
+        s_appliedCcoiaForChar[idx - 1] = ccoia;
     }
 
     // Move the PresetManager axis back to the controlled character WITHOUT running apply_all_transmog. Used after the
@@ -697,7 +727,7 @@ namespace Transmog
         const auto curWorldGen = CDCore::world_generation();
         if (curWorldGen != s_lastAppliedWorldGen)
         {
-            s_appliedCcoiaCount = 0;
+            s_appliedCcoiaForChar.fill(0);
             s_lastAppliedWorldGen = curWorldGen;
         }
 
@@ -709,22 +739,22 @@ namespace Transmog
         {
             if (entries[i].body == controlledCcoia)
                 continue;
-            if (is_ccoia_already_applied(entries[i].body))
+            // Skip only when THIS body (same pointer) was already applied during this world generation. A reallocated
+            // body (despawn/respawn) carries a new pointer != the recorded one, so it correctly falls through to a
+            // re-apply rather than being treated as "already done".
+            if (entries[i].body != 0 && applied_ccoia_for_char(entries[i].charIdx) == entries[i].body)
             {
                 ++skipped;
                 continue;
             }
             const auto chEnum = static_cast<CDCore::ControlledCharacter>(entries[i].charIdx);
             const auto name = std::string(CDCore::controlled_character_name(chEnum));
+            // apply_for_one_char records the applied CCOIA on success (and wipes the stale snapshot when the body was
+            // reallocated), so no explicit mark step is needed here.
             if (apply_for_one_char(name, entries[i].body))
-            {
                 ++applied;
-                mark_ccoia_applied(entries[i].body);
-            }
             else
-            {
                 ++deferred;
-            }
         }
 
         // Second pass: controlled character. Two cases:
@@ -739,17 +769,13 @@ namespace Transmog
             if (controlledIdx >= 1 && controlledIdx <= 3)
             {
                 controlledName = std::string(CDCore::current_controlled_character_name());
-                if (!is_ccoia_already_applied(controlledCcoia))
+                if (applied_ccoia_for_char(controlledIdx) != controlledCcoia)
                 {
+                    // apply_for_one_char records the CCOIA on success.
                     if (apply_for_one_char(controlledName, controlledCcoia))
-                    {
                         ++applied;
-                        mark_ccoia_applied(controlledCcoia);
-                    }
                     else
-                    {
                         ++deferred;
-                    }
                 }
                 else
                 {

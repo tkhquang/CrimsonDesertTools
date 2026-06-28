@@ -193,6 +193,25 @@ namespace Transmog
         s_lastAppliedCarrierIdsPerChar[bucket] = s_lastAppliedCarrierIds;
     }
 
+    void reset_applied_state_for_char(std::uint32_t idx) noexcept
+    {
+        if (idx < 1 || idx > 3)
+            return;
+        const auto bucket = static_cast<std::size_t>(idx - 1);
+        s_lastAppliedIdsPerChar[bucket].fill(0);
+        s_realDamagedPerChar[bucket].fill(false);
+        s_lastAppliedRealIdsPerChar[bucket].fill(0);
+        s_lastAppliedCarrierIdsPerChar[bucket].fill(0);
+        // Also wipe the live globals: apply_all_transmog reads these directly (last_applied_ids / real_damaged /
+        // last_applied_real_ids / last_applied_carrier_ids), so a stale global would drive the no-change early-out
+        // even after the bucket was cleared. rehydrate_applied_state_for_char would normally overwrite the globals from
+        // the bucket, but the body-reallocation path skips rehydrate by design and calls this instead.
+        s_lastAppliedIds.fill(0);
+        s_realDamaged.fill(false);
+        s_lastAppliedRealIds.fill(0);
+        s_lastAppliedCarrierIds.fill(0);
+    }
+
     void reset_all_applied_state() noexcept
     {
         s_lastAppliedIds.fill(0);
