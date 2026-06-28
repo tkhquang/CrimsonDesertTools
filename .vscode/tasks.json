@@ -1,0 +1,40 @@
+{
+  "version": "2.0.0",
+  // CMake resolves through the Visual Studio 2022 toolchain. EquipHide and
+  // LiveTransmog each own a CMakePresets.json, so tasks run from the module
+  // directory; CrimsonDesertCore is a shared library compiled as part of each.
+  // The msvc-dev preset builds the two-DLL hot-reload configuration (loader +
+  // logic); msvc-release builds the single production module.
+  "tasks": [
+    {
+      "label": "EquipHide: configure (msvc-dev)",
+      "type": "shell",
+      "command": "cmake --preset msvc-dev",
+      "options": { "cwd": "${workspaceFolder}/CrimsonDesertEquipHide" },
+      "problemMatcher": []
+    },
+    {
+      "label": "EquipHide: build (msvc-dev)",
+      "type": "shell",
+      "command": "cmake --build --preset msvc-dev",
+      "options": { "cwd": "${workspaceFolder}/CrimsonDesertEquipHide" },
+      "group": "build",
+      "problemMatcher": ["$msCompile"]
+    },
+    {
+      "label": "LiveTransmog: configure (msvc-dev)",
+      "type": "shell",
+      "command": "cmake --preset msvc-dev",
+      "options": { "cwd": "${workspaceFolder}/CrimsonDesertLiveTransmog" },
+      "problemMatcher": []
+    },
+    {
+      "label": "LiveTransmog: build (msvc-dev)",
+      "type": "shell",
+      "command": "cmake --build --preset msvc-dev",
+      "options": { "cwd": "${workspaceFolder}/CrimsonDesertLiveTransmog" },
+      "group": { "kind": "build", "isDefault": true },
+      "problemMatcher": ["$msCompile"]
+    }
+  ]
+}
