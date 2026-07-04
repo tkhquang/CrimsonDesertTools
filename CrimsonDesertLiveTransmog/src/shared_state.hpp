@@ -18,8 +18,9 @@ namespace Transmog
         uintptr_t safeTearDown = 0;        // sub_14075FE60 -- scene-graph tear-down used by real_part_tear_down
         uintptr_t indexedStringLookup = 0; // sub_1402D75D0 -- IndexedStringA short->hash; resolved via ItemNameTable
                                            // chain walk (50+ template siblings prevent direct AOB)
-        uintptr_t charClassBypass = 0; // 0x141D5F538 -- jz byte in CondPrefab evaluator secondary hash check. Toggle
-                                       // 0x74<->0xEB for NPC item support.
+        uintptr_t charClassBypass = 0; // jz byte in the CondPrefab evaluator's char-class hash check (AOB-resolved via
+                                       // k_charClassBypassCandidates -- moved to a new function on v1.13.00). Toggle
+                                       // 0x74<->0xEB for NPC/variant item support.
     };
 
     ResolvedAddresses &resolved_addrs();

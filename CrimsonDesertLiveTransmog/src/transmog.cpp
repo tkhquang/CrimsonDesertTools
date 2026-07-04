@@ -162,17 +162,18 @@ namespace Transmog
     // real_part_tear_down.cpp.
     constexpr std::ptrdiff_t k_compEntryTablePtrOffset = 0x88;
 
-    // Entry layout within the auth-table array. v1.05 grew the entry by 8 bytes and shifted the slot tag accordingly:
+    // Entry layout within the auth-table array. The stride and slot-tag offset move together by 8 across versions:
     //
     //   v1.04.00: stride=0xC8 (200), slotTag@+0xC0
     //   v1.05.00: stride=0xD0 (208), slotTag@+0xC8
+    //   v1.13.00: stride=0xC8 (200), slotTag@+0xC0  (reverted to the v1.04 layout)
     //
     // primary item id at +0x08 is unchanged across versions. Slot-tag VALUES themselves are unchanged (Helm=0x03,
     // Chest=0x04, Gloves=0x05, Boots=0x06, Cloak=0x10); only the position within the entry shifted. Mirrors
     // k_entryStride / k_entrySlotTagOffset in real_part_tear_down.cpp.
-    constexpr std::ptrdiff_t k_compEntryStride = 0xD0;
+    constexpr std::ptrdiff_t k_compEntryStride = 0xC8;
     constexpr std::ptrdiff_t k_compEntryItemIdOffset = 0x08;
-    constexpr std::ptrdiff_t k_compEntrySlotTagOffset = 0xC8;
+    constexpr std::ptrdiff_t k_compEntrySlotTagOffset = 0xC0;
 
     // --- Public interface ---
 
@@ -304,12 +305,13 @@ namespace Transmog
     }
 
     // Walks the live auth-table entry array and snapshots each LT-managed slot's dye records into the active preset's
-    // SlotDyeChannels. The auth-table's per-entry dye-record vector layout at entry+0x78 is:
+    // SlotDyeChannels via read_entry_dye_records(). The auth-table's per-entry dye-record vector layout (v1.13.00,
+    // shifted -8 with the entry shrink -- see k_compEntrySlotTagOffset) is:
     //
-    //   +0x78  qword  data_ptr  -- heap address of contiguous
+    //   +0x70  qword  data_ptr  -- heap address of contiguous
     //                              16-byte records
-    //   +0x80  dword  count     -- number of valid records (0..N)
-    //   +0x84  dword  capacity  -- allocation cap, ignored here
+    //   +0x78  dword  count     -- number of valid records (0..N)
+    //   +0x7C  dword  capacity  -- allocation cap, ignored here
     //
     // Each 16-byte record matches DyeRecordInject::ChannelState:
     //   +0..3   group_hash

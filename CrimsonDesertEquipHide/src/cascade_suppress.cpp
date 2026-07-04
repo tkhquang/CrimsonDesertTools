@@ -15,19 +15,20 @@ namespace EquipHide
     static constexpr uint16_t k_chestSlot = 4;
 
     // BatchEquip dispatch-entry layout used to read the per-entry slot id. Decoded live from the dispatch code so a
-    // future entry re-widening self-corrects, with the last-known 240/216 layout as a validated fallback. A hardcoded
-    // size silently mis-reads the slot id once the engine grows the entry (it widened 232/208 -> 240/216), which is why
-    // the layout is decoded live rather than fixed.
+    // future entry re-widening self-corrects, with the last-known 232/208 layout as a validated fallback. A hardcoded
+    // size silently mis-reads the slot id if the engine grows the entry again (it widened 232/208 -> 240/216 on a
+    // mid-2026 patch, then narrowed back to 232/208 on v1.13.00), which is why the layout is decoded live rather than
+    // fixed.
     //
     // Stride: the entry array is indexed by `imul rsi, rax, imm32`. The AOB anchors on `mov rbx,[rcx]; mov eax,[rcx+8];
-    // imul rsi,rax,imm32` and lands (+6) on the imul; its imm32 operand is the 240-byte entry stride. The pattern stops
+    // imul rsi,rax,imm32` and lands (+6) on the imul; its imm32 operand is the 232-byte entry stride. The pattern stops
     // before the imm32 so it stays value-agnostic (self-heals).
     static constexpr DMK::Scanner::AddrCandidate k_equipSwapStrideSite[] = {
         {"BatchEquipStride", "48 8B 19 8B 41 08 48 69 F0", DMK::Scanner::ResolveMode::Direct, 6, 0, true},
     };
     // Slot: the per-entry slot id is the word read by `movzx eax, word ptr [rbx+disp32]` immediately before `cmp word
     // ptr [rdx+disp32], ax`. The AOB wildcards the displacement (so a shifted slot still matches) and anchors on the
-    // trailing cmp opcode; it lands (+0) on the movzx, whose [rbx+disp32] displacement is the +216 slot.
+    // trailing cmp opcode; it lands (+0) on the movzx, whose [rbx+disp32] displacement is the +208 slot.
     static constexpr DMK::Scanner::AddrCandidate k_equipSwapSlotSite[] = {
         {"BatchEquipSlot", "0F B7 83 ?? ?? ?? ?? 66 39 82", DMK::Scanner::ResolveMode::Direct, 0, 0, true},
     };
@@ -74,14 +75,14 @@ namespace EquipHide
     [[nodiscard]] static std::size_t equip_swap_entry_stride() noexcept
     {
         static const std::size_t value = decode_layout_constant(
-            k_equipSwapStrideSite, DMK::Scanner::OperandKind::Immediate, 2, 216, 256, 240, "stride");
+            k_equipSwapStrideSite, DMK::Scanner::OperandKind::Immediate, 2, 216, 256, 232, "stride");
         return value;
     }
 
     [[nodiscard]] static std::size_t equip_swap_slot_offset() noexcept
     {
         static const std::size_t value = decode_layout_constant(
-            k_equipSwapSlotSite, DMK::Scanner::OperandKind::MemoryDisplacement, 1, 192, 224, 216, "slot");
+            k_equipSwapSlotSite, DMK::Scanner::OperandKind::MemoryDisplacement, 1, 192, 224, 208, "slot");
         return value;
     }
 

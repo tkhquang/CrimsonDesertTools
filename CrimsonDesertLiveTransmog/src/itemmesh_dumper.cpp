@@ -238,6 +238,29 @@ namespace Transmog
             return added;
         }
 
+        // Collect every LIVE partprefab wrapper name across all slot catalogs (lowercased). Used to detect the helm
+        // `_dd` runtime-suffix case: the swap/carrier path matches wrappers by EXACT name, and the engine instantiates
+        // the default helm variant's wrapper as `<mesh>_dd` while the bare `<mesh>` exists only as a data/string entry
+        // with no live wrapper. Linking items to the `_dd` name keeps this dump aligned with what carrier_defaults and
+        // the swap resolver can actually match (cf. carrier_defaults.hpp Oongka-helm note + prefab_wrapper_swap.cpp
+        // k_helmSlotId "helm is the only pair with a suffix").
+        std::size_t collect_live_wrapper_names(std::set<std::string> &out)
+        {
+            if (!PrefabWrapperSwap::is_catalog_populated())
+                return 0;
+            std::size_t added = 0;
+            for (std::size_t s = 0; s < static_cast<std::size_t>(Transmog::TransmogSlot::Count); ++s)
+            {
+                const auto &cat = PrefabWrapperSwap::slot_catalog(static_cast<Transmog::TransmogSlot>(s));
+                for (const auto &e : cat)
+                {
+                    if (!e.name.empty() && out.insert(to_lower(e.name)).second)
+                        ++added;
+                }
+            }
+            return added;
+        }
+
         // Allow-list of asset-name prefixes for the stringinfo enrich pass. Each accepted family resolves to a real
         // `.prefab` file on disk; UI-only families (`itemicon_*`, `cd_questimage_*`, `cd_knowledgeimage_*`) are
         // rejected first so the pool never contains texture-bundle entries that lack an underlying mesh.
@@ -731,6 +754,12 @@ namespace Transmog
             return;
         }
 
+        // Live partprefab wrapper names (from the swap catalogs). Consulted in PASS 2 to link items to the `_dd`
+        // helm-variant wrapper the swap/carrier path actually matches, and in PASS 4 to drop the dead bare data-name.
+        std::set<std::string> liveWrapperSet;
+        const auto liveWrapperCount = collect_live_wrapper_names(liveWrapperSet);
+        logger.info("[itemprefab] live-wrapper set: {} names (for `_dd` helm-suffix linking)", liveWrapperCount);
+
         // PASS 2 -- walk iteminfo, collect item entries with their icon-derived prefab + base. The TSV is emitted in
         // pass 3 from the pool's perspective, so we just collect here.
         std::vector<ItemEntry> items;
@@ -809,12 +838,19 @@ namespace Transmog
             // so the rule chain is the only place the real cd_phw / cd_pom mesh appears; for an ordinary item the rule
             // mesh equals the icon prefab and this is a no-op.
             std::string bodyMesh = resolve_rule_body_mesh(desc, stringArr, stringCount, strip_rig_prefix(iconPrefab));
+            std::string resolvedPrefab = bodyMesh.empty() ? std::string(iconPrefab) : std::move(bodyMesh);
+            // Prefer the LIVE partprefab wrapper name. For helm variants the engine instantiates `<mesh>_dd`; the bare
+            // `<mesh>` has no live wrapper, so the icon/rule-derived name never matches the swap/carrier path. Rewrite
+            // to `_dd` only when the bare form is NOT itself a live wrapper but its `_dd` twin IS -- so ordinary items
+            // (whose bare name is the live wrapper) are untouched. See the carrier_defaults.hpp Oongka-helm note.
+            if (liveWrapperSet.count(resolvedPrefab) == 0 && liveWrapperSet.count(resolvedPrefab + "_dd") != 0)
+                resolvedPrefab += "_dd";
             ItemEntry e;
             e.runtimeIdx = id;
             e.internalName = std::move(internalName);
             e.iconSlot = slot;
             e.fullIcon = full;
-            e.iconPrefab = bodyMesh.empty() ? std::string(iconPrefab) : std::move(bodyMesh);
+            e.iconPrefab = std::move(resolvedPrefab);
             e.base = extract_base_prefix(e.iconPrefab);
             items.push_back(std::move(e));
         }
@@ -857,6 +893,25 @@ namespace Transmog
         for (const auto &name : poolSet)
             cleanPool.insert(tsv_sanitize(name));
         std::vector<std::string> pool(cleanPool.begin(), cleanPool.end());
+
+        // Drop dead bare data-name prefabs superseded by a live `_dd` wrapper (helm variants). The bare
+        // `..._index01` is a string/data entry with no live partprefab wrapper -- the swap path can never match it, and
+        // its items are now linked to the `_dd` row (PASS 2) -- so emitting it as a standalone prefab row is
+        // misleading. Guard is narrow: only names whose `_dd` twin is a live wrapper AND that are not themselves a live
+        // wrapper are removed.
+        {
+            const auto before = pool.size();
+            pool.erase(std::remove_if(pool.begin(), pool.end(),
+                                      [&](const std::string &n)
+                                      {
+                                          return liveWrapperSet.count(n) == 0 &&
+                                                 liveWrapperSet.count(n + "_dd") != 0;
+                                      }),
+                       pool.end());
+            if (pool.size() != before)
+                logger.info("[itemprefab] dropped {} dead bare prefab name(s) superseded by `_dd` live wrappers",
+                            before - pool.size());
+        }
 
         // PASS 3 -- index for prefab-centric emission.
         // exact_map : pool-prefab -> item index whose iconPrefab equals it.

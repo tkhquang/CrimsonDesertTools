@@ -80,14 +80,17 @@ namespace Transmog::RealPartTearDown
         //   +0x10 DWORD live entry count
         //   +0x14 DWORD capacity
         //
-        // entry layout shifted between v1.04 and v1.05:
+        // entry stride and slot-tag offset move together by 8 across versions:
         //   v1.04.00: stride 0xC8, slot tag @ +0xC0
         //   v1.05.00: stride 0xD0, slot tag @ +0xC8 (entry grew 8 bytes)
+        //   v1.13.00: stride 0xC8, slot tag @ +0xC0 (reverted to the v1.04 layout). Confirmed against the engine's
+        //             own BatchEquip walk (sub_1407C8560), which reads the slot tag at auth-entry +0xC0 with a 0xC8
+        //             stride, and a live dump: slot 0x04->chest, 0x03->helm, 0x12->mask, every entry gate=1.
         //
-        // entry fields (offsets within an entry, v1.05):
+        // entry fields (offsets within an entry, v1.13):
         //   +0x08 WORD  primary item word (0xFFFF or 0 == empty)
         //   +0x10 QWORD gate (must be non-zero for a live entry)
-        //   +0xC8 WORD  slot tag (search key; helm=0x0003 .. cloak=0x0010)
+        //   +0xC0 WORD  slot tag (search key; helm=0x0003 .. cloak=0x0010)
         //
         // The alt item word at +0x88 used by older versions is no longer relied on; the primary path at +0x08 is
         // sufficient. Slot-tag values themselves are unchanged across versions
@@ -97,9 +100,9 @@ namespace Transmog::RealPartTearDown
         constexpr std::uintptr_t k_containerArrayBaseOffset = 0x08;
         constexpr std::uintptr_t k_containerCountOffset = 0x10;
 
-        constexpr std::uintptr_t k_entryStride = 0xD0;
+        constexpr std::uintptr_t k_entryStride = 0xC8;
         constexpr std::uintptr_t k_entryPrimaryWordOffset = 0x08;
-        constexpr std::uintptr_t k_entrySlotTagOffset = 0xC8;
+        constexpr std::uintptr_t k_entrySlotTagOffset = 0xC0;
         constexpr std::uintptr_t k_entryGateOffset = 0x10;
 
         constexpr std::uint32_t k_maxPlausibleEntries = 0x1000;
@@ -548,7 +551,7 @@ namespace Transmog::RealPartTearDown
             }
 
             // Safe scene-graph tear-down: routes through sub_1425EBAE0 and does NOT mutate the authoritative entry
-            // array we just walked, which is what makes it safe to call mid-iteration.
+            // array, which keeps it safe to call from the apply dispatcher.
             safeFn(static_cast<std::int64_t>(a1), hash, static_cast<std::int16_t>(gameSlotTag));
             logger.trace("[dispatch] tear_down slot={:#06x} entryFound=true "
                          "primary={:#06x} hash={:#010x} result=true",

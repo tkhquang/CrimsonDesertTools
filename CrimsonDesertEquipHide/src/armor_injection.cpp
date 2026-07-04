@@ -48,6 +48,37 @@ namespace EquipHide
                                                 __int64 entry_data, int extra, uint8_t *out_existed,
                                                 __int64 *out_hash_ptr, __int64 *out_data_ptr);
 
+    // Reject a mapBase that passed the plausible-pointer gate but does not look like a real part-visibility hashtable.
+    // A stale/reallocated vis-ctrl descriptor (e.g. a companion despawned between the resolve pass and this write) can
+    // yield a garbage map -- an oversized count, a bucket pointer that lands in the image .rdata instead of the heap --
+    // and inserting into it faults inside the game's MapInsert (SEH would catch it, but noisily, every frame). The game
+    // reads [mapBase+0] as the bucket modulus, [mapBase+4] as capacity, [mapBase+0x10] as the bucket array (see
+    // MapLookup); part-vis maps are tiny per-character tables. Introduced with the v1.13.00 vis-ctrl chain drift.
+    static bool part_vis_map_looks_valid(std::uintptr_t mapBase) noexcept
+    {
+        // Mirror exactly the fields the game's MapInsert dereferences (verified from its disassembly): bucket modulus
+        // [+0], live entry count [+4], capacity [+8], bucket array [+0x10], entry-pointer array [+0x18]. MapInsert
+        // *writes* through [+0x18][entryCount], so a bad entry-pointer array (or a garbage capacity that skips the grow
+        // path) faults inside the game. A stale/reallocated descriptor -- or a wrong map offset after a struct
+        // re-layout -- fails one of these. Part-vis maps are tiny per-character hashtables.
+        const auto count = DMKMemory::seh_read<std::uint32_t>(mapBase);
+        const auto entryCount = DMKMemory::seh_read<std::uint32_t>(mapBase + 4);
+        const auto cap = DMKMemory::seh_read<std::uint32_t>(mapBase + 8);
+        const auto buckets = DMKMemory::seh_read<std::uintptr_t>(mapBase + 0x10);
+        const auto entryPtrs = DMKMemory::seh_read<std::uintptr_t>(mapBase + 0x18);
+        if (!count || !entryCount || !cap || !buckets || !entryPtrs)
+            return false;
+        if (*count == 0 || *count > 0x400)
+            return false;
+        if (*cap == 0 || *cap > 0x10000 || *entryCount > *cap)
+            return false;
+        if (!DMKMemory::plausible_userspace_ptr(*buckets) || !DMKMemory::plausible_userspace_ptr(*entryPtrs))
+            return false;
+        // Both arrays MapInsert will index/write must be readable.
+        return DMKMemory::seh_read<std::uint32_t>(*buckets).has_value() &&
+               DMKMemory::seh_read<std::uintptr_t>(*entryPtrs).has_value();
+    }
+
     static uint32_t compute_bucket_key(uint32_t partHash) noexcept
     {
         __try
@@ -278,33 +309,45 @@ namespace EquipHide
             /* Per-player SEH so one bad pointer does not skip the rest. */
             __try
             {
-                // Read the descriptor node value at vc->+0x58->+0x218 under one fault guard. seh_read_chain
-                // dereferences the terminal +0x218 link (seh_resolve_chain would stop at its address), so mapBase keeps
-                // its original meaning: *(*(vc+0x58)+0x218) + 0x20.
-                auto descNode = DMKMemory::seh_read_chain<std::uintptr_t>(vc, {0x58, 0x218});
-                if (!descNode)
+                // Resolve the part-info descriptor and its part-visibility map. Two v1.13.00 drifts, both live-verified
+                // against two protagonists: (1) the vis-ctrl -> ClientCharacterControlActorComponent (CCC) link moved
+                // +0x30 (0x58 -> 0x88, RTTI-confirmed); (2) the descriptor's part-vis map moved descriptor+0x20 ->
+                // descriptor+0x28 (the game's "PartInOutSocket" parser, sub_141FAA040 equiv, now emits
+                // `lea rcx,[r14+0x28]` at its MapInsert call site vs `a1+0x20` on v1.05). The CCC -> descriptor link is
+                // UNCHANGED at CCC+0x218. So: desc = *(*(vc+0x88)+0x218); mapBase = desc + 0x28. seh_read_chain derefs
+                // the terminal +0x218 link, so `*desc` (the optional unwrap) IS the descriptor pointer.
+                auto desc = DMKMemory::seh_read_chain<std::uintptr_t>(vc, {0x88, 0x218});
+                if (!desc)
                 {
-                    logger.trace("ArmorInject [{}]: vc=0x{:X} descNode=NULL "
-                                 "(+0x58 -> +0x218)",
+                    logger.trace("ArmorInject [{}]: vc=0x{:X} descriptor=NULL "
+                                 "(+0x88 -> +0x218)",
                                  i, vc);
                     continue;
                 }
-                auto mapBase = *descNode + 0x20;
+                auto mapBase = *desc + 0x28;
 
-                // Reject a non-faulting garbage mapBase from a drifted +0x58 / +0x218 chain (the SEH read only traps an
+                // Reject a non-faulting garbage mapBase from a drifted +0x88 / +0x218 chain (the SEH read only traps an
                 // actual fault, not a wrong-but-mapped pointer). Skip this vis-controller rather than inject into a
                 // wrong map.
                 if (!DMKMemory::plausible_userspace_ptr(mapBase))
                 {
                     logger.trace("ArmorInject [{}]: vc=0x{:X} implausible mapBase=0x{:X} "
-                                 "(+0x58 -> +0x218 -> +0x20)",
+                                 "(+0x88 -> +0x218 -> +0x28)",
                                  i, vc, mapBase);
                     continue;
                 }
 
-                logger.trace("ArmorInject [{}]: vc=0x{:X} descNode=0x{:X} "
+                if (!part_vis_map_looks_valid(mapBase))
+                {
+                    logger.trace("ArmorInject [{}]: vc=0x{:X} mapBase=0x{:X} not a valid part-vis map "
+                                 "(stale/reallocated descriptor) -- skipping",
+                                 i, vc, mapBase);
+                    continue;
+                }
+
+                logger.trace("ArmorInject [{}]: vc=0x{:X} descriptor=0x{:X} "
                              "mapBase=0x{:X} char_idx={}",
-                             i, vc, *descNode, mapBase, charIdx);
+                             i, vc, *desc, mapBase, charIdx);
 
                 int result = inject_armor_entries_for_map(mapBase, charIdx);
                 if (result >= 0)

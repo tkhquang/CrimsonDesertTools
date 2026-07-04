@@ -159,11 +159,20 @@ namespace EquipHide
      *   [RBP+5Fh]) R8B = exclusion-list flag [RBP+0x67] = a4 (transition type byte, saved from R9B at prologue)
      *   [RBP+0x4F] = a1 context pointer
      *
-     * Register layout at hook point (v1.08.00 and later):
-     *   The visibility byte is read directly as `movzx eax, byte [r12+disp8]; cmp al, 3`. The `44 24` SIB reads as
-     *   `[rsp]`, but the leading `41` REX.B prefix extends the base to R12, so this is a struct field load (R12 holds
-     *   the PartInOut decision struct), not a stack-slot spill. The `mov r8b, 1` that sets the exclusion-list flag
-     *   still precedes the read.
+     * Register layout at hook point (v1.08.00 .. v1.12.x):
+     *   The visibility byte was read directly as `movzx eax, byte [r12+disp8]; cmp al, 3` (the `44 24` SIB with a
+     *   leading `41` REX.B extends the base to R12 -- a struct-field load, not a stack spill), preceded by
+     *   `mov r8b, 1`.
+     *
+     * Register layout at hook point (v1.13.00):
+     *   The compiler reverted to the memory-indirect load through the stack local:
+     *   `mov r8b, 1 ; mov rax, [rbp+0x5F] ; movzx eax, byte [rax+0x20] ; cmp al, 3`. At the movzx hook:
+     *     RAX  = PartInOutSocket struct (materialised from [RBP+0x5F] the instruction before) -> ctx.rax
+     *     R12  = pointer to part-hash DWORD (exclusion-list walk `mov edx,[r12]`, dispatch arg `mov rdx,r12`)
+     *            -> ctx.r12
+     *     R8B  = exclusion-list flag -> ctx.r8
+     *     [RBP+0x4F] = a1 context pointer
+     *   (v1.12.x read the hash pointer from R10; v1.13.00 moved it to R12 -- see equip_hide.cpp on_vis_check_impl.)
      *
      * Cascade contract: 1-hit-only on the current target build. Re-adding a legacy tier requires per-version CE
      * verification of both match count AND the match-to-hook displacement against the target build, because a
@@ -171,20 +180,22 @@ namespace EquipHide
      * shifts.
      */
     inline constexpr AddrCandidate k_hookSiteCandidates[] = {
-        // PN1 -- v1.08.00. The PartInOutSocket arg-passing convention changed: the visibility byte is no longer fetched
-        // through `mov rax, [rbp+0x5F] ; movzx eax, byte [rax+0x1C]` (which anchored P0..P3). The byte is now read
-        // directly from the decision struct: `movzx eax, byte [r12+0x20] ; cmp al, 3`. The `44 24` SIB reads as
-        // `[rsp]`, but the leading `41` REX.B extends the base to R12, so the disp8 is a struct field offset, not a
-        // stack slot. The `mov r8b, 1` (set-exclusion-list flag) idiom that precedes the load is retained, so we anchor
-        // on the pair: `41 B0 01 41 0F B6 44 24 ?? 3C 03`. The struct disp8 is wildcarded so a future re-layout still
-        // matches. Hook lands on the movzx at match + 3 (skip the `41 B0 01`). 1 hit on v1.08.00, 0 on v1.04.00 /
-        // v1.05.00.
-        {"PartInOut_PN1_v108_StackArgVisRead", "41 B0 01 41 0F B6 44 24 ?? 3C 03", ResolveMode::Direct, 3, 0},
+        // PN3 -- v1.13.00. The v1.08 direct-from-register form (`movzx eax, byte [r12+0x20]`) is gone; the compiler
+        // reverted to the memory-indirect load through the stack local, the way P0..P3 read it on v1.03.01 (only the
+        // socket-struct field moved 0x1C -> 0x20): `mov r8b, 1 ; mov rax, [rbp+0x5F] ; movzx eax, byte [rax+0x20] ;
+        // cmp al, 3`. Anchor on the struct load + vis read + compare. Both disp8s are wildcarded (the [rbp+..] socket
+        // slot and the [rax+..] vis-byte offset are compiler-assigned and drift on a recompile); the `mov rax,[rbp]`
+        // shape, the movzx ModRM (eax <- byte[rax]), and the literal `cmp al, 3` decision compare are structural. This
+        // is a mid-body landmark well past the 5-byte prologue window, so a sibling mod's inline prologue hook cannot
+        // shadow it and the prologue-fallback path is intentionally never needed. Hook lands on the movzx.
+        //
+        // PN3a -- wider: pins the exclusion-loop join (`EB 03` short jmp over the `mov r8b, 1` that the found-in-list
+        // branch also targets). Extra structural context if a recompile shuffles the flag store. Hook at match + 9.
+        {"PartInOut_PN3a_v113_JoinStructLoadVisRead", "EB 03 41 B0 01 48 8B 45 ?? 0F B6 40 ?? 3C 03",
+         ResolveMode::Direct, 9, 0},
 
-        // PN2 -- v1.08.00 wider: prefixed with the `EB 03` short jmp that lands on the `mov r8b, 1` from the
-        // loop-not-found branch. Provides extra structural pinning if a future recompile shuffles the `mov r8b, 1` away
-        // from PN1. Hook still lands on the movzx, at match + 5. 1 hit on v1.08.00.
-        {"PartInOut_PN2_v108_LoopExitJoin", "EB 03 41 B0 01 41 0F B6 44 24 ?? 3C 03", ResolveMode::Direct, 5, 0},
+        // PN3b -- tight: struct load + vis read + compare only. Hook on the movzx at match + 4 (skip `48 8B 45 ??`).
+        {"PartInOut_PN3b_v113_StructLoadVisRead", "48 8B 45 ?? 0F B6 40 ?? 3C 03", ResolveMode::Direct, 4, 0},
     };
 
     /**

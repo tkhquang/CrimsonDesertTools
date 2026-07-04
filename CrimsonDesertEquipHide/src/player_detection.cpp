@@ -456,11 +456,13 @@ namespace EquipHide
         {
             /* Actor type byte: *(*(actor+0x88)+1). Value 1 = local player, 3-6 = party members. Same mechanism the
                headgear visibility system uses. */
-            // Resolve a1 -> +0x58 -> +0x08 -> +0x88 and read the type byte at
+            // Resolve a1 -> +0x88 -> +0x08 -> +0x88 and read the type byte at
             // +1, all under fault guards. seh_read_chain dereferences the terminal +0x88 link, so typePtr carries
             // *(actor+0x88); the byte lives at typePtr+1. This fallback runs when the global chain-walk AOB failed at
-            // init, so the downstream links are not proven live.
-            const auto typePtr = DMKMemory::seh_read_chain<std::uintptr_t>(a1, {0x58, 0x08, 0x88});
+            // init, so the downstream links are not proven live. v1.13.00 shifted the vis-ctrl -> CCC link +0x30
+            // (0x58 -> 0x88, RTTI-confirmed pa::ClientCharacterControlActorComponent); +0x08 (CCC -> actor) and +0x88
+            // (actor -> type-byte holder) are unchanged.
+            const auto typePtr = DMKMemory::seh_read_chain<std::uintptr_t>(a1, {0x88, 0x08, 0x88});
             if (typePtr)
             {
                 const auto typeByteOpt = DMKMemory::seh_read<std::uint8_t>(*typePtr + 1);

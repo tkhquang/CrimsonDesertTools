@@ -128,18 +128,25 @@ namespace CDCore::Anchors
     //       __int64 a5..a9)       // stack params
     //
     // P1 is tightened past the bare prologue: an aob_scan of the 14-byte prologue alone also hits a Windows module
-    // (kernel DLL) function with a different body, so the P2 discriminator (`4D 8B E8 44 8B 49 ??`) is appended to make
-    // the pattern uniquely select the game.
+    // (kernel DLL) function with a different body, so the P2 discriminator (`4D 8B E8 44 8B 89 ?? ?? ?? ??`) is
+    // appended to make the pattern uniquely select the game.
+    //
+    // v1.13.00: the show-list array/count fields shifted +0x30 within the descriptor (array a1+0x48 -> a1+0x78, count
+    // a1+0x50 -> a1+0x80). The count load `mov r9d,[rcx+disp]` consequently grew from a disp8 form (`44 8B 49 50`) to a
+    // disp32 form (`44 8B 89 80 00 00 00`), which broke the old `44 8B 49 ??` tail. The hook (a partHash filter) does
+    // not read those fields, so only the AOB needed updating.
     // -----------------------------------------------------------------------
     inline constexpr AddrCandidate k_partAddShowCandidates[] = {
         // P1 -- full prologue through the r13/r9d setup, including the post-alloca moves because the 14-byte prologue
-        // alone also matched a Windows DLL function with a different body.
-        {"PartAddShow_P1_FullPrologue", "40 55 56 57 41 55 48 83 EC ?? 48 8B 79 ?? 4D 8B E8 44 8B 49 ??",
+        // alone also matched a Windows DLL function with a different body. The r9d count load is the disp32 form on
+        // v1.13.00 (count field at a1+0x80).
+        {"PartAddShow_P1_FullPrologue", "40 55 56 57 41 55 48 83 EC ?? 48 8B 79 ?? 4D 8B E8 44 8B 89 ?? ?? ?? ??",
          ResolveMode::Direct, 0, 0},
 
-        // P2 -- post-prologue anchor (sub rsp / mov rdi,[rcx+X] / mov r13,r8 / mov r9d,[rcx+X]). Offset -6 backs up to
-        // function start.
-        {"PartAddShow_P2_PostPrologue", "48 83 EC ?? 48 8B 79 ?? 4D 8B E8 44 8B 49 ??", ResolveMode::Direct, -6, 0},
+        // P2 -- post-prologue anchor (sub rsp / mov rdi,[rcx+X] / mov r13,r8 / mov r9d,[rcx+disp32]). Offset -6
+        // backs up to function start.
+        {"PartAddShow_P2_PostPrologue", "48 83 EC ?? 48 8B 79 ?? 4D 8B E8 44 8B 89 ?? ?? ?? ??", ResolveMode::Direct,
+         -6, 0},
     };
 
     // -----------------------------------------------------------------------
