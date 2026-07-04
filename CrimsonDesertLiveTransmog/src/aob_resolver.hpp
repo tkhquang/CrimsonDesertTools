@@ -103,48 +103,55 @@ namespace Transmog
      *        init. See item_name_table.cpp for the full 4-step chain.
      */
     inline constexpr AddrCandidate k_subTranslatorCandidates[] = {
-        // P0 -- v1.05.00 full prologue. The second lea encodes rsp-relative (`48 8D 4C 24 ??`, 4 bytes) instead of the
-        // v1.04 rbp-relative form (`48 8D 4D ??`, 3 bytes), shifting the body by 1 byte. Body shape (mov r8d=1, lea
-        // rdx=[rbp+X], lea rcx=[rsp+Y]) is otherwise unchanged. 1 unique hit on v1.05.00 at 0x140799CA9. dispOffset 0
-        // returns the prologue start; this candidate is consumed by ItemNameTable::build() as a chain anchor (no hook
-        // installed here).
-        {"SubTranslator_P0_v105_FullPrologue",
+        // P0 -- v1.13.00 full prologue. The v1.05 rsp-relative second lea (`48 8D 4C 24 ??`, 5 bytes) reverted to the
+        // rbp-relative form (`48 8D 4D ??`, 4 bytes) -- `lea rcx,[rbp-Y]` -- which broke every v1.05 candidate. Body
+        // shape (mov rdi,rcx; mov r8d=1; lea rdx=[rbp+X]; lea rcx=[rbp-Y]) is otherwise unchanged. 1 unique hit on
+        // v1.13.00 at 0x1407DD3F0. dispOffset 0 returns the prologue start; consumed by ItemNameTable::build() as a
+        // chain anchor (no hook installed here).
+        {"SubTranslator_P0_v113_FullPrologue",
          "48 89 5C 24 08 66 89 54 24 10 55 56 57 "
          "48 8D 6C 24 ?? 48 81 EC ?? ?? ?? ?? "
-         "48 8B F9 41 B8 01 00 00 00 48 8D 55 ?? 48 8D 4C 24 ??",
+         "48 8B F9 41 B8 01 00 00 00 48 8D 55 ?? 48 8D 4D ??",
          ResolveMode::Direct, 0, 0},
 
-        // P0b -- v1.05.00 post-alloca anchor. Same disp8 wildcarding as P0 but no head sentinels. Walk-back matches
-        // v1.04 P2 (-0x19): the encoding shift sits inside the pattern, not before the anchor.
-        {"SubTranslator_P0b_v105_PostAlloca", "48 8B F9 41 B8 01 00 00 00 48 8D 55 ?? 48 8D 4C 24 ?? E8",
+        // P0b -- v1.13.00 post-alloca anchor. Same disp8 wildcarding as P0 but no head sentinels; the anchor
+        // sits before the lea-encoding change so the walk-back to the function start stays -0x19.
+        {"SubTranslator_P0b_v113_PostAlloca", "48 8B F9 41 B8 01 00 00 00 48 8D 55 ?? 48 8D 4D ?? E8",
          ResolveMode::Direct, -0x19, 0},
 
-        // P0c -- v1.05.00 deeper anchor: mov-r8d-1 + lea pair followed by the unique 90 48 8B D0 48 8B CF E8 post-call
-        // tail. 1 unique hit on v1.05.00 at 0x140799CAC; function starts at 0x140799C90, so walk-back -0x1C (matches
-        // v1.04 P3 semantics).
-        {"SubTranslator_P0c_v105_ScratchBufPrep",
-         "41 B8 01 00 00 00 48 8D 55 ?? 48 8D 4C 24 ?? E8 ?? ?? ?? ?? "
+        // P0c -- v1.13.00 deeper anchor: mov-r8d-1 + lea pair followed by the unique 90 48 8B D0 48 8B CF E8 post-call
+        // tail. Anchors at `41 B8 01` (function start + 0x1C), so walk-back -0x1C.
+        {"SubTranslator_P0c_v113_ScratchBufPrep",
+         "41 B8 01 00 00 00 48 8D 55 ?? 48 8D 4D ?? E8 ?? ?? ?? ?? "
          "90 48 8B D0 48 8B CF E8",
          ResolveMode::Direct, -0x1C, 0},
     };
 
     /**
-     * @brief InitSwapEntry (sub_141D451B0) -- initializes a 0x80-byte swap entry structure to default sentinel values
-     *        (-1 / 0). Called by the mod immediately before each SlotPopulator invocation.
+     * @brief InitSwapEntry -- initializes the swap-entry structure to default sentinel values (-1 / 0). Called by the
+     *        mod immediately before each SlotPopulator invocation. On v1.13.00 the function is at 0x141F86480
+     *        (found via the SlotPopulator call sites: `call InitSwapEntry` immediately precedes `call SlotPopulator`).
      *
      * Signature (x64 __fastcall):
-     *   __int64 sub_141D451B0(__int64 dest)
+     *   __int64 InitSwapEntry(__int64 dest)
      *
      * Resolved via AOB rather than a hardcoded RVA so it survives code-drift in earlier .text sections across game
-     * patches.
+     * patches. v1.13.00 folded `mov rax,-1 ; mov [rcx],rax` (7+3 bytes) into a single `mov qword [rcx],-1`
+     * (`48 C7 01 FF FF FF FF`) and reshuffled the sentinel-store offsets, which broke every prior candidate.
      */
     inline constexpr AddrCandidate k_initSwapEntryCandidates[] = {
-        // P1 -- true prologue (mov [rsp+8],rcx / push rbx / sub rsp,20h / mov rbx,rcx / mov rax,-1 / mov [rcx],rax /
-        // mov ecx,0FFFFh).
-        {"InitSwapEntry_P1_FullPrologue",
+        // P1 -- v1.13.00 true prologue: mov [rsp+8],rcx / push rbx / sub rsp,20h / mov rbx,rcx / mov qword [rcx],-1 /
+        // mov ecx,0FFFFh / mov [rbx+8],cx. 1 unique hit at 0x141F86480.
+        {"InitSwapEntry_P1_v113_FullPrologue",
          "48 89 4C 24 08 53 48 83 EC 20 48 8B D9 "
-         "48 C7 C0 FF FF FF FF 48 89 01 B9 FF FF 00 00",
+         "48 C7 01 FF FF FF FF B9 FF FF 00 00 66 89 4B 08",
          ResolveMode::Direct, 0, 0},
+
+        // P2 -- v1.13.00 init-body anchor (no prologue head): mov qword [rcx],-1 / mov ecx,0FFFFh / mov [rbx+8],cx.
+        // Anchors at function start + 0xD, so walk-back -0xD. Survives a prologue reshuffle that leaves the init
+        // intact.
+        {"InitSwapEntry_P2_v113_SentinelBody", "48 C7 01 FF FF FF FF B9 FF FF 00 00 66 89 4B 08", ResolveMode::Direct,
+         -0xD, 0},
     };
 
     /**
@@ -515,44 +522,50 @@ namespace Transmog
     };
 
     /**
-     * @brief Patch site: CondPrefab evaluator secondary hash check (sub_141D5F470 at +0xC8, 0x141D5F538 on v1.02.00).
+     * @brief Patch site: CondPrefab evaluator secondary char-class hash check.
      *
-     * The jz that jumps on character-class hash match. NPC items lack
-     * Kliff's class in their secondary hash array, so this jz never fires, evaluator returns empty, no mesh.
+     * The `jz` that fires when the item's char-class hash matches one of the player's allowed classes. NPC/monster
+     * items lack the player's class in that array, so the jz never fires -> the evaluator emits no resource names ->
+     * no mesh. Toggling this one byte 0x74 (jz rel8) -> 0xEB (jmp rel8) forces the match, so NPC/variant items render
+     * on the carrier's body.
      *
-     * Toggling this single byte from 0x74 (jz rel8) to 0xEB (jmp rel8) forces the match, making the evaluator emit
-     * resource names for NPC items.
+     * v1.13.00 RELOCATION (the final carrier-invisible bug, and a subtle mis-fix). The evaluator moved -- it was
+     * sub_141D5F470+0xC8 (0x141D5F538 on v1.02) -- and its inner loop gained a `90` (nop) between the movzx and the
+     * cmp. A prior 1.13 "fix" changed the allowed-array load register `4C 8B 43` (rbx) -> `4D 8B 45` (r13), which made
+     * the AOB re-lock onto a STRUCTURALLY IDENTICAL loop in an UNRELATED function (~0x1423AAxxx) that is never on the
+     * carrier-apply path -- so the bypass silently toggled dead code (proven live: 0 breakpoint hits at 0x1423AAAE8
+     * during a carrier apply, while this site fires). The real gate KEEPS `4C 8B 43` (rbx) and reads the item's
+     * char-class at `word[rax+0xAC]` (was +0x8A pre-1.13). It resolves to 0x141F90723; the jz is at match+0x12 =
+     * 0x141F90735. Verified live: forcing this jz renders the Preset-4 NPC/boss armor.
      *
-     * Patterns wildcard the fragile bytes (rel8 jump distances, struct offsets) and append the trailing EB (jmp opcode
-     * of the OUTER loop exit, NOT the patch target) to disambiguate from a structurally identical loop at +0x70 in the
-     * same function.
+     * The `90` nop AND the `4C 8B 43` (rbx) register disambiguate from the ~0x1423AAxxx look-alike (which has r13 and
+     * no nop) and from the +0x70 sibling loop in the same function; the trailing `EB` (the OUTER loop's no-match jmp,
+     * NOT the patch target) is kept as an extra anchor. Scan is a unique 1-hit on v1.13.00.
      *
-     * Branch-encoding constraint (aob-signatures.md section 8):
-     *       Unlike every other AOB in this project, the 74 rel8 opcode in these patterns is intentionally literal and
-     *       must NOT be wildcarded -- it is the exact byte the mod flips at runtime. A future compiler that emits this
-     *       jz in its 6-byte 0F 84 rel32 form would require a full re-RE of the patch strategy (not a pattern tweak);
-     *       every candidate below would stop matching and the feature would fail-soft via the scanner's null return.
-     *       Anchors on the outer 72 ?? EB loop structure share the same constraint for the same reason.
+     * Branch-encoding constraint (aob-signatures.md section 8): the `74` rel8 opcode is intentionally literal and must
+     * NOT be wildcarded -- it is the exact byte the mod flips at runtime. A future compiler that emits this jz in its
+     * 6-byte `0F 84` rel32 form would require re-RE (not a pattern tweak); every candidate would stop matching and the
+     * feature fails-soft via the scanner's null return.
      */
     inline constexpr AddrCandidate k_charClassBypassCandidates[] = {
-        // P1 -- mov r8,[rbx+??] + movzx r9d,[rax+??] + inner loop + jmp. Patch byte at match + 0x11.
+        // P1 -- mov r8,[rbx+??] (allowed-class array) + movzx r9d,word[rax+??] (item class @+0xAC) + `90` nop + inner
+        // cmp/jz/loop + jmp. Patch byte (the jz) at match + 0x12. Unique 1-hit at 0x141F90723 on v1.13.00.
         {"CharClassBypass_P1_MovzxCmpLoop",
-         "4C 8B 43 ?? 44 0F B7 88 ?? ?? 00 00 "
+         "4C 8B 43 ?? 44 0F B7 88 ?? ?? 00 00 90 "
          "66 45 3B 0C 48 74 ?? FF C1 3B CA 72 ?? EB",
-         ResolveMode::Direct, 0x11, 0},
+         ResolveMode::Direct, 0x12, 0},
 
-        // P2 -- test edx,edx + jz + mov + movzx + cmp+jz + loop + jmp. Patch byte at match + 0x15.
+        // P2 -- test edx,edx + jz + [P1 loop]. Deeper anchor. Patch byte at match + 0x16.
         {"CharClassBypass_P2_TestMovzxCmp",
-         "85 D2 74 ?? 4C 8B 43 ?? 44 0F B7 88 ?? ?? 00 00 "
+         "85 D2 74 ?? 4C 8B 43 ?? 44 0F B7 88 ?? ?? 00 00 90 "
          "66 45 3B 0C 48 74 ?? FF C1 3B CA 72 ?? EB",
-         ResolveMode::Direct, 0x15, 0},
+         ResolveMode::Direct, 0x16, 0},
 
-        // P3 -- xor ecx,ecx + test + jz + full inner loop + jmp. Deepest anchor, most context. Patch byte at match +
-        // 0x17.
+        // P3 -- xor ecx,ecx + test + jz + [P1 loop]. Deepest anchor. Patch byte at match + 0x18.
         {"CharClassBypass_P3_XorTestCmpLoop",
-         "33 C9 85 D2 74 ?? 4C 8B 43 ?? 44 0F B7 88 ?? ?? 00 00 "
+         "33 C9 85 D2 74 ?? 4C 8B 43 ?? 44 0F B7 88 ?? ?? 00 00 90 "
          "66 45 3B 0C 48 74 ?? FF C1 3B CA 72 ?? EB",
-         ResolveMode::Direct, 0x17, 0},
+         ResolveMode::Direct, 0x18, 0},
     };
 
     // -----------------------------------------------------------------------

@@ -110,9 +110,20 @@ namespace Transmog
         // Oongka (male orc). prefabName values derived from the save-editor companion repo's iteminfo dump. Orc-tribe
         // assets share the cd_phm_* family (orc model is male-tier). Bilibili earring/ring use _index## minor variants;
         // LT's body-mesh hook registers all variants of the base prefab.
+        //
+        // NOTE (helm `_dd` suffix): the prefab-swap resolver (heap_walk_partprefab_for_names) matches src by EXACT
+        // strcmp against LIVE partprefab wrapper names. The helm slot is special (see prefab_wrapper_swap.cpp
+        // k_helmSlotId comment) -- the engine instantiates the default helm variant's runtime wrapper with a `_dd`
+        // suffix. So for hel_0122's index01 the ONLY live wrapper is `cd_phm_00_hel_0122_01_index01_dd`; the bare
+        // `..._index01` exists only in string/data tables, never as a wrapper. Verified live (CE): bare name = 0 valid
+        // wrappers, `_dd` name = valid wrapper at the 0x41C1E4* pool (same region as the resolved chest/cloak/etc.).
+        // The bare form was authored from the itemprefab data dump and silently never resolved -> helm mesh-swap was a
+        // no-op. This only surfaced once the carrier render path (char-class bypass) was fixed on 1.13. Other slots use
+        // bare names and resolve fine (the `_dd` quirk is helm-specific). Re-verify the exact live wrapper name if a
+        // future patch renames it.
         // ============================================================
         {
-            { "Lardein_Fabric_Helm",                         "cd_phm_00_hel_0122_01_index01"     }, // Helm
+            { "Lardein_Fabric_Helm",                         "cd_phm_00_hel_0122_01_index01_dd"  }, // Helm (see _dd note above)
             { "Oongka_Basic_Leather_Armor",                  "cd_phm_00_ub_00_0056"              }, // Chest
             { "Oongka_Basic_Leather_Cloak",                  "cd_phm_00_cloak_00_0056_t"         }, // Cloak
             { "Oongka_Basic_Leather_Gloves",                 "cd_phm_00_hand_00_0056"            }, // Gloves

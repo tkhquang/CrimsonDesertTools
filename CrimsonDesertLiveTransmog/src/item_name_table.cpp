@@ -10,7 +10,6 @@
 #include <atomic>
 #include <cctype>
 #include <chrono>
-#include <cstring>
 #include <fstream>
 #include <string_view>
 #include <mutex>
@@ -41,13 +40,21 @@ namespace Transmog
     //               field is "sentinel for direct-wear items, per-item
     //               heap pointer for carrier-required items"). Anchor
     //               sentinel observed at 0x145BC3638.
+    //   v1.13.00 -- +0x3B0 (this region of the descriptor SHRANK 0x20 --
+    //               old +0x3D0 now reads a constant 0 on every item). The
+    //               variant-meta pointer sits 0x20 lower. Re-derived by
+    //               probing every descriptor qword in 0x380..0x480 and
+    //               correlating "value != mode" against the v1.12.00 dump's
+    //               Variant column BY NAME: +0x3B0 gave fp=0, acc=98.1%
+    //               (sentinel 0x145E49F98, 60% of items). No other offset
+    //               came close.
     //
     // The sentinel value itself is also unstable (any .data reshuffle moves it). Rather than hardcoding either the
     // offset or the sentinel RVA, the builder resolves the sentinel statistically at catalog-build time: scan every
     // valid descriptor's qword at this offset, the value that appears in the clear majority of items (~3-5k of ~6k) IS
     // the sentinel. Self-heals across future game updates as long as the catalog stays statistically dominated by base
     // items.
-    static constexpr std::ptrdiff_t k_descVariantMetaOffset = 0x3D0;
+    static constexpr std::ptrdiff_t k_descVariantMetaOffset = 0x3B0;
 
     // --- iteminfo (qword_145CEF370) container layout, v1.02.00 ---
     // Source: IDA sub_1402D75D0 + static analysis. These are runtime data offsets (not code) so they cannot be
@@ -150,11 +157,11 @@ namespace Transmog
     // Body bits.
     //   Male / Female  -- a male/female token appeared in ANY rule (OR across
     //                     all rules). Drives is_player_compatible (Kliff-
-    //                     centric "has a male rule" => safe to bind) and the
-    //                     multi-body-rules heuristic. DO NOT narrow these:
-    //                     transmog_apply.cpp's carrier-path fallback reads
-    //                     is_player_compatible, and the regression fix was
-    //                     validated against this OR semantics.
+    //                     centric "has a male rule" => safe to bind). DO NOT
+    //                     narrow these: transmog_apply.cpp's carrier-path
+    //                     fallback reads is_player_compatible, and the
+    //                     regression fix was validated against this OR
+    //                     semantics.
     //   CleanMale /     -- gender seen in a "clean" rule = a gender rule with
     //   CleanFemale        NO NPC-identity token (>= k_nonHumanoidTokenThreshold,
     //                      e.g. an NPC armor's 0x1E8C/0x1F46). A clean rule
@@ -195,17 +202,12 @@ namespace Transmog
     static constexpr std::uint8_t k_bodyBitFemale = 0x02;
     static constexpr std::uint8_t k_bodyBitHasTokens = 0x04;
     static constexpr std::uint8_t k_bodyBitNonHumanoid = 0x08;
-    // Set when the item has >= 2 rules that each contain a body token (male or female) -- separate male and female rule
-    // definitions, each gated on that rule's own identity tokens. Correlates with "needs the carrier mechanism to
-    // render on an off-native-class character"; an item with a single body-bearing rule direct-wears on every
-    // protagonist.
-    static constexpr std::uint8_t k_bodyBitMultiBodyRules = 0x10;
     // Set when a k_sharedBodyTokens entry (0x399) is seen. Used only as a classification fallback for items that carry
     // it WITHOUT any gendered human body token (NPC/demon-body carrier items) -- see sorted_entries.
     static constexpr std::uint8_t k_bodyBitSharedBody = 0x20;
     // Clean gender = gender seen in a rule that has NO NPC-identity/high token (>= k_nonHumanoidTokenThreshold). A
     // clean rule reflects a real player mesh; an NPC-gated rule is just an acceptance gate. BodyKind prefers clean
-    // gender (see sorted_entries); is_player_compatible / multi-body use the OR-ed Male/Female bits above. See the
+    // gender (see sorted_entries); is_player_compatible uses the OR-ed Male/Female bits above. See the
     // bit-doc block for rationale.
     static constexpr std::uint8_t k_bodyBitCleanMale = 0x40;
     static constexpr std::uint8_t k_bodyBitCleanFemale = 0x80;
@@ -222,7 +224,7 @@ namespace Transmog
     static constexpr std::uint32_t k_maxPlausibleClassCount = 32;
 
     // Walk an item's rule-classifier arrays once and return the packed body-kind bit mask documented with the
-    // k_bodyBit* constants above (Male / Female / HasTokens / NonHumanoid / MultiBodyRules / SharedBody / CleanMale /
+    // k_bodyBit* constants above (Male / Female / HasTokens / NonHumanoid / SharedBody / CleanMale /
     // CleanFemale). Items with no rules (or unreadable fields) return 0 (Generic) -- the picker treats Generic as
     // "accepted by every body", matching the engine's observed behaviour for rule-less cosmetics.
     static std::uint8_t item_body_bits(uintptr_t descPtr) noexcept
@@ -236,7 +238,6 @@ namespace Transmog
             return 0;
 
         std::uint8_t bits = 0;
-        std::uint32_t bodyBearingRuleCount = 0; // rules with any gender token
 
         for (std::uint32_t i = 0; i < ruleCount; ++i)
         {
@@ -282,8 +283,7 @@ namespace Transmog
                         break;
                     }
                 }
-                // Shared / NPC-body token. Tracked globally (not per-rule):
-                // it must not count toward the multi-body-rules heuristic and is only a fallback in sorted_entries when
+                // Shared / NPC-body token. Tracked globally (not per-rule) as a fallback in sorted_entries when
                 // no gendered human token classified the item.
                 for (const auto st : k_sharedBodyTokens)
                 {
@@ -294,14 +294,11 @@ namespace Transmog
                     }
                 }
             }
-            // OR-across-rules Male/Female (player-compat + multi-body legacy).
+            // OR-across-rules Male/Female (drives is_player_compatible).
             if (ruleHasMale)
                 bits |= k_bodyBitMale;
             if (ruleHasFemale)
                 bits |= k_bodyBitFemale;
-            // A gender-bearing rule contributes to the multi-body count.
-            if (ruleHasMale || ruleHasFemale)
-                ++bodyBearingRuleCount;
             // "Clean" gender = a gender rule with NO NPC-identity/high token. These reflect a real player mesh;
             // NPC-gated rules (Samuel, Heisellen, etc.) are excluded. BodyKind prefers clean gender so a male item with
             // an NPC-gated female rule stays Male, while a protagonist item with a clean female rule (Demian_Greyfur_*
@@ -314,11 +311,6 @@ namespace Transmog
                     bits |= k_bodyBitCleanFemale;
             }
         }
-
-        // Dual-body NPC item: male and female variants split across separate rules, each identity-gated. Render
-        // fidelity on an off-native character requires the carrier mechanism.
-        if (bodyBearingRuleCount >= 2)
-            bits |= k_bodyBitMultiBodyRules;
 
         return bits;
     }
@@ -489,17 +481,22 @@ namespace Transmog
             return TransmogSlot::Gloves;
         case 0x07:
             return TransmogSlot::Boots;
-        // Cloak typeCodes span multiple game versions. 0x45 and 0x46 are pre-v1.06.00 values kept for backwards
-        // compatibility; 0x47 is the v1.06.00+ value. The +1 shift in v1.06.00 also moved the older Bracelet code
-        // (0x47) into Cloak's range, so the accessory codes below cannot keep their pre-v1.06.00 values without
-        // colliding with Cloak.
-        case 0x45:
+        // The accessory typeCode range (Backpack..Mask) took a uniform +1 shift on v1.13.00 -- the game inserted a new
+        // type code at the bottom of the range and pushed everything after it up by one, exactly as v1.06.00 did once
+        // already. Verified live on 1.13 (build 1.0.0.1929): Cloak reads 0x48 (Mercenary_Leather_Cloak,
+        // Ashad_PlateArmor_Cloak), Backpack reads 0x45 (Fish_BackPack); the rest follow the same +1. Cross-checked by
+        // diffing the v1.12.00 vs v1.13.00 item dumps by name -- every accessory moved one slot up (Cloak->Bracelet,
+        // Backpack->Cloak, Bracelet->Glasses, Glasses->Mask, Mask->Other under the stale mapping). Armor (Helm..Boots
+        // 0x04..0x07) and Earring/Necklace/Ring/Lantern sit below the shifted range and are unchanged.
+        //
+        // Pre-v1.13 values are intentionally dropped rather than kept for back-compat: they collide with the new ones
+        // (old Cloak 0x45 == new Backpack 0x45, old Bracelet 0x48 == new Cloak 0x48, ...), and the auto-updating live
+        // game only ever presents the current build's codes. Re-derive from a fresh dump diff if a future patch shifts
+        // the range again.
         case 0x46:
         case 0x47:
+        case 0x48:
             return TransmogSlot::Cloak;
-        // Accessories. Backpack accepts both pre- and post-v1.06.00 codes because 0x43 and 0x44 do not collide with any
-        // other mapping. The remaining accessory cases only accept the v1.06.00 code; older values now route to Cloak
-        // above.
         case 0x08:
             return TransmogSlot::Earring1; // shared with Earring2
         case 0x09:
@@ -508,14 +505,14 @@ namespace Transmog
             return TransmogSlot::Ring1; // shared with Ring2
         case 0x37:
             return TransmogSlot::Lantern;
-        case 0x43:
         case 0x44:
+        case 0x45:
             return TransmogSlot::Backpack;
-        case 0x48:
-            return TransmogSlot::Bracelet;
         case 0x49:
-            return TransmogSlot::Glasses;
+            return TransmogSlot::Bracelet;
         case 0x4A:
+            return TransmogSlot::Glasses;
+        case 0x4B:
             return TransmogSlot::Mask;
         // 1H weapons -- all share MainHand (paired with OffHand)
         case 0x00: // 1H sword
@@ -937,17 +934,17 @@ namespace Transmog
         std::size_t variantCount = 0;
         for (auto &e : scratch)
         {
-            // Item "has variant" (picker shows carrier-color) if either:
-            //   - desc+k_descVariantMetaOffset is non-sentinel (traditional catalog-level variant-meta record), OR
-            //   - the item has >= 2 body-bearing classifier rules, i.e. separate male + female identity-gated rules.
-            //     Empirically these are dual-body NPC items that need the carrier mechanism to render on the off-native
-            //     body (Varantine, Samuel, Heisellen pattern). An item with exactly one body-bearing rule (WellsKnight,
-            //     Redknight) direct-wears because every protagonist's own class pool covers the identity tokens in that
-            //     single rule.
-            const bool hasVariantByMeta =
+            // Item "has variant" (picker shows carrier-color) when
+            // desc+k_descVariantMetaOffset is non-sentinel -- a per-item variant-meta record threaded through the
+            // catalog list. Validated on 1.13.00 (offset 0x3B0): predicting variant = "meta != sentinel" scores fp=0 /
+            // acc=98.1% against the v1.12.00 dump BY NAME.
+            //
+            // A ">= 2 body-bearing classifier rules" heuristic was considered and rejected on 1.13.00: the reshaped
+            // rule struct gives nearly every item ~11 rules, so that heuristic over-flags (dump correlation moved from
+            // 0 to 864 false positives). The variant-meta pointer alone is the reliable signal. See the
+            // k_descVariantMetaOffset history for the offset derivation.
+            const bool hasVariant =
                 (resolvedSentinel != 0) && (e.metaPtr != 0) && (e.metaPtr != resolvedSentinel);
-            const bool hasMultiBodyRules = (e.bodyBits & k_bodyBitMultiBodyRules) != 0;
-            const bool hasVariant = hasVariantByMeta || hasMultiBodyRules;
             if (hasVariant)
                 ++variantCount;
 

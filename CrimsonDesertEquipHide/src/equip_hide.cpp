@@ -213,11 +213,14 @@ namespace EquipHide
             }
         }
 
-        auto r10 = ctx.r10;
-        if (!DMK::Memory::plausible_userspace_ptr(r10))
+        // Part-hash key pointer. v1.13.00 moved this from R10 to R12: the exclusion-list walk reads the key via
+        // `mov edx,[r12]` and the transition dispatch passes it as `rdx = r12`, while R10 at the hook is a clobbered
+        // method-`this` (loaded `mov r10,[rax]` then trashed by the intervening call). See aob_resolver.hpp PN3.
+        auto hashPtr = ctx.r12;
+        if (!DMK::Memory::plausible_userspace_ptr(hashPtr))
             return;
 
-        auto partHash = *reinterpret_cast<const uint32_t *>(r10);
+        auto partHash = *reinterpret_cast<const uint32_t *>(hashPtr);
 
         if (!needs_classification(partHash))
             return;

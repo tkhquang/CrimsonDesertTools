@@ -60,16 +60,17 @@ namespace Transmog
     // restore loop entirely.
     constexpr std::ptrdiff_t k_compEntryTablePtrOffset = 0x88;
 
-    // Entry layout within the auth-table array. v1.05 grew the entry by 8 bytes and shifted the slot tag accordingly:
+    // Entry layout within the auth-table array. The stride and slot-tag offset move together by 8 across versions:
     //
     //   v1.04.00: stride=0xC8 (200), slotTag@+0xC0
     //   v1.05.00: stride=0xD0 (208), slotTag@+0xC8
+    //   v1.13.00: stride=0xC8 (200), slotTag@+0xC0  (reverted to the v1.04 layout)
     //
     // primary item id at +0x08 is unchanged. Slot-tag VALUES themselves are unchanged from v1.04; only the position
     // within the entry shifted. Mirrors k_entryStride / k_entrySlotTagOffset in real_part_tear_down.cpp.
-    constexpr std::ptrdiff_t k_compEntryStride = 0xD0;
+    constexpr std::ptrdiff_t k_compEntryStride = 0xC8;
     constexpr std::ptrdiff_t k_compEntryItemIdOffset = 0x08;
-    constexpr std::ptrdiff_t k_compEntrySlotTagOffset = 0xC8;
+    constexpr std::ptrdiff_t k_compEntrySlotTagOffset = 0xC0;
 
     // (TransmogSlot, engine slot tag) pairs the dispatcher iterates for tear-down + the auth-table real-id snapshot.
     // Sourced from slot_metadata.hpp's single per-slot table; the local TearDownSlot alias keeps existing call sites

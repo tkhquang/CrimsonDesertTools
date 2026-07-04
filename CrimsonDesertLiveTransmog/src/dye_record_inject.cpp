@@ -136,8 +136,12 @@ namespace Transmog::DyeRecordInject
         if (fallback == nullptr)
             return result;
 
-        // Append into the destination vector at dst+120.
-        const auto target_vec = dst_struct + 120;
+        // Append into the destination dye-record vector. On v1.13.00 this moved from dst+0x78 (120) to dst+0x70 (112)
+        // -- the same -8 shift as the auth-table entry and its dye header. Confirmed against the engine's own DyeCopier
+        // (sub_141F87550): its record-copy loop runs `lea rcx,[r14+0x70]; call <DyeCopy 0x140D1E5E0>` with a 16-byte
+        // record, i.e. it appends to dst+0x70 via the exact primitive we call here. Passing dst+0x78 handed
+        // g_dye_copy_fn the vector's count field instead of its base, so every append faulted (emitted=0/16, ok=false).
+        const auto target_vec = dst_struct + 112;
         bool all_ok = true;
         std::size_t emitted = 0;
         const bool sparse = s_injectSparse;
@@ -330,8 +334,13 @@ namespace Transmog::DyeRecordInject
         // entryBase points into the live auth/dye table, which can tear or relocate on a world reload or arena flip.
         // Both call sites invoke this outside an SEH frame, so every read here is self-guarded: a faulting header read
         // yields 0 and the entry is treated as having no records.
-        const auto data = DMKMemory::seh_read<std::uintptr_t>(entryBase + 0x78).value_or(0);
-        auto count = DMKMemory::seh_read<std::uint32_t>(entryBase + 0x80).value_or(0);
+        //
+        // The dye-vector header offsets track the auth-entry layout, which shrank 8 bytes on v1.13.00 (the entry
+        // reverted to the v1.04 stride 0xC8; see k_entrySlotTagOffset in real_part_tear_down.cpp). The data ptr moved
+        // +0x78 -> +0x70 and the count +0x80 -> +0x78. Verified live: a dyed entry holds a 16-byte-record array ptr at
+        // +0x70 with the channel count at +0x78.
+        const auto data = DMKMemory::seh_read<std::uintptr_t>(entryBase + 0x70).value_or(0);
+        auto count = DMKMemory::seh_read<std::uint32_t>(entryBase + 0x78).value_or(0);
         if (data < 0x10000 || count == 0)
             return 0;
         if (count > k_dyeChannelCount)

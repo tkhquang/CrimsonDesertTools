@@ -282,7 +282,7 @@ The active character is detected by walking the live WorldSystem pointer chain t
 | ------- | --------- | ------------ |
 | **Stuttering or FPS drops** | Some users report performance issues in crowded areas. *Not reproducible on my end.* | Try a different ASI Loader DLL (e.g. `version.dll` instead of `winmm.dll`) |
 | **Flight cloak visual artifacts** | `CD_Cloak_Flight` variants cause artifacts and squished hair. Removed from defaults. | Re-add in INI at your own risk (see `[Cloak]` comment) |
-| **Chest/Legs flickering** | Hiding chest armor can cause pants/legs to flash during movement when chest is hidden. A later patch narrowed the event set the EquipVisCheck hook fires on, so the `CascadeFix` mitigation no longer holds. | **`CascadeFix` is currently broken on the latest game patch -- do not enable it; leave `CascadeFix = false` (the default).** It no longer suppresses the flashing and may misbehave. A fix is in progress. ~~Previously, `CascadeFix = true` gave best-effort flicker reduction while bare-chested (armor-to-armor swaps auto re-hid; equipping chest from barechest needed a manual show-then-hide re-toggle).~~ |
+| **Chest/Legs flickering** | Hiding chest armor can cause pants/legs to flash during movement while the chest is hidden. | Fixed as of game version 1.13.00 -- the `CascadeFix` option works again. Set `CascadeFix = true` for best-effort flicker reduction while bare-chested (armor-to-armor swaps auto re-hide; equipping the chest from bare-chest may need a manual show-then-hide re-toggle). |
 | **Toggle delay** | Visibility changes can take 1-3 seconds | -- |
 | **Game updates** | Major updates may break the mod until a new version is released | -- |
 | **Steam only** | Only tested with the Steam version | -- |
