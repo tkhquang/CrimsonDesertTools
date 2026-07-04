@@ -2,6 +2,12 @@
 
 All notable changes to the CrimsonDesertLiveTransmog mod will be documented in this file.
 
+## [0.12.8] - Crimson Desert 1.13.00 support
+
+- Updated the mod to work with Crimson Desert version 1.13.00
+- Refreshed the color and dye data for game version 1.13.00
+- The cross-body (male/female) item filter is temporarily disabled while it is reworked for the new game version; all other picker features work normally
+
 ## [0.12.7] - Companion transmog fix and stability update
 
 - Fixed companions (such as Oongka and Damiane) showing their default gear instead of your chosen outfit after they leave and return to the scene; their transmog now reapplies on its own
@@ -253,6 +259,7 @@ All notable changes to the CrimsonDesertLiveTransmog mod will be documented in t
 - Modular code split: `transmog_apply` (apply/clear logic), `transmog_hooks` (VEC/BatchEquip callbacks), `transmog_worker` (debounce/load-detect/nametable threads), `shared_state` (cross-TU atomics)
 - Docs clarify ReShade is required for GUI; without it, users edit JSON manually via Capture hotkey
 
+[0.12.8]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.12.8
 [0.12.7]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.12.7
 [0.12.6]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.12.6
 [0.12.5]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.12.5
