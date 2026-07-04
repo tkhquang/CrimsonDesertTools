@@ -2,6 +2,11 @@
 
 All notable changes to the CrimsonDesertEquipHide mod will be documented in this file.
 
+## [0.8.4] - Crimson Desert 1.13.00 support
+
+- Updated the mod to work with Crimson Desert version 1.13.00
+- The chest/legs flickering when hiding the chest is resolved on game version 1.13.00; the CascadeFix option works again
+
 ## [0.8.3] - Stability and framework update
 
 - Updated the underlying framework (DetourModKit) to 3.9.0 for better stability and future compatibility
@@ -269,6 +274,7 @@ All notable changes to the CrimsonDesertEquipHide mod will be documented in this
 - Customizable part lists per category via INI configuration
 - Configurable init delay and log level
 
+[0.8.4]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/equip-hide/v0.8.4
 [0.8.3]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/equip-hide/v0.8.3
 [0.8.2]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/equip-hide/v0.8.2
 [0.8.1]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/equip-hide/v0.8.1
