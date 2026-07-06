@@ -529,14 +529,13 @@ namespace Transmog
      * no mesh. Toggling this one byte 0x74 (jz rel8) -> 0xEB (jmp rel8) forces the match, so NPC/variant items render
      * on the carrier's body.
      *
-     * v1.13.00 RELOCATION (the final carrier-invisible bug, and a subtle mis-fix). The evaluator moved -- it was
-     * sub_141D5F470+0xC8 (0x141D5F538 on v1.02) -- and its inner loop gained a `90` (nop) between the movzx and the
-     * cmp. A prior 1.13 "fix" changed the allowed-array load register `4C 8B 43` (rbx) -> `4D 8B 45` (r13), which made
-     * the AOB re-lock onto a STRUCTURALLY IDENTICAL loop in an UNRELATED function (~0x1423AAxxx) that is never on the
-     * carrier-apply path -- so the bypass silently toggled dead code (proven live: 0 breakpoint hits at 0x1423AAAE8
-     * during a carrier apply, while this site fires). The real gate KEEPS `4C 8B 43` (rbx) and reads the item's
-     * char-class at `word[rax+0xAC]` (was +0x8A pre-1.13). It resolves to 0x141F90723; the jz is at match+0x12 =
-     * 0x141F90735. Verified live: forcing this jz renders the Preset-4 NPC/boss armor.
+     * v1.13.00 RELOCATION (the final carrier-invisible bug, and a subtle mis-fix). The evaluator moved -- it was a
+     * sub_...+0xC8 offset on earlier builds -- and its inner loop gained a `90` (nop) between the movzx and the cmp. A
+     * prior 1.13 "fix" changed the allowed-array load register `4C 8B 43` (rbx) -> `4D 8B 45` (r13), which made the AOB
+     * re-lock onto a STRUCTURALLY IDENTICAL loop in an UNRELATED function that is never on the carrier-apply path -- so
+     * the bypass silently toggled dead code (proven live: 0 breakpoint hits at the look-alike during a carrier apply,
+     * while this site fires). The real gate KEEPS `4C 8B 43` (rbx) and reads the item's char-class at `word[rax+0xAC]`
+     * (was +0x8A pre-1.13); the jz is at match+0x12. Verified live: forcing this jz renders the Preset-4 NPC/boss armor.
      *
      * The `90` nop AND the `4C 8B 43` (rbx) register disambiguate from the ~0x1423AAxxx look-alike (which has r13 and
      * no nop) and from the +0x70 sibling loop in the same function; the trailing `EB` (the OUTER loop's no-match jmp,
@@ -566,6 +565,75 @@ namespace Transmog
          "33 C9 85 D2 74 ?? 4C 8B 43 ?? 44 0F B7 88 ?? ?? 00 00 90 "
          "66 45 3B 0C 48 74 ?? FF C1 3B CA 72 ?? EB",
          ResolveMode::Direct, 0x18, 0},
+    };
+
+    // -----------------------------------------------------------------------
+    // BodyVariantHook targets: the per-body mesh variant resolver + its render primitive.
+    //
+    //   BodyVariantResolver : sub_141F90630 -- walks each item's per-body variant entries (list at arg1+0x3E0, count
+    //                                          +0x3E8, stride 0x58) and renders the entry whose token list matches the
+    //                                          wearer's body token, or nothing if none match. Inline-hooked so LT keeps
+    //                                          the natural per-body match yet can still force entry[0] for NPC items
+    //                                          the player cannot naturally wear. The char-class bypass jz (see
+    //                                          k_charClassBypassCandidates, resolved inside this same function) is
+    //                                          the force lever. Returns void (its sole caller discards rax).
+    //   BodyVariantRender   : sub_1412B2370 -- render primitive the resolver calls once per matched entry (call site:
+    //                                          rcx=ctx, rdx=entry+0x10 mesh, r8d=entry+0x18). Midhooked as a pure
+    //                                          observer so LT can tell whether the un-bypassed resolver rendered.
+    //
+    // Each target carries a 3-anchor cascade per the ordering rule in
+    // CrimsonDesertCore/external/DetourModKit/docs/misc/aob-signatures.md: P1 is the full prologue (most specific),
+    // P2 and P3 are progressively deeper body landmarks that walk back to the function start via a negative dispOffset.
+    // P2 and P3 both anchor PAST the SafetyHook 5-byte prologue window, so if a sibling mod inline-hooks the prologue
+    // the regular cascade still resolves the function without depending on the prologue-overwrite fallback. All six
+    // patterns verified as single unique hits (require_unique) on v1.13.00 .text.
+    inline constexpr AddrCandidate k_bodyVariantResolverCandidates[] = {
+        // P1 -- full prologue: 5 callee-saved pushes + 0x30 frame + mov r13,rcx + the edx spill, ending on the opcode
+        // of the registry load `mov rcx,[rip+disp32]`. The disp32 is left off the tail rather than wildcarded, so no
+        // shifting field is committed.
+        {"BodyVariantResolver_P1_Prologue",
+         "40 55 57 41 54 41 55 41 57 48 83 EC 30 4C 8B E9 89 54 24 68 48 8B 0D",
+         ResolveMode::Direct, 0, 0},
+
+        // P2 -- post-prologue registry-lookup setup: mov r13,rcx / spill edx / load registry global (RIP disp32
+        // wildcarded) / lea rdx,[rsp+0x68] / add rcx,0x60 / mov r15,r9 / movzx edi,r8w. Anchors at function start + 0xD,
+        // so walk-back -0xD. Survives a prologue push/frame reshuffle that leaves this argument setup intact.
+        {"BodyVariantResolver_P2_RegistryLookupSetup",
+         "4C 8B E9 89 54 24 68 48 8B 0D ?? ?? ?? ?? 48 8D 54 24 68 48 83 C1 60 4D 8B F9 41 0F B7 F8",
+         ResolveMode::Direct, -0xD, 0},
+
+        // P3 -- the variant-list walk that defines this function: mov rsi,[r13+0x3E0] (entry list) / mov eax,[r13+0x3E8]
+        // (count) / imul r14,rax,0x58 (entry stride) / add r14,rsi / cmp rsi,r14 (empty-list guard). The 0x3E0/0x3E8
+        // field offsets and the 0x58 stride are stable game-struct constants kept literal. Anchors at function start +
+        // 0x8B, so walk-back -0x8B.
+        {"BodyVariantResolver_P3_VariantListWalk",
+         "49 8B B5 E0 03 00 00 41 8B 85 E8 03 00 00 4C 6B F0 58 4C 03 F6 49 3B F6",
+         ResolveMode::Direct, -0x8B, 0},
+    };
+
+    inline constexpr AddrCandidate k_bodyVariantRenderCandidates[] = {
+        // P1 -- full prologue: two shadow-slot spills + push rdi + 0x20 frame + the argument shuffle
+        // (mov rbx,rcx / mov esi,r8d / mov rcx,[rcx] / mov rdi,rdx). All-literal; no field the linker can move.
+        {"BodyVariantRender_P1_Prologue",
+         "48 89 5C 24 10 48 89 74 24 18 57 48 83 EC 20 48 8B D9 41 8B F0 48 8B 09 48 8B FA",
+         ResolveMode::Direct, 0, 0},
+
+        // P2 -- the argument shuffle + list deref/null-test after the frame setup: mov rbx,rcx / mov esi,r8d /
+        // mov rcx,[rcx] (deref the entry-list holder) / mov rdi,rdx / test rcx,rcx. Anchors at function start + 0xF, so
+        // walk-back -0xF. Stops before the rel8 early-out jz, which is not anchored on (jz flips between rel8 and rel32
+        // encodings across builds).
+        {"BodyVariantRender_P2_ArgShuffleListDeref",
+         "48 8B D9 41 8B F0 48 8B 09 48 8B FA 48 85 C9",
+         ResolveMode::Direct, -0xF, 0},
+
+        // P3 -- the empty-list early-out tail: mov r8d,esi (pass the count through) / restore rbx from [rsp+0x38] and
+        // rsi from [rsp+0x40] / add rsp,0x20 / pop rdi / jmp (tail-call to the fallback; the rel32 jmp opcode is the
+        // trailing anchor, its displacement left off the tail). The r8d passthrough plus the exact shadow-slot restores
+        // make this site function-specific where the shared vector-insert body further down does not. Anchors at
+        // function start + 0x20, so walk-back -0x20.
+        {"BodyVariantRender_P3_EmptyListTailCall",
+         "44 8B C6 48 8B 5C 24 38 48 8B 74 24 40 48 83 C4 20 5F E9",
+         ResolveMode::Direct, -0x20, 0},
     };
 
     // -----------------------------------------------------------------------

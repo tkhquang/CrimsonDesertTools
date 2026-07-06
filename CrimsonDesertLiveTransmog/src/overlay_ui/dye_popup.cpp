@@ -230,10 +230,21 @@ namespace Transmog
             ImGui::Dummy(ImVec2(chip_h, chip_h));
         }
 
-        if (dyeBtn && slotDye)
+        if (dyeBtn)
         {
-            ImGui::OpenPopup("##dye_picker");
-            s_dyePopupJumpToDye[slot] = true;
+            // If the editing character has no preset yet, mint one from the current state so the popup has somewhere to
+            // write instead of dropping the click. Re-fetch slotDye off the freshly-created preset so the popup body
+            // below (and this frame's OpenPopup) observe it.
+            if (!slotDye)
+            {
+                editPreset = PresetManager::instance().active_preset_mut_or_create();
+                slotDye = editPreset ? &editPreset->slots[slot].dye : nullptr;
+            }
+            if (slotDye)
+            {
+                ImGui::OpenPopup("##dye_picker");
+                s_dyePopupJumpToDye[slot] = true;
+            }
         }
 
         // 10 color groups, ordered by HSL hue (red -> rose). Anchored by `string_key` (the data file's _stringKey

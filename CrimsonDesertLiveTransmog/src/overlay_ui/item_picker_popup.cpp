@@ -253,9 +253,8 @@ namespace Transmog
 
         // Active character's body kind. Stable for the entire popup invocation: PresetManager state cannot mutate
         // between picker frames on the render thread, so resolving it once here avoids ~6k redundant PresetManager +
-        // string comparisons per frame inside the filter loop. Armor rule classifier tokens partition the catalog into
-        // disjoint body families (male/female token sets live in item_name_table.cpp::k_maleBodyTokens /
-        // k_femaleBodyTokens):
+        // string comparisons per frame inside the filter loop. The catalog's body families come from the
+        // equip-eligibility column of the display_names TSV (item_name_table.cpp::m_bodyByName):
         //   Horse / pet / wagon / dragon: separate token pools with
         //     zero overlap with humanoid. Flagged as NonHumanoid and
         //     hidden unconditionally -- these never render on a human

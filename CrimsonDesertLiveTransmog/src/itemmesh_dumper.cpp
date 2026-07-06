@@ -63,6 +63,20 @@ namespace Transmog
         constexpr ptrdiff_t kOffRuleMeshCount = 0x08;
         constexpr uint32_t kRuleScanCap = 64; // bound on garbage counts
 
+        // Per-body mesh variant entry list (desc+0x3E0), the structure the engine's variant resolver (sub_141F90630)
+        // walks to render an item's mesh for the wearer's body. Each 0x58-byte entry names one body variant of the item;
+        // the mesh handle is reached via a pointer at entry+0x10 (deref -> handle whose low 16 bits index stringinfo).
+        // This is the authoritative, per-item, noise-free source of every mesh an item uses across bodies (human male /
+        // orc / female / NPC), which the shared, rig-stripped icon cannot enumerate -- e.g. Kliff_Mask binds three rig
+        // meshes here (`cd_phm_` / `cd_pom_` / `cd_phw_`) behind one `cd_phm_` icon. 1.13 offsets; re-confirm on a
+        // descriptor reshape. (The engine also stores each entry's wearer body-class token array at entry+0x40 / count
+        // +0x48; the dump links every entry's mesh regardless of which body selects it, so those are not needed here.)
+        constexpr ptrdiff_t kOffDescVariantEntries = 0x3E0;
+        constexpr ptrdiff_t kOffDescVariantCount = 0x3E8;
+        constexpr ptrdiff_t kVariantEntryStride = 0x58;
+        constexpr ptrdiff_t kOffEntryMesh = 0x10; // pointer into the variant table -> mesh handle
+        constexpr uint32_t kVariantEntryCap = 32;
+
         // ----- safe reads -----
         //
         // The `(value, bool& ok)` shape distinguishes a faulted read from a legitimate zero result, which matters at
@@ -654,14 +668,90 @@ namespace Transmog
 
         // ----- per-item record collected from iteminfo/stringinfo -----
 
+        // A garbage byte fragment the "cd_"-prefix pool walk picks up: a body-rig prefix (cd_phm_ / cd_pom_ / ... which
+        // always name a body PART) directly followed by a short digits-then-letters token and nothing else -- e.g.
+        // `cd_pom_0jl`, `cd_phm_00fv` (proven in memory to be a `cd_pom_0jl,<binary>` exe-static fragment). A real
+        // body-rig mesh carries a `_<NN>_<part>_` or `_m<NNNN>_` structure, so it never has this shape, and none of
+        // these fragments is ever linked to an item. Used to skip them at emission so the dump stays clean.
+        bool is_junk_rig_fragment(std::string_view name) noexcept
+        {
+            static constexpr std::string_view kRigs[] = {"cd_phm_", "cd_phw_", "cd_pom_", "cd_pgm_",
+                                                         "cd_pdm_", "cd_ptm_", "cd_nhm_", "cd_ndm_"};
+            std::string_view tail;
+            for (auto rig : kRigs)
+            {
+                if (name.size() > rig.size() && name.substr(0, rig.size()) == rig)
+                {
+                    tail = name.substr(rig.size());
+                    break;
+                }
+            }
+            if (tail.empty())
+                return false;
+            // Junk iff the tail is one digit-run followed by one letter-run and nothing else. A real mesh's tail has an
+            // underscore here (`00_ub_...`) or leads with a model letter (`m0001_...`), so it fails one of these checks.
+            std::size_t i = 0;
+            while (i < tail.size() && tail[i] >= '0' && tail[i] <= '9')
+                ++i;
+            if (i == 0 || i == tail.size())
+                return false;
+            for (std::size_t j = i; j < tail.size(); ++j)
+                if (tail[j] < 'a' || tail[j] > 'z')
+                    return false;
+            return true;
+        }
+
+        // Resolve EVERY distinct mesh an item uses across bodies, from the per-body variant entry list (desc+0x3E0) --
+        // the authoritative linkage source. Each entry's mesh (via entry+kOffEntryMesh -> handle -> stringinfo slot) is
+        // one body variant of the item (human male / orc / female / NPC), all item-specific and noise-free; the shared,
+        // rig-stripped icon cannot enumerate them. The ground-drop mesh (`..._dropitem_...`) is skipped -- it is a
+        // shared prop, not a wearer variant. Returns the deduplicated meshes in entry order (the first is the item's
+        // default/primary mesh); empty for items with no variant list, which fall back to their icon-derived prefab.
+        std::vector<std::string> resolve_variant_meshes(uintptr_t desc, uintptr_t stringArr, uint32_t stringCount) noexcept
+        {
+            std::vector<std::string> meshes;
+            if (!desc || !stringArr)
+                return meshes;
+            bool ok = false;
+            const uintptr_t entries = read_qword_safe(desc + kOffDescVariantEntries, ok);
+            const uint32_t count = read_u32_safe(desc + kOffDescVariantCount, ok);
+            if (!entries || count == 0 || count > kVariantEntryCap)
+                return meshes;
+            for (uint32_t e = 0; e < count; ++e)
+            {
+                const uintptr_t entry = entries + static_cast<uintptr_t>(e) * kVariantEntryStride;
+                // entry+kOffEntryMesh points into the variant table at the entry's mesh handle; deref -> handle whose
+                // low 16 bits index stringinfo.
+                const uintptr_t meshPtr = read_qword_safe(entry + kOffEntryMesh, ok);
+                if (!meshPtr)
+                    continue;
+                const uintptr_t handle = read_qword_safe(meshPtr, ok);
+                if (!ok)
+                    continue;
+                const uint16_t slot = static_cast<uint16_t>(handle & 0xFFFFu);
+                if (slot == 0xFFFF || slot >= stringCount)
+                    continue;
+                const uintptr_t wrap = read_qword_safe(stringArr + static_cast<uintptr_t>(slot) * 8, ok);
+                std::string mesh = to_lower(read_wrapper_string(wrap));
+                if (mesh.empty() || !starts_with_asset_prefix(mesh) || mesh.find("dropitem") != std::string::npos)
+                    continue;
+                if (std::find(meshes.begin(), meshes.end(), mesh) == meshes.end())
+                    meshes.push_back(std::move(mesh));
+            }
+            return meshes;
+        }
+
         struct ItemEntry
         {
             uint32_t runtimeIdx;
             std::string internalName;
             uint16_t iconSlot;
-            std::string fullIcon;   // raw stringinfo string, may have ItemIcon_Prefab_ prefix
-            std::string iconPrefab; // lowercased, prefix stripped
-            std::string base;       // last `_NNNN`-anchored prefix of iconPrefab
+            std::string fullIcon;    // raw stringinfo string, may have ItemIcon_Prefab_ prefix
+            std::string iconPrefab;  // lowercased, prefix stripped
+            std::string base;        // last `_NNNN`-anchored prefix of iconPrefab
+            // Distinct player rig meshes (Kliff / Oongka / Damiane) recovered from the variant entry list; empty when
+            // the item has none. Links the male / orc / female body variants the icon-derived prefab cannot pair.
+            std::vector<std::string> variantMeshes;
         };
     } // namespace
 
@@ -825,9 +915,13 @@ namespace Transmog
             std::string_view iconPrefab = fullLower;
             constexpr std::string_view kLongPrefix = "itemicon_prefab_";
             constexpr std::string_view kShortPrefix = "itemicon_";
+            // `itemicon_prefab_<mesh>` carries the real mesh name; a bare `itemicon_<name>` (e.g. `ItemIcon_Lantern_On`)
+            // does not, so its stripped remainder is a non-mesh item name that must not be trusted as a prefab.
+            bool isPrefabIcon = false;
             if (iconPrefab.size() >= kLongPrefix.size() && iconPrefab.substr(0, kLongPrefix.size()) == kLongPrefix)
             {
                 iconPrefab = iconPrefab.substr(kLongPrefix.size());
+                isPrefabIcon = true;
             }
             else if (iconPrefab.size() >= kShortPrefix.size() &&
                      iconPrefab.substr(0, kShortPrefix.size()) == kShortPrefix)
@@ -837,14 +931,39 @@ namespace Transmog
             // Prefer the item's actual rig mesh over the icon-derived prefab. The icon is shared across rig variants,
             // so the rule chain is the only place the real cd_phw / cd_pom mesh appears; for an ordinary item the rule
             // mesh equals the icon prefab and this is a no-op.
+            // The variant entry list is the authoritative source of every mesh the item uses across bodies; resolve it
+            // once and reuse it for both the primary-prefab recovery below and the per-body-variant linkage in PASS 3.
+            std::vector<std::string> variantMeshes = resolve_variant_meshes(desc, stringArr, stringCount);
+
             std::string bodyMesh = resolve_rule_body_mesh(desc, stringArr, stringCount, strip_rig_prefix(iconPrefab));
-            std::string resolvedPrefab = bodyMesh.empty() ? std::string(iconPrefab) : std::move(bodyMesh);
+            std::string resolvedPrefab;
+            if (!bodyMesh.empty())
+            {
+                resolvedPrefab = std::move(bodyMesh);
+            }
+            else if (isPrefabIcon)
+            {
+                resolvedPrefab = std::string(iconPrefab); // the `_Prefab_` icon already names the real mesh
+            }
+            else
+            {
+                // The icon is not a mesh, so the stripped iconPrefab is a bogus item name and the item would be dropped
+                // as UI-only even though a mesh exists. Recover it from the variant entry list -- held / non-body items
+                // (a lantern) keep their mesh in an untoken default entry there even when the rule chain is empty. Fall
+                // back to the icon name only when the item has no variant mesh.
+                resolvedPrefab = variantMeshes.empty() ? std::string(iconPrefab) : variantMeshes.front();
+            }
             // Prefer the LIVE partprefab wrapper name. For helm variants the engine instantiates `<mesh>_dd`; the bare
             // `<mesh>` has no live wrapper, so the icon/rule-derived name never matches the swap/carrier path. Rewrite
             // to `_dd` only when the bare form is NOT itself a live wrapper but its `_dd` twin IS -- so ordinary items
             // (whose bare name is the live wrapper) are untouched. See the carrier_defaults.hpp Oongka-helm note.
             if (liveWrapperSet.count(resolvedPrefab) == 0 && liveWrapperSet.count(resolvedPrefab + "_dd") != 0)
                 resolvedPrefab += "_dd";
+            for (auto &vm : variantMeshes)
+            {
+                if (liveWrapperSet.count(vm) == 0 && liveWrapperSet.count(vm + "_dd") != 0)
+                    vm += "_dd";
+            }
             ItemEntry e;
             e.runtimeIdx = id;
             e.internalName = std::move(internalName);
@@ -852,6 +971,7 @@ namespace Transmog
             e.fullIcon = full;
             e.iconPrefab = std::move(resolvedPrefab);
             e.base = extract_base_prefix(e.iconPrefab);
+            e.variantMeshes = std::move(variantMeshes);
             items.push_back(std::move(e));
         }
         logger.info("[itemprefab] item-pass: {} entries collected, {} skipped", items.size(), skipped);
@@ -920,11 +1040,32 @@ namespace Transmog
         exact_map.reserve(items.size());
         std::unordered_map<std::string, std::vector<size_t>> base_map;
         base_map.reserve(items.size());
+        // Claim every item's primary (icon-derived) prefab FIRST, so a primary link can never be stolen by another
+        // item's body variant in the second pass below.
         for (size_t i = 0; i < items.size(); ++i)
         {
             exact_map.emplace(items[i].iconPrefab, i);
             base_map[items[i].base].push_back(i);
         }
+        // Then link each item's body-mesh variants (human male / orc / female / NPC) from the variant entry list so
+        // their prefab rows resolve to this item instead of orphaning -- the shared, rig-stripped icon can only name
+        // one. emplace keeps the first claimant, so a primary link is never overwritten and a mesh shared across items
+        // is attributed to (and grouped under) its first owner.
+        uint32_t variantLinks = 0;
+        for (size_t i = 0; i < items.size(); ++i)
+        {
+            for (const auto &vm : items[i].variantMeshes)
+            {
+                if (vm.empty() || vm == items[i].iconPrefab)
+                    continue;
+                if (exact_map.emplace(vm, i).second)
+                {
+                    base_map[extract_base_prefix(vm)].push_back(i);
+                    ++variantLinks;
+                }
+            }
+        }
+        logger.info("[itemprefab] body-mesh variants linked from the variant entry list: {}", variantLinks);
 
         // PASS 4 -- emit one row per pool prefab. Also emit a row for each item whose iconPrefab is NOT in the pool (so
         // the dump never silently drops an item). Track them via `phantomItems`.
@@ -983,6 +1124,7 @@ namespace Transmog
         uint32_t rowsExact = 0;
         uint32_t rowsSiblingOnly = 0;
         uint32_t rowsOrphan = 0;
+        uint32_t rowsJunkSkipped = 0;
         for (const auto &p : pool)
         {
             const std::string rowBase = extract_base_prefix(p);
@@ -1004,6 +1146,14 @@ namespace Transmog
                 }
             }
             const bool orphan = !exact && siblings.empty();
+            // Skip a junk exe-static string fragment (cd_<rig>_<digits><letters>) that resolves to no item -- it is not
+            // a real mesh, just noise the cd_-prefix pool walk captured. Guarded on `orphan`, so a linked prefab is
+            // never dropped even if one somehow matched the shape.
+            if (orphan && is_junk_rig_fragment(p))
+            {
+                ++rowsJunkSkipped;
+                continue;
+            }
             if (exact)
                 ++rowsExact;
             else if (!siblings.empty())
@@ -1057,8 +1207,8 @@ namespace Transmog
         }
 
         logger.info("[itemprefab] dumped {} rows: {} exact, {} sibling-only, "
-                    "{} orphan, {} phantom-item, {} UI-only skipped -> "
+                    "{} orphan, {} phantom-item, {} UI-only skipped, {} junk-fragment skipped -> "
                     "CrimsonDesertLiveTransmog_itemprefabs.tsv",
-                    rowsEmitted, rowsExact, rowsSiblingOnly, rowsOrphan, phantomRows, uiSkipped);
+                    rowsEmitted, rowsExact, rowsSiblingOnly, rowsOrphan, phantomRows, uiSkipped, rowsJunkSkipped);
     }
 } // namespace Transmog

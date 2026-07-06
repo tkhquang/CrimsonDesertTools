@@ -1,5 +1,6 @@
 #include "transmog.hpp"
 #include "aob_resolver.hpp"
+#include "body_variant_hook.hpp"
 #include "color_override/color_override.hpp"
 #include "color_override/color_token_table.hpp"
 #include "color_override/host_scope.hpp"
@@ -948,6 +949,14 @@ namespace Transmog
                 }
             }
         }
+
+        // BodyVariantHook: lets each character render its correct per-body mesh variant on transmog by keeping the
+        // engine's natural per-body match and forcing entry[0] only for items the wearer cannot equip. Supersedes the
+        // former transmog-side char-class bypass toggling (see body_variant_hook.hpp). If either of its AOBs fails to
+        // resolve, install() returns false and BodyVariantHook::is_active() stays false; the apply path then falls back
+        // to that legacy bypass force (see legacy_bypass_force_needed in transmog_apply.cpp) so a failed hook cannot
+        // block transmog rendering.
+        (void)BodyVariantHook::install();
 
         // PartAddShow (sub_14081DC20) inline hook -- transition-flash polish.
         //

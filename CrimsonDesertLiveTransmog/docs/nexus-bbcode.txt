@@ -20,7 +20,7 @@ Change the visual appearance of your equipped armor [b]in real time[/b] without 
 [*][b]Body-mesh prefab picker[/b] -optional per-slot prefab swap for users who want to mix and match individual mesh variants beyond what the item picker exposes
 [*][b]Preset system[/b] -save, load, rename, and cycle through multiple transmog presets per character
 [*][b]Multi-character support[/b] -independent preset lists for Kliff, Damiane, and Oongka. Every visible protagonist's preset is applied automatically on world entry (and to followers as soon as they're summoned in-game), and the active preset follows whoever you control
-[*][b]Body-type filter[/b] -hides items whose body type (male/female) does not match the active character so broken meshes stay out of the picker. Per-character override available in the overlay for body-swap mod users. Temporarily disabled on game version 1.13.00 while it is reworked; all other picker filters work normally
+[*][b]Body-type filter[/b] -hides items whose body type (male/female) does not match the active character so broken meshes stay out of the picker. Per-character override available in the overlay for body-swap mod users
 [*][b]NPC and damaged variants[/b] -NPC armor variants and damaged variants render via automatic carrier swap
 [*][b]Safety filters[/b] -non-player gear (horse tack, pet armor) and wrong-slot items are filtered out by default
 [*][b]Per-slot control[/b] -enable/disable transmog independently for each equipment slot
