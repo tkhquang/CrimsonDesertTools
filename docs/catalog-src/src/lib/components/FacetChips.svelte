@@ -1,8 +1,13 @@
 <script lang="ts">
-  import { catalog } from '../store.svelte';
-  import { SLOT_DEFINITIONS } from '../types';
+  import { catalog, supportsBodyFacets } from '../store.svelte';
+  import { SLOT_DEFINITIONS, BODY_TYPES } from '../types';
 
   type TriState = 'any' | 'yes' | 'no';
+
+  // The Body, Multi-prefab, and Duo-body facets rely on data only the v1.13.00+
+  // dumps carry, so their controls are shown only on supported versions (the
+  // store also clears their values on an unsupported dump).
+  const showBodyFacets = $derived(supportsBodyFacets(catalog.version));
 
   const triFacets: {
     key: keyof typeof catalog.facets;
@@ -38,6 +43,11 @@
         'Prefab is sibling-linked to one or more items via SiblingItemNames',
     },
   ] as const;
+
+  const multiPrefabTitle =
+    'Item is the exact item of more than one mesh prefab (one item with ' +
+    'several distinct meshes, e.g. a character armor with separate male and ' +
+    'female body meshes). Sibling links do not count.';
 
   function cycle(current: TriState): TriState {
     return current === 'any' ? 'yes' : current === 'yes' ? 'no' : 'any';
@@ -88,6 +98,25 @@
     Empty only
   </label>
 
+  {#if showBodyFacets}
+    <label
+      class="inline-flex cursor-pointer items-center gap-1 rounded border border-border bg-panel px-2 py-1 text-xs hover:bg-input"
+    >
+      <input
+        type="checkbox"
+        bind:checked={catalog.facets.duoBodyOnly}
+        class="accent-accent"
+      />
+      <span
+        title={'Duo-body items only: the item is the exact item of both a\n' +
+          'female-body mesh (cd_phw_ / cd_pow_ / ...) and a male or base-body\n' +
+          'mesh (cd_phm_ / cd_pom_ / cd_m<n>_ carrier), e.g. Samuel armor.'}
+      >
+        Duo-body
+      </span>
+    </label>
+  {/if}
+
   <label class="ml-2 inline-flex items-center gap-1 text-xs text-text-dim">
     <span>Slot</span>
     <span
@@ -116,4 +145,41 @@
       {/each}
     </select>
   </label>
+
+  {#if showBodyFacets}
+    {@const multiPrefab = catalog.facets.multiPrefab}
+    <button
+      type="button"
+      onclick={() => {
+        catalog.facets.multiPrefab = cycle(multiPrefab);
+      }}
+      class="cursor-pointer rounded border bg-panel px-2 py-1 text-xs hover:bg-input {colorFor(multiPrefab)}"
+      title="{multiPrefabTitle} Click to cycle: any, yes, no."
+    >
+      <span class="mr-1 font-mono">{symbolFor(multiPrefab)}</span>Multi-prefab
+    </button>
+
+    <label class="inline-flex items-center gap-1 text-xs text-text-dim">
+      <span>Body</span>
+      <span
+        class="cursor-help text-yellow"
+        title={'Wearer body from the display_names data (authoritative, not a\n' +
+          'rig-token guess): Male / Female for items restricted to that body.\n' +
+          'Items with no body restriction are unmarked and only match Any\n' +
+          '(the default, which does not filter).'}
+        aria-label="Body filter note"
+      >
+        (!)
+      </span>
+      <select
+        bind:value={catalog.facets.bodyType}
+        class="cursor-pointer rounded border border-border bg-input px-1.5 py-0.5 text-xs text-text outline-none focus:border-accent"
+      >
+        <option value="">any</option>
+        {#each BODY_TYPES as body (body)}
+          <option value={body}>{body}</option>
+        {/each}
+      </select>
+    </label>
+  {/if}
 </div>

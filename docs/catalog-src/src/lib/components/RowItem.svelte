@@ -57,8 +57,31 @@
     </div>
   </div>
   <div
-    class="ml-3 flex shrink-0 flex-col items-end justify-center text-xs"
+    class="ml-3 flex shrink-0 flex-col items-end justify-center gap-0.5 text-xs"
   >
+    {#if row.bodyType || row.rigFamily || (row.prefabCount ?? 0) > 1}
+      <div class="flex items-center gap-1">
+        {#if row.bodyType}
+          <span
+            class="rounded bg-input px-1 text-text-dim"
+            title="Wearer body (display_names)">{row.bodyType}</span
+          >
+        {/if}
+        {#if row.rigFamily}
+          <span
+            class="rounded bg-input px-1 text-text-dim"
+            title="Rig family (cd_<family>_ token)">{row.rigFamily}</span
+          >
+        {/if}
+        {#if (row.prefabCount ?? 0) > 1}
+          <span
+            class="rounded bg-input px-1 text-accent"
+            title="{row.prefabCount} mesh prefabs have this item as their exact item"
+            >×{row.prefabCount}</span
+          >
+        {/if}
+      </div>
+    {/if}
     {#if row.itemId !== undefined}
       <span class="text-text-dim">ID {row.itemId}</span>
     {/if}

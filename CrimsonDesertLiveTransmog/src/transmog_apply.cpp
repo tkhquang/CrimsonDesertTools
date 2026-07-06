@@ -191,12 +191,14 @@ namespace Transmog
         return DMKMemory::seh_read<uintptr_t>(desc + k_descBodyVariantTableOffset).value_or(0) > 0x10000;
     }
 
-    // Legacy fallback gate: force the char-class bypass for the whole apply window ONLY when BodyVariantHook is not live
+    // Legacy fallback gate: force the char-class bypass for the whole apply window ONLY when BodyVariantHook is
+    // not live
     // (its resolver/render AOBs did not resolve, or its hooks failed to install). BodyVariantHook normally owns the
     // per-body mesh pick -- it observes the engine's natural match and forces entry[0] only for items the wearer cannot
     // equip. With the hook down that observation is gone, so LT falls back to the pre-hook behavior: force entry[0] via
     // the bypass so cross-class/NPC items still render (visible, default mesh) instead of turning invisible.
-    // should_skip_bypass still excludes dual-body armor the wearer is eligible for, so that armor keeps its correct mesh
+    // should_skip_bypass still excludes dual-body armor the wearer is eligible for, so that armor keeps its
+    // correct mesh
     // through the engine's own resolver; an unresolved catalog reports "do not skip" (fail-safe: keep the forced-render
     // path). Returns false when charClassBypass itself did not resolve -- there is no byte to flip.
     static bool legacy_bypass_force_needed(uint16_t targetId)
@@ -361,13 +363,6 @@ namespace Transmog
         return actual != expected;
     }
 
-    // Legacy wrapper retained for any call sites that still assume
-    // Kliff. Defers to the per-character overload with Kliff bound.
-    bool needs_carrier(uint16_t itemId)
-    {
-        return needs_carrier(itemId, std::string("Kliff"));
-    }
-
     // Descriptor size. Stride between consecutive descriptors observed in CE on the live build:
     //
     //   v1.03.01 -- 0x400 (1024)
@@ -519,7 +514,8 @@ namespace Transmog
                      patchedBytes, carrierId, carrierDesc, targetId, targetDesc, hybridAddr);
 
         // SEH-isolated: swap the carrier descriptor to the hybrid, call SlotPopulator, then restore. The per-body mesh
-        // pick is handled by BodyVariantHook when it is live; forceBypass drives the legacy fallback for the REAL target
+        // pick is handled by BodyVariantHook when it is live; forceBypass drives the legacy fallback for the
+        // REAL target
         // (not the carrier) when it is down.
         const bool forceBypass = legacy_bypass_force_needed(targetId);
         carrier_swap_and_call(a1, carrierId, carrierSlotAddr, hybridAddr, forceBypass);

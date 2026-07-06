@@ -19,24 +19,58 @@ function* splitLines(text: string): Generator<string> {
   }
 }
 
-export function parseDisplayNames(text: string): Map<string, string> {
-  const result = new Map<string, string>();
+export interface DisplayInfo {
+  display: string;
+  // Wearer-body marking from the display_names 3rd column: 'Male', 'Female', or
+  // '' when the item is not body-restricted. This is the item's authoritative
+  // equip-eligibility from the game data, unlike a rig-token guess.
+  body: string;
+}
+
+export function parseDisplayNames(text: string): Map<string, DisplayInfo> {
+  const result = new Map<string, DisplayInfo>();
   for (const line of splitLines(text)) {
     if (!line) continue;
-    const tabIndex = line.indexOf('\t');
-    if (tabIndex < 0) continue;
-    const itemName = line.substring(0, tabIndex);
-    const displayName = line.substring(tabIndex + 1);
-    result.set(itemName, displayName);
+    // Columns: <internal name> \t <display name> [ \t <wearer body> ].
+    const cols = line.split('\t');
+    if (cols.length < 2 || !cols[0]) continue;
+    result.set(cols[0], { display: cols[1] ?? '', body: cols[2] ?? '' });
   }
   return result;
+}
+
+// Rig family of a mesh: the model/rig token right after `cd_` in the prefab
+// (e.g. cd_phm_00_ub -> "phm", cd_m0001_00_samuel_ub -> "m0001", cd_bag_lantern
+// -> "bag"). Listed verbatim rather than mapped to a body label, since the token
+// is the authoritative family and any human label (male/female/orc) is a guess.
+export function rigFamily(prefab: string | undefined): string {
+  if (!prefab) return '';
+  const p = prefab.toLowerCase();
+  if (!p.startsWith('cd_')) return '';
+  const rest = p.slice(3);
+  const end = rest.indexOf('_');
+  return end < 0 ? rest : rest.slice(0, end);
+}
+
+// Body-rig classifiers for the duo-body facet. Player/npc rig families follow a
+// <role><frame><body> token: [pn] (player/npc) + one or two frame letters
+// (h/o/g/d/t...) + a trailing 'w' (female body) or 'm' (male body), e.g. phw /
+// pom / nhw / ndem. isFemaleRig requires a single frame letter; isMaleRig allows
+// one or two. Unique and monster carriers are m<digits> and count as the
+// male/base body; an item's female counterpart is then a phw_ wrapper over the
+// same carrier (cd_phw_m0001_00_samuel_ub).
+function isFemaleRig(rig: string): boolean {
+  return /^[pn][a-z]w$/.test(rig);
+}
+
+function isMaleRig(rig: string): boolean {
+  return /^[pn][a-z]{1,2}m$/.test(rig) || /^m\d+$/.test(rig);
 }
 
 export interface ItemMeta {
   slot: string;
   variant: string;
   playerSafe: boolean;
-  name: string;
 }
 
 export function parseItems(text: string): Map<number, ItemMeta> {
@@ -49,14 +83,16 @@ export function parseItems(text: string): Map<number, ItemMeta> {
       continue;
     }
     const cols = line.split('\t');
-    if (cols.length < 5) continue;
+    // Only the first four columns (id, slot, variant, playerSafe) are consumed;
+    // the items.tsv Name column is intentionally ignored (row.itemName comes
+    // from the prefab dump instead).
+    if (cols.length < 4) continue;
     const itemId = parseHexOrDec(cols[0]);
     if (itemId < 0) continue;
     result.set(itemId, {
       slot: cols[1] ?? '',
       variant: cols[2] ?? '',
       playerSafe: (cols[3] ?? '').toLowerCase() === 'yes',
-      name: cols[4] ?? '',
     });
   }
   return result;
@@ -124,6 +160,20 @@ export function joinAll(
 
   const rows: CatalogRow[] = [];
   const seenItemNames = new Set<string>();
+  // itemId -> number of prefab rows whose EXACT item is this id. Drives the
+  // multi-prefab facet: an item that is the exact item of more than one mesh
+  // prefab (e.g. a character armor with separate male and female body meshes for
+  // the same item) has count > 1. Sibling references are deliberately excluded:
+  // a sibling link is a speculative alternate mapping, not a confirmed mesh
+  // attached to the item, so counting it would flag distinct set pieces (e.g.
+  // Iguana_Rider_PlateArmor_Armor_I/II/III, which merely list each other as
+  // siblings) as multi-prefab.
+  const itemPrefabCount = new Map<number, number>();
+  // itemId -> which body rigs its exact prefabs use, for the duo-body facet. An
+  // item that is the exact item of both a female-body mesh and a male/base-body
+  // mesh renders on both bodies (e.g. Samuel armor: cd_m0001_ male + cd_phw_
+  // female).
+  const itemBodyRigs = new Map<number, { female: boolean; male: boolean }>();
   let isHeader = true;
   let nextId = 0;
   let orphanCount = 0;
@@ -150,7 +200,11 @@ export function joinAll(
     const fullIconString = cols[7] || undefined;
     const isOrphan = (cols[8] ?? '').toLowerCase() === 'yes';
 
-    const displayName = itemName ? displayMap.get(itemName) : undefined;
+    const info = itemName ? displayMap.get(itemName) : undefined;
+    const displayName = info?.display;
+    // Body eligibility from the display_names mark: 'Male' / 'Female' when the
+    // item is restricted to one body, undefined otherwise (unmarked or no entry).
+    const bodyType = info?.body || undefined;
     if (itemName) seenItemNames.add(itemName);
 
     let siblingDisplayNames: (string | undefined)[] | undefined;
@@ -159,7 +213,7 @@ export function joinAll(
       let anyResolved = false;
       for (const siblingName of siblingItemNames) {
         seenItemNames.add(siblingName);
-        const sibDisplay = displayMap.get(siblingName);
+        const sibDisplay = displayMap.get(siblingName)?.display;
         resolved.push(sibDisplay);
         if (sibDisplay) anyResolved = true;
       }
@@ -167,6 +221,18 @@ export function joinAll(
     }
 
     const meta = itemId >= 0 ? itemsMap.get(itemId) : undefined;
+    const rig = rigFamily(prefab);
+
+    // Tally exact prefab references per item for the multi-prefab facet, and
+    // record which body rigs the item's exact prefabs use for the duo-body
+    // facet. Sibling references are deliberately not counted (see above).
+    if (itemId >= 0) {
+      itemPrefabCount.set(itemId, (itemPrefabCount.get(itemId) ?? 0) + 1);
+      const flags = itemBodyRigs.get(itemId) ?? { female: false, male: false };
+      if (isFemaleRig(rig)) flags.female = true;
+      else if (isMaleRig(rig)) flags.male = true;
+      itemBodyRigs.set(itemId, flags);
+    }
 
     let kind: RowKind;
     if (isOrphan) {
@@ -199,6 +265,8 @@ export function joinAll(
       slot: meta?.slot,
       variant: meta?.variant,
       playerSafe: meta?.playerSafe,
+      rigFamily: rig,
+      bodyType,
       searchBlob: buildSearchBlob([
         prefab,
         base,
@@ -210,20 +278,33 @@ export function joinAll(
         siblingItemNames?.join(' '),
         siblingDisplayNames?.filter(Boolean).join(' '),
         meta?.slot,
+        rig,
       ]),
     });
   }
 
+  // Second pass: attach each prefab row's multi-prefab count and duo-body flag
+  // from its exact item now that all exact references have been tallied. Rows
+  // without an exact item (orphans, sibling-only, name-only) are neither, so
+  // their fields stay undefined.
+  for (const row of rows) {
+    if (row.itemId === undefined) continue;
+    row.prefabCount = itemPrefabCount.get(row.itemId) ?? 0;
+    const flags = itemBodyRigs.get(row.itemId);
+    row.duoBody = !!(flags && flags.female && flags.male);
+  }
+
   let nameOnlyCount = 0;
-  for (const [itemName, displayName] of displayMap) {
+  for (const [itemName, info] of displayMap) {
     if (seenItemNames.has(itemName)) continue;
     nameOnlyCount++;
     rows.push({
       id: nextId++,
       kind: 'name-only',
       itemName,
-      displayName,
-      searchBlob: buildSearchBlob([itemName, displayName]),
+      displayName: info.display,
+      bodyType: info.body || undefined,
+      searchBlob: buildSearchBlob([itemName, info.display]),
     });
   }
 

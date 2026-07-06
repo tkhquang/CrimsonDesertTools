@@ -100,8 +100,9 @@ namespace Transmog
          * @brief True if the item is safe to equip on the (male) player.
          *
          * Kliff-centric: an item is player-safe unless it is restricted to the female body. The restriction is sourced
-         * from the equip-eligibility ("Male"/"Female") column of the display_names TSV (m_bodyByName, keyed by lowercase
-         * internal name); an item wearable by both bodies or unrestricted is absent from that map and counts as safe.
+         * from the equip-eligibility ("Male"/"Female") column of the display_names TSV (m_bodyByName, keyed by
+         * lowercase internal name); an item wearable by both bodies or unrestricted is absent from that map and
+         * counts as safe.
          * This supersedes the former descriptor rule-classifier token walk, which the 1.13 game update rendered inert.
          *
          * Unknown ids default to `true`: the picker prefers to surface an item rather than hide it accidentally.

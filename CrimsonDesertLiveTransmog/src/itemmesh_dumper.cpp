@@ -63,8 +63,8 @@ namespace Transmog
         constexpr ptrdiff_t kOffRuleMeshCount = 0x08;
         constexpr uint32_t kRuleScanCap = 64; // bound on garbage counts
 
-        // Per-body mesh variant entry list (desc+0x3E0), the structure the engine's variant resolver (sub_141F90630)
-        // walks to render an item's mesh for the wearer's body. Each 0x58-byte entry names one body variant of the item;
+        // Per-body mesh variant entry list (desc+0x3E0), the structure the engine's variant resolver walks to
+        // render an item's mesh for the wearer's body. Each 0x58-byte entry names one body variant of the item;
         // the mesh handle is reached via a pointer at entry+0x10 (deref -> handle whose low 16 bits index stringinfo).
         // This is the authoritative, per-item, noise-free source of every mesh an item uses across bodies (human male /
         // orc / female / NPC), which the shared, rig-stripped icon cannot enumerate -- e.g. Kliff_Mask binds three rig
@@ -689,7 +689,8 @@ namespace Transmog
             if (tail.empty())
                 return false;
             // Junk iff the tail is one digit-run followed by one letter-run and nothing else. A real mesh's tail has an
-            // underscore here (`00_ub_...`) or leads with a model letter (`m0001_...`), so it fails one of these checks.
+            // underscore here (`00_ub_...`) or leads with a model letter (`m0001_...`), so it fails one of
+            // these checks.
             std::size_t i = 0;
             while (i < tail.size() && tail[i] >= '0' && tail[i] <= '9')
                 ++i;
@@ -707,7 +708,8 @@ namespace Transmog
         // rig-stripped icon cannot enumerate them. The ground-drop mesh (`..._dropitem_...`) is skipped -- it is a
         // shared prop, not a wearer variant. Returns the deduplicated meshes in entry order (the first is the item's
         // default/primary mesh); empty for items with no variant list, which fall back to their icon-derived prefab.
-        std::vector<std::string> resolve_variant_meshes(uintptr_t desc, uintptr_t stringArr, uint32_t stringCount) noexcept
+        std::vector<std::string> resolve_variant_meshes(uintptr_t desc, uintptr_t stringArr,
+                                                        uint32_t stringCount) noexcept
         {
             std::vector<std::string> meshes;
             if (!desc || !stringArr)
@@ -915,8 +917,9 @@ namespace Transmog
             std::string_view iconPrefab = fullLower;
             constexpr std::string_view kLongPrefix = "itemicon_prefab_";
             constexpr std::string_view kShortPrefix = "itemicon_";
-            // `itemicon_prefab_<mesh>` carries the real mesh name; a bare `itemicon_<name>` (e.g. `ItemIcon_Lantern_On`)
-            // does not, so its stripped remainder is a non-mesh item name that must not be trusted as a prefab.
+            // `itemicon_prefab_<mesh>` carries the real mesh name; a bare `itemicon_<name>`
+            // (e.g. `ItemIcon_Lantern_On`) does not, so its stripped remainder is a non-mesh item name that
+            // must not be trusted as a prefab.
             bool isPrefabIcon = false;
             if (iconPrefab.size() >= kLongPrefix.size() && iconPrefab.substr(0, kLongPrefix.size()) == kLongPrefix)
             {

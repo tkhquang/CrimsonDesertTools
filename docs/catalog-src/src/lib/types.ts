@@ -24,6 +24,22 @@ export interface CatalogRow {
   slot?: string;
   variant?: string;
   playerSafe?: boolean;
+  // Rig family of the mesh: the `cd_<family>_` token from the prefab (phm, phw,
+  // pom, m0001, bag, ...). '' / undefined for non-cd_ or missing prefabs.
+  rigFamily?: string;
+  // Wearer body from the display_names mark: 'Male' or 'Female' when the item is
+  // restricted to one body, undefined otherwise (unmarked or no display entry).
+  // Authoritative equip-eligibility from the game data.
+  bodyType?: string;
+  // How many mesh prefabs have this row's item as their exact item. > 1 marks a
+  // multi-prefab item: one item with several distinct meshes (e.g. a character
+  // armor with separate male and female body meshes). Sibling links do not
+  // count. Undefined for rows without an exact item.
+  prefabCount?: number;
+  // True when the row's item is the exact item of both a female-body mesh and a
+  // male/base-body mesh (a duo-body item, e.g. Samuel armor). False for other
+  // rows with an exact item; undefined for rows without one.
+  duoBody?: boolean;
   searchBlob: string;
 }
 
@@ -36,6 +52,12 @@ export interface FacetState {
   orphanOnly: boolean;
   emptyOnly: boolean;
   slot: string;
+  // Wearer-body filter: 'Male' / 'Female' / 'Both'; '' = any.
+  bodyType: string;
+  // Restrict to items that are the exact item of more than one mesh prefab.
+  multiPrefab: 'any' | 'yes' | 'no';
+  // Restrict to duo-body items (a female-body mesh and a male/base-body mesh).
+  duoBodyOnly: boolean;
 }
 
 export const DEFAULT_FACETS: FacetState = {
@@ -47,7 +69,14 @@ export const DEFAULT_FACETS: FacetState = {
   orphanOnly: false,
   emptyOnly: false,
   slot: '',
+  bodyType: '',
+  multiPrefab: 'any',
+  duoBodyOnly: false,
 };
+
+// Selectable wearer-body values for the Body facet, in display order. Both come
+// from the display_names restriction mark; the empty facet value ('') means any.
+export const BODY_TYPES = ['Male', 'Female'] as const;
 
 // Slot tag substrings mirrored from
 // CrimsonDesertLiveTransmog/src/prefab_wrapper_swap.cpp (k_slotTagPatterns).

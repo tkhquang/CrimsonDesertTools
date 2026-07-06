@@ -6,6 +6,7 @@ import { joinAll, type JoinResult } from './parse';
 // dropping the matching CrimsonDesertLiveTransmog_*_<version>.tsv files into
 // docs/live-transmog/. The first entry is the default selection.
 export const CATALOG_VERSIONS = [
+  'v1.13.00',
   'v1.12.00',
   'v1.10.00',
   'v1.09.00',
@@ -26,9 +27,38 @@ export const UNCORRECTED_VERSIONS: readonly string[] = [
   'v1.07.00',
 ];
 
-// Kept for any external references; reflects the default version only. Live UI
-// should read `catalog.version` so it tracks the user's selection.
-export const CATALOG_VERSION: CatalogVersion = DEFAULT_VERSION;
+// The wearer-body, multi-prefab, and duo-body facets are driven by data only
+// the v1.13.00 and newer dumps carry: the display_names equip-eligibility
+// column and the corrected per-rig mesh variants. Older dumps lack the column
+// (so Body would match nothing) and mislink rig variants (so duo-body detection
+// is unreliable), so those facets are offered only from this version onward.
+export const BODY_FACET_MIN_VERSION = 'v1.13.00';
+
+function parseVersion(version: string): number[] {
+  return version
+    .replace(/^v/, '')
+    .split('.')
+    .map((part) => Number(part) || 0);
+}
+
+// Numeric compare of two 'vMAJOR.MINOR.PATCH' strings: negative when a < b, zero
+// when equal, positive when a > b. Missing trailing components read as 0.
+function compareVersions(a: string, b: string): number {
+  const pa = parseVersion(a);
+  const pb = parseVersion(b);
+  const len = Math.max(pa.length, pb.length);
+  for (let i = 0; i < len; i++) {
+    const diff = (pa[i] ?? 0) - (pb[i] ?? 0);
+    if (diff !== 0) return diff;
+  }
+  return 0;
+}
+
+// Whether the body-eligibility, multi-prefab, and duo-body facets apply to the
+// given dump version. See BODY_FACET_MIN_VERSION.
+export function supportsBodyFacets(version: string): boolean {
+  return compareVersions(version, BODY_FACET_MIN_VERSION) >= 0;
+}
 
 function tsvUrl(
   kind: 'display_names' | 'itemprefabs' | 'items',
@@ -124,6 +154,15 @@ class CatalogStore {
     this.regexError = '';
   }
 
+  // Reset the version-gated facets (Body, Multi-prefab, Duo-body) to their
+  // defaults so a filter carried in from the URL or a previous version cannot
+  // keep filtering while its controls are hidden on an unsupported dump.
+  #clearBodyFacets() {
+    this.facets.bodyType = DEFAULT_FACETS.bodyType;
+    this.facets.multiPrefab = DEFAULT_FACETS.multiPrefab;
+    this.facets.duoBodyOnly = DEFAULT_FACETS.duoBodyOnly;
+  }
+
   // Read shareable filter/search state from URL params. Bypasses the search
   // debounce so the filter takes effect on the first paint after navigation.
   applyUrlState(params: URLSearchParams) {
@@ -145,7 +184,11 @@ class CatalogStore {
       orphanOnly: params.get('orphan') === '1',
       emptyOnly: params.get('empty') === '1',
       slot: params.get('slot') ?? '',
+      bodyType: params.get('body') ?? '',
+      multiPrefab: triStateFromParam(params.get('multiPrefab')),
+      duoBodyOnly: params.get('duo') === '1',
     };
+    if (!supportsBodyFacets(this.version)) this.#clearBodyFacets();
     this.setUseRegex(params.get('regex') === '1');
   }
 
@@ -168,6 +211,10 @@ class CatalogStore {
     if (facets.orphanOnly) params.set('orphan', '1');
     if (facets.emptyOnly) params.set('empty', '1');
     if (facets.slot) params.set('slot', facets.slot);
+    if (facets.bodyType) params.set('body', facets.bodyType);
+    if (facets.multiPrefab !== 'any')
+      params.set('multiPrefab', facets.multiPrefab);
+    if (facets.duoBodyOnly) params.set('duo', '1');
     return params;
   }
 
@@ -218,6 +265,7 @@ class CatalogStore {
   async setVersion(next: CatalogVersion): Promise<void> {
     if (next === this.version) return;
     this.version = next;
+    if (!supportsBodyFacets(next)) this.#clearBodyFacets();
     await this.load();
   }
 
@@ -284,6 +332,13 @@ function matchesFacets(row: CatalogRow, facets: FacetState): boolean {
   if (facets.slot && !matchesSlot(facets.slot, row.slot, row.prefab)) {
     return false;
   }
+  if (facets.bodyType && (row.bodyType ?? '') !== facets.bodyType)
+    return false;
+  if (facets.multiPrefab !== 'any') {
+    const isMulti = (row.prefabCount ?? 0) > 1;
+    if ((facets.multiPrefab === 'yes') !== isMulti) return false;
+  }
+  if (facets.duoBodyOnly && !row.duoBody) return false;
   return true;
 }
 
@@ -292,13 +347,21 @@ export const catalog = new CatalogStore();
 export function hasActiveFilter(): boolean {
   if (catalog.debouncedQuery) return true;
   const facets = catalog.facets;
-  if (facets.orphanOnly || facets.emptyOnly || facets.slot) return true;
+  if (
+    facets.orphanOnly ||
+    facets.emptyOnly ||
+    facets.slot ||
+    facets.bodyType ||
+    facets.duoBodyOnly
+  )
+    return true;
   return (
     facets.hasPrefab !== 'any' ||
     facets.hasDisplayName !== 'any' ||
     facets.hasInternalName !== 'any' ||
     facets.hasItemId !== 'any' ||
-    facets.hasSiblings !== 'any'
+    facets.hasSiblings !== 'any' ||
+    facets.multiPrefab !== 'any'
   );
 }
 
@@ -355,4 +418,20 @@ export function filteredRows(): CatalogRow[] {
     matches.push(row);
   }
   return matches;
+}
+
+// The mesh prefabs whose EXACT item is this row's item, i.e. the item's real
+// multi-prefab variant set (matches the row's prefabCount). Sibling links are
+// deliberately excluded so a single-prefab item that merely appears as another
+// prefab's sibling does not pull in unrelated meshes; those still show under the
+// details drawer's separate Siblings section. Rows without an exact item return
+// just themselves (the drawer then hides the section).
+export function relatedRows(row: CatalogRow): CatalogRow[] {
+  if (row.itemId === undefined) return [row];
+  const id = row.itemId;
+  const out: CatalogRow[] = [];
+  for (const r of catalog.rows) {
+    if (r.prefab && r.itemId === id) out.push(r);
+  }
+  return out.length ? out : [row];
 }
