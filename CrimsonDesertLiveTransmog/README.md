@@ -16,7 +16,7 @@
 - Preset system: save, load, rename, and cycle through multiple transmog presets per character
 - Multi-character support: independent preset lists for Kliff, Damiane, and Oongka. Every visible protagonist's preset is applied automatically on world entry (and to followers as soon as they're summoned in-game), and the active preset follows whoever you control
 - NPC armor variants and damaged variants render via automatic carrier swap
-- Body-type picker filter: hides items whose body (male/female) does not match the active character so broken meshes stay out of the list. Per-character override available in the overlay for body-swap mod users. Temporarily disabled on game version 1.13.00 while it is reworked; all other picker filters work normally
+- Body-type picker filter: hides items whose body (male/female) does not match the active character so broken meshes stay out of the list. Per-character override available in the overlay for body-swap mod users
 - Per-slot control: enable/disable transmog independently for each equipment slot
 - Optional hotkeys: all disabled by default, configurable via INI
 - Open-source with full transparency

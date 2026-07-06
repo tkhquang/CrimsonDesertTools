@@ -97,16 +97,14 @@ namespace Transmog
         bool has_variant_meta(uint16_t itemId) const;
 
         /**
-         * @brief True if the item is safe to equip on the player.
+         * @brief True if the item is safe to equip on the (male) player.
          *
-         * Player-compatible means at least one of the item's rules in the descriptor rule list at `+0x248` carries a
-         * male body-type token. The default player (Kliff) uses the male humanoid skeleton; items whose rules use only
-         * non-player classifiers (horse/mount/pet tack, wagon gear) are flagged unsafe -- binding them to a player body
-         * crashes the mesh binder downstream.
+         * Kliff-centric: an item is player-safe unless it is restricted to the female body. The restriction is sourced
+         * from the equip-eligibility ("Male"/"Female") column of the display_names TSV (m_bodyByName, keyed by lowercase
+         * internal name); an item wearable by both bodies or unrestricted is absent from that map and counts as safe.
+         * This supersedes the former descriptor rule-classifier token walk, which the 1.13 game update rendered inert.
          *
-         * Unknown ids and items with no rules default to `true`: the picker prefers to surface inert cosmetics rather
-         * than hide them accidentally. See `k_maleBodyTokens` in the .cpp for the token set and how to re-derive it
-         * after a game patch.
+         * Unknown ids default to `true`: the picker prefers to surface an item rather than hide it accidentally.
          */
         bool is_player_compatible(uint16_t itemId) const;
 
@@ -169,20 +167,20 @@ namespace Transmog
          * armor, quest item, etc).
          */
         /**
-         * Body-type classification derived from an item's rule classifier tokens. Drives the picker's per-character
-         * visibility: an item rendered on the wrong body produces broken meshes, so the filter hides opposite-body
-         * items by default.
+         * Body-type classification that drives the picker's per-character visibility: an item rendered on the wrong
+         * body produces broken meshes, so the filter hides opposite-body items by default.
          *
-         *   Generic:     no classifier tokens at all (rule-less items)
-         *   Male:        has a male token   (k_maleBodyTokens)
-         *   Female:      has a female token (k_femaleBodyTokens)
-         *   Both:        rare -- has both male and female tokens
-         *   Ambiguous:   humanoid-range tokens only, but not in the
-         *                male or female body sets (e.g. NPC-specific variants like `0x012F`-only items --
-         *                Antumbra/Badran/Luka gloves). Picker shows with an amber badge because render fidelity is
-         *                inconsistent -- some work, some break.
-         *   NonHumanoid: has any token >= 0x1000 (mount/pet/wagon/
-         *                dragon armors). Hidden from all human-character pickers.
+         * The live source is the equip-eligibility column of the display_names TSV (m_bodyByName): only single-body
+         * restricted items are listed, so classification currently resolves to Male, Female, or Generic. This
+         * superseded the former rule-classifier token walk, which the 1.13 game update rendered inert; the remaining
+         * kinds are retained as picker display vocabulary for a future mesh-based classifier.
+         *
+         *   Generic:     unrestricted / wearable by both bodies (also the default for unknown ids)
+         *   Male:        restricted to the male humanoid skeleton
+         *   Female:      restricted to the female humanoid skeleton
+         *   Both:        wearable by both bodies (reserved; not currently emitted)
+         *   Ambiguous:   humanoid item whose body cannot be decided; picker shows an amber badge (reserved)
+         *   NonHumanoid: mount/pet/wagon/dragon gear, hidden from all human-character pickers (reserved)
          */
         enum class BodyKind : std::uint8_t
         {
@@ -220,6 +218,20 @@ namespace Transmog
          * for unknown names so future characters produce a wide-open picker instead of an empty one.
          */
         static BodyKind body_kind_for_character(const std::string &charName) noexcept;
+
+        /**
+         * @brief Single-body restriction for an item: BodyKind::Male / BodyKind::Female, or BodyKind::Generic when the
+         *        item is dual-body / unrestricted (or the id is unknown / catalog not yet built).
+         *
+         * Unlike is_player_compatible (which is Kliff-centric), this returns the raw kind so callers can compare it
+         * against a specific character's body -- e.g. to decide whether the engine's own body/class check will accept
+         * the item (and therefore pick the correct body variant) WITHOUT LT's char-class bypass. Sourced from the same
+         * display_names equip-eligibility column (m_bodyByName, keyed by lowercase internal name).
+         *
+         * Named to parallel body_kind_for_character(); distinct from PresetManager::body_kind_of(), which returns a
+         * character's configured body as a string.
+         */
+        BodyKind body_kind_for_item(uint16_t itemId) const;
 
         /**
          * @brief Look up the transmog slot for an item id.
@@ -286,9 +298,7 @@ namespace Transmog
         std::unordered_map<uint16_t, std::string> m_idToName;
         std::unordered_map<std::string, uint16_t> m_nameToId;
         std::unordered_map<uint16_t, uint8_t> m_variantFlag;
-        std::unordered_map<uint16_t, uint8_t> m_playerFlag;
         std::unordered_map<uint16_t, uint16_t> m_equipType;
-        std::unordered_map<uint16_t, uint8_t> m_bodyBits;
         std::unordered_map<uint16_t, uint16_t> m_typeCode; // desc+0x44 canonical item-type code
         // Runtime-learned `itemId -> TransmogSlot` map. Populated by
         // `record_observed_slot` (called from the slot-discovery dump when it observes live auth-table bindings).
@@ -296,6 +306,11 @@ namespace Transmog
         // given slot, we trust that over any heuristic. Session-scoped (no disk persistence).
         std::unordered_map<uint16_t, TransmogSlot> m_observedSlot;
         std::unordered_map<std::string, std::string> m_displayNames; // lowercase internal -> display
+        // Wearer-body restriction, loaded from the optional 3rd column of the display_names TSV. Keyed by lowercase
+        // internal name; only single-body-restricted items are present (Male / Female). Absent -> unrestricted
+        // (BodyKind::Generic). Drives the per-character picker filter and is_player_compatible. Replaced the old
+        // runtime rule-classifier tokens, which the 1.13 game update rendered inert.
+        std::unordered_map<std::string, BodyKind> m_bodyByName;
         mutable std::vector<Entry> m_sortedCache;
 
         // Stability detector: tracks the valid count from the previous build() attempt. The catalog is accepted only

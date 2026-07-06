@@ -110,211 +110,6 @@ namespace Transmog
         return v.value_or(0);
     }
 
-    // --- Body-type classification via rule-classifier tokens ---
-    //
-    // Every armor descriptor at +0x248 holds a stride-0x38 rule list (count at +0x250). Each rule's classifier array at
-    // rule+0x20 (count at rule+0x28) is a list of u16 body-type tokens the engine's rule evaluator accepts for that
-    // item. Mount/pet/non-humanoid gear (horse tack, wagon gear, dragon armor) uses a disjoint, high-valued token pool
-    // and crashes the mesh binder if bound to a player body.
-    //
-    // The class-enum is re-keyed across major game versions; the descriptor layout (the offsets above, 0x38 stride) is
-    // stable, only the enum values move. Token sets per version, kept for drift tracking:
-    //
-    //   v1.03.01:  male {0x0018,0x0058,0x02E3}  female {0x0072,0x0382,0x0300}
-    //   v1.04.00:  male {0x0019,0x0059,0x02E5}  female {0x0073,0x0384,0x0302}
-    //   v1.08.00:  male {0x0012,0x0052,0x02DE}  female {0x006C,0x037D,0x02FB}
-    //   v1.09.00:  male {0x0012,0x0054,0x02DF}  female {0x001D,0x037E,0x02FC}
-    //
-    // Each body has three interchangeable markers; an armor item may carry any subset (r0{0x12} and r0{0x12,0x54,0x2DF}
-    // are both male). 0x12 and 0x1D are the male/female primary markers and counterparts; the other two of each set are
-    // secondary. All three female markers must be matched because some female items carry only the primary 0x1D with
-    // neither 0x37E nor 0x2FC. Every value drifts on a game update; re-derive then.
-    //
-    // To re-derive after a drift, read the rule cls array
-    // (desc+0x248 -> rule+0x20, see item_body_bits) of a known male and a
-    // known female armor item; those cls values are the male and female token sets. The deltas are not uniform across
-    // patches, so map by inspection rather than a fixed offset. The male markers do not appear in clean female items,
-    // so the OR-any-token classification stays sound.
-    static constexpr std::uint16_t k_maleBodyTokens[] = {
-        0x0011,
-        0x005E,
-        0x02E9,
-    };
-    static constexpr std::uint16_t k_femaleBodyTokens[] = {
-        0x001C,
-        0x0388,
-        0x0306,
-    };
-    // Shared / NPC-body token. Carried as a secondary tag by most male (cd_phm_*) human armor alongside a male token,
-    // and in isolation (no human gender token) by a handful of NPC/demon-body items whose mesh is cd_ndm_*/cd_pdm_*.
-    // The mesh body code's last letter is the true gender (m=male, w=female), and every isolated-shared-token armor
-    // item resolves to a *dm (male) body, so an item carrying only this token is classified
-    // Male (see sorted_entries). Items that also carry a real male token classify Male from that token, so this
-    // fallback never alters them.
-    static constexpr std::uint16_t k_sharedBodyTokens[] = {
-        0x03A3, // *dm (male) NPC/demon body marker; drifts on game updates
-    };
-    // Body bits.
-    //   Male / Female  -- a male/female token appeared in ANY rule (OR across
-    //                     all rules). Drives is_player_compatible (Kliff-
-    //                     centric "has a male rule" => safe to bind). DO NOT
-    //                     narrow these: transmog_apply.cpp's carrier-path
-    //                     fallback reads is_player_compatible, and the
-    //                     regression fix was validated against this OR
-    //                     semantics.
-    //   CleanMale /     -- gender seen in a "clean" rule = a gender rule with
-    //   CleanFemale        NO NPC-identity token (>= k_nonHumanoidTokenThreshold,
-    //                      e.g. an NPC armor's 0x1E8C/0x1F46). A clean rule
-    //                      reflects a real player mesh; an NPC-gated rule is an
-    //                      acceptance gate. Used for BodyKind / picker display
-    //                      ONLY. This keeps NPC armor whose female rule is
-    //                      NPC-gated classified Male, while letting a
-    //                      protagonist item with a clean female rule show for
-    //                      female. KNOWN LIMITATION: a male-mesh item that
-    //                      carries a CLEAN female rule over-shows for female,
-    //                      because the classifier tokens alone cannot separate
-    //                      it from a real female item (identical token
-    //                      patterns); only the mesh prefab gender letter can.
-    //                      A future mesh-based classifier supersedes this. The
-    //                      trade-off is deliberate: it favours zero female
-    //                      false-negatives over a handful of male false-positives.
-    //   HasTokens      -- saw ANY classifier token (humanoid or not)
-    //   NonHumanoid    -- saw a token >= 0x1000 (mount/pet/wagon/dragon
-    //                     pools all sit in this range; every humanoid
-    //                     token observed so far lives below 0x0400).
-    //   SharedBody     -- saw a k_sharedBodyTokens entry (0x399); only
-    //                     decisive when no gendered human token is present.
-    // BodyKind (derived in sorted_entries):
-    //   CleanMale + CleanFemale              -> Both
-    //   CleanMale                            -> Male
-    //   CleanFemale                          -> Female
-    //   (no clean) Male + Female  [OR bits]  -> Male  (NPC-dual, both gender
-    //                                           rules NPC-gated -> default Male)
-    //   (no clean) Male                      -> Male
-    //   (no clean) Female                    -> Female
-    //   SharedBody only (no M/F)             -> Male  (0x399 NPC-body items are
-    //                                           male-mesh, cd_*dm)
-    //   NonHumanoid (no gender, no shared)   -> BodyKind::NonHumanoid (hide)
-    //   HasTokens but no body                -> Ambiguous  (e.g. {0x012F}-only
-    //                                           NPC variants; picker amber)
-    //   No tokens at all                     -> Generic    (rule-less items)
-    static constexpr std::uint8_t k_bodyBitMale = 0x01;
-    static constexpr std::uint8_t k_bodyBitFemale = 0x02;
-    static constexpr std::uint8_t k_bodyBitHasTokens = 0x04;
-    static constexpr std::uint8_t k_bodyBitNonHumanoid = 0x08;
-    // Set when a k_sharedBodyTokens entry (0x399) is seen. Used only as a classification fallback for items that carry
-    // it WITHOUT any gendered human body token (NPC/demon-body carrier items) -- see sorted_entries.
-    static constexpr std::uint8_t k_bodyBitSharedBody = 0x20;
-    // Clean gender = gender seen in a rule that has NO NPC-identity/high token (>= k_nonHumanoidTokenThreshold). A
-    // clean rule reflects a real player mesh; an NPC-gated rule is just an acceptance gate. BodyKind prefers clean
-    // gender (see sorted_entries); is_player_compatible uses the OR-ed Male/Female bits above. See the
-    // bit-doc block for rationale.
-    static constexpr std::uint8_t k_bodyBitCleanMale = 0x40;
-    static constexpr std::uint8_t k_bodyBitCleanFemale = 0x80;
-    // Any classifier token >= this threshold is treated as non-humanoid (horse saddles, dragon armors, pet harnesses);
-    // every humanoid token observed sits well below it.
-    static constexpr std::uint16_t k_nonHumanoidTokenThreshold = 0x1000;
-
-    static constexpr std::ptrdiff_t k_ruleListPtrOffset = 0x248;
-    static constexpr std::ptrdiff_t k_ruleListCountOffset = 0x250;
-    static constexpr std::size_t k_ruleStride = 0x38;
-    static constexpr std::ptrdiff_t k_ruleClassPtrOffset = 0x20;
-    static constexpr std::ptrdiff_t k_ruleClassCountOffset = 0x28;
-    static constexpr std::uint32_t k_maxPlausibleRuleCount = 64;
-    static constexpr std::uint32_t k_maxPlausibleClassCount = 32;
-
-    // Walk an item's rule-classifier arrays once and return the packed body-kind bit mask documented with the
-    // k_bodyBit* constants above (Male / Female / HasTokens / NonHumanoid / SharedBody / CleanMale /
-    // CleanFemale). Items with no rules (or unreadable fields) return 0 (Generic) -- the picker treats Generic as
-    // "accepted by every body", matching the engine's observed behaviour for rule-less cosmetics.
-    static std::uint8_t item_body_bits(uintptr_t descPtr) noexcept
-    {
-        bool ok = false;
-        const auto rulesPtr = read_qword_safe(descPtr + k_ruleListPtrOffset, ok);
-        if (!ok || rulesPtr < 0x10000)
-            return 0;
-        const auto ruleCount = read_u32_safe(descPtr + k_ruleListCountOffset, ok);
-        if (!ok || ruleCount == 0 || ruleCount > k_maxPlausibleRuleCount)
-            return 0;
-
-        std::uint8_t bits = 0;
-
-        for (std::uint32_t i = 0; i < ruleCount; ++i)
-        {
-            const auto rule = rulesPtr + i * k_ruleStride;
-            const auto clsPtr = read_qword_safe(rule + k_ruleClassPtrOffset, ok);
-            if (!ok || clsPtr < 0x10000)
-                continue;
-            const auto clsCount = read_u32_safe(rule + k_ruleClassCountOffset, ok);
-            if (!ok || clsCount == 0 || clsCount > k_maxPlausibleClassCount)
-                continue;
-
-            bool ruleHasMale = false;
-            bool ruleHasFemale = false;
-            // A token >= k_nonHumanoidTokenThreshold inside a gender rule is an NPC-identity gate (e.g. Samuel
-            // 0x1E8C/0x1F46), not a player body. A rule carrying one is NOT "clean" -- its gender tokens are an
-            // acceptance gate, not a real player mesh.
-            bool ruleHasHighToken = false;
-            for (std::uint32_t j = 0; j < clsCount; ++j)
-            {
-                const auto clsOpt = DMKMemory::seh_read<std::uint16_t>(clsPtr + 2ull * j);
-                if (!clsOpt)
-                    break;
-                const std::uint16_t cls = *clsOpt;
-                bits |= k_bodyBitHasTokens;
-                if (cls >= k_nonHumanoidTokenThreshold)
-                {
-                    bits |= k_bodyBitNonHumanoid;
-                    ruleHasHighToken = true;
-                }
-                for (const auto mt : k_maleBodyTokens)
-                {
-                    if (cls == mt)
-                    {
-                        ruleHasMale = true;
-                        break;
-                    }
-                }
-                for (const auto ft : k_femaleBodyTokens)
-                {
-                    if (cls == ft)
-                    {
-                        ruleHasFemale = true;
-                        break;
-                    }
-                }
-                // Shared / NPC-body token. Tracked globally (not per-rule) as a fallback in sorted_entries when
-                // no gendered human token classified the item.
-                for (const auto st : k_sharedBodyTokens)
-                {
-                    if (cls == st)
-                    {
-                        bits |= k_bodyBitSharedBody;
-                        break;
-                    }
-                }
-            }
-            // OR-across-rules Male/Female (drives is_player_compatible).
-            if (ruleHasMale)
-                bits |= k_bodyBitMale;
-            if (ruleHasFemale)
-                bits |= k_bodyBitFemale;
-            // "Clean" gender = a gender rule with NO NPC-identity/high token. These reflect a real player mesh;
-            // NPC-gated rules (Samuel, Heisellen, etc.) are excluded. BodyKind prefers clean gender so a male item with
-            // an NPC-gated female rule stays Male, while a protagonist item with a clean female rule (Demian_Greyfur_*
-            // cloak) shows for female.
-            if (!ruleHasHighToken)
-            {
-                if (ruleHasMale)
-                    bits |= k_bodyBitCleanMale;
-                if (ruleHasFemale)
-                    bits |= k_bodyBitCleanFemale;
-            }
-        }
-
-        return bits;
-    }
-
     /**
      * Decode a relative-call instruction ( `E8 disp32` ) at the given address and return its target. Returns 0 on
      * failure.
@@ -801,16 +596,12 @@ namespace Transmog
         std::unordered_map<uint16_t, std::string> idToName;
         std::unordered_map<std::string, uint16_t> nameToId;
         std::unordered_map<uint16_t, uint8_t> variantFlag;
-        std::unordered_map<uint16_t, uint8_t> playerFlag;
         std::unordered_map<uint16_t, uint16_t> equipTypeMap;
-        std::unordered_map<uint16_t, uint8_t> bodyBitsMap;
         std::unordered_map<uint16_t, uint16_t> typeCodeMap;
         idToName.reserve(count);
         nameToId.reserve(count);
         variantFlag.reserve(count);
-        playerFlag.reserve(count);
         equipTypeMap.reserve(count);
-        bodyBitsMap.reserve(count);
         typeCodeMap.reserve(count);
 
         // Pass 1: walk the catalog, collect names + variant-meta pointers
@@ -821,10 +612,8 @@ namespace Transmog
         {
             uint16_t id;
             std::string name;
-            uintptr_t metaPtr; // 0 on read fault
-            bool playerCompatible;
+            uintptr_t metaPtr;  // 0 on read fault
             uint16_t equipType; // raw u16 at desc+0x42, 0 on read fault
-            uint8_t bodyBits;   // k_bodyBit* mask from item_body_bits()
             uint16_t typeCode;  // desc+0x44 -- canonical item-type code
         };
         std::vector<ScratchEntry> scratch;
@@ -832,7 +621,6 @@ namespace Transmog
 
         std::size_t valid = 0;
         std::size_t collisions = 0;
-        std::size_t nonPlayerCount = 0;
         char buf[k_maxNameLen + 1];
 
         for (uint32_t id = 0; id < count; ++id)
@@ -841,9 +629,9 @@ namespace Transmog
             if (!ok || !DMKMemory::plausible_userspace_ptr(descPtr))
                 continue;
 
-            // descPtr is reused by four downstream reads (metaPtr, item_body_bits, equipType@+0x42, typeCode@+0x44), so
-            // it is resolved separately; only the wrapper -> string pointer hops
-            // (descPtr -> +0x8 -> +0x0) are folded into one guarded walk.
+            // descPtr is reused by three downstream reads (metaPtr, equipType@+0x42, typeCode@+0x44), so it is resolved
+            // separately; only the wrapper -> string pointer hops (descPtr -> +0x8 -> +0x0) are folded into one guarded
+            // walk.
             const auto strPtrOpt = DMKMemory::seh_read_chain<uintptr_t>(descPtr, {0x8, 0x0});
             if (!strPtrOpt || !DMKMemory::plausible_userspace_ptr(*strPtrOpt))
                 continue;
@@ -856,12 +644,11 @@ namespace Transmog
             const auto id16 = static_cast<uint16_t>(id);
             const uintptr_t metaPtr = read_qword_safe(descPtr + k_descVariantMetaOffset, ok);
 
-            // Body-bits summary walked once; Kliff "PlayerSafe" is equivalent to "item has a male-body token".
-            const uint8_t bodyBits = item_body_bits(descPtr);
-            const bool playerCompat = (bodyBits & k_bodyBitMale) != 0;
-            if (!playerCompat)
-                ++nonPlayerCount;
-
+            // Wearer-body classification is NOT read here: the 1.13 game re-keyed the descriptor rule-classifier body
+            // tokens (the rule list at +0x248 no longer yields a usable body class), so body now comes from the
+            // equip-eligibility ("Male"/"Female") column of the display_names TSV (see load_display_names / m_bodyByName),
+            // applied at query time in sorted_entries and is_player_compatible. scripts/gen_item_body_table.py fills that
+            // column from the packed gamedata.
             bool etOk = false;
             const uint16_t equipType = read_u16_safe(descPtr + 0x42, etOk);
 
@@ -879,9 +666,7 @@ namespace Transmog
                 id16,
                 std::string(buf, len),
                 ok ? metaPtr : 0,
-                playerCompat,
                 etOk ? equipType : uint16_t{0},
-                bodyBits,
                 tcOk ? typeCode : uint16_t{0xFFFF},
             });
             ++valid;
@@ -953,10 +738,8 @@ namespace Transmog
             if (!inserted)
                 ++collisions;
             variantFlag.emplace(e.id, hasVariant ? uint8_t{1} : uint8_t{0});
-            playerFlag.emplace(e.id, e.playerCompatible ? uint8_t{1} : uint8_t{0});
             if (e.equipType != 0)
                 equipTypeMap.emplace(e.id, e.equipType);
-            bodyBitsMap.emplace(e.id, e.bodyBits);
             typeCodeMap.emplace(e.id, e.typeCode);
         }
 
@@ -1035,9 +818,7 @@ namespace Transmog
             m_idToName = std::move(idToName);
             m_nameToId = std::move(nameToId);
             m_variantFlag = std::move(variantFlag);
-            m_playerFlag = std::move(playerFlag);
             m_equipType = std::move(equipTypeMap);
-            m_bodyBits = std::move(bodyBitsMap);
             m_typeCode = std::move(typeCodeMap);
             m_sortedCache.clear(); // will be rebuilt lazily on next access
         }
@@ -1046,8 +827,8 @@ namespace Transmog
         const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
 
         logger.info("[nametable] built: {}/{} entries ({} name collisions, "
-                    "{} variant-meta, {} non-player) in {}ms",
-                    valid, count, collisions, variantCount, nonPlayerCount, ms);
+                    "{} variant-meta) in {}ms",
+                    valid, count, collisions, variantCount, ms);
         return BuildResult::Ok;
     }
 
@@ -1079,11 +860,31 @@ namespace Transmog
     bool ItemNameTable::is_player_compatible(uint16_t itemId) const
     {
         std::lock_guard<std::mutex> lk(s_tableMtx);
-        auto it = m_playerFlag.find(itemId);
-        // Unknown ids default to true -- prefer to surface rather than hide.
-        if (it == m_playerFlag.end())
-            return true;
-        return it->second != 0;
+        // Kliff-centric: safe to bind on the (male) player unless the item is restricted to the female body. Body is
+        // sourced from the display_names equip-eligibility column (m_bodyByName, keyed by lowercase internal name).
+        auto nit = m_idToName.find(itemId);
+        if (nit == m_idToName.end())
+            return true; // unknown -> prefer to surface
+        std::string key = nit->second;
+        for (auto &c : key)
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        auto bit = m_bodyByName.find(key);
+        return bit == m_bodyByName.end() || bit->second != BodyKind::Female;
+    }
+
+    ItemNameTable::BodyKind ItemNameTable::body_kind_for_item(uint16_t itemId) const
+    {
+        std::lock_guard<std::mutex> lk(s_tableMtx);
+        // Lowercase the internal name to match m_bodyByName's keys; an item wearable by both bodies (or
+        // unrestricted) is absent from the map and resolves to BodyKind::Generic.
+        auto nit = m_idToName.find(itemId);
+        if (nit == m_idToName.end())
+            return BodyKind::Generic;
+        std::string key = nit->second;
+        for (auto &c : key)
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        auto bit = m_bodyByName.find(key);
+        return bit != m_bodyByName.end() ? bit->second : BodyKind::Generic;
     }
 
     uint16_t ItemNameTable::equip_type_of(uint16_t itemId) const noexcept
@@ -1136,10 +937,9 @@ namespace Transmog
 
     ItemNameTable::BodyKind ItemNameTable::body_kind_for_character(const std::string &charName) noexcept
     {
-        // Male: Kliff, Oongka (their native rule sets include male-body
-        //       tokens -- see k_maleBodyTokens above).
-        // Female: Damiane (see k_femaleBodyTokens above). Unknown characters default to Generic -- we don't know their
-        // body, so treat every item as potentially compatible rather than silently hiding their picker.
+        // Fixed per-character body: Kliff and Oongka use the male humanoid skeleton, Damiane the female one. Unknown
+        // characters default to Generic -- we don't know their body, so treat every item as potentially compatible
+        // rather than silently hiding their picker.
         if (charName == "Kliff" || charName == "Oongka")
             return BodyKind::Male;
         if (charName == "Damiane")
@@ -1174,55 +974,25 @@ namespace Transmog
         {
             auto vit = m_variantFlag.find(id);
             const bool hasVariant = (vit != m_variantFlag.end()) && (vit->second != 0);
-            auto pit = m_playerFlag.find(id);
-            const bool isPlayer = (pit == m_playerFlag.end()) || (pit->second != 0);
             auto eit = m_equipType.find(id);
             const uint16_t equipT = (eit != m_equipType.end()) ? eit->second : uint16_t{0};
-            auto bit = m_bodyBits.find(id);
-            // Unknown ids default to Generic (bodyBits=0). Picker shows Generic on every character, matching the
-            // engine's behaviour for rule-less cosmetics.
-            const uint8_t bBits = (bit != m_bodyBits.end()) ? bit->second : uint8_t{0};
-            BodyKind kind;
-            // BodyKind prefers CLEAN gender (a gender rule with no NPC-identity token) so NPC armor with an NPC-gated
-            // female rule stays Male while a protagonist item with a clean female rule shows for female. The OR
-            // Male/Female bits are the fallback when no rule is clean.
-            const bool cleanM = (bBits & k_bodyBitCleanMale) != 0;
-            const bool cleanF = (bBits & k_bodyBitCleanFemale) != 0;
-            const bool anyM = (bBits & k_bodyBitMale) != 0;
-            const bool anyF = (bBits & k_bodyBitFemale) != 0;
-            const bool hasT = (bBits & k_bodyBitHasTokens) != 0;
-            const bool hasNH = (bBits & k_bodyBitNonHumanoid) != 0;
-            const bool hasShared = (bBits & k_bodyBitSharedBody) != 0;
-            if (cleanM && cleanF)
-                kind = BodyKind::Both;
-            else if (cleanM)
-                kind = BodyKind::Male;
-            else if (cleanF)
-                kind = BodyKind::Female;
-            else if (anyM)
-                // Only NPC-gated gender rules. If it has both male and female NPC rules (Samuel/Heisellen) it defaults
-                // Male; a male-only NPC rule is Male too. Render is via carrier on the native class; keeping it Male
-                // matches "no clean female mesh".
-                kind = BodyKind::Male;
-            else if (anyF)
-                kind = BodyKind::Female;
-            else if (hasShared)
-                // Shared/NPC-body token (0x399) only, no gendered human token. Mesh is an NPC/demon body ending in 'm'
-                // (cd_ndm_*/cd_pdm_*, e.g. Greyfur_Fabric_Armor_L, Cantina_ChainMail_Armor) = MALE.
-                kind = BodyKind::Male;
-            else if (hasNH)
-                // Token >= 0x1000 with no humanoid body-token present => actual mount/pet/wagon/dragon gear. Hide.
-                kind = BodyKind::NonHumanoid;
-            else if (hasT)
-                // Humanoid-range tokens but no body-specific match -- NPC-variant glove/armor items that carry only
-                // identity tokens like `0x012F`. Render behaviour is inconsistent so the picker colours these amber.
-                kind = BodyKind::Ambiguous;
-            else
-                kind = BodyKind::Generic;
-            // Look up display name by lowercased internal name.
+
+            // Lowercased internal name keys both the display-name and the wearer-body maps (both loaded from the
+            // display_names TSV).
             std::string lowerName = name;
             for (auto &c : lowerName)
                 c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+
+            // Wearer-body classification comes from the equip-eligibility column of the display_names TSV
+            // (m_bodyByName). Only single-body-restricted items are listed; anything wearable by both bodies (or
+            // unrestricted) is absent -> BodyKind::Generic, shown on every character. This supersedes the old
+            // rule-classifier token machinery, which the 1.13 game update rendered inert. See
+            // scripts/gen_item_body_table.py for how the column is filled.
+            auto brit = m_bodyByName.find(lowerName);
+            const BodyKind kind = (brit != m_bodyByName.end()) ? brit->second : BodyKind::Generic;
+            // Kliff-centric "PlayerSafe": an item is player-safe unless it is restricted to the female body.
+            const bool isPlayer = (kind != BodyKind::Female);
+
             auto dit = m_displayNames.find(lowerName);
             std::string dispName = (dit != m_displayNames.end()) ? dit->second : std::string();
 
@@ -1320,6 +1090,7 @@ namespace Transmog
         }
 
         std::unordered_map<std::string, std::string> names;
+        std::unordered_map<std::string, BodyKind> bodyByName;
         names.reserve(6100);
         std::string line;
         while (std::getline(file, line))
@@ -1329,25 +1100,46 @@ namespace Transmog
             if (line.back() == '\r')
                 line.pop_back();
 
-            const auto tab = line.find('\t');
-            if (tab == std::string::npos || tab == 0 || tab + 1 >= line.size())
+            const auto t1 = line.find('\t');
+            if (t1 == std::string::npos || t1 == 0)
                 continue;
 
-            std::string key = line.substr(0, tab);
+            std::string key = line.substr(0, t1);
             for (auto &c : key)
                 c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-            names.emplace(std::move(key), line.substr(tab + 1));
+
+            // Columns: <internal name> \t <display name> [\t <wearer body: "Male"|"Female">]. The optional 3rd column
+            // carries the equip-eligibility body restriction (scripts/gen_item_body_table.py fills it from the packed
+            // gamedata) and is only present for single-body-restricted items, so an older 2-column TSV still loads --
+            // absent body just means "unrestricted / shown on every character".
+            std::string display, body;
+            const auto t2 = line.find('\t', t1 + 1);
+            if (t2 == std::string::npos)
+                display = line.substr(t1 + 1);
+            else
+            {
+                display = line.substr(t1 + 1, t2 - (t1 + 1));
+                body = line.substr(t2 + 1);
+            }
+            if (body == "Male")
+                bodyByName.emplace(key, BodyKind::Male);
+            else if (body == "Female")
+                bodyByName.emplace(key, BodyKind::Female);
+            if (!display.empty())
+                names.emplace(std::move(key), std::move(display));
         }
 
         {
             std::lock_guard<std::mutex> lk(s_tableMtx);
             m_displayNames = std::move(names);
+            m_bodyByName = std::move(bodyByName);
             // Callers must invoke load_display_names() before any sorted_entries() access (i.e. before
             // dump_catalog_tsv) so the cache is still empty here -- no re-sort needed.
             m_sortedCache.clear();
         }
 
-        logger.info("[nametable] loaded {} display names from '{}'", m_displayNames.size(), tsvPath);
+        logger.info("[nametable] loaded {} display names ({} body-restricted) from '{}'", m_displayNames.size(),
+                    m_bodyByName.size(), tsvPath);
     }
 
     std::string ItemNameTable::display_name_of(std::string_view internalName) const

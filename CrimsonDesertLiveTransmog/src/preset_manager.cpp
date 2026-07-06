@@ -925,6 +925,23 @@ namespace Transmog
         return &it->second.presets[static_cast<std::size_t>(idx)];
     }
 
+    Preset *PresetManager::active_preset_mut_or_create()
+    {
+        if (auto *p = active_preset_mut())
+            return p;
+        // No preset for the editing character yet -- mint one from the current in-game/edit state so the caller (e.g.
+        // the Dye picker) has somewhere to write, instead of swallowing the interaction. Mirrors the auto-create branch
+        // of replace_current_from_state().
+        auto &cp = ensure_character(m_editingCharacter);
+        int idx = static_cast<int>(cp.presets.size());
+        std::string name = "Preset " + std::to_string(idx);
+        cp.presets.push_back(capture_from_state(name));
+        cp.activePreset = idx;
+        DMK::Logger::get_instance().info("Preset auto-created for dye/edit: '{}' (index {})", name, idx);
+        save();
+        return active_preset_mut();
+    }
+
     const std::vector<Preset> &PresetManager::presets() const
     {
         static const std::vector<Preset> s_empty;

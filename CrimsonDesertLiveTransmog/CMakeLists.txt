@@ -92,6 +92,7 @@ set(COMMON_SOURCES
     src/input_handler.cpp
     src/transmog.cpp
     src/transmog_apply.cpp
+    src/body_variant_hook.cpp
     src/transmog_hooks.cpp
     src/transmog_worker.cpp
     src/dx_overlay.cpp
@@ -293,6 +294,17 @@ endif()
             -DSTAGING_PDB=${GAME_STAGING_DIR}/CrimsonDesertLiveTransmog_Logic.pdb
             -P "${CMAKE_CURRENT_BINARY_DIR}/deploy_logic.cmake"
         COMMENT "Deploying Logic DLL+PDB (falls back to staging if locked)"
+    )
+
+    # The display_names TSV (item names + the wearer-body "Male"/"Female" column filled by
+    # scripts/gen_item_body_table.py) is data the mod loads at runtime. Keep the deployed copy in
+    # sync so it never goes stale -- unlike the DLL it is never game-locked, so a direct
+    # copy_if_different is enough (no staging dance).
+    add_custom_command(TARGET transmog_logic POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/build/template/CrimsonDesertLiveTransmog_display_names.tsv"
+            "${GAME_BIN_DIR}/CrimsonDesertLiveTransmog_display_names.tsv"
+        COMMENT "Deploying display_names.tsv (item names + wearer-body column)"
     )
 
     target_compile_options(transmog_logic PRIVATE /W4 /Zi)

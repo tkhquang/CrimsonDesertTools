@@ -244,6 +244,13 @@ namespace Transmog
         int preset_count() const;
         const Preset *active_preset() const;
         Preset *active_preset_mut();
+        /**
+         * Like active_preset_mut(), but if the editing character has no presets yet, mint one from the current state
+         * (so callers such as the Dye picker always have a preset to write to instead of silently no-op'ing) and return
+         * it. Persists via save(). Returns nullptr only on an unexpected failure. Mirrors the auto-create branch of
+         * replace_current_from_state().
+         */
+        Preset *active_preset_mut_or_create();
         const std::vector<Preset> &presets() const;
 
         /**
