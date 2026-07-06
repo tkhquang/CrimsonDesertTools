@@ -9,28 +9,18 @@
 
 namespace Transmog
 {
-    // Per-(character, slot) default carrier item used by LT's transmog apply path AND by the prefab-wrapper-swap
+    // Per-(character, slot) default carrier ITEM used by LT's transmog apply path AND by the prefab-wrapper-swap
     // picker.
     //
-    //   itemName   -- resolved through ItemNameTable::id_of() at runtime
-    //                 to produce a uint16_t carrier itemId. Drives
-    //                 SlotPopulator(itemId) for the carrier-equip path.
-    //   prefabName -- the body-mesh prefab the carrier emits when
-    //                 equipped (e.g. "cd_phm_02_sword_0015"). Used by
-    //                 PWS::populate_slot_catalogs as the picker's
-    //                 default src selection so the swap-map's source
-    //                 wrapper matches the carrier's natural emit. Empty
-    //                 string when no body-mesh swap is configured for
-    //                 this slot/character (the carrier still works as
-    //                 a plain itemId; just no prefab-level intercept).
-    //
-    // Both fields refer to the SAME logical default item per (char, slot). Centralising them here prevents the drift
-    // class where one was updated and the other forgotten (e.g. the spear-carrier test that failed because PWS src
-    // still pointed at sword_0015).
+    //   itemName -- resolved through ItemNameTable::id_of() at runtime to a uint16_t carrier itemId. Drives
+    //               SlotPopulator(itemId) for the carrier-equip path, and is the SOLE input the prefab-wrapper-swap
+    //               source needs: PWS derives the carrier's body-mesh source prefab(s) from this item's runtime
+    //               variant list (itemmesh_dumper::variant_meshes_for_item -> desc+0x3E0) through
+    //               PrefabWrapperSwap::carrier_source_seed, rather than a hardcoded prefab column that could drift
+    //               from the itemName each patch; the runtime variant list is always exact.
     struct CarrierDefault
     {
         const char *itemName;
-        const char *prefabName;
     };
 
     // Character axis. Order is fixed; CarrierChar(i) maps to k_carriers[i]. New characters append at the end before
@@ -50,66 +40,63 @@ namespace Transmog
     // clang-format off
     inline constexpr CarrierDefault k_carriers[k_carrierCharCount][k_slotCount] = {
         // ============================================================
-        // Kliff (male). Default carriers per slot from the live slot-discovery dump; prefabName values from the in-game
-        // item-mesh mapping.
+        // Kliff (male). Default carriers per slot from the live slot-discovery dump.
         // ============================================================
         {
-            { "Scovi_Fabric_Helm",                           "cd_phm_00_hel_0122"                }, // Helm
-            { "Mercenary_Leather_Armor",                     "cd_phm_00_ub_00_0054"              }, // Chest
-            { "Mercenary_Leather_Cloak",                     "cd_phm_00_cloak_00_0054_s"         }, // Cloak
-            { "Mercenary_Gloves",                            "cd_phm_00_hand_0054"               }, // Gloves
-            { "Mercenary_Leather_Boots",                     "cd_phm_00_foot_0054"               }, // Boots
-            { "Hexe_Earring",                                "cd_phm_00_earring_0013_l"          }, // Earring1
-            { "Ancient_People_Earring",                      "cd_phm_00_earring_0004_r"          }, // Earring2
-            { "Titan_Necklace",                              "cd_phm_00_necklace_0017"           }, // Necklace
-            { "Antumbra_DarkDeacon_Ring",                    "cd_phm_00_ring_0018_l"             }, // Ring1
-            { "AbyssReward_EastWitch_Ring",                  "cd_phm_00_ring_0017_r"             }, // Ring2 (variants: _l/_r)
-            { "RedNose_Lantern",                             "cd_t0000_lantern_0003"             }, // Lantern
-            { "Kliff_Glasses",                               "cd_phm_00_glasses_0002"            }, // Glasses
-            { "Kliff_Mask",                                  "cd_phm_00_mask_00_0271_a"          }, // Mask
-            { "Aggro_Backpack",                              "cd_phm_00_bag_0053"                }, // Backpack
-            { "Daeil_Band",                                  "cd_phm_00_rinkband_0001"           }, // Bracelet (phm, male rig)
-            { "Legendary_Dragon_OneHandSword",               "cd_phm_01_sword_0023_r"            }, // MainHand
-            { "Legendary_Dragon_OneHandSword",               "cd_phm_01_sword_0023_l"            }, // OffHand (mirror)
-            { "GreyWolf_OneHandBow",                         "cd_phm_04_bow_0003"                }, // Ranged
-            { "Legendary_Shakatu_OneHandDagger",             "cd_phm_01_dagger_0079_r"           }, // SubWeapon
-            { "Legendary_Antumbra_TwoHandGiantBastard",      "cd_phm_02_sword_0015"              }, // TwoHandWeapon
+            { "Scovi_Fabric_Helm"                            }, // Helm
+            { "Mercenary_Leather_Armor"                      }, // Chest
+            { "Mercenary_Leather_Cloak"                      }, // Cloak
+            { "Mercenary_Gloves"                             }, // Gloves
+            { "Mercenary_Leather_Boots"                      }, // Boots
+            { "Hexe_Earring"                                 }, // Earring1
+            { "Ancient_People_Earring"                       }, // Earring2
+            { "Titan_Necklace"                               }, // Necklace
+            { "Antumbra_DarkDeacon_Ring"                     }, // Ring1
+            { "AbyssReward_EastWitch_Ring"                   }, // Ring2 (variants: _l/_r)
+            { "RedNose_Lantern"                              }, // Lantern
+            { "Kliff_Glasses"                                }, // Glasses
+            { "Kliff_Mask"                                   }, // Mask
+            { "Aggro_Backpack"                               }, // Backpack
+            { "Daeil_Band"                                   }, // Bracelet (phm, male rig)
+            { "Legendary_Dragon_OneHandSword"                }, // MainHand
+            { "Legendary_Dragon_OneHandSword"                }, // OffHand (mirror)
+            { "GreyWolf_OneHandBow"                          }, // Ranged
+            { "Legendary_Shakatu_OneHandDagger"              }, // SubWeapon
+            { "Legendary_Antumbra_TwoHandGiantBastard"       }, // TwoHandWeapon
         },
 
         // ============================================================
         // Damiane (female). Demeniss Elite/Uniform Leather armor set +
-        // Pattern jewelry set + Damian_OneHandPistol Ranged. prefab values derived from
-        // `00_idea/items_to_prefabs_v105_01.tsv`. Engine uses cd_phw_* for female-specific assets and cd_phm_* for
-        // shared accessories. Some armor pieces use _index## variants -- LT's prefab-wrapper hook registers all
-        // variants of the base prefab so any one variant works as the picker default seed.
+        // Pattern jewelry set + Damian_OneHandPistol Ranged. The engine uses cd_phw_* for female-specific assets
+        // and cd_phm_* for shared accessories; PWS derives the source rig meshes from each carrier itemId at runtime.
         // ============================================================
         {
-            { "Demian_PlateArmor_Helm_VII",                  "cd_phw_00_hel_00_0162"             }, // Helm
-            { "Damian_Demeniss_Elite_Uniform_Leather_Armor", "cd_phw_00_ub_00_0163_index01"      }, // Chest
-            { "Damian_Demeniss_Uniform_Leather_Cloak",       "cd_phw_00_cloak_00_0163_index01_t" }, // Cloak
-            { "Damian_Demeniss_Uniform_Leather_Gloves",      "cd_phw_01_hand_00_0380_index03"    }, // Gloves
-            { "Damian_Demeniss_Elite_Uniform_Leather_Boots", "cd_phw_00_foot_00_0163_index01"    }, // Boots
-            { "Pattern_Bronze_Earring",                      "cd_phm_00_earring_0017_l"          }, // Earring1
-            { "Pattern_Silver_Earring",                      "cd_phm_00_earring_0019_r"          }, // Earring2
-            { "Pattern_Copper_Necklace",                     "cd_phm_00_necklace_0026"           }, // Necklace
-            { "Hernand_Nobility_Degree_I",                   "cd_phm_00_ring_0006_r"             }, // Ring1
-            { "Hernand_Nobility_Degree_I",                   "cd_phm_00_ring_0006_r"             }, // Ring2 (same item in both rings)
-            { "Lantern",                                     ""                                  }, // Lantern (cd_t0000_* family, not in cd_ph[mw]_ map)
-            { "Kliff_Glasses",                               "cd_phm_00_glasses_0002"            }, // Glasses (Kliff fallback)
-            { "Kliff_Mask",                                  "cd_phm_00_mask_00_0271_a"          }, // Mask    (cross-char)
-            { "Aggro_Backpack",                              "cd_phm_00_bag_0053"                }, // Backpack (Kliff fallback)
-            { "Damian_Daeil_Band",                           "cd_phw_00_rinkband_0001"           }, // Bracelet (phw, female rig)
-            { "Demian_OneHandRapier",                        "cd_phw_01_sword_0005"              }, // MainHand
-            { "Damian_OneHandShield",                        "cd_phw_03_shield_0131"             }, // OffHand (shield off-hand)
-            { "Damian_OneHandPistol",                        "cd_phm_06_pistol_0001"             }, // Ranged
-            { "Rikisis_OneHandDagger",                       "cd_phm_01_dagger_0004_r"           }, // SubWeapon
-            { "Tynion_Giant_TwoHandGiantBastard",            "cd_phw_02_sword_0002"              }, // TwoHandWeapon
+            { "Demian_PlateArmor_Helm_VII"                   }, // Helm
+            { "Damian_Demeniss_Elite_Uniform_Leather_Armor"  }, // Chest
+            { "Damian_Demeniss_Uniform_Leather_Cloak"        }, // Cloak
+            { "Damian_Demeniss_Uniform_Leather_Gloves"       }, // Gloves
+            { "Damian_Demeniss_Elite_Uniform_Leather_Boots"  }, // Boots
+            { "Pattern_Bronze_Earring"                       }, // Earring1
+            { "Pattern_Silver_Earring"                       }, // Earring2
+            { "Pattern_Copper_Necklace"                      }, // Necklace
+            { "Hernand_Nobility_Degree_I"                    }, // Ring1
+            { "Hernand_Nobility_Degree_I"                    }, // Ring2 (same item in both rings)
+            { "Lantern"                                      }, // Lantern (cd_t0000_* family, not in cd_ph[mw]_ map)
+            { "Kliff_Glasses"                                }, // Glasses (Kliff fallback)
+            { "Kliff_Mask"                                   }, // Mask    (cross-char)
+            { "Aggro_Backpack"                               }, // Backpack (Kliff fallback)
+            { "Damian_Daeil_Band"                            }, // Bracelet (phw, female rig)
+            { "Demian_OneHandRapier"                         }, // MainHand
+            { "Damian_OneHandShield"                         }, // OffHand (shield off-hand)
+            { "Damian_OneHandPistol"                         }, // Ranged
+            { "Rikisis_OneHandDagger"                        }, // SubWeapon
+            { "Tynion_Giant_TwoHandGiantBastard"             }, // TwoHandWeapon
         },
 
         // ============================================================
-        // Oongka (male orc). prefabName values derived from the save-editor companion repo's iteminfo dump. Orc-tribe
-        // assets share the cd_phm_* family (orc model is male-tier). Bilibili earring/ring use _index## minor variants;
-        // LT's body-mesh hook registers all variants of the base prefab.
+        // Oongka (male orc). Orc-tribe assets share the cd_phm_* family (orc model is male-tier). PWS derives the
+        // source rig meshes from each carrier itemId at runtime; the `_dd` runtime-wrapper suffix note below still
+        // applies to how the picker matches source wrappers.
         //
         // NOTE (helm `_dd` suffix): the prefab-swap resolver (heap_walk_partprefab_for_names) matches src by EXACT
         // strcmp against LIVE partprefab wrapper names. The helm slot is special (see prefab_wrapper_swap.cpp
@@ -123,26 +110,26 @@ namespace Transmog
         // future patch renames it.
         // ============================================================
         {
-            { "Lardein_Fabric_Helm",                         "cd_phm_00_hel_0122_01_index01_dd"  }, // Helm (see _dd note above)
-            { "Oongka_Basic_Leather_Armor",                  "cd_phm_00_ub_00_0056"              }, // Chest
-            { "Oongka_Basic_Leather_Cloak",                  "cd_phm_00_cloak_00_0056_t"         }, // Cloak
-            { "Oongka_Basic_Leather_Gloves",                 "cd_phm_00_hand_00_0056"            }, // Gloves
-            { "Langust_Leather_Boots",                       "cd_phm_00_foot_0056"               }, // Boots
-            { "Bilibili_Earring",                            "cd_phm_00_earring_0008_l_index02"  }, // Earring1
-            { "WhiteHorn_Earring",                           "cd_phm_00_earring_0014_l"          }, // Earring2
-            { "Bilibili_Necklace",                           "cd_phm_00_necklace_0004_index02"   }, // Necklace
-            { "Pailune_Nobility_Degree_I",                   "cd_phm_00_ring_0006_r_index05"     }, // Ring1
-            { "Bilibili_Ring",                               "cd_phm_00_ring_0005_l_index02"     }, // Ring2
-            { "Lantern",                                     ""                                  }, // Lantern (cd_t0000_* family, not in cd_ph[mw]_ map)
-            { "",                                            ""                                  }, // Glasses (no Oongka capture)
-            { "Kliff_Mask",                                  "cd_phm_00_mask_00_0271_a"          }, // Mask    (cross-char)
-            { "Oongka_Rocket_BackPack",                      "cd_phm_00_bag_0057"                }, // Backpack (orc-tribe rocket pack)
-            { "OOngka_Daeil_Band",                           "cd_pom_00_rinkband_0001"           }, // Bracelet (pom, orc rig)
-            { "Big_Horn_Tiger_OneHandAxe",                   "cd_phm_01_axe_0035_r"              }, // MainHand
-            { "Big_Horn_Tiger_OneHandAxe",                   "cd_phm_01_axe_0035_r"              }, // OffHand (1H mirror)
-            { "Orc_OneHandCannon",                           "cd_phm_13_cannon_0003_l"           }, // Ranged
-            { "Aurio_OneHandDagger",                         "cd_phm_01_dagger_0066_r"           }, // SubWeapon
-            { "Khadion_TwoHandSword",                        "cd_phm_02_sword_0010"              }, // TwoHandWeapon
+            { "Lardein_Fabric_Helm"                          }, // Helm (see _dd note above)
+            { "Oongka_Basic_Leather_Armor"                   }, // Chest
+            { "Oongka_Basic_Leather_Cloak"                   }, // Cloak
+            { "Oongka_Basic_Leather_Gloves"                  }, // Gloves
+            { "Langust_Leather_Boots"                        }, // Boots
+            { "Bilibili_Earring"                             }, // Earring1
+            { "WhiteHorn_Earring"                            }, // Earring2
+            { "Bilibili_Necklace"                            }, // Necklace
+            { "Pailune_Nobility_Degree_I"                    }, // Ring1
+            { "Bilibili_Ring"                                }, // Ring2
+            { "Lantern"                                      }, // Lantern (cd_t0000_* family, not in cd_ph[mw]_ map)
+            { "Kliff_Glasses"                                }, // Glasses (Kliff fallback -- shared accessory)
+            { "Kliff_Mask"                                   }, // Mask    (cross-char)
+            { "Oongka_Rocket_BackPack"                       }, // Backpack (orc-tribe rocket pack)
+            { "OOngka_Daeil_Band"                            }, // Bracelet (pom, orc rig)
+            { "Big_Horn_Tiger_OneHandAxe"                    }, // MainHand
+            { "Big_Horn_Tiger_OneHandAxe"                    }, // OffHand (1H mirror)
+            { "Orc_OneHandCannon"                            }, // Ranged
+            { "Aurio_OneHandDagger"                          }, // SubWeapon
+            { "Khadion_TwoHandSword"                         }, // TwoHandWeapon
         },
     };
     // clang-format on

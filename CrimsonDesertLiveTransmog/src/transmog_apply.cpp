@@ -401,6 +401,37 @@ namespace Transmog
         return DMK::Memory::write_bytes(reinterpret_cast<std::byte *>(addr), &byteVal, 1).has_value();
     }
 
+    // Second-pass tear-down for a DIRECT-applied accessory fake -- a fake that entered the scene graph via the
+    // direct SlotPopulator path because its carrier collapsed to the target (carrier == fake) or it had no
+    // carrier. Such a fake renders its per-body rig through the engine's natural variant resolver (BodyVariantHook
+    // picks the wearer's rig at apply time, at NATURAL bypass), and the engine needs the scene-graph tear-down
+    // fired TWICE to fully detach that rig -- the same empirical "same hash, same slot tag, twice" requirement the
+    // first-claim-hide branch already documents and doubles for.
+    //
+    // The normal Phase A/Phase B flow only supplies the 2nd call when a DISTINCT carrier was torn (its own mesh)
+    // or when the live real item equals the fake (Phase B re-tears the same hash). A direct-applied fake with NO
+    // matching real underneath -- e.g. a multi-rig mask (Kliff_Mask, three rigs) transmogged onto a wearer who has
+    // no real mask (Damiane) -- is left with a single call and its rendered rig survives. That is the reported
+    // "mask keeps showing after switching to a none preset" bug.
+    //
+    // Call this AFTER the char-class bypass byte has been restored to 0x74, so both detaches target the
+    // NATURALLY-resolved (rendered) rig -- never the forced entry[0] rig, which is not the one attached on a
+    // cross-body wearer (a female wearer renders the female rig; a forced-0xEB teardown would target the male
+    // entry[0] rig that was never attached). Two natural calls make this correct whether the engine tear-down is
+    // invocation-count sensitive (H1) or per-body-variant sensitive (H2); we deliberately do NOT rely on the
+    // forced-bypass Phase A call counting. No-op when a distinct carrier already handled the tear, when Phase B
+    // will (live real == fake), or when there is no fake. SafeTearDown does not mutate the authoritative entry
+    // array, so a redundant detach of an already-gone rig is a safe no-op (the first-claim branch relies on the
+    // same idempotency).
+    static void tear_down_direct_fake_second_pass(__int64 a1, std::uint16_t fakeId, std::uint16_t gameTag,
+                                                  std::uint16_t liveRealId, bool distinctCarrierTorn) noexcept
+    {
+        if (fakeId == 0 || distinctCarrierTorn || liveRealId == fakeId)
+            return;
+        RealPartTearDown::tear_down_by_item_id(reinterpret_cast<void *>(a1), fakeId, gameTag);
+        RealPartTearDown::tear_down_by_item_id(reinterpret_cast<void *>(a1), fakeId, gameTag);
+    }
+
     // Swaps the carrier slot's descriptor pointer to the hybrid, calls SlotPopulator via apply_transmog_core, then
     // unconditionally restores the descriptor via __finally. The per-body mesh selection is handled by BodyVariantHook
     // during the apply when it is live; `forceBypass` (decided by the caller from the REAL target, not the carrier)
@@ -651,6 +682,12 @@ namespace Transmog
 
                 if (bypassApplied)
                     set_char_class_bypass(bypassAddr, 0x74);
+
+                // Direct-applied fake with no matching real underneath: 2nd-pass detach at natural bypass
+                // (restored above). See tear_down_direct_fake_second_pass.
+                tear_down_direct_fake_second_pass(a1, static_cast<std::uint16_t>(prevId), gameTag, realId,
+                                                  prevCarrier != 0 &&
+                                                      prevCarrier != static_cast<std::uint16_t>(prevId));
             }
 
             // Phase B: tear down the real item. Runs unconditionally (fake == real is treated the same as fake !=
@@ -1193,6 +1230,15 @@ namespace Transmog
                     set_char_class_bypass(bypassAddr, 0x74);
                     logger.trace("[carrier] charClass bypass RESTORED for slot={:#06x} tear-down", td.gameTag);
                 }
+
+                // Direct-applied fake (Mask/Necklace, or any carrier==target collapse) with no matching real
+                // underneath: give it the required 2nd/3rd detach at natural bypass (restored above) so its
+                // rendered per-body rig actually comes off. No-op for distinct-carrier items and when Phase B
+                // re-tears the same hash (live real == fake). See tear_down_direct_fake_second_pass.
+                tear_down_direct_fake_second_pass(a1, static_cast<std::uint16_t>(prevId),
+                                                  static_cast<std::uint16_t>(td.gameTag), realItemId[k],
+                                                  prevCarrier != 0 &&
+                                                      prevCarrier != static_cast<std::uint16_t>(prevId));
             }
 
             // Phase B: real items for any active slot. Runs unconditionally -- fake and real are treated equally, so
@@ -1273,7 +1319,7 @@ namespace Transmog
             //
             // Decide: direct apply or carrier-assisted apply. current_apply_owner picks the editing character when the
             // dropdown pin is engaged, so a targeted-apply on a non-controlled body installs THAT body's carrier
-            // family. See the matching block in apply_single_slot_-transmog for the cross-talk failure mode this
+            // family. See the matching block in apply_single_slot_transmog for the cross-talk failure mode this
             // avoids.
             const auto tmSlot = static_cast<TransmogSlot>(i);
             const auto targetId = m.targetItemId;
@@ -1634,6 +1680,10 @@ namespace Transmog
                     set_char_class_bypass(bypassAddr, 0x74);
                     logger.trace("[clear] charClass bypass RESTORED for slot={:#06x} tear-down", gameTag);
                 }
+
+                // Direct-applied orphan fake with no matching real underneath: 2nd-pass detach at natural
+                // bypass (restored above). See tear_down_direct_fake_second_pass.
+                tear_down_direct_fake_second_pass(a1, fakeId, gameTag, realId, cId != 0 && cId != fakeId);
             }
         }
         else

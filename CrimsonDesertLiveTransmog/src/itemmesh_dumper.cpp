@@ -17,6 +17,7 @@
 #include <cstring>
 #include <fstream>
 #include <ios>
+#include <mutex>
 #include <set>
 #include <string>
 #include <string_view>
@@ -756,6 +757,71 @@ namespace Transmog
             std::vector<std::string> variantMeshes;
         };
     } // namespace
+
+    std::vector<std::string> variant_meshes_for_item(std::uint16_t itemId) noexcept
+    {
+        // Resolve the iteminfo + stringinfo registries once (same holders dump_itemmesh_tsv uses) and cache them --
+        // they are stable for the session. Retry the AOB resolve while it fails (e.g. called before the
+        // world/registries exist) so an early miss does not permanently disable the solver.
+        static std::mutex s_registryMtx;
+        static uintptr_t s_itemArr = 0;
+        static uintptr_t s_stringArr = 0;
+        static uint32_t s_itemCount = 0;
+        static uint32_t s_stringCount = 0;
+        static bool s_ready = false;
+
+        // Snapshot the cached registry handles under the lock so the per-item read below never races the one-shot
+        // initialisation on another thread (this runs on both the game and UI threads); the cached statics are only
+        // ever written here, under this same lock.
+        uintptr_t itemArr = 0;
+        uintptr_t stringArr = 0;
+        uint32_t itemCount = 0;
+        uint32_t stringCount = 0;
+        {
+            std::scoped_lock lk(s_registryMtx);
+            if (!s_ready)
+            {
+                const uintptr_t iteminfoHolderAddr = resolve_address(k_iteminfoHolderCandidates, "IteminfoHolder");
+                const uintptr_t stringinfoHolderAddr =
+                    resolve_address(k_stringinfoHolderCandidates, "StringinfoHolder");
+                bool ok = false;
+                const uintptr_t iteminfoMgr = iteminfoHolderAddr ? read_qword_safe(iteminfoHolderAddr, ok) : 0;
+                const uintptr_t stringinfoMgr = stringinfoHolderAddr ? read_qword_safe(stringinfoHolderAddr, ok) : 0;
+                if (iteminfoMgr && stringinfoMgr)
+                {
+                    s_itemCount = read_u32_safe(iteminfoMgr + kOffRegistryCount, ok);
+                    s_itemArr = read_qword_safe(iteminfoMgr + kOffRegistryArray, ok);
+                    s_stringCount = read_u32_safe(stringinfoMgr + kOffRegistryCount, ok);
+                    s_stringArr = read_qword_safe(stringinfoMgr + kOffRegistryArray, ok);
+                    s_ready = s_itemArr && s_stringArr && s_itemCount && s_stringCount;
+                }
+            }
+            if (!s_ready)
+                return {};
+            itemArr = s_itemArr;
+            stringArr = s_stringArr;
+            itemCount = s_itemCount;
+            stringCount = s_stringCount;
+        }
+        if (itemId >= itemCount)
+            return {};
+
+        bool ok = false;
+        const uintptr_t desc = read_qword_safe(itemArr + static_cast<uint64_t>(itemId) * 8, ok);
+        if (!ok || desc < 0x10000)
+            return {};
+
+        // Authoritative per-body variant list (desc+0x3E0). Empty for single-rig items -> fall back to the rule-chain
+        // primary body mesh so the result is non-empty for any item that owns a real mesh.
+        std::vector<std::string> meshes = resolve_variant_meshes(desc, stringArr, stringCount);
+        if (meshes.empty())
+        {
+            std::string primary = resolve_rule_body_mesh(desc, stringArr, stringCount, std::string_view{});
+            if (!primary.empty())
+                meshes.push_back(std::move(primary));
+        }
+        return meshes;
+    }
 
     void dump_itemmesh_tsv()
     {
