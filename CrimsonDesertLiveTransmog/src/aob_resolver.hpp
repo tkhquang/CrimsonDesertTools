@@ -535,7 +535,8 @@ namespace Transmog
      * re-lock onto a STRUCTURALLY IDENTICAL loop in an UNRELATED function that is never on the carrier-apply path -- so
      * the bypass silently toggled dead code (proven live: 0 breakpoint hits at the look-alike during a carrier apply,
      * while this site fires). The real gate KEEPS `4C 8B 43` (rbx) and reads the item's char-class at `word[rax+0xAC]`
-     * (was +0x8A pre-1.13); the jz is at match+0x12. Verified live: forcing this jz renders the Preset-4 NPC/boss armor.
+     * (was +0x8A pre-1.13); the jz is at match+0x12. Verified live: forcing this jz renders the Preset-4
+     * NPC/boss armor.
      *
      * The `90` nop AND the `4C 8B 43` (rbx) register disambiguate from the ~0x1423AAxxx look-alike (which has r13 and
      * no nop) and from the +0x70 sibling loop in the same function; the trailing `EB` (the OUTER loop's no-match jmp,
@@ -548,7 +549,7 @@ namespace Transmog
      */
     inline constexpr AddrCandidate k_charClassBypassCandidates[] = {
         // P1 -- mov r8,[rbx+??] (allowed-class array) + movzx r9d,word[rax+??] (item class @+0xAC) + `90` nop + inner
-        // cmp/jz/loop + jmp. Patch byte (the jz) at match + 0x12. Unique 1-hit at 0x141F90723 on v1.13.00.
+        // cmp/jz/loop + jmp. Patch byte (the jz) at match + 0x12. Unique 1-hit on v1.13.00.
         {"CharClassBypass_P1_MovzxCmpLoop",
          "4C 8B 43 ?? 44 0F B7 88 ?? ?? 00 00 90 "
          "66 45 3B 0C 48 74 ?? FF C1 3B CA 72 ?? EB",
@@ -596,13 +597,15 @@ namespace Transmog
          ResolveMode::Direct, 0, 0},
 
         // P2 -- post-prologue registry-lookup setup: mov r13,rcx / spill edx / load registry global (RIP disp32
-        // wildcarded) / lea rdx,[rsp+0x68] / add rcx,0x60 / mov r15,r9 / movzx edi,r8w. Anchors at function start + 0xD,
+        // wildcarded) / lea rdx,[rsp+0x68] / add rcx,0x60 / mov r15,r9 / movzx edi,r8w.
+        // Anchors at function start + 0xD,
         // so walk-back -0xD. Survives a prologue push/frame reshuffle that leaves this argument setup intact.
         {"BodyVariantResolver_P2_RegistryLookupSetup",
          "4C 8B E9 89 54 24 68 48 8B 0D ?? ?? ?? ?? 48 8D 54 24 68 48 83 C1 60 4D 8B F9 41 0F B7 F8",
          ResolveMode::Direct, -0xD, 0},
 
-        // P3 -- the variant-list walk that defines this function: mov rsi,[r13+0x3E0] (entry list) / mov eax,[r13+0x3E8]
+        // P3 -- the variant-list walk that defines this function: mov rsi,[r13+0x3E0] (entry list) /
+        // mov eax,[r13+0x3E8]
         // (count) / imul r14,rax,0x58 (entry stride) / add r14,rsi / cmp rsi,r14 (empty-list guard). The 0x3E0/0x3E8
         // field offsets and the 0x58 stride are stable game-struct constants kept literal. Anchors at function start +
         // 0x8B, so walk-back -0x8B.

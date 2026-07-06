@@ -40,11 +40,6 @@ namespace Transmog
     bool needs_carrier(std::uint16_t itemId, const std::string &charName);
 
     /**
-     * Legacy overload (assumes Kliff). Kept for call sites that predate multi-character support.
-     */
-    bool needs_carrier(std::uint16_t itemId);
-
-    /**
      * Single-slot apply: tears down and re-applies only the given slot. Used by hover-preview to avoid full-gear
      * flicker. Only clears dispatch cache entries matching this slot's game tag.
      */

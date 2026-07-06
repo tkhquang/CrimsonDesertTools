@@ -1,10 +1,18 @@
 <script lang="ts">
   import type { CatalogRow } from '../types';
   import { KIND_LABEL } from '../types';
-  import { catalog } from '../store.svelte';
+  import { catalog, relatedRows } from '../store.svelte';
 
   type Props = { row: CatalogRow };
   let { row }: Props = $props();
+
+  // The item's own multi-prefab variant set: mesh prefabs whose exact item is
+  // this row's item, so a duo/triple-body item shows all its meshes at once.
+  // This is kept separate from the Siblings section below (sibling links are
+  // other items sharing a base, not this item's own meshes). Only shown when
+  // more than one prefab shares the item; otherwise the single entry is `row`.
+  const related = $derived(relatedRows(row));
+  const hasRelated = $derived(related.length > 1);
 
   let copyMsg = $state('');
 
@@ -49,6 +57,12 @@
         <button class="block w-full break-all text-left font-mono text-text hover:text-accent" onclick={() => copy(row.base!)}>{row.base}</button>
       </div>
     {/if}
+    {#if row.rigFamily}
+      <div>
+        <div class="text-text-dim">Rig family</div>
+        <div class="font-mono text-text">{row.rigFamily}</div>
+      </div>
+    {/if}
     {#if row.itemName}
       <div>
         <div class="text-text-dim">Internal name</div>
@@ -59,6 +73,12 @@
       <div>
         <div class="text-text-dim">Display name</div>
         <div class="text-text">{row.displayName}</div>
+      </div>
+    {/if}
+    {#if row.bodyType}
+      <div>
+        <div class="text-text-dim">Body</div>
+        <div class="text-text">{row.bodyType}</div>
       </div>
     {/if}
     {#if row.itemId !== undefined}
@@ -83,6 +103,36 @@
       <div>
         <div class="text-text-dim">Slot · Variant</div>
         <div class="text-text">{row.slot}{#if row.variant} · {row.variant}{/if}{#if row.playerSafe} · <span class="text-green">player-safe</span>{/if}</div>
+      </div>
+    {/if}
+    {#if hasRelated}
+      <div>
+        <div class="text-text-dim">
+          Related meshes ({related.length}) · same item
+        </div>
+        <ul class="mt-1 space-y-1 font-mono">
+          {#each related as r (r.id)}
+            <li>
+              <button
+                type="button"
+                onclick={() => (catalog.selected = r)}
+                class="flex w-full items-baseline gap-2 rounded px-1 py-0.5 text-left hover:bg-input {r.id ===
+                row.id
+                  ? 'text-accent'
+                  : 'text-text'}"
+                title={r.id === row.id ? 'Current mesh' : 'Show this mesh'}
+              >
+                {#if r.rigFamily}
+                  <span class="shrink-0 rounded bg-input px-1 text-text-dim">{r.rigFamily}</span>
+                {/if}
+                <span class="break-all">{r.prefab}</span>
+                {#if r.id === row.id}
+                  <span class="shrink-0 text-text-disabled">(current)</span>
+                {/if}
+              </button>
+            </li>
+          {/each}
+        </ul>
       </div>
     {/if}
     {#if row.siblingItemNames && row.siblingItemNames.length}

@@ -646,9 +646,9 @@ namespace Transmog
 
             // Wearer-body classification is NOT read here: the 1.13 game re-keyed the descriptor rule-classifier body
             // tokens (the rule list at +0x248 no longer yields a usable body class), so body now comes from the
-            // equip-eligibility ("Male"/"Female") column of the display_names TSV (see load_display_names / m_bodyByName),
-            // applied at query time in sorted_entries and is_player_compatible. scripts/gen_item_body_table.py fills that
-            // column from the packed gamedata.
+            // equip-eligibility ("Male"/"Female") column of the display_names TSV (see load_display_names /
+            // m_bodyByName), applied at query time in sorted_entries and is_player_compatible.
+            // scripts/gen_item_body_table.py fills that column from the packed gamedata.
             bool etOk = false;
             const uint16_t equipType = read_u16_safe(descPtr + 0x42, etOk);
 
