@@ -2,6 +2,13 @@
 
 All notable changes to the CrimsonDesertLiveTransmog mod will be documented in this file.
 
+## [0.13.0] - Female armor, body filter, and body-mesh swap fixes
+
+- Fixed boss and unique armor (Guardian of Odeck, Dark Marksman, Masked Liberator) looking male on Damiane; it now shows her correct female version.
+- The Dye button now works before you have saved an outfit preset, creating one for you automatically instead of doing nothing.
+- Improved gear filtering so each character only sees the items their body can actually wear.
+- Body-mesh outfit swaps now find the right source automatically, keeping them accurate across game updates and body-swap mods.
+
 ## [0.12.8] - Crimson Desert 1.13.00 support
 
 - Updated the mod to work with Crimson Desert version 1.13.00
@@ -259,6 +266,7 @@ All notable changes to the CrimsonDesertLiveTransmog mod will be documented in t
 - Modular code split: `transmog_apply` (apply/clear logic), `transmog_hooks` (VEC/BatchEquip callbacks), `transmog_worker` (debounce/load-detect/nametable threads), `shared_state` (cross-TU atomics)
 - Docs clarify ReShade is required for GUI; without it, users edit JSON manually via Capture hotkey
 
+[0.13.0]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.13.0
 [0.12.8]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.12.8
 [0.12.7]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.12.7
 [0.12.6]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.12.6
