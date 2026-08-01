@@ -52,16 +52,16 @@ namespace Transmog
         DMK::Config::register_atomic<bool>("General", "PlayerOnly", "Player Only", flag_player_only(), true);
 
         // When the dropdown is pinned to a non-controlled character, route overlay-UI edits onto that character's body
-        // instead of cross-applying onto whoever you control. Engine-triggered equip events still target the controlled
-        // body, so the controlled character's transmog stays consistent across their own gear changes. Disable to
-        // restore the legacy cross-body behaviour (preset items rendered on the controlled body regardless of the
-        // dropdown).
+        // instead of cross-applying onto whoever you control. Engine-triggered equip events still target the
+        // controlled body, so the controlled character's transmog stays consistent across their own gear changes.
+        // Disable to restore the legacy cross-body behavior (preset items rendered on the controlled body regardless
+        // of the dropdown).
         DMK::Config::register_atomic<bool>("General", "ApplyToSelectedCharacter", "Apply To Selected Character",
                                            flag_apply_to_editing(), true);
 
         // Advanced: rtti_dissect self-heal search radius (bytes, per side) for the manager->userActor offset recovery
-        // in CDCore. Default 0x200 (~10x the worst historical drift); raise toward MAX_HEAL_WINDOW only if a game patch
-        // shifts the field further. Not for normal users.
+        // in CDCore. The default 0x200 covers roughly ten times the worst drift seen so far. Raise it toward
+        // MAX_HEAL_WINDOW only if a game patch pushes the field further. Not for normal users.
         DMK::Config::register_atomic<int>("Advanced", "SelfHealWindow", "Self Heal Window",
                                           CDCore::heal_window_setting(), 0x200);
 
@@ -71,9 +71,10 @@ namespace Transmog
             "General", "ForceStandaloneOverlay", "Force Standalone Overlay",
             [](bool val) { set_force_standalone(val); }, false);
 
-        // Protagonist codename overrides for CDCore's appearance-config classifier. Each codename is a substring search
-        // target inside the actor's appearance-config asset path. Defaults match the shipped engine subfolder names;
-        // provided in case a future patch or mod renames a subfolder. Empty values are ignored.
+        // Protagonist codename overrides for CDCore's appearance-config classifier. Each codename is a substring
+        // search target inside the actor's appearance-config asset path. The defaults match the shipped engine
+        // subfolder names. The overrides exist in case a future patch or mod renames a subfolder. Empty values are
+        // ignored.
         DMK::Config::register_string(
             "General", "KliffCodename", "Kliff Codename",
             [](const std::string &val) { CDCore::set_protagonist_codenames(val, {}, {}); }, "cd_phm_macduff");
@@ -85,34 +86,34 @@ namespace Transmog
             [](const std::string &val) { CDCore::set_protagonist_codenames({}, {}, val); }, "cd_phm_oongka");
 
         // Experimental: master toggle for the per-shader-property ColorOverride pipeline (publisher hook, setter
-        // substitute, host-scope owner-vfunc midhooks, and the per-region color picker UI). Disabled by default; the
-        // feature relies on AOB-resolved engine entry points that may shift under a major game patch.
+        // substitute, host-scope owner-vfunc midhooks, and the per-region color picker UI). Disabled by default. The
+        // feature relies on AOB-resolved engine entry points that can shift under a major game patch.
         DMK::Config::register_atomic<bool>("Experimental", "ColorOverride", "Color Override", flag_color_override(),
                                            false);
 
-        // Experimental: helm voice-unmuffle filter. Disabled by default; enable to remove the engine's stock
-        // plate/heavy-helm voice muffle on protagonists. The hook only installs at startup when this is true, so toggle
-        // changes take effect on the next game launch. NPC voice muffle is unaffected either way.
+        // Experimental: helm voice-unmuffle filter. Disabled by default. Enable it to remove the engine's stock
+        // plate/heavy-helm voice muffle on protagonists. The hook installs at startup only when this is true, so a
+        // toggle change takes effect on the next game launch. NPC voice muffle is unaffected either way.
         DMK::Config::register_atomic<bool>("Experimental", "UnmuffleHelmVoice", "Unmuffle Helm Voice",
                                            flag_helm_audio_unmuffle(), false);
 
-        // One-shot diagnostic TSV dumps. Off by default; enable to capture item-catalog / item->prefab snapshots once
-        // ItemNameTable::build() lands. Both files are written to the plugin's runtime directory.
+        // One-shot diagnostic TSV dumps. Off by default. Enable them to capture item-catalog and item->prefab
+        // snapshots after ItemNameTable::build() lands. Both files are written to the plugin's runtime directory.
         DMK::Config::register_atomic<bool>("Diagnostics", "DumpItemPrefabsTsv", "Dump Item->Prefab TSV",
                                            flag_dump_item_prefabs(), false);
         DMK::Config::register_atomic<bool>("Diagnostics", "DumpItemCatalogTsv", "Dump Item Catalog TSV",
                                            flag_dump_item_catalog(), false);
 
-        // Auto-reload toggle. Off-by-default would force a relaunch for every INI tweak; on-by-default keeps the
-        // iteration loop tight. Setters invoked from the watcher thread are idempotent (every register_atomic /
+        // Auto-reload toggle. An off-by-default watcher forces a relaunch for every INI tweak. On-by-default keeps the
+        // iteration loop tight. Setters invoked from the watcher thread are idempotent (every register_atomic and
         // register_press_combo path is safe to re-fire).
         static std::atomic<bool> s_autoReload{true};
         DMK::Config::register_atomic<bool>("General", "AutoReloadConfig", "Auto-Reload Config", s_autoReload, true);
 
-        // Hotkey bindings are registered here, while the Config registry is being populated, so the press_combo INI
-        // keys participate in the same Config::load() pass below. register_press_combo also ties each binding to
-        // InputManager directly; we just need to ensure that InputManager::start() runs after this call (handled in
-        // init() further down).
+        // Hotkey bindings are registered here, while the Config registry fills, so the press_combo INI keys
+        // participate in the same Config::load() pass below. register_press_combo also ties each binding to
+        // InputManager directly. InputManager::start() must therefore run after this call (handled in init() further
+        // down).
         register_hotkeys();
 
         PrefabWrapperSwap::register_config();
@@ -122,8 +123,8 @@ namespace Transmog
 
         if (s_autoReload.load(std::memory_order_relaxed))
         {
-            // Atomic flags update silently through their per-setter callbacks; the watcher does not drive any
-            // game-state work. Re-applying or clearing transmog still requires a hotkey or in-game action.
+            // Atomic flags update silently through their per-setter callbacks. The watcher does not drive any
+            // game-state work. A re-apply or a clear of transmog still requires a hotkey or an in-game action.
             const auto status =
                 DMK::Config::enable_auto_reload(std::chrono::milliseconds{250},
                                                 [](bool content_changed)
@@ -152,29 +153,22 @@ namespace Transmog
     //   container +0x10  DWORD   live entry count
     //   container +0x14  DWORD   capacity
     //
-    // The pointer slot itself shifted between game versions as the component grew new fields below it:
-    //
-    //   v1.03.01 -- pointer @ a1 + 0x78
-    //   v1.04.00 -- pointer @ a1 + 0x88   (+0x10 of new fields inserted)
-    //   v1.05.00 -- pointer @ a1 + 0x88   (unchanged from v1.04)
-    //
-    // Reading the old offset on v1.04.00 returns garbage (the qword that lives at +0x78 is no longer the container
-    // pointer), which is what produced the "Capture: no entry table" warning. Mirrors k_containerPtrOffset in
-    // real_part_tear_down.cpp.
-    constexpr std::ptrdiff_t k_compEntryTablePtrOffset = 0x88;
+    // The pointer slot itself moves whenever pa::ClientEquipSlotActorComponent grows or shrinks fields in front of it.
+    // A stale offset reads a neighboring field that is not a container pointer, and the capture path then logs
+    // "Capture: no entry table". Verify the offset against live memory on patch day. This constant mirrors
+    // k_containerPtrOffset in real_part_tear_down.cpp, which carries the full silent-failure analysis.
+    constexpr std::ptrdiff_t k_compEntryTablePtrOffset = 0x80;
 
-    // Entry layout within the auth-table array. The stride and slot-tag offset move together by 8 across versions:
+    // Entry layout within the auth-table array. The stride and the slot-tag offset always move together by 8, so
+    // verify both together. The engine auth-table search loop states both literally:
+    //   `imul rcx,rax,0xD0 ; cmp [rdx+0xC8],r8w ; add rdx,0xD0`
     //
-    //   v1.04.00: stride=0xC8 (200), slotTag@+0xC0
-    //   v1.05.00: stride=0xD0 (208), slotTag@+0xC8
-    //   v1.13.00: stride=0xC8 (200), slotTag@+0xC0  (reverted to the v1.04 layout)
-    //
-    // primary item id at +0x08 is unchanged across versions. Slot-tag VALUES themselves are unchanged (Helm=0x03,
-    // Chest=0x04, Gloves=0x05, Boots=0x06, Cloak=0x10); only the position within the entry shifted. Mirrors
+    // The primary item id at +0x08 is stable across patches. Slot-tag VALUES are stable too (Helm=0x03, Chest=0x04,
+    // Gloves=0x05, Boots=0x06, Cloak=0x10). Only the position within the entry shifts. These constants mirror
     // k_entryStride / k_entrySlotTagOffset in real_part_tear_down.cpp.
-    constexpr std::ptrdiff_t k_compEntryStride = 0xC8;
+    constexpr std::ptrdiff_t k_compEntryStride = 0xD0;
     constexpr std::ptrdiff_t k_compEntryItemIdOffset = 0x08;
-    constexpr std::ptrdiff_t k_compEntrySlotTagOffset = 0xC0;
+    constexpr std::ptrdiff_t k_compEntrySlotTagOffset = 0xC8;
 
     // --- Public interface ---
 
@@ -200,13 +194,14 @@ namespace Transmog
     namespace
     {
         // Editing-target gate consulted by every overlay-UI entry point (manual_apply, manual_apply_slot,
-        // manual_clear). Returns true if the caller should proceed with `schedule_transmog_*`; false if it should bail
-        // (the editing character is not in the live snapshot and the user opted out of cross-body apply).
+        // manual_clear). It returns true when the caller can proceed with `schedule_transmog_*`. It returns false when
+        // the caller must bail, because the editing character is not in the live snapshot and the user opted out of
+        // cross-body apply.
         //
         // When the pin is off OR the flag is off, the helper is a no-op and the caller proceeds with the legacy
         // controlled-body path. When the pin is on AND the flag is on, the helper resolves the editing character's
         // char-idx, primes `set_targeted_apply_char_idx` so the worker redirects this apply, and returns true. If the
-        // editing character is not currently live, the helper logs at info level and returns false so the caller skips
+        // editing character is not live, the helper logs at info level and returns false, so the caller skips
         // scheduling entirely.
         bool prime_targeted_apply_if_pinned() noexcept
         {
@@ -222,7 +217,7 @@ namespace Transmog
                 return true; // Unknown character name; fall back to default.
 
             // Resolve the snapshot now so the entry point can decide whether to schedule. The worker re-resolves at
-            // apply time too -- this pre-check just lets us skip scheduling when the editing body is clearly not live.
+            // apply time too. This pre-check only skips the scheduling step when the editing body is not live.
             std::array<CDCore::BodyCacheEntry, 3> entries{};
             const auto n = CDCore::snapshot_body_cache(entries.data(), entries.size());
             bool live = false;
@@ -305,34 +300,15 @@ namespace Transmog
         schedule_transmog_ms(k_manualDebounceMs);
     }
 
-    // Walks the live auth-table entry array and snapshots each LT-managed slot's dye records into the active preset's
-    // SlotDyeChannels via read_entry_dye_records(). The auth-table's per-entry dye-record vector layout (v1.13.00,
-    // shifted -8 with the entry shrink -- see k_compEntrySlotTagOffset) is:
+    // Copies a captured live-dye snapshot into a preset slot's per-channel dye state. It skips channels with
+    // `group_hash == 0`. It resolves `group_name` from the static DyeColorTable, so the string key survives a
+    // renumbered hash table across patches. It sets `dyeSparse=true`, so the apply path emits only the channels that
+    // the source item actually colors. It returns the count of non-empty channels written. The caller owns any
+    // pre-wipe of `slotPreset.dye[]` before the call.
     //
-    //   +0x70  qword  data_ptr  -- heap address of contiguous
-    //                              16-byte records
-    //   +0x78  dword  count     -- number of valid records (0..N)
-    //   +0x7C  dword  capacity  -- allocation cap, ignored here
-    //
-    // Each 16-byte record matches DyeRecordInject::ChannelState:
-    //   +0..3   group_hash
-    //   +4..5   material_id
-    //   +6      channel index (0..k_dyeChannelCount-1)
-    //   +7..9   R / G / B
-    //   +11     repair_byte
-    //
-    // This function is split out of capture_outfit() because it mutates std::string members (ChannelDye::group_name),
-    // which requires C++ object unwinding. MSVC's C2712 forbids that in the same function as a __try frame, and
-    // capture_outfit() has one. The caller's __try/__except therefore covers any access fault from a stale auth table
-    // here too -- we deliberately do NOT add another __try in this function.
-    //
-    // SAFETY: the raw reads of `entryArray`, `base + ...`, and the call to read_entry_dye_records() can fault if the
-    // caller hands us a stale or torn auth table. capture_outfit()'s __try/__except is the only line of defence. Copy a
-    // captured live-dye snapshot into a preset slot's per-channel dye state. Skips channels with `group_hash == 0`,
-    // resolves `group_name` from the static DyeColorTable so the string-key survives a renumbered hash table across
-    // patches, and flips `dyeSparse=true` so the apply path emits only the channels the source item actually colours.
-    // Returns the count of non-empty channels written. The caller owns any pre-wipe of `slotPreset.dye[]` before
-    // invoking.
+    // This work lives outside capture_outfit() because it mutates std::string members (ChannelDye::group_name), which
+    // requires C++ object unwinding. MSVC C2712 forbids that in the same function as a __try frame, and
+    // capture_outfit() owns one. Keep this function out of every __try frame.
     static std::size_t apply_live_dye_to_preset_slot(
         PresetSlot &slotPreset,
         const DyeRecordInject::ChannelState (&live)[DyeRecordInject::k_dyeChannelCount]) noexcept
@@ -361,6 +337,29 @@ namespace Transmog
         return written;
     }
 
+    // Walks the live auth-table entry array and snapshots each LT-managed slot's dye records into the active preset's
+    // SlotDyeChannels through read_entry_dye_records(). The per-entry dye-record vector sits inside the auth entry, so
+    // its offset moves together with k_compEntrySlotTagOffset whenever the entry geometry changes. The authoritative
+    // values live in dye_record_inject.cpp (k_dstDyeVectorOffset for the vector base, k_vecDataOffset and
+    // k_vecCountOffset within it). They currently place the header at these offsets from the entry base:
+    //
+    //   +0x78  qword  data_ptr  -- heap address of contiguous 16-byte records
+    //   +0x80  dword  count     -- number of valid records (0..N)
+    //   +0x84  dword  capacity  -- allocation cap, ignored here
+    //
+    // Each 16-byte record matches DyeRecordInject::ChannelState:
+    //   +0..3   group_hash
+    //   +4..5   material_id
+    //   +6      channel index (0..k_dyeChannelCount-1)
+    //   +7..9   R / G / B
+    //   +11     repair_byte
+    //
+    // This function is split out of capture_outfit() for the same MSVC C2712 reason as apply_live_dye_to_preset_slot
+    // above. The caller's __try/__except therefore covers any access fault from a stale auth table here too, and this
+    // function deliberately does NOT open another __try frame.
+    //
+    // SAFETY: the raw reads of `entryArray`, `base + ...`, and the call to read_entry_dye_records() can fault when the
+    // caller passes a stale or torn auth table. capture_outfit()'s __try/__except is the only line of defense.
     static void capture_live_dye_into_active_preset(uintptr_t entryArray, uint32_t entryCount) noexcept
     {
         auto &logger = DMK::Logger::get_instance();
@@ -404,8 +403,8 @@ namespace Transmog
 
             DyeRecordInject::log_dye_snapshot("capture", slot_name(*tmSlot), live);
 
-            // Real-item capture -- the apply path emits sparse records (only channels the item actually colours). A
-            // slot previously edited in picker-dense mode also flips back to sparse here.
+            // Real-item capture. The apply path emits sparse records, that is, only the channels the item actually
+            // colors. A slot previously edited in picker-dense mode also flips back to sparse here.
             apply_live_dye_to_preset_slot(activePreset->slots[idx], live);
             any = true;
             logger.info("    -> {} dye channel(s) captured for {}", dyeFilled, slot_name(*tmSlot));
@@ -442,11 +441,11 @@ namespace Transmog
 
             namespace PWS = Transmog::PrefabWrapperSwap;
 
-            // Capture is "snapshot what the user is currently equipped with". Any session-only PWS prefab picks must be
-            // cleared so the captured carrier itemIds become the visible state -- otherwise the cyan prefab label would
-            // hide the captured gear behind a stale prefab pick. Disabled slots are skipped entirely (the dispatcher
-            // won't service them; writing any captured state into their mapping just bloats the in-memory rows the next
-            // Save would already drop on disk per slot_metadata.hpp).
+            // Capture means "snapshot what the user wears right now". Any session-only PWS prefab pick must be
+            // cleared, so the captured carrier itemIds become the visible state. Otherwise the cyan prefab label hides
+            // the captured gear behind a stale prefab pick. Disabled slots are skipped entirely: the dispatcher does
+            // not service them, and captured state written into their mapping only bloats in-memory rows that the next
+            // Save drops on disk anyway, per slot_metadata.hpp.
             for (std::size_t i = 0; i < k_slotCount; ++i)
             {
                 if (!Transmog::slot_enabled(i))
@@ -488,8 +487,8 @@ namespace Transmog
                 }
             }
 
-            // Live dye snapshot delegated to a separate function so its std::string mutations don't conflict with this
-            // function's __try frame (MSVC C2712 forbids C++ object unwinding inside __try).
+            // Live dye snapshot delegated to a separate function so its std::string mutations do not conflict with
+            // this function's __try frame (MSVC C2712 forbids C++ object unwinding inside __try).
             capture_live_dye_into_active_preset(entryArray, entryCount);
 
             logger.info("=== CAPTURE DONE: {} equipped, {} total slots ===", captured, k_slotCount);
@@ -510,9 +509,9 @@ namespace Transmog
             return;
         }
 
-        // Capture-style snapshot: skip disabled slots so we don't bloat in-memory rows for slots the dispatcher won't
-        // service. PWS picks are intentionally NOT preserved -- this function is a "what is the user wearing right now"
-        // snapshot, mirroring capture_outfit, and any session-only prefab pick should surrender to the captured itemId
+        // Capture-style snapshot: skip disabled slots to keep in-memory rows out for slots the dispatcher does not
+        // service. PWS picks are intentionally NOT preserved. This function is a "what does the user wear right now"
+        // snapshot, and it mirrors capture_outfit. Any session-only prefab pick must surrender to the captured itemId,
         // so the visible state matches.
         namespace PWS = Transmog::PrefabWrapperSwap;
         for (std::size_t i = 0; i < k_slotCount; ++i)
@@ -664,9 +663,9 @@ namespace Transmog
 
         // --- Required asset gate ---
         //
-        // The display-names TSV ships with the mod and is required for the catalog UI and name-keyed preset resolution.
-        // Missing file means the user installed incorrectly; surface a hard, visible error (modal popup) and bail out
-        // of init so the failure cannot be silently ignored by skipping the log.
+        // The display-names TSV ships with the mod and is required for the catalog UI and name-keyed preset
+        // resolution. A missing file means the user installed the mod incorrectly. Surface a hard, visible error
+        // (modal popup) and bail out of init, so a user who never opens the log cannot ignore the failure.
         {
             const auto rtDir = runtime_dir_utf8();
             std::string tsvPath = rtDir.empty() ? std::string{DISPLAY_NAMES_FILE} : rtDir + DISPLAY_NAMES_FILE;
@@ -688,8 +687,8 @@ namespace Transmog
         }
 
         // Apply config before the resolver and hook-install steps so the INI LogLevel takes effect for any TRACE/DEBUG
-        // emissions that follow. Setters dispatched by Config::load() touch only atomics, preset/state structures, and
-        // InputManager bindings; none of them depend on resolved addresses (those are populated below).
+        // emissions that follow. Setters dispatched by Config::load() touch only atomics, preset/state structures and
+        // InputManager bindings. None of them depend on resolved addresses, which are populated below.
         load_config();
 
         if (!DMK::Memory::init_cache())
@@ -699,9 +698,9 @@ namespace Transmog
         //
         // These six targets are independent: each scans a static candidate table and none reads another's resolved
         // address. They all live in the host EXE, so resolve them in one fork-join batch rather than six serial
-        // host-module scans. Each per-target validation and side-effect block below is unchanged and runs in the same
-        // order; every block touches only its own address, so hoisting the scans ahead of them is behaviour-preserving.
-        // The initBatch order defines the initAddrs order.
+        // host-module scans. Each per-target validation and side-effect block below runs in the batch order, and every
+        // block touches only its own address, so the hoisted scans preserve behavior. The initBatch order defines the
+        // initAddrs order.
 
         auto &addrs = resolved_addrs();
 
@@ -725,10 +724,10 @@ namespace Transmog
 
         if (addrs.mapLookup)
         {
-            // Deferred slot-hash resolution. A synchronous scan here would observe a small / empty IndexedStringA table
-            // on cold-launch (LT loaded before the game finishes wiring main-menu state), leaving PartShowSuppress
-            // inert for the whole session. The deferred worker polls until world-ready, then commits once every
-            // expected slot hash is present. See transmog_worker.hpp for the contract.
+            // Deferred slot-hash resolution. A synchronous scan here observes a small or empty IndexedStringA table on
+            // cold-launch, because LT loads before the game finishes wiring main-menu state. That leaves
+            // PartShowSuppress inert for the whole session. The deferred worker polls until world-ready, then commits
+            // after every expected slot hash is present. See transmog_worker.hpp for the contract.
             launch_deferred_slot_hash_scan();
             logger.info("[dispatch] slot-hash resolution scheduled "
                         "(deferred until world-ready)");
@@ -739,7 +738,7 @@ namespace Transmog
                            "PartShowSuppress will be inert this session");
         }
 
-        // SubTranslator (sub_14076D950): anchor for the item-name catalog scan.
+        // SubTranslator: anchor for the item-name catalog scan.
         addrs.subTranslator = initAddrs[2];
 
         if (addrs.subTranslator)
@@ -751,8 +750,8 @@ namespace Transmog
                 logger.info("[nametable] built synchronously at init "
                             "({} entries)",
                             ItemNameTable::instance().size());
-                // Load display names BEFORE dump_catalog_tsv so the sorted cache (built lazily by the dump) already
-                // contains display names and doesn't need a second rebuild that would stall the overlay render thread.
+                // Load display names BEFORE dump_catalog_tsv, so the sorted cache that the dump builds lazily already
+                // contains display names. A second rebuild stalls the overlay render thread.
                 {
                     const auto dir = runtime_dir_utf8();
                     if (!dir.empty())
@@ -762,9 +761,9 @@ namespace Transmog
                     ItemNameTable::instance().dump_catalog_tsv();
                 if (flag_dump_item_prefabs().load(std::memory_order_relaxed))
                 {
-                    // Targeted phantom-recovery sweep can take ~minutes on a cold registry. Detach so the rest of
-                    // transmog init (hooks, color-override) doesn't block waiting for the TSV write -- nothing
-                    // downstream depends on the dump.
+                    // The targeted phantom-recovery sweep can take minutes on a cold registry. Detach it so the rest
+                    // of transmog init (hooks, color-override) does not block on the TSV write. Nothing downstream
+                    // depends on the dump.
                     std::thread{[] { dump_itemmesh_tsv(); }}.detach();
                 }
             }
@@ -792,7 +791,7 @@ namespace Transmog
                            "presets will fall back to raw itemId only");
         }
 
-        // SafeTearDown (sub_14075FE60): scene-graph tear-down.
+        // SafeTearDown: scene-graph tear-down.
         addrs.safeTearDown = initAddrs[3];
         if (!addrs.safeTearDown)
         {
@@ -800,7 +799,7 @@ namespace Transmog
                            "be disabled this session");
         }
 
-        // InitSwapEntry (sub_141D451B0): zero-init helper for the 0x80-byte swap entry passed to SlotPopulator.
+        // InitSwapEntry: zero-init helper for the 0x80-byte swap entry passed to SlotPopulator.
         {
             auto iseAddr = initAddrs[4];
 
@@ -950,26 +949,26 @@ namespace Transmog
             }
         }
 
-        // BodyVariantHook: lets each character render its correct per-body mesh variant on transmog by keeping the
-        // engine's natural per-body match and forcing entry[0] only for items the wearer cannot equip. Supersedes the
-        // former transmog-side char-class bypass toggling (see body_variant_hook.hpp). If either of its AOBs fails to
-        // resolve, install() returns false and BodyVariantHook::is_active() stays false; the apply path then falls back
-        // to that legacy bypass force (see legacy_bypass_force_needed in transmog_apply.cpp) so a failed hook cannot
-        // block transmog rendering.
+        // BodyVariantHook lets each character render its correct per-body mesh variant on transmog. It keeps the
+        // engine's natural per-body match and forces entry[0] only for items the wearer cannot equip. It supersedes
+        // the transmog-side char-class bypass toggling (see body_variant_hook.hpp). If either of its AOBs fails to
+        // resolve, install() returns false and BodyVariantHook::is_active() stays false. The apply path then falls
+        // back to the legacy bypass force (see legacy_bypass_force_needed in transmog_apply.cpp), so a failed hook
+        // cannot block transmog rendering.
         (void)BodyVariantHook::install();
 
-        // PartAddShow (sub_14081DC20) inline hook -- transition-flash polish.
+        // PartAddShow inline hook -- transition-flash polish.
         //
         // Auto-skip if CrimsonDesertEquipHide is loaded in-process. EH installs its own inline hook on the exact same
         // function for its gliding-fix. Two inline hooks on one address chain non-deterministically across game
-        // launches (DLL load order isn't fixed), and one side can end up silently bypassed. LT's hook is cosmetic
-        // polish, EH's is user-visible functionality -- when both are present, yield to EH.
+        // launches, because DLL load order is not fixed, and one side can end up silently bypassed. LT's hook is
+        // cosmetic polish and EH's hook is user-visible functionality, so when both are present, yield to EH.
         //
-        // A managed-hook-vs-managed-hook collision check covers only the case where both sides hook via the same hook
-        // manager. The substring module-name match here covers the orthogonal scenario where EH has been loaded but has
-        // not yet installed its hook (load-order race during the worker thread's init pass) or hooks via a non-DMK
-        // route. Yielding on module presence avoids the race entirely. The substring match covers both the dev two-DLL
-        // ("..._Logic.dll") and the release single-ASI (".asi") layouts in one call.
+        // A managed-hook-versus-managed-hook collision check covers only the case where both sides hook through the
+        // same hook manager. The substring module-name match here covers the orthogonal case where EH is loaded but
+        // did not install its hook yet (load-order race during the worker thread's init pass), or where EH hooks
+        // through a non-DMK route. A yield on module presence avoids the race entirely. The substring match covers
+        // both the dev two-DLL ("..._Logic.dll") and the release single-ASI (".asi") layouts in one call.
         const bool ehPresent = CDCore::Glue::is_sibling_mod_loaded("CrimsonDesertEquipHide");
         if (ehPresent)
         {
@@ -1023,8 +1022,8 @@ namespace Transmog
         // --- Input ---
 
         // Resolve WorldSystem pointer for LT-local chain walks (per-character presets, load-detect, apply-side a1
-        // fallbacks). Independent of CDCore::controlled_char, which now uses the static-chain [moduleBase + 0x5FA0430]
-        // anchor and does not need a published WorldSystem holder.
+        // fallbacks). Independent of CDCore::controlled_char, which uses its own static-chain anchor and does not need
+        // a published WorldSystem holder.
         {
             auto wsAddr = resolve_address(k_worldSystemCandidates, std::size(k_worldSystemCandidates), "WorldSystem");
             if (wsAddr)
@@ -1041,16 +1040,15 @@ namespace Transmog
 
         PrefabWrapperSwap::init();
 
-        // Helm-audio filter -- intervenes at the passive-skill REGISTRATION boundary (sub_141C6CC90) BEFORE the muffle
-        // tag enters the character's skill registry, so no downstream
-        // Wwise / RTPC / Switch path ever observes it. The combined gates (audio-classifier call layout + RTTI chain
-        // walk to `pa::GameAudioEffectBuffData` + protagonist host) leave other passive-skill effects of the same item
-        // intact and keep NPC voices muffling as in vanilla. See helm_audio_filter.hpp for the full data-flow chain and
-        // bypass-safety analysis.
+        // Helm-audio filter. It intervenes at the passive-skill REGISTRATION boundary, BEFORE the muffle tag enters
+        // the character's skill registry, so no downstream Wwise / RTPC / Switch path ever observes it. The combined
+        // gates (audio-classifier call layout, RTTI chain walk to `pa::GameAudioEffectBuffData`, protagonist host)
+        // leave the other passive-skill effects of the same item intact and keep NPC voices muffled as in vanilla. See
+        // helm_audio_filter.hpp for the full data-flow chain and the bypass-safety analysis.
         //
-        // Gated by `[Experimental] UnmuffleHelmVoice`. The flag is read once here at startup; runtime toggle is not
-        // supported because tearing down the inline detour would race the engine equip pipeline that calls it from
-        // arbitrary threads. The hook leaves a single virtual call un-invoked on SUPPRESS; letting users opt out is the
+        // Gated by `[Experimental] UnmuffleHelmVoice`. The flag is read once here at startup. A runtime toggle is not
+        // supported, because a tear-down of the inline detour races the engine equip pipeline, which calls it from
+        // arbitrary threads. The hook leaves a single virtual call un-invoked on SUPPRESS. The user opt-out is the
         // safety lever for that bypass.
         if (flag_helm_audio_unmuffle().load(std::memory_order_relaxed))
         {
@@ -1068,8 +1066,8 @@ namespace Transmog
         DyeRecordInject::init();
 
         // ColorOverride is a tri-hook subsystem (host-scope owner vfuncs, setter property substitute, publisher
-        // per-matInst capture). Gated behind the `[Experimental] ColorOverride` INI key so the hooks don't install on
-        // the default configuration; the picker UI keys off the same flag.
+        // per-matInst capture). It is gated behind the `[Experimental] ColorOverride` INI key, so the hooks do not
+        // install on the default configuration. The picker UI keys off the same flag.
         if (flag_color_override().load(std::memory_order_acquire))
         {
             ColorOverride::HostScope::init();
@@ -1083,16 +1081,17 @@ namespace Transmog
         }
 
         // Crimson Desert has TWO independent dye layers:
-        //   1. Bench/menu UI dyeability -- gated by the partprefabdyeslotinfo.pabgb registry. Not modified at runtime;
-        //      static PAZ overlays handle this externally.
-        //   2. Render-time dye apply -- engine reads dye records from a publish vector at dst+120 during slotpop. The
-        //      DyeRecordInject inline detour on sub_141E019E0 (init above) injects user-chosen records here.
+        //   1. Bench/menu UI dyeability -- gated by the partprefabdyeslotinfo.pabgb registry. LT does not modify it at
+        //      runtime. Static PAZ overlays handle this externally.
+        //   2. Render-time dye apply -- the engine reads dye records from a publish vector at dst+120 during slotpop.
+        //      The DyeRecordInject inline detour on DyeCopier (see k_dyeCopierCandidates, init above) injects
+        //      user-chosen records here.
 
         start_load_detect_thread();
         ensure_apply_worker_started();
 
-        // Hotkey bindings were registered in load_config() so the press_combo INI keys could be picked up during
-        // Config::load(). Now flip InputManager live; the bindings start firing on the next poll tick.
+        // Hotkey bindings were registered in load_config() so that Config::load() picks up the press_combo INI keys.
+        // Flip InputManager live now. The bindings start to fire on the next poll tick.
         DMK::InputManager::get_instance().start();
 
         logger.info("Transmog initialization complete -- SlotPopulator {}",
@@ -1111,17 +1110,15 @@ namespace Transmog
     {
         DMK::Logger::get_instance().info("{} shutting down...", MOD_NAME);
 
-        // Disable the INI watcher up front so an in-flight save event cannot fire setters while we are tearing state
-        // down.
+        // Disable the INI watcher up front so an in-flight save event cannot fire setters during the state tear-down.
         DMK::Config::disable_auto_reload();
 
         shutdown_requested().store(true, std::memory_order_release);
 
-        // Drain workers before the DMK teardown removes the hooks they call into. Every worker we spawned calls raw
-        // game functions
-        // under SEH (apply_all_transmog -> SlotPopulator, debounce
-        // worker -> RealPartTearDown -> safeTearDown), so joining them
-        // first guarantees no worker is mid-call into a SafetyHook trampoline when the trampoline pages are unmapped.
+        // Drain workers before the DMK teardown removes the hooks they call into. Every spawned worker calls raw game
+        // functions under SEH (apply_all_transmog -> SlotPopulator, debounce worker -> RealPartTearDown ->
+        // safeTearDown). Join them first to guarantee that no worker sits mid-call inside a SafetyHook trampoline when
+        // the trampoline pages are unmapped.
         stop_load_detect_thread();
         stop_apply_worker();
         join_deferred_nametable_scan();
@@ -1129,11 +1126,11 @@ namespace Transmog
 
         PrefabWrapperSwap::shutdown();
 
-        // Full DMK teardown: removes every managed hook (BatchEquip, VEC, PartAddShow), stops and clears the
-        // InputManager poller along with its registered bindings, stops the ConfigWatcher, and clears the Config
-        // registered-items list. Idempotent and safe to re-init from on the next Logic-DLL load. Each detour body
-        // snapshots its trampoline pointer at entry and bails to a benign default if the snapshot is null, defending
-        // the brief drain window between hook removal and DLL unmap.
+        // Full DMK teardown: it removes every managed hook (BatchEquip, VEC, PartAddShow), stops and clears the
+        // InputManager poller together with its registered bindings, stops the ConfigWatcher, and clears the Config
+        // registered-items list. It is idempotent and safe to re-init from on the next Logic-DLL load. Each detour
+        // body snapshots its trampoline pointer at entry and bails to a benign default if the snapshot is null. That
+        // defends the brief drain window between hook removal and DLL unmap.
         DMK_Shutdown();
 
         clear_hotkey_guards();

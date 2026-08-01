@@ -166,6 +166,23 @@ Not sure which prefab is which armor? Browse the full **[Item Catalog](https://t
 
 > **Naming convention:** item names carry a gender marker - `_**w_` is the female variant and `_**m_` the male variant (in most cases).
 
+### Note on male/female variants
+
+Some items, such as **Dark Marksman's Plate Armor**, **Odeck's Protector Plate Armor**, and **The Masked Liberator's Cloth Armor**, have separate prefabs for the female and male variants. If the picker selects the wrong variant for your character, follow these steps:
+
+1. Tick the **Prefabs** checkbox in the item search popup.
+2. Look up the correct prefab name in the [Item Catalog](https://tkhquang.github.io/CrimsonDesertTools/live-transmog/catalog).
+3. Type that prefab name into the search box in the overlay.
+
+**Example.** Search [Dark Marksman's Plate Armor](https://tkhquang.github.io/CrimsonDesertTools/live-transmog/catalog?q=Dark+Marksman%27s+Plate+Armor) in the catalog. It shows the base (male) prefab, `cd_m0001_00_samuel_ub_0001`. Note the `_samuel_ub_` part. Type `_samuel_ub_` into the overlay search box. It returns two records, one of them the female variant:
+
+```text
+cd_m0001_00_samuel_ub_0001
+cd_phw_m0001_00_samuel_ub_00_0001
+```
+
+Note the extra `_00_` in the second name. If there are noisy matches, narrow the search with `_samuel_ub_00_0001`.
+
 ## Configuration
 
 Edit `CrimsonDesertLiveTransmog.ini` for global settings and optional hotkey bindings.
@@ -194,8 +211,8 @@ PrevHotkey =
 [Experimental]
 ; --- Color Override ---
 ; Adds a "Color Override" tab to the per-slot popup that lets you pick
-; a custom colour for each visible material region on a transmogged
-; item, including outfits the in-game dye merchant would normally refuse.
+; a custom color for each visible material region on a transmogged
+; item, including outfits the in-game dye merchant normally refuses.
 ;
 ; HIGHLY EXPERIMENTAL -- disabled by default. Toggle changes take
 ; effect on the next game launch.
@@ -230,11 +247,12 @@ See the full list at the [Supported Input Names](https://github.com/tkhquang/Det
 - **[Experimental] Color Override** is off by default. Set `ColorOverride = true` in the `[Experimental]` INI section to enable a per-region color picker that paints transmog items (including outfits the in-game dye merchant refuses). Changes take effect on the next game launch. Expect rough edges.
 - **[Experimental] Dye support shipped as a rough POC/MVP**, please bear with the UX for now. Note that not every item is dyeable; applying a color to a non-dyeable slot will produce no visual change.
 - **Helmets: visibility override and voice muffle** - while LT is active, the in-game helmet visibility setting is overridden (workaround: set the Helm slot in the LT picker to "(none)" to hide the helmet). Closed-face helmets also muffle your protagonist's voice; enable the experimental **Unmuffle Helm Voice** option (`UnmuffleHelmVoice = true`) to remove it, NPC voices keep their vanilla muffle. Changes take effect on the next game launch.
-- **Silverwolf Leather Armor** and some other armor seems to have combined with the cloak and other slots. If you apply it and it disappears right afterwards, try setting the cloak slot and other involved slots to none, save, then reapply the armor again.
+- **Some NPC armor** seems to have combined with the cloak and other slots. If you apply it and it disappears right afterwards, try setting the cloak slot and other involved slots to none, save, then reapply the armor again.
 - **NPC armor variants and damaged variants render via carrier** -- items tagged `(carrier)` in the picker use an automatic carrier swap + character-class bypass to render. Most work; a few may still produce empty slots depending on the item's internal skeleton bindings.
 - **Non-humanoid items crash** -- horse tack, pet armor, and wagon gear crash the mesh binder. The "Safe only" filter hides these by default.
 - **Wrong-slot or non-equipment items will crash** - selecting a chest piece for the helm slot, or non-armor items (dog armor, recipes, etc.) crashes the game. Safety filters prevent this by default. Do not disable them unless you know what you are doing.
 - **Special-effect armor may have visual quirks** - armor with particle or emissive (glow) effects (e.g. Marni Laser Helm) may not render those effects correctly. Hair may clip through some helmets. I haven't been able to make these work yet.
+- **Armor may render white / untextured right after loading** - occasionally a transmogged piece (most often the helm) shows up as a plain white, untextured mesh when your preset is auto-applied during world or character load. The item's material has not finished streaming in at the moment the transmog is applied. _Workaround:_ once you are fully in-game, re-apply the transmog - open the overlay (**Home**) and click **Apply All** again, or toggle the affected slot off and back on. Re-applying reloads the material and it renders correctly.
 - Major game updates may break the mod until a new version is released.
 - Only tested with the Steam version.
 

@@ -20,21 +20,16 @@ namespace Transmog::RealPartTearDown
 {
     namespace
     {
-        // Helper function pointer types. Addresses come from
-        // Transmog::resolved_addrs() (populated elsewhere in init()):
+        // Helper function pointer types. Addresses come from Transmog::resolved_addrs() (populated elsewhere in
+        // init()):
         //
-        // SafeTearDown -- engine scene-graph tear-down. Calls
-        //   sub_1425EBAE0 internally. Does NOT mutate the
-        //   authoritative equip table at a1+k_containerPtrOffset.
-        //   AOB-resolved -- the v1.05 build name was sub_14075FE60
-        //   and the current v1.06 build resolves to sub_1407990E0;
-        //   readers comparing to the live IDA db should use the AOB
-        //   pattern in k_safeTearDownCandidates, not these names.
+        // SafeTearDown -- engine scene-graph tear-down. It calls an internal scene-detach primitive. It does NOT
+        //   mutate the authoritative equip table at a1+k_containerPtrOffset. The function is AOB-resolved, so a
+        //   reader who cross-checks against a disassembler database must match the byte pattern in
+        //   k_safeTearDownCandidates, never a name.
         //
-        // IndexedStringLookup (sub_1402D75D0) -- short->hash lookup.
-        //   Takes the address of a uint16_t slot id; returns a
-        //   pointer whose first DWORD is the descriptor hash used
-        //   by the rest of the equip pipeline.
+        // IndexedStringLookup -- short->hash lookup. It takes the address of a uint16_t slot id. It returns a
+        //   pointer whose first DWORD is the descriptor hash used by the rest of the equip pipeline.
 
         using SafeTearDownFn = std::int64_t(__fastcall *)(std::int64_t a1, std::uint32_t hash, std::int16_t slotTag);
 
@@ -48,17 +43,16 @@ namespace Transmog::RealPartTearDown
         // in the log (the container ptr + entry offsets are not AOB-anchored).
         std::atomic<bool> g_loggedFirstEntry{false};
 
-        // Auth-table verbose dump tracker. Fires the full enumeration once per distinct (a1, count) pair so character
-        // switches and table resizes re-emit the slot inventory, but a single session of stable equip state doesn't
-        // spam the log on every tear-down call. Used by the slot-discovery research pass -- helps decide whether a
-        // character actually has live entries for tags beyond the documented Helm/Chest/Gloves/Boots/Cloak
-        // (0x03/0x04/0x05/0x06/0x10) set. The dump function itself is defined below the layout constants because it
-        // reads them.
+        // Auth-table verbose dump tracker. It fires the full enumeration once per distinct (a1, count) pair, so
+        // character switches and table resizes re-emit the slot inventory. A session of stable equip state does not
+        // spam the log on every tear-down call. The dump answers the slot-discovery question: does a character hold
+        // live entries for tags beyond the documented Helm/Chest/Gloves/Boots/Cloak (0x03/0x04/0x05/0x06/0x10) set?
+        // The dump function itself is defined below the layout constants because it reads them.
         std::atomic<std::uintptr_t> g_lastDumpedA1{0};
         std::atomic<std::uint32_t> g_lastDumpedCount{0};
-        // Hash over the entry-array's primary IDs so the dedupe also catches gear changes within the same (a1, count)
-        // -- without it, the auth table's `count` is the slot-array capacity (not the equipped count: empty slots
-        // persist as 0xFFFF sentinels) so equip/unequip never bumps count and the prior dedupe key wouldn't re-fire
+        // Hash over the entry-array's primary IDs so the dedupe also catches gear changes within the same (a1, count).
+        // The auth table's `count` is the slot-array capacity, not the equipped count. Empty slots persist as 0xFFFF
+        // sentinels, so equip and unequip never bump `count`. Without the content hash, the dedupe key never re-fires
         // after the first dump per actor.
         std::atomic<std::uint64_t> g_lastDumpedContentHash{0};
 
@@ -68,46 +62,49 @@ namespace Transmog::RealPartTearDown
         // >0x10000, count <= k_maxPlausibleEntries, slotTag in plausible range) bail out before touching anything
         // dangerous if a future patch reshapes the struct again.
         //
-        // a1 is the SlotPopulator descriptor context. The container pointer field shifted as the component grew new
-        // fields in front of this slot:
-        //   v1.03.01: container @ a1 + 0x78
-        //   v1.04.00: container @ a1 + 0x88   (+0x10 of new fields)
-        //   v1.05.00: container @ a1 + 0x88   (unchanged from v1.04)
+        // a1 is the SlotPopulator descriptor context. The container pointer field moves whenever
+        // pa::ClientEquipSlotActorComponent grows or shrinks fields in front of this slot. The delta is per-field. One
+        // patch can shrink this component by 8 bytes and at the same time push unrelated descriptor fields the other
+        // way, so never assume that one measured delta applies struct-wide.
         //
-        // container layout (unchanged across all versions):
+        // container layout:
         //   +0x00 QWORD header (unused)
         //   +0x08 QWORD base address of entry array
         //   +0x10 DWORD live entry count
         //   +0x14 DWORD capacity
         //
-        // entry stride and slot-tag offset move together by 8 across versions:
-        //   v1.04.00: stride 0xC8, slot tag @ +0xC0
-        //   v1.05.00: stride 0xD0, slot tag @ +0xC8 (entry grew 8 bytes)
-        //   v1.13.00: stride 0xC8, slot tag @ +0xC0 (reverted to the v1.04 layout). Confirmed against the engine's
-        //             own BatchEquip walk (sub_1407C8560), which reads the slot tag at auth-entry +0xC0 with a 0xC8
-        //             stride, and a live dump: slot 0x04->chest, 0x03->helm, 0x12->mask, every entry gate=1.
-        //
-        // entry fields (offsets within an entry, v1.13):
+        // entry fields (offsets within an entry):
         //   +0x08 WORD  primary item word (0xFFFF or 0 == empty)
         //   +0x10 QWORD gate (must be non-zero for a live entry)
-        //   +0xC0 WORD  slot tag (search key; helm=0x0003 .. cloak=0x0010)
+        //   +0xC8 WORD  slot tag (search key, helm=0x0003 .. cloak=0x0010)
         //
-        // The alt item word at +0x88 used by older versions is no longer relied on; the primary path at +0x08 is
-        // sufficient. Slot-tag values themselves are unchanged across versions
-        // (Helm=0x03, Chest=0x04, Gloves=0x05, Boots=0x06, Cloak=0x10);
-        // only the position within the entry shifted.
-        constexpr std::uintptr_t k_containerPtrOffset = 0x88;
+        // The alt item word at +0x88 used by older layouts is no longer read. The primary word at +0x08 is
+        // sufficient. Slot-tag VALUES are stable across patches (Helm=0x03, Chest=0x04, Gloves=0x05, Boots=0x06,
+        // Cloak=0x10). Only the position within the entry shifts.
+        //
+        // A stale container offset fails SILENTLY and disables the whole mod. The neighboring slot holds a packed
+        // scalar, not a pointer. On most component instances that scalar is small, so the `< 0x10000` guard rejects
+        // it, is_actor_apply_ready() returns false forever and the apply path reports zero applied slots. On other
+        // instances the same scalar is large enough to PASS the guard, and the walk then reads garbage. Verify the
+        // offset against live memory on patch day. The engine states it in its own auth-table walk, with the
+        // component in the base register:
+        //   `mov rax,[r13+0x80] ; mov rdx,[rax+08] ; mov eax,[rax+10]`
+        // That is: container at +0x80, array base at +0x08, count at +0x10.
+        constexpr std::uintptr_t k_containerPtrOffset = 0x80;
         constexpr std::uintptr_t k_containerArrayBaseOffset = 0x08;
         constexpr std::uintptr_t k_containerCountOffset = 0x10;
 
-        constexpr std::uintptr_t k_entryStride = 0xC8;
+        // The entry stride and the slot-tag offset always move together by 8, so verify both together on patch day.
+        // The engine's own BatchEquip auth-table search loop (see k_batchEquipCandidates) states both literally:
+        //   `imul rcx,rax,0xD0 ; cmp [rdx+0xC8],r8w ; add rdx,0xD0`
+        constexpr std::uintptr_t k_entryStride = 0xD0;
         constexpr std::uintptr_t k_entryPrimaryWordOffset = 0x08;
-        constexpr std::uintptr_t k_entrySlotTagOffset = 0xC0;
+        constexpr std::uintptr_t k_entrySlotTagOffset = 0xC8;
         constexpr std::uintptr_t k_entryGateOffset = 0x10;
 
         constexpr std::uint32_t k_maxPlausibleEntries = 0x1000;
-        // Slot-tag range covers the full engine taxonomy: 0x00..0x15. Tag 0x0E is engine-unused but harmless to include
-        // in the range -- the auth-table walk simply never finds an entry for it.
+        // Slot-tag range covers the full engine taxonomy: 0x00..0x15. Tag 0x0E is engine-unused but harmless to
+        // include in the range. The auth-table walk never finds an entry for it.
         constexpr std::uint16_t k_minPlausibleSlotTag = 0x0000;
         constexpr std::uint16_t k_maxPlausibleSlotTag = 0x0015;
 
@@ -133,9 +130,9 @@ namespace Transmog::RealPartTearDown
             }
         }
 
-        // Slot label resolver. Defers to `slot_metadata.hpp` (single source of truth for per-slot static data) when the
-        // tag maps to a `TransmogSlot`; falls back to the engine-only override table for the two tags LT does not
-        // manage.
+        // Slot label resolver. It defers to `slot_metadata.hpp` (single source of truth for per-slot static data) when
+        // the tag maps to a `TransmogSlot`. Otherwise it falls back to the engine-only override table for the two tags
+        // LT does not manage.
         [[nodiscard]] const char *known_slot_name(std::uint16_t tag) noexcept
         {
             if (const auto s = slot_from_game_tag(static_cast<std::int16_t>(tag)))
@@ -151,10 +148,10 @@ namespace Transmog::RealPartTearDown
             return slot_from_game_tag(static_cast<std::int16_t>(tag)).has_value();
         }
 
-        // Friendly name for the LT-internal TransmogSlot category that ItemNameTable::category_of returns when
-        // classifying an item by its descriptor (independent of the auth-table slot tag). Defers to slot_name() which
-        // knows every TransmogSlot enum entry; "Other" is the catch-all for items whose descriptor type-code didn't
-        // classify (returned TransmogSlot::Count).
+        // Friendly name for the LT-internal TransmogSlot category that ItemNameTable::category_of returns when it
+        // classifies an item by its descriptor (independent of the auth-table slot tag). It defers to slot_name(),
+        // which knows every TransmogSlot enum entry. "Other" is the catch-all for items whose descriptor type-code did
+        // not classify (it returned TransmogSlot::Count).
         [[nodiscard]] const char *transmog_category_str(TransmogSlot s) noexcept
         {
             if (s == TransmogSlot::Count)
@@ -163,15 +160,15 @@ namespace Transmog::RealPartTearDown
         }
 
         // Walks every live entry in the auth table once per (a1, count) change and logs (index, slotTag, primary,
-        // gate-non-null) plus the resolved item name + LT-classified category. SEH-guarded by the caller's __try;
-        // container/arrayBase/count have already been validated by the caller. Cheap: at most k_maxPlausibleEntries
-        // iterations and emits one log line per live entry. Item-name resolution falls back to "<unresolved>" when
-        // ItemNameTable hasn't built (e.g. early in load).
+        // gate-non-null) plus the resolved item name and LT-classified category. The caller's __try guards the reads.
+        // The caller also validates container, arrayBase and count before the call. The cost is bounded: at most
+        // k_maxPlausibleEntries iterations, and one log line per live entry. Item-name resolution falls back to
+        // "<unresolved>" when ItemNameTable is not built yet (for example, early in load).
         void dump_full_auth_table_if_changed(std::uintptr_t a1, std::uintptr_t arrayBase, std::uint32_t count) noexcept
         {
-            // Cheap pre-pass: FNV-1a 64-bit hash over the primary IDs so equip/unequip events (which leave count
-            // unchanged) are visible to the dedupe gate. ~20 entries * 2 bytes hashed per call -- negligible. Caller's
-            // __try frame covers the volatile reads.
+            // Cheap pre-pass: FNV-1a 64-bit hash over the primary IDs so equip and unequip events, which leave count
+            // unchanged, stay visible to the dedupe gate. Two bytes hashed per entry, so the cost is negligible. The
+            // caller's __try frame covers the volatile reads.
             std::uint64_t contentHash = 0xCBF29CE484222325ULL;
             for (std::uint32_t i = 0; i < count; ++i)
             {
@@ -187,11 +184,11 @@ namespace Transmog::RealPartTearDown
             if (prevA1 == a1 && prevCount == count && prevHash == contentHash)
                 return;
 
-            // Stamp the dedupe tracker only when ItemNameTable is ready -- otherwise the first dump fires from the
-            // early load-detect retry probe (which runs ~1s before the catalog is built), names show as "<unresolved>",
-            // and we'd never re-dump once stamped. By deferring the stamp until names resolve, the dump re-fires up to
-            // a couple times during the load window (cheap: one log batch per retry tick) and lands its FINAL emission
-            // with full item names.
+            // Stamp the dedupe tracker only when ItemNameTable is ready. Otherwise the first dump fires from the early
+            // load-detect retry probe, which runs before the catalog is built. Names then show as "<unresolved>", and
+            // a stamped tracker blocks every later dump. The deferred stamp lets the dump re-fire on each retry tick
+            // through the load window. The cost is one log batch per tick, and the FINAL emission carries full item
+            // names.
             auto &logger = DMK::Logger::get_instance();
             auto &itemTable = ItemNameTable::instance();
             const bool itemTableReady = itemTable.size() > 0;
@@ -235,9 +232,9 @@ namespace Transmog::RealPartTearDown
 
                 if (!itemTableReady)
                 {
-                    // Catalog not built yet -- skip the resolved fields entirely (they would all be default-init noise:
-                    // equipType=0, typeCode=0xFFFF, cat=Other) and just print the raw engine-side fields. This branch
-                    // re-fires on the next probe tick once names land.
+                    // Catalog not built yet. Skip the resolved fields entirely, because they are all default-init
+                    // noise (typeCode=0xFFFF, cat=Other), and print the raw engine-side fields only. This branch
+                    // re-fires on the next probe tick after names land.
                     logger.trace("[slot-discovery]   [{:>2}] tag={:#06x} ({:<12}) "
                                  "primary={:#06x} <unresolved>{}",
                                  i, tag, tagName, primary, newTagMarker);
@@ -249,22 +246,21 @@ namespace Transmog::RealPartTearDown
                     itemName = "<unresolved>";
 
                 const char *categoryStr = transmog_category_str(itemTable.category_of(primary));
-                const std::uint16_t equipType = itemTable.equip_type_of(primary);
                 const std::uint16_t typeCode = itemTable.type_code_of(primary);
 
-                // Auto-record (itemId -> TransmogSlot) for the picker
-                // catalog. The engine just told us which slot this item belongs in -- ground truth that overrides the
-                // static type-code heuristic. Skips when the tag has no TransmogSlot mapping (e.g. tag 0x0E "Unknown"
-                // or 0x15 OongkaRocket -- both intentionally not in TransmogSlot).
+                // Auto-record (itemId -> TransmogSlot) for the picker catalog. The auth-table tag states which slot
+                // this item belongs in. That is ground truth, and it overrides the static type-code heuristic. The
+                // record is skipped when the tag has no TransmogSlot mapping (for example tag 0x0E "Unknown" or 0x15
+                // OongkaRocket, both intentionally outside TransmogSlot).
                 if (auto tslot = slot_from_game_slot(static_cast<std::int16_t>(tag)); tslot.has_value())
                 {
                     itemTable.record_observed_slot(primary, *tslot);
                 }
 
                 logger.trace("[slot-discovery]   [{:>2}] tag={:#06x} ({:<12}) "
-                             "primary={:#06x} equipType={:#06x} typeCode={:#06x} "
+                             "primary={:#06x} typeCode={:#06x} "
                              "cat={:<13} name=\"{}\"{}",
-                             i, tag, tagName, primary, equipType, typeCode, categoryStr, itemName, newTagMarker);
+                             i, tag, tagName, primary, typeCode, categoryStr, itemName, newTagMarker);
             }
 
             logger.trace("[slot-discovery] auth-table dump end live={} "
@@ -333,18 +329,18 @@ namespace Transmog::RealPartTearDown
             return false;
         }
 
-        // Stage 2: engine readiness. SafeTearDown's deep dereference reads
-        //     v15 = *(CCC + 0x130);
-        //     ... *v15 ...
-        // During cold-load the field at `CCC + 0x130` is null; once the engine wires up the actor's scene graph it
-        // becomes a heap-allocated sub-handler pointer. SafeTearDown's own null-check (`if (v7)`) only guards against a
-        // null CCC and not this deeper field, so calling it before the field is populated fault-trips inside the
-        // engine. Probing this one pointer is both necessary (SafeTearDown faults when it is null) and sufficient
-        // empirically (the transition coincides with the end of the cold-load fault burst window).
+        // Stage 2: engine readiness. SafeTearDown performs a deep dereference of the shape
+        //     sub = *(CCC + 0x130);
+        //     ... *sub ...
+        // During cold-load the field at `CCC + 0x130` is null. After the engine wires up the actor's scene graph, the
+        // field holds a heap-allocated sub-handler pointer. SafeTearDown's own null-check guards only against a null
+        // CCC, not against this deeper field, so a call before the field is populated faults inside the engine. A
+        // probe of this one pointer is necessary, because SafeTearDown faults when it is null. It is also sufficient,
+        // because the transition coincides with the end of the cold-load fault window.
         //
-        // The CCC instance is located by MSVC RTTI mangled name rather than fixed slot offset so the slot drift
+        // The CCC instance is located by MSVC RTTI mangled name rather than by a fixed slot offset, so the slot drift
         // documented in CDCore controlled_char does not affect this probe. Only the +0x130 sub-handler offset lives in
-        // LT; the a1->CCOIA-> p1 chain offsets live inside CDCore.
+        // LT. The a1 -> CCOIA -> p1 chain offsets live inside CDCore.
         constexpr std::ptrdiff_t k_offCccSubHandler = 0x130;
         static std::atomic<std::uintptr_t> s_cccVt{0};
         static constexpr std::string_view k_cccName = ".?AVClientCharacterControlActorComponent@pa@@";
@@ -550,8 +546,8 @@ namespace Transmog::RealPartTearDown
                 return false;
             }
 
-            // Safe scene-graph tear-down: routes through sub_1425EBAE0 and does NOT mutate the authoritative entry
-            // array, which keeps it safe to call from the apply dispatcher.
+            // Safe scene-graph tear-down. It routes through the engine's scene-detach primitive and does NOT mutate
+            // the authoritative entry array, so the apply dispatcher can call it.
             safeFn(static_cast<std::int64_t>(a1), hash, static_cast<std::int16_t>(gameSlotTag));
             logger.trace("[dispatch] tear_down slot={:#06x} entryFound=true "
                          "primary={:#06x} hash={:#010x} result=true",

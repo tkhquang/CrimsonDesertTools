@@ -30,24 +30,30 @@ namespace Transmog
     {
         // Registry-holder absolute addresses are resolved on first call via the AOB cascade defined in
         // `aob_resolver.hpp` (k_iteminfoHolderCandidates / k_stringinfoHolderCandidates) and cached for the lifetime of
-        // the process. Both holders dereference to a registry struct with the standard `+0x08 = u32 count`, `+0x50 =
-        // QWORD entry-array` layout.
+        // the process. Both holders dereference to a registry struct with the standard `+0x08 = u32 count`,
+        // `+0x58 = QWORD entry-array` layout.
+        //
+        // The entry-array offset moves whenever the pa::StaticInfoManager2<> base changes width. The count sits ahead
+        // of the growth point and stays put, so usually only the array offset needs a new value. A stale array offset
+        // fails SILENTLY: the neighboring offset also holds a valid heap pointer, to a different small-stride array,
+        // so no plausibility guard trips and the walk yields nothing useful. On patch day, verify both offsets against
+        // live memory.
         constexpr ptrdiff_t kOffRegistryCount = 0x08;
-        constexpr ptrdiff_t kOffRegistryArray = 0x50;
+        constexpr ptrdiff_t kOffRegistryArray = 0x58;
 
         constexpr ptrdiff_t kOffName = 0x08;
         constexpr ptrdiff_t kOffMetaSub = 0x90;
 
-        // The engine stores strings behind a "StringRef" descriptor:
-        // {char* ptr @+0x00, u32 len @+0x08}. The characters are always heap-allocated (confirmed down to a 5-character
-        // string), so there is no inline/SSO form to special-case.
+        // The engine stores strings behind a "StringRef" descriptor: {char* ptr @+0x00, u32 len @+0x08}. The
+        // characters are always heap-allocated, down to strings only a few characters long, so there is no inline/SSO
+        // form to special-case.
         //
         // Two wrapper shapes reference a StringRef:
         //   - Item NAME wrappers (desc+0x08) ARE a StringRef directly.
         //   - stringinfo ICON wrappers are a larger object that stores a pointer to their StringRef at +0x18. For an
-        //     inline icon wrapper that pointer targets the wrapper's own +0x20; for an external one it targets a
-        //     StringRef elsewhere on the heap. Dereferencing +0x18 resolves both forms, whereas a fixed +0x20/+0x28
-        //     read only handles the inline form and reads garbage on the external one.
+        //     inline icon wrapper, that pointer targets the wrapper's own +0x20. For an external one, it targets a
+        //     StringRef elsewhere on the heap. A dereference of +0x18 resolves both forms. A fixed +0x20/+0x28 read
+        //     only handles the inline form and reads garbage on the external one.
         constexpr ptrdiff_t kOffWrapDesc = 0x18; // icon wrapper -> StringRef*
         constexpr ptrdiff_t kOffRefPtr = 0x00;   // StringRef: char*
         constexpr ptrdiff_t kOffRefLen = 0x08;   // StringRef: u32 length
@@ -55,8 +61,8 @@ namespace Transmog
         // Item body-mesh chain. An item carries its actual per-rig mesh prefab names here, independent of the icon.
         // Several rig variants of one item share a single icon -- Daeil_Band, Damian_Daeil_Band and OOngka_Daeil_Band
         // all expose ItemIcon_Prefab_cd_phm_... yet emit cd_phm / cd_phw / cd_pom meshes respectively -- so the icon
-        // alone collapses them onto the cd_phm prefab. desc+0x248 holds a rule-list pointer (count at +0x250); each
-        // rule's mesh-slot array (u16 stringinfo slots) is at rule+0x00 with its count at rule+0x08.
+        // alone collapses them onto the cd_phm prefab. desc+0x248 holds a rule-list pointer with its count at +0x250.
+        // Each rule's mesh-slot array (u16 stringinfo slots) is at rule+0x00 with its count at rule+0x08.
         constexpr ptrdiff_t kOffDescRuleList = 0x248;
         constexpr ptrdiff_t kOffDescRuleCount = 0x250;
         constexpr ptrdiff_t kRuleStride = 0x38;
@@ -64,16 +70,20 @@ namespace Transmog
         constexpr ptrdiff_t kOffRuleMeshCount = 0x08;
         constexpr uint32_t kRuleScanCap = 64; // bound on garbage counts
 
-        // Per-body mesh variant entry list (desc+0x3E0), the structure the engine's variant resolver walks to
-        // render an item's mesh for the wearer's body. Each 0x58-byte entry names one body variant of the item;
-        // the mesh handle is reached via a pointer at entry+0x10 (deref -> handle whose low 16 bits index stringinfo).
-        // This is the authoritative, per-item, noise-free source of every mesh an item uses across bodies (human male /
-        // orc / female / NPC), which the shared, rig-stripped icon cannot enumerate -- e.g. Kliff_Mask binds three rig
-        // meshes here (`cd_phm_` / `cd_pom_` / `cd_phw_`) behind one `cd_phm_` icon. 1.13 offsets; re-confirm on a
-        // descriptor reshape. (The engine also stores each entry's wearer body-class token array at entry+0x40 / count
-        // +0x48; the dump links every entry's mesh regardless of which body selects it, so those are not needed here.)
-        constexpr ptrdiff_t kOffDescVariantEntries = 0x3E0;
-        constexpr ptrdiff_t kOffDescVariantCount = 0x3E8;
+        // Per-body mesh variant entry list (desc+0x408), the structure the engine's variant resolver walks to render an
+        // item's mesh for the wearer's body. Each 0x58-byte entry names one body variant of the item. The mesh handle
+        // is reached via a pointer at entry+0x10 (deref -> handle whose low 16 bits index stringinfo). This is the
+        // authoritative, per-item, noise-free source of every mesh an item uses across bodies (human male / orc /
+        // female / NPC), which the shared, rig-stripped icon cannot enumerate -- e.g. Kliff_Mask binds three rig meshes
+        // here (`cd_phm_` / `cd_pom_` / `cd_phw_`) behind one `cd_phm_` icon. The engine also stores each entry's
+        // wearer body-class token array at entry+0x40 with its count at +0x48. The dump links every entry's mesh
+        // regardless of which body selects it, so it does not need those two.
+        //
+        // The list offset and its count offset move when the item descriptor is reshaped. The entry stride 0x58 and the
+        // per-entry mesh pointer at +0x10 stay put across such a reshape. The BodyVariantResolver walks the same list,
+        // so its disassembly is the independent cross-check for new values on patch day.
+        constexpr ptrdiff_t kOffDescVariantEntries = 0x408;
+        constexpr ptrdiff_t kOffDescVariantCount = 0x410;
         constexpr ptrdiff_t kVariantEntryStride = 0x58;
         constexpr ptrdiff_t kOffEntryMesh = 0x10; // pointer into the variant table -> mesh handle
         constexpr uint32_t kVariantEntryCap = 32;
@@ -82,7 +92,7 @@ namespace Transmog
         //
         // The `(value, bool& ok)` shape distinguishes a faulted read from a legitimate zero result, which matters at
         // call sites where 0 is a valid value (e.g. a slot index of 0). `DMKMemory::seh_read` is the underlying
-        // SEH-protected primitive; these adapters fold its `std::optional<T>` return into the local shape used by the
+        // SEH-protected primitive. These adapters fold its `std::optional<T>` return into the local shape used by the
         // dumper's bounded walks.
 
         uintptr_t read_qword_safe(uintptr_t addr, bool &ok) noexcept
@@ -118,11 +128,11 @@ namespace Transmog
                         break;
                     // Reject control bytes (0x01..0x1F): a misaligned or torn heap read lands on pointer/length bytes
                     // that carry low control values, so a control byte aborts the read. High bytes (0x80..0xFF) are
-                    // accepted because some item name keys are UTF-8 encoded -- the
-                    // Roman numerals in `Goblin_Merchant_Fabric_Armor_*` use `E2 85 A2..A5` -- and a
-                    // printable-ASCII-only filter would zero the whole name, dropping the item from the prefab pass
-                    // entirely (it never reaches the exact/base maps, so its prefab loses its item link). Mirrors the
-                    // name reader in item_name_table.cpp.
+                    // accepted because some item name keys are UTF-8 encoded -- the Roman numerals in
+                    // `Goblin_Merchant_Fabric_Armor_*` use `E2 85 A2..A5`. A printable-ASCII-only filter zeroes the
+                    // whole name and drops the item from the prefab pass entirely. Such an item never reaches the
+                    // exact/base maps, so its prefab loses its item link. Mirrors the name reader in
+                    // item_name_table.cpp.
                     if (static_cast<unsigned char>(c) < 0x20)
                     {
                         n = 0;
@@ -161,8 +171,8 @@ namespace Transmog
             return read_cstr_safe(reinterpret_cast<const char *>(cstr), len + 1);
         }
 
-        // stringinfo ICON wrapper: the StringRef is reached via wrap+0x18 (inline wrappers point back at their own
-        // +0x20; external ones point elsewhere). Dereference it so both layouts resolve.
+        // stringinfo ICON wrapper: the StringRef is reached via wrap+0x18. An inline wrapper points back at its own
+        // +0x20 and an external one points elsewhere. Dereference wrap+0x18 so both layouts resolve.
         std::string read_wrapper_string(uintptr_t wrap) noexcept
         {
             if (!wrap)
@@ -179,20 +189,19 @@ namespace Transmog
         // `ItemIcon_<name>` (no `_Prefab_` infix) for icons that resolve to a UI texture bundle (quest dialogs,
         // abyss-gear sockets, money/trade UI, collection-album thumbnails, housing-UI icons, puzzle slots, and so on).
         // Two cd_* sub-families (`cd_questimage_*` and `cd_knowledgeimage_*`) are likewise UI-only and must be filtered
-        // before the targeted phantom-recovery pass, otherwise it would resolve unrelated quest-registry strings
-        // against mesh-prefab names that happen to overlap post-strip.
+        // before the targeted phantom-recovery pass. Without that filter, the pass resolves unrelated quest-registry
+        // strings against mesh-prefab names that overlap post-strip.
         bool starts_with_asset_prefix(std::string_view sl) noexcept; // fwd decl
 
         // True when the icon string does NOT encode a real mesh/world-object prefab -- i.e. it is UI-texture-only
         // (quest dialogs, abyss-gear, skill/stat items, money/trade UI, memory chips, dev stubs, or a bespoke
         // `ItemIcon_<ItemName>` whose post-strip name is not a known asset family).
         //
-        // An icon encodes a mesh when, after stripping the `itemicon_`(`prefab_`) wrapper, the remainder begins with a
-        // known asset-prefix family (the same accept-list the pool enrich pass uses:
-        // cd_/gimmick_/collection_/craft_/puzzle_/background_/lamp_/fs_/ docking_/item_rare_). Classifying on the
-        // family (not on the `itemicon_prefab_` infix alone) is deliberate: gimmick/collection/ craft/puzzle
-        // world-objects own real meshes but reference them through the bare `itemicon_` form, so they must still count
-        // as prefabs.
+        // An icon encodes a mesh when, after the strip of the `itemicon_`(`prefab_`) wrapper, the remainder begins with
+        // a known asset-prefix family (the same accept-list the pool enrich pass uses:
+        // cd_/gimmick_/collection_/craft_/puzzle_/background_/lamp_/fs_/docking_/item_rare_). The test uses the family,
+        // not the `itemicon_prefab_` infix alone, and that is deliberate: gimmick/collection/craft/puzzle world-objects
+        // own real meshes but reference them through the bare `itemicon_` form, so they must still count as prefabs.
         bool is_ui_only_icon(std::string_view fullIconLower) noexcept
         {
             // `cd_questimage_*` / `cd_knowledgeimage_*` are UI-texture bundle entries with no underlying mesh.
@@ -231,8 +240,8 @@ namespace Transmog
         }
 
         // PASS 1a: build the pool from the prefab_wrapper_swap cached catalog. Engine-validated, zero garbage, but
-        // vtable-filtered (`0x145BC4638` inside walk_string_info) -- drops some legit cd_* prefabs (bags, monsters,
-        // NPCs, accessories). The supplementary stringinfo walk in PASS 1b recovers those.
+        // vtable-filtered: walk_string_info accepts only one wrapper vtable identity, so it drops some legitimate cd_*
+        // prefabs (bags, monsters, NPCs, accessories). The supplementary stringinfo walk in PASS 1b recovers those.
         std::size_t build_pool_from_catalog(std::set<std::string> &out)
         {
             auto &logger = DMK::Logger::get_instance();
@@ -277,8 +286,8 @@ namespace Transmog
         }
 
         // Allow-list of asset-name prefixes for the stringinfo enrich pass. Each accepted family resolves to a real
-        // `.prefab` file on disk; UI-only families (`itemicon_*`, `cd_questimage_*`, `cd_knowledgeimage_*`) are
-        // rejected first so the pool never contains texture-bundle entries that lack an underlying mesh.
+        // `.prefab` file on disk. UI-only families (`itemicon_*`, `cd_questimage_*`, `cd_knowledgeimage_*`) are
+        // rejected first, so the pool never contains texture-bundle entries that lack an underlying mesh.
         bool starts_with_asset_prefix(std::string_view sl) noexcept
         {
             // sl is already lowercased.
@@ -289,7 +298,7 @@ namespace Transmog
                 return false;
             if (sl.size() >= 17 && sl.substr(0, 17) == "cd_knowledgeimage")
                 return false;
-            // Accept-list (each ends with underscore so we don't pick up name collisions like `cdkey_*` or
+            // Accept-list (each ends with an underscore so the test does not pick up name collisions like `cdkey_*` or
             // `gimmickspecial_*`).
             constexpr std::string_view kAccepts[] = {"cd_",     "gimmick_",    "collection_", "craft_",
                                                      "puzzle_", "background_", "lamp_",       "fs_phm_",
@@ -304,8 +313,8 @@ namespace Transmog
 
         // PASS 1b: supplementary stringinfo walk without the vtable filter. Picks up the asset families the
         // swap-catalog's vtable gate drops AND the non-cd_ families (gimmick, collection, craft, puzzle, etc.) that
-        // prefab_wrapper_swap doesn't index at all. Only enriches the dumper's pool; prefab_wrapper_swap is untouched
-        // so live swap path + UI picker keep their scope.
+        // prefab_wrapper_swap does not index at all. This only enriches the dumper's pool. prefab_wrapper_swap stays
+        // untouched, so the live swap path and the UI picker keep their scope.
         std::size_t enrich_pool_from_stringinfo(std::set<std::string> &out, uintptr_t stringArr, uint32_t stringCount)
         {
             bool ok = false;
@@ -328,8 +337,8 @@ namespace Transmog
         }
 
         // Bounded byte-scan window for the residual asset-pool pass (enrich_pool_from_asset_pool). Crimson Desert's
-        // heap-loaded asset strings (gimmick/collection/cd_ex_*/etc.) cluster in the low 0x01-0x20 VA band, so scanning
-        // just this window is fast and catches the bulk of them; the wider full-VA walk in recover_phantoms_targeted
+        // heap-loaded asset strings (gimmick/collection/cd_ex_*/etc.) cluster in the low 0x01-0x20 VA band. A scan of
+        // this window alone is fast and catches most of them. The wider full-VA walk in recover_phantoms_targeted
         // picks up the families that land outside it.
         constexpr uintptr_t kAssetScanStart = 0x01000000;
         constexpr uintptr_t kAssetScanEnd = 0x20000000;
@@ -353,10 +362,10 @@ namespace Transmog
             return (u >= 'a' && u <= 'z') || (u >= 'A' && u <= 'Z') || (u >= '0' && u <= '9') || u == '_';
         }
 
-        // True at a position that looks like the start of an asset-name string we want. Matches all the prefixes the
-        // stringinfo enrich accepts (cd_/gimmick_/collection_/craft_/puzzle_/background_/
-        // lamp_/fs_/docking_/item_rare_). Case-insensitive on the first letter; later chars use the same set as
-        // `is_prefab_char` plus a fast-fail.
+        // True at a position that looks like the start of a wanted asset-name string. Matches all the prefixes the
+        // stringinfo enrich accepts (cd_/gimmick_/collection_/craft_/puzzle_/background_/lamp_/fs_/docking_/
+        // item_rare_). The first letter matches case-insensitively. Later chars use the same set as `is_prefab_char`
+        // plus a fast-fail.
         bool starts_with_asset_byte_prefix(const char *p, size_t avail) noexcept
         {
             if (avail < 4)
@@ -372,8 +381,8 @@ namespace Transmog
             // gimmick_
             if ((p[0] == 'g' || p[0] == 'G') && std::memcmp(p + 1, "immick_", 7) == 0)
                 return true;
-            // gimmick must be matched first since avail<7 returned; craft_ (6 chars) and lamp_ (5 chars) are shorter,
-            // so each is checked below under its own length guard:
+            // gimmick_ must match first, because the avail<7 guard above already returned. craft_ (6 chars) and lamp_
+            // (5 chars) are shorter, so each one gets its own length guard below.
             if (avail >= 6)
             {
                 if ((p[0] == 'c' || p[0] == 'C') && std::memcmp(p + 1, "raft_", 5) == 0)
@@ -437,10 +446,10 @@ namespace Transmog
             }
         }
 
-        // PASS 1e: targeted phantom recovery. After PASS 1a-1d build the pool, items whose iconPrefab isn't in pool
-        // become "phantom candidates". This pass walks memory once searching for the exact phantom strings via a
-        // first-4-byte hash table -- O(memory_size + N_phantoms) total. Catches byte-scan misses where the asset string
-        // lives in a region the chunked walker mis-handled or where the prefix gate didn't match.
+        // PASS 1e: targeted phantom recovery. After PASS 1a-1d build the pool, items whose iconPrefab is not in the
+        // pool become "phantom candidates". This pass walks memory once and searches for the exact phantom strings via
+        // a first-4-byte hash table -- O(memory_size + N_phantoms) total. Catches byte-scan misses where the asset
+        // string lives in a region the chunked walker mis-handled, or where the prefix gate did not match.
         std::size_t recover_phantoms_targeted(std::set<std::string> &pool, const std::vector<std::string> &phantomNames)
         {
             if (phantomNames.empty())
@@ -463,9 +472,9 @@ namespace Transmog
             std::vector<uint8_t> found(phantomNames.size(), 0);
             std::size_t recovered = 0;
 
-            // Targeted recovery walks the FULL user address range because asset string heap addresses shift between
-            // reloads (low 0x02xxxxx OR high 0xEFxxxxxx depending on allocation order). The per-byte cost is one uint32
-            // hash lookup -- fast enough to cover the whole VA in <10s.
+            // Targeted recovery walks the FULL user address range, because asset string heap addresses shift between
+            // reloads: the same string lands in a low or a high VA band, depending on allocation order. The per-byte
+            // cost is one uint32 hash lookup, which is cheap enough to cover the whole VA in a single pass.
             constexpr size_t kChunk = 0x100000;
             std::vector<char> scratch(kChunk);
             SYSTEM_INFO si{};
@@ -543,10 +552,10 @@ namespace Transmog
                 const DWORD readable =
                     PAGE_READONLY | PAGE_READWRITE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_WRITECOPY;
                 // Scan any committed readable region within the bounded VA window (kAssetScanStart..kAssetScanEnd).
-                // MEM_PRIVATE is welcome here because Crimson Desert's heap-loaded asset strings
+                // MEM_PRIVATE is welcome here, because Crimson Desert's heap-loaded asset strings
                 // (gimmick/collection/`cd_ex_*`/etc.) live in mid-size MEM_PRIVATE regions clustered in the 0x01-0x20
-                // VA band. PAGE_GUARD pages would AV, skip. MEM_IMAGE is included -- harmless since asset names rarely
-                // appear in .rdata literals.
+                // VA band. PAGE_GUARD pages fault on read, so skip them. MEM_IMAGE is included and is harmless,
+                // because asset names rarely appear in .rdata literals.
                 if (mbi.State == MEM_COMMIT && (mbi.Protect & readable) != 0 && (mbi.Protect & PAGE_GUARD) == 0)
                 {
                     const uintptr_t bs = reinterpret_cast<uintptr_t>(mbi.BaseAddress);
@@ -567,9 +576,9 @@ namespace Transmog
             return out.size() - before;
         }
 
-        // TSV columns are tab-delimited and rows newline-delimited, so a control character inside a name (a cached
-        // asset string can carry an embedded CR/LF) would split or shift the row when written. Strip TAB/CR/LF so the
-        // name can neither corrupt a row nor differ from its clean twin once both are pooled.
+        // TSV columns are tab-delimited and rows are newline-delimited, so a control character inside a name splits or
+        // shifts the row when written. A cached asset string can carry an embedded CR/LF. Strip TAB/CR/LF so the name
+        // can neither corrupt a row nor differ from its clean twin once both are pooled.
         std::string tsv_sanitize(std::string_view s)
         {
             std::string result;
@@ -619,7 +628,7 @@ namespace Transmog
         // Resolve the item's primary body-mesh prefab from its rule chain. With a non-empty @p iconStem, returns the
         // mesh whose rig-stripped name equals it -- the same logical item in its actual wearer rig -- which lets rig
         // variants link to cd_phw / cd_pom instead of the shared cd_phm icon. Sub-part meshes (e.g. `..._wire_0001_r`)
-        // have a different stem and are skipped; for an ordinary item the matching mesh equals the icon prefab, so the
+        // have a different stem and are skipped. For an ordinary item the matching mesh equals the icon prefab, so the
         // result is identical and only genuine rig variants change.
         //
         // When @p iconStem is empty -- the item's icon string is missing or a bare `ItemIcon_` stub, so there is
@@ -671,9 +680,10 @@ namespace Transmog
 
         // A garbage byte fragment the "cd_"-prefix pool walk picks up: a body-rig prefix (cd_phm_ / cd_pom_ / ... which
         // always name a body PART) directly followed by a short digits-then-letters token and nothing else -- e.g.
-        // `cd_pom_0jl`, `cd_phm_00fv` (proven in memory to be a `cd_pom_0jl,<binary>` exe-static fragment). A real
-        // body-rig mesh carries a `_<NN>_<part>_` or `_m<NNNN>_` structure, so it never has this shape, and none of
-        // these fragments is ever linked to an item. Used to skip them at emission so the dump stays clean.
+        // `cd_pom_0jl`, `cd_phm_00fv`. These are exe-static byte fragments, where the rig-shaped text runs straight
+        // into binary data. A real body-rig mesh carries a `_<NN>_<part>_` or `_m<NNNN>_` structure, so it never has
+        // this shape, and no fragment of this shape ever links to an item. Used to skip them at emission so the dump
+        // stays clean.
         bool is_junk_rig_fragment(std::string_view name) noexcept
         {
             static constexpr std::string_view kRigs[] = {"cd_phm_", "cd_phw_", "cd_pom_", "cd_pgm_",
@@ -703,12 +713,13 @@ namespace Transmog
             return true;
         }
 
-        // Resolve EVERY distinct mesh an item uses across bodies, from the per-body variant entry list (desc+0x3E0) --
-        // the authoritative linkage source. Each entry's mesh (via entry+kOffEntryMesh -> handle -> stringinfo slot) is
-        // one body variant of the item (human male / orc / female / NPC), all item-specific and noise-free; the shared,
-        // rig-stripped icon cannot enumerate them. The ground-drop mesh (`..._dropitem_...`) is skipped -- it is a
-        // shared prop, not a wearer variant. Returns the deduplicated meshes in entry order (the first is the item's
-        // default/primary mesh); empty for items with no variant list, which fall back to their icon-derived prefab.
+        // Resolve EVERY distinct mesh an item uses across bodies, from the per-body variant entry list at
+        // kOffDescVariantEntries -- the authoritative linkage source. Each entry's mesh (via entry+kOffEntryMesh ->
+        // handle -> stringinfo slot) is one body variant of the item (human male / orc / female / NPC), all
+        // item-specific and noise-free. The shared, rig-stripped icon cannot enumerate them. The ground-drop mesh
+        // (`..._dropitem_...`) is skipped, because it is a shared prop, not a wearer variant. Returns the deduplicated
+        // meshes in entry order, where the first is the item's default/primary mesh. Returns empty for items with no
+        // variant list, which fall back to their icon-derived prefab.
         std::vector<std::string> resolve_variant_meshes(uintptr_t desc, uintptr_t stringArr,
                                                         uint32_t stringCount) noexcept
         {
@@ -723,8 +734,8 @@ namespace Transmog
             for (uint32_t e = 0; e < count; ++e)
             {
                 const uintptr_t entry = entries + static_cast<uintptr_t>(e) * kVariantEntryStride;
-                // entry+kOffEntryMesh points into the variant table at the entry's mesh handle; deref -> handle whose
-                // low 16 bits index stringinfo.
+                // entry+kOffEntryMesh points into the variant table at the entry's mesh handle. Deref it to get the
+                // handle whose low 16 bits index stringinfo.
                 const uintptr_t meshPtr = read_qword_safe(entry + kOffEntryMesh, ok);
                 if (!meshPtr)
                     continue;
@@ -749,10 +760,10 @@ namespace Transmog
             uint32_t runtimeIdx;
             std::string internalName;
             uint16_t iconSlot;
-            std::string fullIcon;    // raw stringinfo string, may have ItemIcon_Prefab_ prefix
+            std::string fullIcon;    // raw stringinfo string, with or without the ItemIcon_Prefab_ prefix
             std::string iconPrefab;  // lowercased, prefix stripped
             std::string base;        // last `_NNNN`-anchored prefix of iconPrefab
-            // Distinct player rig meshes (Kliff / Oongka / Damiane) recovered from the variant entry list; empty when
+            // Distinct player rig meshes (Kliff / Oongka / Damiane) recovered from the variant entry list. Empty when
             // the item has none. Links the male / orc / female body variants the icon-derived prefab cannot pair.
             std::vector<std::string> variantMeshes;
         };
@@ -771,8 +782,8 @@ namespace Transmog
         static bool s_ready = false;
 
         // Snapshot the cached registry handles under the lock so the per-item read below never races the one-shot
-        // initialisation on another thread (this runs on both the game and UI threads); the cached statics are only
-        // ever written here, under this same lock.
+        // initialization on another thread. This function runs on both the game thread and the UI thread. The cached
+        // statics are only ever written here, under this same lock.
         uintptr_t itemArr = 0;
         uintptr_t stringArr = 0;
         uint32_t itemCount = 0;
@@ -811,8 +822,8 @@ namespace Transmog
         if (!ok || desc < 0x10000)
             return {};
 
-        // Authoritative per-body variant list (desc+0x3E0). Empty for single-rig items -> fall back to the rule-chain
-        // primary body mesh so the result is non-empty for any item that owns a real mesh.
+        // Authoritative per-body variant list. Empty for single-rig items -> fall back to the rule-chain primary body
+        // mesh so the result is non-empty for any item that owns a real mesh.
         std::vector<std::string> meshes = resolve_variant_meshes(desc, stringArr, stringCount);
         if (meshes.empty())
         {
@@ -832,11 +843,11 @@ namespace Transmog
         // overlay open). Both dump triggers spawn this routine in a detached thread the instant the dump flag is set,
         // which can beat that build and leave PASS 1a with nothing -- an incomplete pool.
         //
-        // Wait for the catalog rather than capping the wait: there is no valid timeout here. A player can sit at the
-        // main menu for days with no world and therefore no catalog, so any cap would just skip the dump (or fall back
-        // to a degraded one) for a state that is normal, not failed. Polling until the catalog exists yields a complete
-        // dump whenever the world finally loads, however long that takes. The wait is free (this already runs off the
-        // main thread) and the thread is reclaimed at process exit if a world is never entered.
+        // Wait for the catalog rather than cap the wait: there is no valid timeout here. A player can sit at the main
+        // menu for days with no world and therefore no catalog, so any cap skips the dump, or degrades it, for a state
+        // that is normal and not failed. A poll until the catalog exists yields a complete dump whenever the world
+        // finally loads, however long that takes. The wait is free, because this already runs off the main thread, and
+        // the thread is reclaimed at process exit if a world is never entered.
         if (!PrefabWrapperSwap::is_catalog_populated())
         {
             logger.info("[itemprefab] waiting for swap catalog before dumping");
@@ -847,8 +858,8 @@ namespace Transmog
 
         // Resolve both registry-holder absolute addresses via the AOB cascade. The patterns target the `mov reg,
         // [rip+disp32]` load of each holder in a stable lookup primitive (see aob_resolver.hpp). The cascade returns
-        // the absolute address of the holder slot; one indirection yields the registry struct (header + +0x08 count +
-        // +0x50 entry array).
+        // the absolute address of the holder slot. One indirection yields the registry struct (header, then the count
+        // at kOffRegistryCount, then the entry array at kOffRegistryArray).
         const uintptr_t iteminfoHolderAddr = resolve_address(k_iteminfoHolderCandidates, "IteminfoHolder");
         const uintptr_t stringinfoHolderAddr = resolve_address(k_stringinfoHolderCandidates, "StringinfoHolder");
         if (!iteminfoHolderAddr || !stringinfoHolderAddr)
@@ -882,14 +893,12 @@ namespace Transmog
             return;
         }
 
-        // PASS 1a -- pool from prefab_wrapper_swap cached catalog. PASS 1b -- supplementary stringinfo walk for cd_*
-        // entries
-        //            the swap-catalog's vtable filter dropped.
-        // PASS 1c -- AppearanceTableLoader registry, unfiltered (the
-        //            internal walker filters by body-mesh slot tag and
-        //            drops ~7,400 entries; we want them all here for
-        //            the gimmick/collection/lamp/puzzle families).
-        // PASS 1d -- MEM_MAPPED asset-pool byte-scan (residual catch).
+        // PASS 1a -- pool from the prefab_wrapper_swap cached catalog.
+        // PASS 1b -- supplementary stringinfo walk for the cd_* entries the swap-catalog's vtable filter dropped.
+        // PASS 1c -- AppearanceTableLoader registry, unfiltered. Its internal walker filters by body-mesh slot tag and
+        //            drops every entry that does not carry one. The dump wants them all, for the
+        //            gimmick/collection/lamp/puzzle families.
+        // PASS 1d -- bounded-window asset-pool byte-scan (residual catch).
         const auto t0 = GetTickCount64();
         std::set<std::string> poolSet;
         const auto fromCatalog = build_pool_from_catalog(poolSet);
@@ -918,8 +927,8 @@ namespace Transmog
         const auto liveWrapperCount = collect_live_wrapper_names(liveWrapperSet);
         logger.info("[itemprefab] live-wrapper set: {} names (for `_dd` helm-suffix linking)", liveWrapperCount);
 
-        // PASS 2 -- walk iteminfo, collect item entries with their icon-derived prefab + base. The TSV is emitted in
-        // pass 3 from the pool's perspective, so we just collect here.
+        // PASS 2 -- walk iteminfo, collect item entries with their icon-derived prefab + base. PASS 3 emits the TSV
+        // from the pool's perspective, so this pass only collects.
         std::vector<ItemEntry> items;
         items.reserve(itemCount);
         uint32_t skipped = 0;
@@ -969,23 +978,20 @@ namespace Transmog
             }
 
             // Case-insensitive prefix strip. Icons come in three flavors:
-            //   ItemIcon_Prefab_<cd_mesh>   -- body-mesh prefabs (cd_*)
-            //   ItemIcon_<gimmick|collection|craft|puzzle>_<name>
-            //                               -- world-object prefabs that
-            //                                  share the icon namespace
-            //                                  but use a different
-            //                                  mesh-prefab family
-            //   itemicon_quest|abyssgear_*  -- UI-only (no mesh)
-            // Strip `itemicon_prefab_` first (cd_*) else strip just `itemicon_` so the remainder is the underlying mesh
-            // name (e.g. `collection_prop_doll_0001`) that the pool indexes -- otherwise items resolve to themselves as
-            // phantoms.
+            //   ItemIcon_Prefab_<cd_mesh>                         -- body-mesh prefabs (cd_*)
+            //   ItemIcon_<gimmick|collection|craft|puzzle>_<name> -- world-object prefabs that share the icon
+            //                                                        namespace but use a different mesh-prefab family
+            //   itemicon_quest|abyssgear_*                        -- UI-only (no mesh)
+            // Strip `itemicon_prefab_` first (cd_*), else strip only `itemicon_`, so the remainder is the underlying
+            // mesh name (e.g. `collection_prop_doll_0001`) that the pool indexes. Otherwise items resolve to
+            // themselves as phantoms.
             std::string fullLower = to_lower(full);
             std::string_view iconPrefab = fullLower;
             constexpr std::string_view kLongPrefix = "itemicon_prefab_";
             constexpr std::string_view kShortPrefix = "itemicon_";
-            // `itemicon_prefab_<mesh>` carries the real mesh name; a bare `itemicon_<name>`
-            // (e.g. `ItemIcon_Lantern_On`) does not, so its stripped remainder is a non-mesh item name that
-            // must not be trusted as a prefab.
+            // `itemicon_prefab_<mesh>` carries the real mesh name. A bare `itemicon_<name>` (e.g.
+            // `ItemIcon_Lantern_On`) does not, so its stripped remainder is a non-mesh item name that the dump must
+            // not trust as a prefab.
             bool isPrefabIcon = false;
             if (iconPrefab.size() >= kLongPrefix.size() && iconPrefab.substr(0, kLongPrefix.size()) == kLongPrefix)
             {
@@ -998,9 +1004,9 @@ namespace Transmog
                 iconPrefab = iconPrefab.substr(kShortPrefix.size());
             }
             // Prefer the item's actual rig mesh over the icon-derived prefab. The icon is shared across rig variants,
-            // so the rule chain is the only place the real cd_phw / cd_pom mesh appears; for an ordinary item the rule
+            // so the rule chain is the only place the real cd_phw / cd_pom mesh appears. For an ordinary item the rule
             // mesh equals the icon prefab and this is a no-op.
-            // The variant entry list is the authoritative source of every mesh the item uses across bodies; resolve it
+            // The variant entry list is the authoritative source of every mesh the item uses across bodies. Resolve it
             // once and reuse it for both the primary-prefab recovery below and the per-body-variant linkage in PASS 3.
             std::vector<std::string> variantMeshes = resolve_variant_meshes(desc, stringArr, stringCount);
 
@@ -1016,16 +1022,16 @@ namespace Transmog
             }
             else
             {
-                // The icon is not a mesh, so the stripped iconPrefab is a bogus item name and the item would be dropped
-                // as UI-only even though a mesh exists. Recover it from the variant entry list -- held / non-body items
-                // (a lantern) keep their mesh in an untoken default entry there even when the rule chain is empty. Fall
-                // back to the icon name only when the item has no variant mesh.
+                // The icon is not a mesh, so the stripped iconPrefab is a bogus item name and the item drops out as
+                // UI-only even though a mesh exists. Recover it from the variant entry list -- held / non-body items
+                // (a lantern) keep their mesh in an untoken default entry there even when the rule chain is empty.
+                // Fall back to the icon name only when the item has no variant mesh.
                 resolvedPrefab = variantMeshes.empty() ? std::string(iconPrefab) : variantMeshes.front();
             }
-            // Prefer the LIVE partprefab wrapper name. For helm variants the engine instantiates `<mesh>_dd`; the bare
+            // Prefer the LIVE partprefab wrapper name. For helm variants the engine instantiates `<mesh>_dd`. The bare
             // `<mesh>` has no live wrapper, so the icon/rule-derived name never matches the swap/carrier path. Rewrite
-            // to `_dd` only when the bare form is NOT itself a live wrapper but its `_dd` twin IS -- so ordinary items
-            // (whose bare name is the live wrapper) are untouched. See the carrier_defaults.hpp Oongka-helm note.
+            // to `_dd` only when the bare form is NOT itself a live wrapper but its `_dd` twin IS, so ordinary items
+            // (whose bare name is the live wrapper) stay untouched. See the carrier_defaults.hpp Oongka-helm note.
             if (liveWrapperSet.count(resolvedPrefab) == 0 && liveWrapperSet.count(resolvedPrefab + "_dd") != 0)
                 resolvedPrefab += "_dd";
             for (auto &vm : variantMeshes)
@@ -1045,11 +1051,11 @@ namespace Transmog
         }
         logger.info("[itemprefab] item-pass: {} entries collected, {} skipped", items.size(), skipped);
 
-        // PASS 1e -- targeted phantom recovery. Find items whose iconPrefab + base aren't in the pool yet, scan memory
-        // once for those exact strings via a first-4-byte hash table. SKIP items whose FullIconString lacks the
-        // `_Prefab_` infix (those are UI-only icons -- the targeted search would otherwise resolve quest/abyssgear/etc.
-        // strings against unrelated quest-registry entries that happen to share the post-strip name and aren't actual
-        // mesh prefabs).
+        // PASS 1e -- targeted phantom recovery. Find items whose iconPrefab + base are not in the pool yet, then scan
+        // memory once for those exact strings via a first-4-byte hash table. SKIP items whose FullIconString lacks the
+        // `_Prefab_` infix. Those are UI-only icons, and without the skip the targeted search resolves
+        // quest/abyssgear/etc. strings against unrelated quest-registry entries that share the post-strip name and are
+        // not actual mesh prefabs.
         {
             std::vector<std::string> phantomTargets;
             for (const auto &e : items)
@@ -1075,19 +1081,19 @@ namespace Transmog
 
         // A pooled name sourced from a cached or loader-registry string can carry a stray control character (e.g. an
         // embedded CR/LF in an asset name). The byte-scan and stringinfo passes already reject such bytes, but the
-        // cached passes do not, so clean every entry through one chokepoint here. Re-inserting into a set both strips
-        // the control chars and collapses the dirty variant into its clean twin, so the writer cannot emit a split row
-        // or a duplicate key for the same prefab.
+        // cached passes do not, so clean every entry through one chokepoint here. A re-insert into a set strips the
+        // control chars and also collapses the dirty variant into its clean twin, so the writer cannot emit a split
+        // row or a duplicate key for the same prefab.
         std::set<std::string> cleanPool;
         for (const auto &name : poolSet)
             cleanPool.insert(tsv_sanitize(name));
         std::vector<std::string> pool(cleanPool.begin(), cleanPool.end());
 
-        // Drop dead bare data-name prefabs superseded by a live `_dd` wrapper (helm variants). The bare
-        // `..._index01` is a string/data entry with no live partprefab wrapper -- the swap path can never match it, and
-        // its items are now linked to the `_dd` row (PASS 2) -- so emitting it as a standalone prefab row is
-        // misleading. Guard is narrow: only names whose `_dd` twin is a live wrapper AND that are not themselves a live
-        // wrapper are removed.
+        // Drop dead bare data-name prefabs superseded by a live `_dd` wrapper (helm variants). The bare `..._index01`
+        // is a string/data entry with no live partprefab wrapper, so the swap path can never match it, and PASS 2
+        // already linked its items to the `_dd` row. A standalone prefab row for it is therefore misleading. The guard
+        // is narrow: it removes only names whose `_dd` twin is a live wrapper AND that are not themselves a live
+        // wrapper.
         {
             const auto before = pool.size();
             pool.erase(std::remove_if(pool.begin(), pool.end(),
@@ -1136,8 +1142,9 @@ namespace Transmog
         }
         logger.info("[itemprefab] body-mesh variants linked from the variant entry list: {}", variantLinks);
 
-        // PASS 4 -- emit one row per pool prefab. Also emit a row for each item whose iconPrefab is NOT in the pool (so
-        // the dump never silently drops an item). Track them via `phantomItems`.
+        // PASS 4 -- emit one row per pool prefab. Also emit a row for each item whose iconPrefab is NOT in the pool, so
+        // the dump never silently drops an item. `itemsCovered` records which items an emitted row already mentions.
+        // The phantom loop after this one emits the rest.
         const auto rtDir = runtime_dir_utf8();
         if (rtDir.empty())
         {
@@ -1233,10 +1240,10 @@ namespace Transmog
             ++rowsEmitted;
         }
 
-        // Phantom items -- their iconPrefab never appeared in the pool (engine's stringinfo references a prefab that
-        // the asset-bundle walk missed). Emit ONE row per unique phantom iconPrefab with all sharing items grouped
-        // (first as exact, rest as siblings). This dump is PREFAB-based: an item only appears when it resolves to a
-        // real mesh/world-object prefab. Mesh-less UI icons (quest/ skill/stat/bespoke `ItemIcon_<name>` with no
+        // Phantom items -- their iconPrefab never appeared in the pool, because the engine's stringinfo references a
+        // prefab that the asset-bundle walk missed. Emit ONE row per unique phantom iconPrefab with all sharing items
+        // grouped (first as exact, rest as siblings). This dump is PREFAB-based: an item only appears when it resolves
+        // to a real mesh/world-object prefab. Mesh-less UI icons (quest/skill/stat/bespoke `ItemIcon_<name>` with no
         // asset-prefix mesh) are skipped. gimmick/collection/craft/puzzle ARE real prefabs and are kept (see
         // is_ui_only_icon).
         uint32_t phantomRows = 0;
@@ -1249,14 +1256,14 @@ namespace Transmog
             const std::string fullLower = to_lower(items[i].fullIcon);
             if (is_ui_only_icon(fullLower))
             {
-                // Not a real mesh prefab (UI-only icon) -- skip; this dump is prefab-based.
+                // Not a real mesh prefab (UI-only icon), so skip it. This dump is prefab-based.
                 ++uiSkipped;
                 continue;
             }
             if (!phantomIconsEmitted.insert(items[i].iconPrefab).second)
                 continue;
-            // Collect every other item sharing this iconPrefab via base_map (extract_base_prefix returns the iconPrefab
-            // itself when there's no `_NNNN` token, so base lookup is the right grouping key).
+            // Collect every other item that shares this iconPrefab via base_map. extract_base_prefix returns the
+            // iconPrefab itself when there is no `_NNNN` token, so the base lookup is the correct grouping key.
             std::vector<size_t> sharing;
             if (auto it = base_map.find(items[i].base); it != base_map.end())
             {

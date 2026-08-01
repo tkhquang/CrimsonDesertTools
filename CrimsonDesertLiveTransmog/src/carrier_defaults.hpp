@@ -15,16 +15,16 @@ namespace Transmog
     //   itemName -- resolved through ItemNameTable::id_of() at runtime to a uint16_t carrier itemId. Drives
     //               SlotPopulator(itemId) for the carrier-equip path, and is the SOLE input the prefab-wrapper-swap
     //               source needs: PWS derives the carrier's body-mesh source prefab(s) from this item's runtime
-    //               variant list (itemmesh_dumper::variant_meshes_for_item -> desc+0x3E0) through
-    //               PrefabWrapperSwap::carrier_source_seed, rather than a hardcoded prefab column that could drift
-    //               from the itemName each patch; the runtime variant list is always exact.
+    //               variant list (itemmesh_dumper::variant_meshes_for_item) through
+    //               PrefabWrapperSwap::carrier_source_seed. A hardcoded prefab column drifts from the itemName each
+    //               patch. The runtime variant list is always exact.
     struct CarrierDefault
     {
         const char *itemName;
     };
 
-    // Character axis. Order is fixed; CarrierChar(i) maps to k_carriers[i]. New characters append at the end before
-    // Count.
+    // Character axis. The order is fixed, because CarrierChar(i) maps to k_carriers[i]. New characters append at the
+    // end, before Count.
     enum class CarrierChar : std::size_t
     {
         Kliff = 0,
@@ -66,9 +66,9 @@ namespace Transmog
         },
 
         // ============================================================
-        // Damiane (female). Demeniss Elite/Uniform Leather armor set +
-        // Pattern jewelry set + Damian_OneHandPistol Ranged. The engine uses cd_phw_* for female-specific assets
-        // and cd_phm_* for shared accessories; PWS derives the source rig meshes from each carrier itemId at runtime.
+        // Damiane (female). Demeniss Elite/Uniform Leather armor set + Pattern jewelry set + Damian_OneHandPistol
+        // Ranged. The engine uses cd_phw_* for female-specific assets and cd_phm_* for shared accessories. PWS derives
+        // the source rig meshes from each carrier itemId at runtime.
         // ============================================================
         {
             { "Demian_PlateArmor_Helm_VII"                   }, // Helm
@@ -94,20 +94,18 @@ namespace Transmog
         },
 
         // ============================================================
-        // Oongka (male orc). Orc-tribe assets share the cd_phm_* family (orc model is male-tier). PWS derives the
-        // source rig meshes from each carrier itemId at runtime; the `_dd` runtime-wrapper suffix note below still
-        // applies to how the picker matches source wrappers.
+        // Oongka (male orc). Orc assets share the cd_phm_* family (the orc model is male-tier). PWS derives the source
+        // rig meshes from each carrier itemId at runtime. The `_dd` runtime-wrapper suffix note below still applies to
+        // how the picker matches source wrappers.
         //
         // NOTE (helm `_dd` suffix): the prefab-swap resolver (heap_walk_partprefab_for_names) matches src by EXACT
         // strcmp against LIVE partprefab wrapper names. The helm slot is special (see prefab_wrapper_swap.cpp
         // k_helmSlotId comment) -- the engine instantiates the default helm variant's runtime wrapper with a `_dd`
-        // suffix. So for hel_0122's index01 the ONLY live wrapper is `cd_phm_00_hel_0122_01_index01_dd`; the bare
-        // `..._index01` exists only in string/data tables, never as a wrapper. Verified live (CE): bare name = 0 valid
-        // wrappers, `_dd` name = valid wrapper at the 0x41C1E4* pool (same region as the resolved chest/cloak/etc.).
-        // The bare form was authored from the itemprefab data dump and silently never resolved -> helm mesh-swap was a
-        // no-op. This only surfaced once the carrier render path (char-class bypass) was fixed on 1.13. Other slots use
-        // bare names and resolve fine (the `_dd` quirk is helm-specific). Re-verify the exact live wrapper name if a
-        // future patch renames it.
+        // suffix. So for hel_0122's index01 the ONLY live wrapper is `cd_phm_00_hel_0122_01_index01_dd`. The bare
+        // `..._index01` exists only in string/data tables, never as a wrapper, so a bare helm name never resolves and
+        // the helm mesh-swap turns into a silent no-op. Other slots use bare names and resolve correctly, because the
+        // `_dd` quirk is helm-specific. On patch day, verify the exact live wrapper name against the live partprefab
+        // pool: the bare name must yield no wrapper, and the `_dd` name must yield one.
         // ============================================================
         {
             { "Lardein_Fabric_Helm"                          }, // Helm (see _dd note above)
@@ -123,7 +121,7 @@ namespace Transmog
             { "Lantern"                                      }, // Lantern (cd_t0000_* family, not in cd_ph[mw]_ map)
             { "Kliff_Glasses"                                }, // Glasses (Kliff fallback -- shared accessory)
             { "Kliff_Mask"                                   }, // Mask    (cross-char)
-            { "Oongka_Rocket_BackPack"                       }, // Backpack (orc-tribe rocket pack)
+            { "Oongka_Rocket_BackPack"                       }, // Backpack (orc rocket pack)
             { "OOngka_Daeil_Band"                            }, // Bracelet (pom, orc rig)
             { "Big_Horn_Tiger_OneHandAxe"                    }, // MainHand
             { "Big_Horn_Tiger_OneHandAxe"                    }, // OffHand (1H mirror)

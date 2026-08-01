@@ -10,32 +10,67 @@ namespace EquipHide
 {
     static std::atomic<bool> s_equipChangeDetected{false};
 
-    // Slot ID for chest armor (confirmed via log: slot=4, item=5208). Only chest changes need cascade re-sync -- other
-    // armor slots (necklace=9, mask=18, etc.) don't affect chest lock state.
+    // Slot id for chest armor. Only a chest change needs a cascade re-sync -- the other armor slots (necklace=9,
+    // mask=18, and so on) do not affect the chest lock state.
     static constexpr uint16_t k_chestSlot = 4;
 
-    // BatchEquip dispatch-entry layout used to read the per-entry slot id. Decoded live from the dispatch code so a
-    // future entry re-widening self-corrects, with the last-known 232/208 layout as a validated fallback. A hardcoded
-    // size silently mis-reads the slot id if the engine grows the entry again (it widened 232/208 -> 240/216 on a
-    // mid-2026 patch, then narrowed back to 232/208 on v1.13.00), which is why the layout is decoded live rather than
-    // fixed.
+    // BatchEquip dispatch-entry layout, used to read the per-entry slot id.
     //
-    // Stride: the entry array is indexed by `imul rsi, rax, imm32`. The AOB anchors on `mov rbx,[rcx]; mov eax,[rcx+8];
-    // imul rsi,rax,imm32` and lands (+6) on the imul; its imm32 operand is the 232-byte entry stride. The pattern stops
-    // before the imm32 so it stays value-agnostic (self-heals).
+    // The engine walks two nested containers here, and the mod must read from the outer one. The outer loop iterates
+    // the swap entries handed to on_visual_equip_swap: it loads the base from [rcx] and the count from [rcx+8], then
+    // forms the end pointer with `imul rsi, rax, <stride>`. The inner loop searches one actor's authority table with a
+    // different stride and a different slot field. A read of the inner values mis-indexes every entry, so the mod
+    // decodes both constants below from the outer loop.
+    //
+    // The mod decodes both values live and does not hardcode them. The entry width changes across builds, so a fixed
+    // size mis-reads the slot id silently instead of failing. The nominal is the last verified layout, and the code
+    // uses it only when the decode fails. Verify it against live memory on patch day.
+    //
+    // Stride: the imm32 of the outer `imul rsi, rax, <stride>`. No candidate pins that imm32. P1 and P2 stop before
+    // it, and P3 wildcards it. The pattern therefore stays value-agnostic and self-heals when the entry width changes.
+    //
+    // A short branch sits between the outer loop head and the imul, and the same three-instruction shape appears at an
+    // unrelated container-iteration site. No branch-free window tells the two sites apart, so each candidate below
+    // includes one short jump with a wildcarded target. If a future build changes that jump encoding, the candidate
+    // stops matching. That result is intended: the decode falls back to the nominal instead of resolving to the wrong
+    // site.
     static constexpr DMK::Scanner::AddrCandidate k_equipSwapStrideSite[] = {
-        {"BatchEquipStride", "48 8B 19 8B 41 08 48 69 F0", DMK::Scanner::ResolveMode::Direct, 6, 0, true},
+        // P1 -- outer loop head through the imul. Widest context, anchored before the null check.
+        {"BatchEquipStride_P1_LoopHeadToImul",
+         "C7 85 ?? ?? ?? ?? ?? ?? ?? ?? 49 8B 09 48 85 C9 74 ?? 48 8B 19 8B 41 08 48 69 F0",
+         DMK::Scanner::ResolveMode::Direct, 0x18, 0, true},
+
+        // P2 -- null check through the imul. Drops the preceding frame initialization.
+        {"BatchEquipStride_P2_NullCheckToImul", "49 8B 09 48 85 C9 74 ?? 48 8B 19 8B 41 08 48 69 F0",
+         DMK::Scanner::ResolveMode::Direct, 14, 0, true},
+
+        // P3 -- imul forward into the branch that follows it. Independent of everything before the imul, so it
+        // survives a rewrite of the loop head that defeats P1 and P2.
+        {"BatchEquipStride_P3_ImulToJoin",
+         "48 8B 19 8B 41 08 48 69 F0 ?? ?? ?? ?? 48 03 F3 EB ?? 49 8B 41 08 48 8B 18",
+         DMK::Scanner::ResolveMode::Direct, 6, 0, true},
     };
-    // Slot: the per-entry slot id is the word read by `movzx eax, word ptr [rbx+disp32]` immediately before `cmp word
-    // ptr [rdx+disp32], ax`. The AOB wildcards the displacement (so a shifted slot still matches) and anchors on the
-    // trailing cmp opcode; it lands (+0) on the movzx, whose [rbx+disp32] displacement is the +208 slot.
+
+    // Slot: the disp32 of `movzx eax, word ptr [rbx+<slot>]`, where rbx is the current outer entry. The instruction
+    // that follows compares that word against the inner table's own slot field, which uses a different offset. Anchor
+    // on the movzx, not on the compare.
     static constexpr DMK::Scanner::AddrCandidate k_equipSwapSlotSite[] = {
-        {"BatchEquipSlot", "0F B7 83 ?? ?? ?? ?? 66 39 82", DMK::Scanner::ResolveMode::Direct, 0, 0, true},
+        // P1 -- inner-loop setup through the movzx. Widest context and unique across the whole process.
+        {"BatchEquipSlot_P1_InnerSetupToMovzx", "48 69 C8 ?? ?? ?? ?? 48 03 CA 48 3B D1 74 ?? 0F B7 83",
+         DMK::Scanner::ResolveMode::Direct, 0x0F, 0, true},
+
+        // P2 -- movzx and compare, extended into the entry advance that follows.
+        {"BatchEquipSlot_P2_MovzxCompareAdvance", "0F B7 83 ?? ?? ?? ?? 66 39 82 ?? ?? ?? ?? 74 ?? 48 81 C2",
+         DMK::Scanner::ResolveMode::Direct, 0, 0, true},
+
+        // P3 -- movzx and compare only. Both displacements are wildcarded, so a shifted slot field still matches.
+        {"BatchEquipSlot_P3_MovzxCompare", "0F B7 83 ?? ?? ?? ?? 66 39 82 ?? ?? ?? ??",
+         DMK::Scanner::ResolveMode::Direct, 0, 0, true},
     };
 
     // Decode an instruction operand to a layout constant, validated to a plausible range. On any miss, out-of-range
-    // value, or decode exception the nominal is kept, so a wrong anchor or operand index can never mis-read the
-    // dispatch entry; the decoded value is logged once for verification.
+    // value, or decode exception the code keeps the nominal. A wrong anchor or operand index therefore can never
+    // mis-read the dispatch entry. The code logs the decoded value once for verification.
     [[nodiscard]] static std::size_t decode_layout_constant(std::span<const DMK::Scanner::AddrCandidate> site,
                                                             DMK::Scanner::OperandKind kind, std::uint8_t operandIndex,
                                                             std::int64_t lo, std::int64_t hi, std::size_t nominal,
@@ -53,8 +88,8 @@ namespace EquipHide
             if (decoded.has_value() && *decoded >= lo && *decoded <= hi)
             {
                 const auto value = static_cast<std::size_t>(*decoded);
-                // A live value != nominal means the engine layout drifted on a patch; the decode self-healed it, but
-                // surface it as a WARNING so the offset change is easy to spot in the log.
+                // A live value != nominal means the engine layout drifted on a patch. The decode self-heals it, but
+                // reports a WARNING so the offset change is easy to find in the log.
                 if (value != nominal)
                     DMK::Logger::get_instance().warning(
                         "BatchEquip {} DRIFTED: live={} nominal={} -- self-healed (engine layout changed)", label,
@@ -74,15 +109,19 @@ namespace EquipHide
 
     [[nodiscard]] static std::size_t equip_swap_entry_stride() noexcept
     {
+        // Nominal is the outer entry stride, 240 (0xF0). The accepted range leaves headroom on both sides so a further
+        // change of entry width still decodes instead of falling back.
         static const std::size_t value = decode_layout_constant(
-            k_equipSwapStrideSite, DMK::Scanner::OperandKind::Immediate, 2, 216, 256, 232, "stride");
+            k_equipSwapStrideSite, DMK::Scanner::OperandKind::Immediate, 2, 216, 264, 240, "stride");
         return value;
     }
 
     [[nodiscard]] static std::size_t equip_swap_slot_offset() noexcept
     {
+        // Nominal is the slot field of the outer entry, 216 (0xD8). Do not set this to the inner table's slot field:
+        // that one sits at a different offset and belongs to a container with a different stride.
         static const std::size_t value = decode_layout_constant(
-            k_equipSwapSlotSite, DMK::Scanner::OperandKind::MemoryDisplacement, 1, 192, 224, 208, "slot");
+            k_equipSwapSlotSite, DMK::Scanner::OperandKind::MemoryDisplacement, 1, 192, 240, 216, "slot");
         return value;
     }
 
@@ -107,8 +146,8 @@ namespace EquipHide
             s_equipChangeDetected.store(true, std::memory_order_relaxed);
         }
         // Snapshot guards a teardown race: shutdown calls remove_hook() which restores the prologue and disables the
-        // detour, but a game thread already past the JMP might still enter the body before the DLL unmaps. Returning
-        // zero matches the engine's own no-op shape for this slot-update API.
+        // detour, but a game thread already past the JMP can still enter the body before the DLL unmaps. A return of
+        // zero matches the engine no-op shape for this slot-update API.
         auto trampoline = s_originalVisualEquipChange;
         if (!trampoline)
             return 0;
@@ -122,8 +161,8 @@ namespace EquipHide
     void set_visual_equip_swap_trampoline(VisualEquipSwapFn original)
     {
         s_originalVisualEquipSwap = original;
-        // Warm the layout self-heal at install (setup/control-plane) so the dispatch-entry stride/slot are decoded and
-        // cached before the first swap, keeping the hot path free of the one-time AOB scan.
+        // Warm the layout self-heal at install (setup/control-plane). The dispatch-entry stride and slot then decode
+        // and cache before the first swap, and the hot path stays free of the one-time AOB scan.
         (void)equip_swap_entry_stride();
         (void)equip_swap_slot_offset();
     }

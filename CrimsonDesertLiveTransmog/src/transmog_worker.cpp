@@ -309,6 +309,17 @@ namespace Transmog
         }
     }
 
+    // Actor-side hops from pa::ClientUserActor down to the equip-slot component that the apply pipeline treats as a1.
+    //
+    // These belong to the ACTOR, not to the component. Do not move them when the component layout shifts: the
+    // component's own fields (container, slot cache) live in transmog_apply.cpp and change independently.
+    //
+    // k_actorTypeEntryOffset is read only as a liveness probe, so a shift there fails CLOSED and stops every apply
+    // with no log line. If applies stop firing and no anchor reports a miss, verify this offset first.
+    constexpr std::ptrdiff_t k_actorTypeEntryOffset = 0x88;
+    constexpr std::ptrdiff_t k_actorToComponentHolder = 0x68;
+    constexpr std::ptrdiff_t k_componentHolderToComponent = 0x38;
+
     __int64 resolve_player_component() noexcept
     {
         const auto user = walk_ws_to_user_actor_seh();
@@ -319,24 +330,23 @@ namespace Transmog
             // user+0xD8 holds the currently-controlled character's ClientChildOnlyInGameActor. It coincides with
             // user+0xD0 (the "primary" slot, always Kliff) when Kliff is the active character, and rotates to Damiane's
             // or Oongka's actor when one of them is controlled. Reading +0xD0 unconditionally would land all companion
-            // applies on
-            // Kliff's actor, which is why the apply pipeline always walks +0xD8.
+            // applies on Kliff's actor, which is why the apply pipeline always walks +0xD8.
             auto actor = *reinterpret_cast<uintptr_t *>(user + k_userToControlled);
             if (actor < 0x10000)
                 return 0;
 
-            // Pointer-validity check on the typeEntry slot. The byte at typeEntry+1 is role-based (controlled vs
-            // backgrounded) and not stable per-character, so it cannot gate the chain walk; rejecting on it would
+            // Pointer-validity check on the typeEntry slot. The byte at typeEntry+1 is role-based (controlled against
+            // backgrounded) and is not stable per character, so it cannot gate the chain walk. Rejecting on it would
             // silently drop companion applies. A readable typeEntry pointer is sufficient structural evidence that the
             // actor is alive.
-            auto te = *reinterpret_cast<uintptr_t *>(actor + 0x88);
+            auto te = *reinterpret_cast<uintptr_t *>(actor + k_actorTypeEntryOffset);
             if (te < 0x10000)
                 return 0;
 
-            auto comp104 = *reinterpret_cast<uintptr_t *>(actor + 104);
-            if (comp104 < 0x10000)
+            auto componentHolder = *reinterpret_cast<uintptr_t *>(actor + k_actorToComponentHolder);
+            if (componentHolder < 0x10000)
                 return 0;
-            auto component = *reinterpret_cast<uintptr_t *>(comp104 + 56);
+            auto component = *reinterpret_cast<uintptr_t *>(componentHolder + k_componentHolderToComponent);
             if (component < 0x10000)
                 return 0;
 
