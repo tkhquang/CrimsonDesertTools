@@ -28,8 +28,8 @@
 
 namespace EquipHide
 {
-    // Indexed by truncated part hash; R8B gate-skip lock prevents PartInOut from re-running the transition dispatch
-    // after the first vis=2 frame.
+    // Indexed by truncated part hash. The R8B gate-skip lock prevents PartInOut from re-running the transition
+    // dispatch after the first vis=2 frame.
     static uint8_t s_hideLocked[0x10000]{};
 
     // Brief guard window after any hotkey toggle. Prevents cascade from other armor slots (shield/helm) from briefly
@@ -51,14 +51,15 @@ namespace EquipHide
         DMK::Config::register_atomic<bool>("General", "CascadeFix", "Cascade Fix", flag_cascade_fix(), false);
 
         // Advanced: rtti_dissect self-heal search radius (bytes, per side) for the manager->userActor offset recovery
-        // in CDCore. Default 0x200 (~10x the worst historical drift); raise toward MAX_HEAL_WINDOW only if a game patch
-        // shifts the field further. Not for normal users.
+        // in CDCore. The default 0x200 leaves about ten times the margin of the largest drift to date. Raise it
+        // toward MAX_HEAL_WINDOW only if a game patch shifts the field further. Not for normal users.
         DMK::Config::register_atomic<int>("Advanced", "SelfHealWindow", "Self Heal Window",
                                           CDCore::heal_window_setting(), 0x200);
 
         // Protagonist codename overrides for CDCore's appearance-config classifier. Each codename is a substring search
-        // target inside the actor's appearance-config asset path. Defaults match the shipped engine subfolder names;
-        // provided in case a future patch or mod renames a subfolder. Empty values are ignored.
+        // target inside the actor's appearance-config asset path. The defaults match the shipped engine subfolder
+        // names. The overrides exist in case a future patch or mod renames a subfolder. The loader ignores empty
+        // values.
         DMK::Config::register_string(
             "General", "KliffCodename", "Kliff Codename",
             [](const std::string &val) { CDCore::set_protagonist_codenames(val, {}, {}); }, "cd_phm_macduff");
@@ -101,8 +102,8 @@ namespace EquipHide
             }
         }
 
-        // Auto-reload toggle. Off-by-default would force a relaunch for every INI tweak; on-by-default keeps the
-        // iteration loop tight. Setters invoked from the watcher thread are idempotent.
+        // Auto-reload toggle. Off-by-default forces a relaunch for every INI tweak. On-by-default keeps the iteration
+        // loop tight. Setters invoked from the watcher thread are idempotent.
         static std::atomic<bool> s_autoReload{true};
         DMK::Config::register_atomic<bool>("General", "AutoReloadConfig", "Auto-Reload Config", s_autoReload, true);
 
@@ -122,13 +123,13 @@ namespace EquipHide
         {
             // Per-setter callbacks refresh the visibility atomics inline. The reload tail re-derives cached
             // hidden-state masks and hands the actual vis-byte commit to the game thread via needs_direct_write, the
-            // same primitive that drives character-swap re-application. Doing the writes from the watcher thread
-            // directly contends with the game thread's vis_write_mutex (try_lock bails silently) and skips the
-            // s_hideLocked clear that the mid-hook performs alongside its writes, so the next mid-hook frame would see
-            // stale locks and refuse to re-transition. The Parts= setter populates the inactive lookup buffer but does
-            // not flip s_activeMap; rebuild_part_lookup() rebuilds from the stored per-category strings (honouring
-            // per-character overrides) and atomically publishes the new buffer so the mid-hook and direct-write paths
-            // see edited part lists on the next tick.
+            // same primitive that drives character-swap re-application. A direct write from the watcher thread
+            // contends with the game thread's vis_write_mutex (try_lock bails silently) and skips the s_hideLocked
+            // clear that the mid-hook performs alongside its writes. The next mid-hook frame then sees stale locks and
+            // refuses to re-transition. The Parts= setter populates the inactive lookup buffer but does not flip
+            // s_activeMap. rebuild_part_lookup() rebuilds from the stored per-category strings, honors per-character
+            // overrides, and atomically publishes the new buffer, so the mid-hook and direct-write paths see edited
+            // part lists on the next tick.
             const auto status =
                 DMK::Config::enable_auto_reload(std::chrono::milliseconds{250},
                                                 [](bool content_changed)
@@ -213,10 +214,11 @@ namespace EquipHide
             }
         }
 
-        // Part-hash key pointer. v1.13.00 moved this from R10 to R12: the exclusion-list walk reads the key via
-        // `mov edx,[r12]` and the transition dispatch passes it as `rdx = r12`, while R10 at the hook is a clobbered
-        // method-`this` (loaded `mov r10,[rax]` then trashed by the intervening call). See aob_resolver.hpp PN3.
-        auto hashPtr = ctx.r12;
+        // Part-hash key pointer. The register that carries it moves between builds, so verify it against the
+        // disassembly instead of assuming. On the current build it is R13: the exclusion-list walk reads the key as
+        // `mov edx,[r13]` and the transition dispatch passes it as `rdx = r13`. See the register map on
+        // k_hookSiteCandidates in aob_resolver.hpp.
+        auto hashPtr = ctx.r13;
         if (!DMK::Memory::plausible_userspace_ptr(hashPtr))
             return;
 
@@ -229,8 +231,13 @@ namespace EquipHide
         if (mask == 0)
             return;
 
-        // PartInOut struct pointer is in RAX (loaded from [rbp+5F] before hook).
-        auto partInOut = ctx.rax;
+        // PartInOut struct pointer. The instruction ahead of the hook loads it from the frame slot as
+        // `mov rcx,[rbp+0x5F]`, the hooked `movzx eax, byte [rcx+0x20]` reads the visibility byte through it, and the
+        // engine reads it back at `cmp [rcx+3],r8b`. Take it from RCX, not from RAX. At the hook instant RAX holds
+        // the exclusion-list walk cursor, which is a live heap pointer. It passes plausible_userspace_ptr(), so a
+        // read of the wrong register does not fail loudly. The mid-hook then writes the visibility byte at +0x20
+        // inside an unrelated struct. See the register map on k_hookSiteCandidates in aob_resolver.hpp.
+        auto partInOut = ctx.rcx;
         if (!DMK::Memory::plausible_userspace_ptr(partInOut))
             return;
 
@@ -238,8 +245,8 @@ namespace EquipHide
         const auto hashIdx = static_cast<uint16_t>(partHash);
         const bool isChest = (mask & category_bit(Category::Chest)) != 0;
 
-        // Protect legs from cascade during the brief window after a hotkey toggle (e.g. shield show/hide triggers a
-        // re-evaluation that would otherwise flash the pants).
+        // Protect legs from cascade during the brief window after a hotkey toggle. Without this guard, a shield
+        // show/hide triggers a re-evaluation that flashes the pants.
         if (cascadeOn)
         {
             auto guard = s_flushGuard.load(std::memory_order_relaxed);
@@ -277,15 +284,14 @@ namespace EquipHide
             return;
 
         // Per-character override resolution. The cascade and chest-lock paths above gate engine-wide state and
-        // intentionally use the GLOBAL classify_part / is_any_category_hidden masks; this block keeps the actual vis=2
-        // write per-character so an INI override that excludes a hash for one protagonist does not get hidden by the
+        // intentionally use the GLOBAL classify_part / is_any_category_hidden masks. This block keeps the actual vis=2
+        // write per-character, so an INI override that excludes a hash for one protagonist does not get hidden by the
         // mid-hook on that protagonist's frames.
         //
-        // The vis-ctrl scan is O(n) where n is at most k_maxProtagonists (3 after the phantom-filter ship), so the
-        // added cost is a handful of relaxed atomic loads + one extra flat-table lookup per call. Relaxed ordering is
-        // sufficient: the resolve poll thread publishes consistent (visCtrls[i], visCharIdx[i]) pairs on each pass, and
-        // a torn read produces at worst one stale per-char idx for a single frame, well within the existing swap-detect
-        // timing tolerance.
+        // The vis-ctrl scan is O(n) where n is at most k_maxProtagonists, so the added cost is a handful of relaxed
+        // atomic loads + one extra flat-table lookup per call. Relaxed ordering is sufficient: the resolve poll thread
+        // publishes consistent (visCtrls[i], visCharIdx[i]) pairs on each pass, and a torn read produces at worst one
+        // stale per-char idx for a single frame, well within the existing swap-detect timing tolerance.
         int charIdx = -1;
         {
             auto &ps = player_state();
@@ -300,8 +306,8 @@ namespace EquipHide
             }
         }
 
-        // Refine the hide decision against the per-character part map. charIdx == -1 (untracked actor) preserves legacy
-        // behaviour by falling back to the global mask computed earlier.
+        // Refine the hide decision against the per-character part map. charIdx == -1 (untracked actor) preserves the
+        // legacy behavior and falls back to the global mask computed earlier.
         CategoryMask charMask = mask;
         if (charIdx >= 0 && charIdx < static_cast<int>(k_charIdxCount))
         {
@@ -329,8 +335,8 @@ namespace EquipHide
         }
     }
 
-    /* SEH wrapper: separate function because MSVC SEH cannot coexist with C++ destructors in the same frame. Swallows
-       faults if the mod is outdated and register layout has changed -- don't crash the game. */
+    /* SEH wrapper: separate function because MSVC SEH cannot coexist with C++ destructors in the same frame. It
+       swallows faults when the mod is outdated and the register layout changed -- do not crash the game. */
     static void on_vis_check(SafetyHookContext &ctx)
     {
         __try
@@ -349,7 +355,7 @@ namespace EquipHide
 
         // Apply config before the resolver and hook-install steps so the INI LogLevel takes effect for any TRACE/DEBUG
         // emissions that follow. Setters dispatched by Config::load() touch only atomics, per-category state, and
-        // InputManager bindings; none of them depend on resolved addresses (those are populated below).
+        // InputManager bindings. None of them depend on resolved addresses, which the code below populates.
         load_config();
 
         if (!DMK::Memory::init_cache())
@@ -357,12 +363,12 @@ namespace EquipHide
 
         auto &addrs = resolved_addrs();
 
-        // WorldSystem is consumed by EH-local chain walks (background_threads / player_detection) for user+0xD8 body
-        // resolution. CDCore::controlled_char uses the independent static-chain [moduleBase + 0x5FA0430] anchor and
-        // does not need a published holder. These four targets are independent (no resolution reads another's result)
-        // and all live in the host EXE, so resolve them in one fork-join batch rather than four serial host-module
-        // scans. Each request keeps the host-scope + prologue-fallback semantics of the single resolve_address; only
-        // the wall-clock collapses to the slowest single scan. initAddrs is parallel to the request-array order.
+        // EH-local chain walks (background_threads / player_detection) consume WorldSystem for user+0xD8 body
+        // resolution. CDCore::controlled_char uses its own independent static-chain anchor and does not need a
+        // published holder. These four targets are independent (no resolution reads another's result) and all live in
+        // the host EXE, so resolve them in one fork-join batch rather than four serial host-module scans. Each request
+        // keeps the host-scope + prologue-fallback semantics of the single resolve_address. Only the wall-clock
+        // collapses to the slowest single scan. initAddrs is parallel to the request-array order.
         const CDCore::Glue::BatchRequest initBatch[] = {
             {k_worldSystemCandidates, "WorldSystem"},
             {k_childActorVtblCandidates, "ChildActorVtbl"},
@@ -447,12 +453,11 @@ namespace EquipHide
 
         // Mid-body scan with the host-EXE-scoped, prologue-fallback cascade resolver. Host scope bounds this
         // safety-critical match -- its callback writes engine structs (visPtr, ctx.r8) -- to CrimsonDesert.exe, where
-        // the real target provably lives, so a generic-shaped candidate cannot first-match elsewhere in the process
-        // image. The prologue-fallback variant survives dev hot-reload: when a prior Logic-DLL load left a SafetyHook
+        // the real target lives. A generic-shaped candidate then cannot first-match elsewhere in the process image.
+        // The prologue-fallback variant survives dev hot-reload: when a prior Logic-DLL load left a SafetyHook
         // detour-jump in place at this site, every original-bytes candidate fails on rescan, and the resolver retries
-        // each Direct candidate with the first five byte-tokens replaced by the near-JMP signature
-        // E9 ?? ?? ?? ??. The candidate's disp_offset is preserved, so the returned address still lands on the original
-        // cmp instr.
+        // each Direct candidate with the first five byte-tokens replaced by the near-JMP signature E9 ?? ?? ?? ??. The
+        // candidate's disp_offset is preserved, so the returned address still lands on the original cmp instr.
         auto hookHit = DMK::Scanner::resolve_cascade_in_host_module_with_prologue_fallback(
             std::span<const AddrCandidate>{k_hookSiteCandidates, std::size(k_hookSiteCandidates)},
             "EquipVisCheckHookSite");
@@ -465,9 +470,8 @@ namespace EquipHide
 
         const auto hookAddr = hookHit->address;
 
-        // Warm the self-healing vis-byte offset BEFORE installing the mid-hook:
-        // the decode re-resolves the EquipVisCheck instruction by AOB, and the SafetyHook install about to happen
-        // overwrites those bytes with a jmp.
+        // Warm the self-healing vis-byte offset BEFORE the mid-hook install: the decode re-resolves the EquipVisCheck
+        // instruction by AOB, and the SafetyHook install that follows overwrites those bytes with a jmp.
         (void)vis_byte_offset();
 
         auto &hookMgr = DMK::HookManager::get_instance();
@@ -509,11 +513,11 @@ namespace EquipHide
             }
         }
 
-        // Prevents baldness when hiding helmets/cloaks. The hook temporarily sets bit 19 in item+0x70 bitmasks per-call
-        // so PostfixEval sees inactive priority and hair-hiding rules don't match. Player vs NPC invocations are
-        // distinguished by a call-graph landmark: NPC PostfixEval calls always traverse a specific caller whose return
-        // address we resolve via AOB (npcPfeReturnAddr); the hook scans its own stack window for that landmark and
-        // rejects NPC calls.
+        // Prevents baldness when hiding helmets/cloaks. The hook temporarily sets bit 19 in item+0x70 bitmasks
+        // per-call, so PostfixEval sees inactive priority and hair-hiding rules do not match. A call-graph landmark
+        // separates player invocations from NPC invocations: NPC PostfixEval calls always traverse one specific
+        // caller, and an AOB resolves that caller's return address (npcPfeReturnAddr). The hook scans its own stack
+        // window for that landmark and rejects NPC calls.
         if (flag_bald_fix().load(std::memory_order_relaxed))
         {
             auto postfixEvalAddr =
@@ -559,7 +563,7 @@ namespace EquipHide
             logger.info("BaldFix disabled in config -- hair-hiding rules will apply normally");
         }
 
-        // Equipment change detection for CascadeFix re-sync. Clears the R8B gate-skip locks when chest armor is changed
+        // Equipment change detection for CascadeFix re-sync. Clears the R8B gate-skip locks when chest armor changes,
         // so the new gear gets a fresh Out transition.
         if (flag_cascade_fix().load(std::memory_order_relaxed))
         {
@@ -602,8 +606,8 @@ namespace EquipHide
             }
         }
 
-        // Hotkey bindings were registered in load_config() so the press_combo INI keys could be picked up during
-        // Config::load(). Now flip InputManager live.
+        // load_config() registers the hotkey bindings, so Config::load() picks up the press_combo INI keys in the same
+        // pass. Now flip InputManager live.
         auto &inputMgr = DMK::InputManager::get_instance();
         inputMgr.start();
 
@@ -616,8 +620,8 @@ namespace EquipHide
         else
             logger.info("Equip hide fully initialized ({} parts resolved)", total_part_count());
 
-        // One-shot DMK health snapshot for at-a-glance per-launch diagnostics:
-        // hook population plus any intentional loader-lock leak/detach events.
+        // One-shot DMK health snapshot for at-a-glance per-launch diagnostics: hook population plus any intentional
+        // loader-lock leak/detach events.
         const auto health = DMK::Diagnostics::collect(DMK::HookManager::get_instance());
         logger.info("DMK health: hooks total={} active={} disabled={}, intentional-leaks={}", health.hooks_total,
                     health.hooks_active, health.hooks_disabled, health.total_intentional_leaks);
@@ -636,14 +640,13 @@ namespace EquipHide
         auto &logger = DMK::Logger::get_instance();
         logger.info("{} shutting down...", MOD_NAME);
 
-        // Per-step bracket logs around each blocking call let any future shutdown stall be pinpointed to the exact step
-        // (worker join, vis-byte cleanup, DMK teardown, etc.). The teardown path crosses several mutexes and the
-        // SafetyHook trampoline drain window, so a silent hang would otherwise be undiagnosable from the user's log
-        // alone. Logger::flush() between steps drains the async queue so a hang inside a step still surfaces every line
-        // the prior step emitted.
+        // Per-step bracket logs around each blocking call pin a shutdown stall to the exact step (worker join,
+        // vis-byte cleanup, DMK teardown, and so on). The teardown path crosses several mutexes and the SafetyHook
+        // trampoline drain window. Without the brackets, a silent hang stays undiagnosable from the user's log alone.
+        // Logger::flush() between steps drains the async queue, so a hang inside a step still surfaces every line the
+        // prior step emitted.
         logger.info("{} shutdown: step 1 disable_auto_reload", MOD_NAME);
-        // Disable the INI watcher up front so an in-flight save event cannot fire setters while we are tearing state
-        // down.
+        // Disable the INI watcher up front so an in-flight save event cannot fire setters during the state teardown.
         DMK::Config::disable_auto_reload();
         logger.flush();
 
@@ -653,26 +656,25 @@ namespace EquipHide
         logger.flush();
 
         logger.info("{} shutdown: step 3 join workers", MOD_NAME);
-        // Drain workers before the DMK teardown removes the hooks they call into. shutdown_requested is the cooperative
-        // stop signal each StoppableWorker body polls; joining them first guarantees no worker is mid-call into a
-        // SafetyHook trampoline when the trampoline pages are unmapped.
+        // Drain workers before the DMK teardown removes the hooks they call into. shutdown_requested is the
+        // cooperative stop signal that each StoppableWorker body polls. A join here guarantees that no worker is
+        // mid-call into a SafetyHook trampoline when the loader unmaps the trampoline pages.
         join_background_threads();
         logger.flush();
 
         logger.info("{} shutdown: step 4 cleanup vis bytes", MOD_NAME);
         // Restore visibility bytes while the hooks are still installed and the game's part registry is reachable. The
-        // vis-byte cleanup walks per-actor arrays and writes back the original bytes recorded at first hide; running it
-        // after DMK_Shutdown would race the loader unmapping the Logic-DLL pages backing the cleanup function itself.
+        // vis-byte cleanup walks per-actor arrays and writes back the original bytes recorded at first hide. A run
+        // after DMK_Shutdown races the loader, which unmaps the Logic-DLL pages that back the cleanup function itself.
         cleanup_vis_bytes();
         logger.flush();
 
         logger.info("{} shutdown: step 5 DMK_Shutdown", MOD_NAME);
         // Full DMK teardown: removes every managed hook (EquipVisCheck, PartAddShow, PostfixEval, VisualEquipChange,
         // VisualEquipSwap), stops and clears the InputManager poller along with its registered bindings, stops the
-        // ConfigWatcher, and clears the
-        // Config registered-items list. Idempotent and safe to re-init from on the next Logic-DLL load. Each detour
-        // body snapshots its trampoline pointer at entry and bails to a benign default if the snapshot is null,
-        // defending the brief drain window between hook removal and DLL unmap.
+        // ConfigWatcher, and clears the Config registered-items list. It is idempotent, so the next Logic-DLL load can
+        // re-init cleanly from this state. Each detour body snapshots its trampoline pointer at entry and bails to a
+        // benign default when the snapshot is null. That defends the drain window between hook removal and DLL unmap.
         DMK_Shutdown();
         logger.flush();
 

@@ -1,6 +1,7 @@
 #include "armor_injection.hpp"
 #include "categories.hpp"
 #include "shared_state.hpp"
+#include "visibility_write.hpp" // vis_byte_offset: the live decode every vis-byte write shares
 
 #include <DetourModKit.hpp>
 
@@ -39,10 +40,21 @@ namespace EquipHide
     /**
      * @brief Game's map insertion function signature.
      *
-     * Entry data struct (29 bytes):
-     *   +0x00  3 x byte flags + padding = 0
-     *   +0x04  5 x dword socket bones   = 0
-     *   +0x1C  byte Visible             = 2 (Out-only)
+     * The map holds TWO payload shapes, keyed by part hash and discriminated by the part's own type. Do not model
+     * them as one struct.
+     *
+     * An ARMOR entry (built on the PartInOut path) ends at its visible byte. Read that byte's position from
+     * vis_byte_offset(), never a literal, so this file agrees with the direct-write path and the mid-hook.
+     *
+     * A SOCKET entry (built on the PartInOutSocket path, weapons and shields) is longer. The engine lays it out as
+     * flags, three zeroed qword socket-bone slots, a zeroed dword, then a socket-state WORD at +0x20. It seeds that
+     * word with 3 and later reads the byte at +0x21 back, comparing it against 1. The payload therefore runs to at
+     * least +0x21.
+     *
+     * Consequences for anything inserting here. A fabricated all-zero payload is valid only for the armor shape. On
+     * a socket entry it wipes the state word, the part attaches to nothing, and it renders at the actor origin: the
+     * mesh lies at the character's feet and other socket parts disappear. An undersized buffer is worse, because the
+     * engine then reads whatever follows it on the stack. Prefer copying the live entry and editing one byte.
      */
     using MapInsertFn = __int64 *(__fastcall *)(unsigned int *map_base, int **part_hash_pp, unsigned int bucket_key,
                                                 __int64 entry_data, int extra, uint8_t *out_existed,
@@ -199,8 +211,38 @@ namespace EquipHide
                         continue;
                     }
 
-                    alignas(8) uint8_t entryData[32] = {};
-                    entryData[0x1C] = hidden ? 2 : 0;
+                    /* Payload for the insert.
+                       PRESERVE an existing entry rather than fabricating one. The map holds two different payload
+                       shapes. An armor entry ends at its visible byte, which this module models correctly. A
+                       PartInOutSocket entry is longer: it carries socket state in a word at +0x20 whose high byte the
+                       engine reads back and compares against 1, and the engine seeds that word with 3.
+
+                       A fabricated all-zero payload therefore destroys a socket entry. The part loses its socket state,
+                       attaches to nothing, and renders at the actor origin. In game that reads as weapons lying at the
+                       character's feet, with other socket parts vanishing. Every registered part reaches this loop,
+                       including parts of a DISABLED category, so socket entries arrive here routinely.
+
+                       Copying the live payload keeps the flush doing only what it exists to do: re-insert the same
+                       bytes so the engine re-processes the entry and drops its cached hidden state. Only the hide path
+                       writes a byte, and only into an entry this module is hiding. */
+                    constexpr std::size_t k_entryDataSize = 64;
+                    alignas(8) uint8_t entryData[k_entryDataSize] = {};
+                    const auto visOff = vis_byte_offset();
+
+                    const bool preserved =
+                        existing && DMK::Memory::seh_read_bytes(existing, entryData, k_entryDataSize);
+
+                    if (!preserved)
+                    {
+                        /* No live payload to copy. This is a fresh armor entry (a hidden part with no map row, or the
+                           cascade-fix body row), so the armor shape is the right model. */
+                        if (visOff < k_entryDataSize)
+                            entryData[visOff] = hidden ? 2 : 0;
+                    }
+                    else if (hidden && visOff < k_entryDataSize)
+                    {
+                        entryData[visOff] = 2;
+                    }
 
                     uint32_t hashCopy = hash;
                     int *hashPtr = reinterpret_cast<int *>(&hashCopy);

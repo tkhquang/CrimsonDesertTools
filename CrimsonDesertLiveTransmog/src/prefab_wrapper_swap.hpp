@@ -74,10 +74,27 @@ namespace Transmog::PrefabWrapperSwap
     void deactivate_for_clear();
 
     /**
-     * Notify the module of an upcoming apply's slot itemIds. If swap is active AND the previous apply's recorded
-     * itemIds differ from these, treat this as a preset-switch and `deactivate_for_clear` before the new apply so
-     * substitutions don't re-bind target wrappers to the new gear. The first apply post-activation records its itemIds
-     * without deactivating.
+     * Arm the swap for a single-slot install, without disturbing any other slot. Returns the number of slots bound.
+     *
+     * `notify_apply_starting` cannot serve this path. It routes through `reactivate_with_selections`. That function
+     * starts with an unconditional `deactivate_for_clear` whenever the swap is already active. `deactivate_for_clear`
+     * drains the WHOLE substitution ledger and reverse-writes every live record, across every slot and every
+     * character. A single-slot apply re-installs only its own slot. Every other slot then stays reverted to its base
+     * mesh until the next full apply.
+     *
+     * This entry point instead rebuilds the name-to-wrapper map from the current selections and raises the active
+     * flag. It never touches the ledger. The re-install appends its own record through the struct-copy hook.
+     *
+     * Call it only when the slot INSTALLS a fake. On a single-slot tear-down the swap must stay as it is. An armed
+     * map rewrites the wrapper that the engine's unlink pass looks for, the unlink misses, and the old mesh stays
+     * painted on the actor.
+     */
+    std::size_t ensure_armed_for_slot_apply() noexcept;
+
+    /**
+     * Notify the module of an upcoming apply's slot itemIds. The itemIds decide between an install pass and a
+     * cleanup-only pass. An install pass rebuilds the swap map and activates. A cleanup-only pass (every id zero)
+     * deactivates, so the tear-down calls that follow run with the hook in passthrough.
      */
     void notify_apply_starting(const std::uint16_t (&itemIds)[5]);
 

@@ -21,24 +21,25 @@ namespace Transmog::HelmAudioFilter
 {
     namespace
     {
-        // 12-arg signature for sub_141C6CC90, the per-tag passive-skill registrar. a1 is the actor's skill registry, a2
-        // a status int*, a3 a u16 tag pointer, a4 the level, a5..a12 carry per-call context (descriptors, scope, etc.).
-        // The function body returns `a2` and zeroes `*a2` on its natural exit; the suppress path replicates exactly
-        // that tail so callers cannot distinguish a SUPPRESS from a no-op registration.
+        // 12-arg signature of the per-tag passive-skill registrar. a1 is the actor's skill registry, a2 a status int*,
+        // a3 a u16 tag pointer, a4 the level, a5..a12 carry per-call context (descriptors, scope, etc.). The function
+        // body returns `a2` and zeroes `*a2` on its natural exit. The suppress path replicates exactly that tail, so
+        // callers cannot distinguish a SUPPRESS from a no-op registration.
         using PassiveSkillRegistrarFn = std::int32_t *(*)(std::int64_t, std::int32_t *, std::uint16_t *, std::int32_t,
                                                           std::int64_t, std::int64_t, char, std::int32_t, std::int64_t,
                                                           std::int64_t, char, std::int64_t);
 
-        // Engine's u16-tag -> skill record resolver (sub_1402FB2C0).
-        // Reads a3 as `*(u16*)a3`, indexes into the SkillInfoManager pointer array at manager+0x50, returns the record
-        // pointer (or the manager's `default record` at MEMORY[0x145F34258] if the tag is out of range / unbound). The
-        // returned record carries the per-level entry table at +0x18 and a level-count vector at +0xF8.
+        // Engine's u16-tag -> skill record resolver. It reads a3 as `*(u16*)a3` and indexes the SkillInfoManager entry
+        // array at manager+0x58, then returns the record pointer. An out-of-range or unbound tag yields the manager's
+        // default record instead. The returned record carries the per-level entry table at +0x18 and a level-count
+        // vector at +0xF8. The entry-array displacement tracks the pa::StaticInfoManager2 layout and moves whenever
+        // that base changes width, so verify it against live memory on patch day.
         using SkillTagResolverFn = std::int64_t (*)(std::uint16_t *);
 
         PassiveSkillRegistrarFn g_trampoline = nullptr;
-        // Bound lazily on the first registrar invocation (see ensure_skill_tag_resolver). Atomic because it is
-        // published and read from arbitrary equip threads; release/acquire gives a standards-clean happens-before
-        // independent of which path bound it.
+        // Bound lazily on the first registrar invocation (see ensure_skill_tag_resolver). Atomic because arbitrary
+        // equip threads publish and read it. Release/acquire gives a standards-clean happens-before, independent of
+        // which thread won the bind.
         std::atomic<SkillTagResolverFn> g_skillTagResolver{nullptr};
         // The value stored in the first qword of every `pa::GameAudioEffectBuffData` instance: i.e. the address of
         // vfunc[0]. We compare buff_instance[0] against this value to determine class membership without RTTI walks.
@@ -46,58 +47,51 @@ namespace Transmog::HelmAudioFilter
         std::uintptr_t g_gameAudioEffectVtable = 0;
 
         // Engine player static -- root of the chain that reaches the currently-controlled protagonist's Server CCOIA.
-        // Used as a
-        // Kliff identity fallback during the save-load init race window where Kliff's CharacterAssets struct isn't
-        // wired up yet but he IS the controlled actor at that moment (Kliff is always the first-spawned protagonist).
+        // Used as a Kliff identity fallback during the save-load init race window, where Kliff's CharacterAssets struct
+        // is not wired up yet but he IS the controlled actor at that moment (Kliff is always the first-spawned
+        // protagonist).
         std::uintptr_t g_playerStatic = 0;
 
         std::atomic<bool> g_initDone{false};
 
-        // Forward declaration; defined at the bottom, by the other scan logic.
+        // Forward declaration. The definition sits at the bottom, next to the other scan logic.
         [[nodiscard]] std::uintptr_t resolve_skill_tag_resolver();
 
-        // Binds g_skillTagResolver lazily on the first audio-classifier call, preferring the patch-resilient RTTI scan
-        // and falling back to the build-specific baked-disp cascade. The first path that resolves wins and the bind is
-        // terminal.
+        // Binds g_skillTagResolver lazily on the first audio-classifier call. The bind is terminal.
         //
-        // Resolution is deferred out of init() on purpose. The RTTI primary identifies the SkillInfo resolver by the
-        // class name of a live pa::SkillInfoManager, but that singleton is not constructed when init() runs (the mod
-        // resolves its anchors during the save-load window), so an init-time scan loses the race. The hooked registrar
-        // is a generic, widely-shared engine routine (it registers both item-equip passives and character built-in
-        // passives), so we cannot assume the first detour call already has the singleton live either. We therefore
-        // re-scan on every call until something binds.
+        // There is exactly one resolution path, and it must stay that way. The engine emits about a hundred
+        // near-identical u16-tag resolvers, one per pa::*InfoManager. They are byte-identical for more than forty
+        // bytes, including the whole prologue, the tag load, the bound check and the entry fetch. The only thing that
+        // separates the SkillInfo resolver from its siblings is which manager global it loads, which lives in a
+        // RIP-relative displacement. A byte signature therefore cannot identify this function without baking that
+        // displacement, and a baked displacement stops matching on the next build that relocates the global. The scan
+        // below matches the shared family shape and then picks the right member by reading the manager's RTTI class
+        // name, which survives relocation.
         //
-        // No upgrade loop, no give-up cap: a cascade hit is only possible on a build where the baked RIP-relative disp
-        // still matches, i.e. a build where the resolver has not moved and RTTI would resolve to the same address
-        // anyway, so there is nothing to upgrade to. When the manager global does relocate (the real risk on a content
-        // patch), the cascade signature stops matching, the cascade never binds, and we stay in the unbound state
-        // re-scanning until RTTI finds the relocated resolver once the singleton is live. The only state that re-scans
-        // repeatedly is a doubly-dead build (disp drifted AND the RTTI class renamed) on which neither path can ever
-        // bind; that scan only fires on audio-classifier registrations (equip / spawn), never per frame, and can be
-        // bounded later if such a build ever appears.
+        // Resolution is deferred out of init() on purpose. The scan identifies the resolver through a live
+        // pa::SkillInfoManager, and that singleton does not exist when init() runs, because the mod resolves its
+        // anchors during the save-load window. The hooked registrar is a shared engine routine that also registers
+        // character built-in passives, so the first detour call cannot guarantee a live singleton either. The scan
+        // therefore repeats on every call until it binds. It runs on audio-classifier registrations, which happen on
+        // equip and spawn, never per frame.
         //
-        // noexcept: callers are noexcept (is_audio_muffle_class, on equip threads). The try wrapper swallows a
-        // log/alloc throw; the atomic compare-exchange publishes the pointer to acquire-loading readers regardless of
-        // whether logging throws afterwards, and guarantees a single winner if two equip threads resolve concurrently.
+        // noexcept: callers are noexcept and run on equip threads. The try wrapper swallows a log or allocation throw.
+        // The compare-exchange publishes the pointer to acquire-loading readers regardless of whether logging throws
+        // afterwards, and it guarantees a single winner if two equip threads resolve at the same time.
         void ensure_skill_tag_resolver() noexcept
         {
             if (g_skillTagResolver.load(std::memory_order_acquire) != nullptr)
-                return; // already bound (RTTI or cascade); terminal
+                return; // already bound, terminal
             try
             {
-                const std::uintptr_t rtti = resolve_skill_tag_resolver();
-                const std::uintptr_t addr = rtti != 0
-                                                ? rtti
-                                                : ::Transmog::resolve_address(::Transmog::k_skillTagResolverCandidates,
-                                                                              "HelmAudioFilter_SkillTagResolver");
+                const std::uintptr_t addr = resolve_skill_tag_resolver();
                 if (addr == 0)
-                    return; // nothing resolved this call; retry on the next
+                    return; // nothing resolved this call, retry on the next
 
                 SkillTagResolverFn expected = nullptr;
                 if (g_skillTagResolver.compare_exchange_strong(expected, reinterpret_cast<SkillTagResolverFn>(addr),
                                                                std::memory_order_release, std::memory_order_relaxed))
-                    DMK::Logger::get_instance().info("[helm-audio] skill-tag resolver bound via {} at 0x{:X}",
-                                                     rtti != 0 ? "RTTI" : "baked-disp cascade", addr);
+                    DMK::Logger::get_instance().info("[helm-audio] skill-tag resolver bound at 0x{:X}", addr);
             }
             catch (...)
             {
@@ -134,8 +128,9 @@ namespace Transmog::HelmAudioFilter
         //
         // Slot indices for the portrait / `player_N` strings differ between protagonists because armor-wearing actors
         // carry an extra `model` slot. The scan therefore walks all entries up to a small bound and short-circuits on
-        // the first codename hit. Slot[0] (the .app_xml path) is the canonical match target for unarmored protagonists;
-        // the portrait string at the slot whose index varies provides the fallback codename when armor renames slot[0].
+        // the first codename hit. Slot[0] (the .app_xml path) is the canonical match target for unarmored protagonists.
+        // When armor renames slot[0], the portrait string at the slot whose index varies provides the fallback
+        // codename.
         constexpr std::ptrdiff_t k_offComponentTable = 0x68;
         constexpr std::ptrdiff_t k_offCharCtlSlot = 0x40;
         constexpr std::ptrdiff_t k_offCharCtlToInner = 0x40;
@@ -143,17 +138,16 @@ namespace Transmog::HelmAudioFilter
         constexpr std::ptrdiff_t k_assetStride = 0x40;
         constexpr std::size_t k_assetMaxScan = 8;
 
-        // Persistent per-host classification cache. Once an actor's host pointer has been successfully identified via
-        // the CharacterAssets scan, store the result so later muffle events for the same actor don't have to re-walk
-        // the chain. The cache also covers the save-load init race: Kliff's first muffle events arrive before his
-        // CharacterAssets struct has been populated, so the chain returns empty and the gate falls through. Subsequent
-        // events for the same host succeed once the struct is wired and stay cached afterwards.
+        // Persistent per-host classification cache. Once the CharacterAssets scan identifies an actor's host pointer,
+        // the result is stored, so later muffle events for the same actor do not have to re-walk the chain. The cache
+        // also covers the save-load init race: Kliff's first muffle events arrive before the engine populates his
+        // CharacterAssets struct, so the chain returns empty and the gate falls through. Later events for the same host
+        // succeed once the struct is wired, and stay cached afterwards.
         std::mutex g_hostCacheMutex;
         std::unordered_map<std::uintptr_t, CDCore::ControlledCharacter> g_hostCache;
 
         // Per-entry std::string layout (MSVC SSO):
-        //   +0x00 -> ptr (heap buffer when len>=16, else points into
-        //            the entry's inline buffer at +0x10)
+        //   +0x00 -> ptr (heap buffer when len>=16, else points into the entry's inline buffer at +0x10)
         //   +0x08  size_t length
         //   +0x10  inline buffer (16 bytes)
         //   +0x18  size_t capacity
@@ -164,16 +158,15 @@ namespace Transmog::HelmAudioFilter
 
         // Chain-walk reads route through DMK's SEH-guarded primitives (`DMKMemory::seh_read<T>` / `seh_read_bytes`).
         // They handle the low-address sentinel (<0x10000) internally and report a fault as an empty optional / `false`
-        // return. The chain collapses to "not muffle" on any intermediate fault because each step propagates the empty
+        // return. The chain collapses to "not muffle" on any intermediate fault, because each step propagates the empty
         // optional via `value_or(0)`, and a 0 base terminates the next step at the sentinel check. The audio-classifier
-        // tag pointer (`a3`) is a heap-allocated 8-byte record from the engine's iteminfo / skillinfo metadata; in
-        // theory always live for the duration of the call, but the SEH guard keeps the feature alive on torn reads.
+        // tag pointer (`a3`) is a heap-allocated 8-byte record from the engine's iteminfo / skillinfo metadata. In
+        // theory it stays live for the duration of the call, but the SEH guard keeps the feature alive on torn reads.
 
-        // Structural identification of an audio-classifier registration
-        // call (a7 == 0 AND a3 in the {u16 tag, u16 0, u16 lvl, u16 0}
-        // 8-byte-stride buffer layout the equip dispatcher uses). This cleanly separates the audio-classifier code path
-        // from the other ~45 callers of sub_141C6CC90 (combat passives, teardown nulls, vehicle skills, etc.)
-        // regardless of skill class.
+        // Structural identification of an audio-classifier registration call (a7 == 0 AND a3 in the
+        // {u16 tag, u16 0, u16 lvl, u16 0} 8-byte-stride buffer layout the equip dispatcher uses). This cleanly
+        // separates the audio-classifier code path from the other callers of the registrar (combat passives, teardown
+        // nulls, vehicle skills, etc.) regardless of skill class.
         bool is_audio_classifier_call(std::uint16_t *a3, std::int32_t a4, char a7) noexcept
         {
             if (a7 != 0)
@@ -197,32 +190,32 @@ namespace Transmog::HelmAudioFilter
         // the entry's vtable, and returns true iff the entry's class is `pa::GameAudioEffectBuffData`.
         //
         // Chain:
-        //   record       = sub_1402FB2C0(a3)                  // engine resolver
-        //   level_table  = *(record + 0x18)                    // per-level table
-        //   inner_arr    = *(level_table + 0x00)               // first inner ptr
-        //   first_entry  = *(inner_arr + 0x00)                 // level 1 entry #1
-        //   vtable       = *(first_entry + 0x00)               // class vtable
+        //   record       = skill_tag_resolver(a3)             // engine resolver
+        //   level_table  = *(record + 0x18)                   // per-level table
+        //   inner_arr    = *(level_table + 0x00)              // first inner ptr
+        //   first_entry  = *(inner_arr + 0x00)                // level 1 entry #1
+        //   vtable       = *(first_entry + 0x00)              // class vtable
         //   return vtable == g_gameAudioEffectVtable
         //
-        // Tag mapping observed in the live skillinfo catalog: only 0x64B (skill 91000, "PlateHelm_Audio") and 0x64C
-        // (skill 91001, "PlateHelm_Audio_OpenableHelm") resolve to records whose per-level entry is
+        // Tag mapping in the live skillinfo catalog: only 0x64B (skill 91000, "PlateHelm_Audio") and 0x64C (skill
+        // 91001, "PlateHelm_Audio_OpenableHelm") resolve to records whose per-level entry is
         // `pa::GameAudioEffectBuffData` (the class with description "투구 착용 시 먹먹한 소리" / Muffled sound when
-        // wearing helmet). Other tags in the same neighbourhood (0x647 / 0x64A / 0x650) resolve to
+        // wearing helmet). Other tags in the same neighborhood (0x647 / 0x64A / 0x650) resolve to
         // `pa::VoidPassiveBuffData` (item stat) or `pa::ImmuneBuffData` (sound-attack immunity) and pass through.
-        // Iteminfo dump cross-check: 124 helms equip skill 91000 / 91001; the chain walk identifies them universally
-        // without hardcoded tag tokens.
+        // Iteminfo dump cross-check: the muffle set is the helms that equip skill 91000 or 91001. The chain walk
+        // identifies them all without hardcoded tag tokens.
         bool is_audio_muffle_class(std::uint16_t *a3) noexcept
         {
-            // Bind the resolver on first use, retrying while unbound; until a bind holds, pass through.
+            // Bind the resolver on first use. The bind retries while unbound. Until a bind holds, pass through.
             ensure_skill_tag_resolver();
             const auto resolver = g_skillTagResolver.load(std::memory_order_acquire);
             if (resolver == nullptr || g_gameAudioEffectVtable == 0 || a3 == nullptr)
                 return false;
 
-            // Resolver is engine code; in theory faultless given the tag pointer's heap origin, but a torn iteminfo
-            // refresh could publish a stale pointer mid-equip. The trampoline detour is reached from arbitrary equip
-            // threads, so wrapping the call in our own SEH frame is cheaper than proving the engine's invariants and
-            // means a fault here pass-throughs to the registrar instead of crashing.
+            // The resolver is engine code. In theory it is faultless, given the tag pointer's heap origin, but a torn
+            // iteminfo refresh can publish a stale pointer mid-equip. The trampoline detour is reached from arbitrary
+            // equip threads. Our own SEH frame around the call is cheaper than a proof of the engine's invariants, and
+            // a fault here then passes through to the registrar instead of a crash.
             std::int64_t record = 0;
             __try
             {
@@ -235,19 +228,19 @@ namespace Transmog::HelmAudioFilter
             if (record < 0x10000)
                 return false;
 
-            // record +0x18 -> +0x0 -> +0x0 -> +0x0 dereferences the
-            // per-level table, first inner ptr, level-1 entry, then the entry's class vtable. seh_read_chain screens
-            // each link with plausible_userspace_ptr and reads the terminal vtable value.
+            // record +0x18 -> +0x0 -> +0x0 -> +0x0 dereferences the per-level table, first inner ptr, level-1 entry,
+            // then the entry's class vtable. seh_read_chain screens each link with plausible_userspace_ptr and reads
+            // the terminal vtable value.
             const auto vtable =
                 DMKMemory::seh_read_chain<std::uintptr_t>(static_cast<std::uintptr_t>(record), {0x18, 0x0, 0x0, 0x0})
                     .value_or(0);
             return vtable == g_gameAudioEffectVtable;
         }
 
-        // ASCII copy with length cap. Walks the std::string entry's backing buffer in a single SEH-guarded bulk read;
-        // the backing-buffer length comes from the std::string's own size field (already validated by the caller for
-        // plausibility) so we trust it as the upper bound and then truncate on the first embedded NUL we encounter,
-        // mirroring the C-string semantics the asset-path classifier expects.
+        // ASCII copy with length cap. Walks the std::string entry's backing buffer in a single SEH-guarded bulk read.
+        // The backing-buffer length comes from the std::string's own size field, which the caller already validated for
+        // plausibility, so we trust it as the upper bound. The copy then truncates on the first embedded NUL, which
+        // mirrors the C-string semantics the asset-path classifier expects.
         std::size_t copy_ascii_safe(std::uintptr_t src, std::size_t len, char *out, std::size_t cap) noexcept
         {
             if (src < 0x10000 || out == nullptr || cap == 0)
@@ -276,14 +269,12 @@ namespace Transmog::HelmAudioFilter
             return actual;
         }
 
-        // Delegates to CDCore::classify_appearance_by_path which matches the appearance path against
-        // dynamically-maintained
-        // codenames ("cd_phm_macduff" -> Kliff, "cd_phw_damian" ->
-        // Damiane, "cd_phm_oongka" -> Oongka). Using CDCore's API
-        // here means the codename set stays consistent with the rest of LT/EH/CDCore -- including any runtime
-        // auto-update of codenames the engine might perform.
+        // Delegates to CDCore::classify_appearance_by_path, which matches the appearance path against
+        // dynamically-maintained codenames ("cd_phm_macduff" -> Kliff, "cd_phw_damian" -> Damiane, "cd_phm_oongka" ->
+        // Oongka). CDCore's API keeps the codename set consistent with the rest of LT/EH/CDCore, including any runtime
+        // auto-update of codenames the engine can perform.
         //
-        // The function expects a path containing "/cd_" as anchor; protagonist .app_xml paths from the Server
+        // The function expects a path that contains "/cd_" as anchor. Protagonist .app_xml paths from the Server
         // CharacterAssets (slot 0) carry this anchor verbatim, e.g.
         // "character/appearance/1_pc/1_phm/cd_phm_macduff/...". Returns 1/2/3 for Kliff/Damiane/Oongka, 0 (Unknown)
         // else.
@@ -302,7 +293,7 @@ namespace Transmog::HelmAudioFilter
             if (len == 0 || len > 0x10000)
                 return 0;
             const auto ptr = DMKMemory::seh_read<std::uintptr_t>(entry + k_offEntryPtr).value_or(0);
-            // SSO heuristic: if `ptr` looks like a canonical heap pointer, follow it; otherwise read inline at +0x10.
+            // SSO heuristic: if `ptr` looks like a canonical heap pointer, follow it. Otherwise read inline at +0x10.
             const bool ptrLooksValid = ptr >= 0x10000000000ULL && ptr < 0xF000000000000ULL;
             const auto src = ptrLooksValid ? ptr : (entry + k_offEntryInline);
             return copy_ascii_safe(src, len, out, cap);
@@ -319,10 +310,10 @@ namespace Transmog::HelmAudioFilter
             if (host < 0x10000)
                 return CDCore::ControlledCharacter::Unknown;
 
-            // host +0x68 -> +0x40 -> +0x40 -> +0x38 dereferences the
-            // component table, character-controller slot, inner record, then the CharacterAssets pointer. The trailing
-            // 0 forces the +0x38 link to be dereferenced so the result is the assets base the slot-scan loop below
-            // indexes. Each link is screened by plausible_userspace_ptr.
+            // host +0x68 -> +0x40 -> +0x40 -> +0x38 dereferences the component table, character-controller slot, inner
+            // record, then the CharacterAssets pointer. The trailing 0 forces the +0x38 link to be dereferenced, so the
+            // result is the assets base that the slot-scan loop below indexes. Each link is screened by
+            // plausible_userspace_ptr.
             const auto assets = DMKMemory::seh_resolve_chain(host, {k_offComponentTable, k_offCharCtlSlot,
                                                                     k_offCharCtlToInner, k_offInnerToAssets, 0})
                                     .value_or(0);
@@ -336,7 +327,7 @@ namespace Transmog::HelmAudioFilter
             //   Oongka (base)    asset='cd_phm_oongka_*.app_xml'
             //   NPC              asset='character/appearance/.../<npc>.app_xml'
             // For protagonists the match is found independently in a later slot (portrait or player_N) when slot[0]
-            // doesn't contain the codename (e.g. Kliff in custom armor).
+            // does not contain the codename (e.g. Kliff in custom armor).
             CDCore::ControlledCharacter matched = CDCore::ControlledCharacter::Unknown;
             for (std::size_t i = 0; i < k_assetMaxScan; ++i)
             {
@@ -367,7 +358,7 @@ namespace Transmog::HelmAudioFilter
         }
 
         // Walk the engine player-static chain to the currently-controlled protagonist's pa::ServerChildOnlyInGameActor.
-        // The whole walk runs under one SEH frame via DMKMemory::seh_read_chain; returns 0 on fault or pre-world.
+        // The whole walk runs under one SEH frame via DMKMemory::seh_read_chain. Returns 0 on fault or pre-world.
         //
         //   *(g_playerStatic) -> root container
         //   *(root + 0x18)    -> pa::NwVirtualAsyncSession
@@ -378,10 +369,9 @@ namespace Transmog::HelmAudioFilter
             if (g_playerStatic == 0)
                 return 0;
 
-            // Leading 0 dereferences g_playerStatic to the root container,
-            // then +0x18 -> +0xA0 -> +0xD0 walks to the controlled host,
-            // dereferencing the +0xD0 link to read the host pointer value. Each link is screened by
-            // plausible_userspace_ptr; a fault or implausible link returns 0.
+            // The leading 0 dereferences g_playerStatic to the root container. Then +0x18 -> +0xA0 -> +0xD0 walks to
+            // the controlled host and dereferences the +0xD0 link to read the host pointer value. Each link is screened
+            // by plausible_userspace_ptr. A fault or an implausible link returns 0.
             const auto host =
                 DMKMemory::seh_read_chain<std::uintptr_t>(g_playerStatic, {0x0, 0x18, 0xA0, 0xD0}).value_or(0);
             if (host < 0x10000)
@@ -394,14 +384,13 @@ namespace Transmog::HelmAudioFilter
         //   2. Asset-string scan -> on match, cache + return.
         //   3. Kliff fallback: if `host` equals the player-static chain leaf (i.e. host IS the currently-controlled
         //      actor) AND the asset scan returned Unknown, treat this as Kliff. Justification: Kliff is always the
-        //      first-spawned protagonist and is the controlled actor at world load; during that brief window his
-        //      CharacterAssets struct hasn't been wired up yet so the scan returns empty. Damiane and Oongka spawn
-        //      later with assets fully wired so the scan succeeds for them without needing this fallback.
+        //      first-spawned protagonist and is the controlled actor at world load. During that brief window the engine
+        //      did not wire up his CharacterAssets struct yet, so the scan returns empty. Damiane and Oongka spawn
+        //      later with assets fully wired, so the scan succeeds for them without this fallback.
         //   4. Otherwise return Unknown.
         //
-        // The cache stores ONLY successful identifications. The
-        // Kliff fallback caches its result too so subsequent muffle events on the same Kliff host hit instantly without
-        // re-walking the chain.
+        // The cache stores ONLY successful identifications. The Kliff fallback caches its result too, so later muffle
+        // events on the same Kliff host hit instantly without a re-walk of the chain.
         CDCore::ControlledCharacter classify_host_cached(std::uintptr_t host, char *outMatchedAsset,
                                                          std::size_t outCap) noexcept
         {
@@ -422,8 +411,8 @@ namespace Transmog::HelmAudioFilter
                 g_hostCache.emplace(host, ch);
                 return ch;
             }
-            // Asset scan returned Unknown. Kliff init-race fallback:
-            // if the static chain reaches a host AND it equals the one we're classifying, attribute to Kliff.
+            // The asset scan returned Unknown. Kliff init-race fallback: if the static chain reaches a host and that
+            // host equals the one we are classifying, attribute it to Kliff.
             const auto controlled = resolve_controlled_host();
             if (controlled != 0 && controlled == host)
             {
@@ -442,36 +431,30 @@ namespace Transmog::HelmAudioFilter
             return CDCore::ControlledCharacter::Unknown;
         }
 
-        // Inline detour for sub_141C6CC90, the per-tag passive-skill registrar. The call is suppressed when ALL three
-        // conditions hold:
-        //   (1) Structural: args identify the audio-classifier code
-        //       path (a7 == 0 AND a3 in the {tag, 0, lvl, 0} layout
-        //       the equip dispatcher uses).
-        //   (2) Class chain walk: the resolved skill's first per-level
-        //       entry has class `pa::GameAudioEffectBuffData`. This
-        //       derives muffle-class membership from the engine's own
-        //       RTTI without hardcoded tag tokens, so any future tag
-        //       backed by the same class is admitted automatically.
-        //   (3) Actor protagonist gate: the actor's CharacterAssets
-        //       vector contains one of the configured protagonist
-        //       codenames (Kliff, Damiane, or Oongka). The gate
-        //       matches by appearance string so a non-controlled
-        //       protagonist actor (e.g. sibling sitting next to the
-        //       player) also has its voice muffle stripped.
+        // Inline detour for the per-tag passive-skill registrar. The call is suppressed when ALL three conditions hold:
+        //   (1) Structural: the args identify the audio-classifier code path (a7 == 0 AND a3 in the {tag, 0, lvl, 0}
+        //       layout the equip dispatcher uses).
+        //   (2) Class chain walk: the resolved skill's first per-level entry has class `pa::GameAudioEffectBuffData`.
+        //       This derives muffle-class membership from the engine's own RTTI without hardcoded tag tokens, so any
+        //       future tag backed by the same class is admitted automatically.
+        //   (3) Actor protagonist gate: the actor's CharacterAssets vector contains one of the configured protagonist
+        //       codenames (Kliff, Damiane, or Oongka). The gate matches by appearance string, so a non-controlled
+        //       protagonist actor (e.g. a sibling who sits next to the player) also has its voice muffle stripped.
         //
         // The combined gates restrict the suppress universe to protagonist-owned `pa::GameAudioEffectBuffData` entries.
         // Item-stat / sound-attack-immunity / generic combat passives all pass through.
         //
-        // Log policy: SUPPRESS at INFO so an audible behaviour change is always present in the user log for triage; the
-        // non-muffle and non-protagonist audio-classifier branches log at TRACE so a user who flips `log_level = trace`
-        // can see why a tag did or did not suppress.
+        // Log policy: SUPPRESS at INFO, so an audible behavior change is always present in the user log for triage.
+        // The non-muffle and non-protagonist audio-classifier branches log at TRACE, so a user who flips
+        // `log_level = trace` can see why a tag did or did not suppress.
         std::int32_t *__fastcall detour(std::int64_t a1, std::int32_t *a2, std::uint16_t *a3, std::int32_t a4,
                                         std::int64_t a5, std::int64_t a6, char a7, std::int32_t a8, std::int64_t a9,
                                         std::int64_t a10, char a11, std::int64_t a12) noexcept
         {
             // Fast reject: only the audio-classifier code path can ever trigger SUPPRESS. Every other call falls
             // through to the trampoline immediately. The is_audio_classifier check is cheap (4 SEH-wrapped u16 reads),
-            // so adding it at the entry rather than after the protagonist walk keeps the unhooked-call cost minimal.
+            // so it sits at the entry rather than after the protagonist walk, which keeps the unhooked-call cost
+            // minimal.
             if (a3 == nullptr || a1 < 0x10000 || !is_audio_classifier_call(a3, a4, a7))
             {
                 return g_trampoline(a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12);
@@ -490,12 +473,11 @@ namespace Transmog::HelmAudioFilter
 
             // Muffle-class confirmed. Actor gate next: walk to the host's CharacterAssets std::vector<std::string> and
             // scan its entries for a protagonist codename literal (Kliff, Damiane, or Oongka). Returns the matched
-            // character on first hit; pass-through otherwise.
+            // character on first hit, pass-through otherwise.
             //
-            // Why asset-string scan vs other actor-identity sources:
-            // the codename appears verbatim in the resource paths shipped with the game data, so the match is grounded
-            // in semantically meaningful content rather than a run-time-allocated handle or a build-specific byte
-            // offset on the host. The chain
+            // Why an asset-string scan and not another actor-identity source: the codename appears verbatim in the
+            // resource paths shipped with the game data, so the match is grounded in semantically meaningful content
+            // rather than a run-time-allocated handle or a build-specific byte offset on the host. The chain
             //   host -> +0x68 (component table)
             //        -> +0x40 (slot 8, CharacterControlActorComp)
             //        -> +0x40 -> +0x38 (CharacterAssets vector)
@@ -517,13 +499,13 @@ namespace Transmog::HelmAudioFilter
 
             if (!isProtagonist)
             {
-                // Muffle path but no protagonist codename was found in the actor's CharacterAssets entries. Pass
+                // Muffle path, but no protagonist codename was found in the actor's CharacterAssets entries. Pass
                 // through (NPCs, generic humanoids, pre-init).
                 log.trace(k_fmt, "non-protagonist", tag, a4, static_cast<std::uintptr_t>(a1), host, actorSv, assetSv);
                 return g_trampoline(a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12);
             }
 
-            // SUPPRESS. Tag never enters the actor's skill registry, so the audio dispatcher never finds it and no
+            // SUPPRESS. The tag never enters the actor's skill registry, so the audio dispatcher never finds it and no
             // muffle gets published for the protagonist. The single virtual call that the trampoline-skip leaves
             // un-invoked is rate-limited, role-gated, and refcount-balanced inside its own body (see header
             // bypass-safety analysis), so the skip is a no-op for the only role the protagonist ever has.
@@ -533,29 +515,30 @@ namespace Transmog::HelmAudioFilter
             return a2;
         }
 
-        // Resolves the engine's u16-tag -> SkillInfo record resolver in a
-        // way meant to survive game updates rather than pinning it to one build's addresses.
+        // Resolves the engine's u16-tag -> SkillInfo record resolver in a way meant to survive game updates rather than
+        // pinning it to one build's addresses.
         //
         // The engine emits a family of byte-identical pa::*InfoManager index resolvers from one shared template. They
         // differ ONLY in the RIP-relative disp32 that names their manager-pointer global. A signature that bakes that
-        // disp32 (the k_skillTagResolverCandidates cascade) only matches the build it was captured from, because the
-        // linker recomputes that displacement on every rebuild.
+        // disp32 only matches the build it was captured from, because the linker recomputes that displacement on
+        // every rebuild.
         //
         // This path instead signs ONLY the opcode/ModRM body shape (every movable operand wildcarded: the manager
         // disp32 and both forward-jump rel32s), then disambiguates the structurally identical hits at runtime by the
         // MSVC RTTI class name of the manager each resolver references. The class name is a source-level identity that
         // tends to outlive recompiles and address reshuffles, so this keeps working when the function or its manager
         // global moves. The SkillInfo resolver is the lowest-address member of the family, so the sweep usually returns
-        // on the first hit; correctness does not depend on that ordering, as every hit is RTTI-checked.
+        // on the first hit. Correctness does not depend on that ordering, because every hit is RTTI-checked.
         [[nodiscard]] std::uintptr_t resolve_skill_tag_resolver()
         {
             auto &log = DMK::Logger::get_instance();
 
             // The two signature inputs -- the resolver's opcode body shape (every movable operand wildcarded) and the
             // target manager's decorated RTTI name -- live in aob_resolver.hpp (k_skillTagResolverBodyAob /
-            // k_skillInfoManagerRttiName), alongside the fallback cascade, so all of this mod's signatures stay in one
-            // place. The body anchors at function entry+0x12 and the offsets used below to read the manager disp32 and
-            // walk back to the entry are named there too.
+            // k_skillInfoManagerRttiName), next to the other candidate cascades, so all of this mod's signatures stay
+            // in one place. This target has no fallback cascade: the RTTI pick is the only path. The body anchors at
+            // function entry+0x12, and the offsets used below to read the manager disp32 and walk back to the entry are
+            // named there too.
             const auto pattern = DMKScanner::parse_aob(::Transmog::k_skillTagResolverBodyAob);
             if (!pattern)
                 return 0; // parse_aob already logged the malformed token
@@ -579,13 +562,13 @@ namespace Transmog::HelmAudioFilter
                 const auto match = reinterpret_cast<std::uintptr_t>(hit);
 
                 // mov rbx,[rip+disp32]: the 3-byte movzx, then 48 8B 1D + disp32. disp32 sits at body offset
-                // +DispOffset; the mov ends at +InstrEnd, which is the RIP base for it.
+                // +DispOffset. The mov ends at +InstrEnd, which is the RIP base for it.
                 const auto disp = DMKMemory::seh_read<std::int32_t>(match + ::Transmog::k_skillTagResolverDispOffset);
                 if (disp.has_value())
                 {
                     const auto mgrGlobal =
                         match + ::Transmog::k_skillTagResolverInstrEnd + static_cast<std::int64_t>(*disp);
-                    // The pointer SLOT lives in the EXE image (.data/.bss); the manager object it points at is on the
+                    // The pointer SLOT lives in the EXE image (.data/.bss). The manager object it points at is on the
                     // heap, and that object's vtable is back inside the image.
                     if (DMKMemory::contains(range, mgrGlobal))
                     {
@@ -609,9 +592,8 @@ namespace Transmog::HelmAudioFilter
                 cur = hit + 1; // resume the sweep just past this hit
             }
 
-            // Expected while the SkillInfoManager singleton is still constructing: ensure_skill_tag_resolver re-scans
-            // on later calls (and binds the baked-disp cascade as a fallback when it matches this build), so a missing
-            // RTTI hit here is a trace, not a warning.
+            // Expected while the SkillInfoManager singleton is still constructing. ensure_skill_tag_resolver re-scans
+            // on later calls, so a missing hit here is a trace, not a warning.
             log.trace("[helm-audio] RTTI scan: no SkillInfoManager resolver among "
                       "{} body-shape matches (will retry)",
                       scanned);
@@ -626,7 +608,7 @@ namespace Transmog::HelmAudioFilter
 
         auto &log = DMK::Logger::get_instance();
 
-        // Resolve the registrar entry (sub_141C6CC90 in v1.08.00).
+        // Resolve the per-tag passive-skill registrar entry.
         const auto target = ::Transmog::resolve_address(::Transmog::k_helmAudioRegistrarCandidates,
                                                         "HelmAudioFilter_PassiveSkillRegistrar");
         if (target == 0)
@@ -636,17 +618,16 @@ namespace Transmog::HelmAudioFilter
             return false;
         }
 
-        // The engine's tag -> skill record resolver is bound lazily on the
-        // first registrar detour invocation rather than here: its RTTI primary needs the pa::SkillInfoManager singleton
-        // to be live, which is not guaranteed during this init pass but is guaranteed once skill registration (the
-        // hooked path) runs. A resolve failure there only makes is_audio_muffle_class pass through, so it never blocks
-        // hook installation. See ensure_skill_tag_resolver.
+        // The engine's tag -> skill record resolver binds lazily on the first registrar detour invocation rather than
+        // here: its RTTI primary needs the pa::SkillInfoManager singleton to be live, which this init pass cannot
+        // guarantee, but which skill registration (the hooked path) does guarantee. A resolve failure there only makes
+        // is_audio_muffle_class pass through, so it never blocks hook installation. See ensure_skill_tag_resolver.
 
         // Resolve the pa::GameAudioEffectBuffData vtable. Each instance of that class stores its vtable base in its
         // first qword, so the filter compares buff_instance[0] against g_gameAudioEffectVtable to identify muffle-class
         // entries. The candidate cascade leads with a ResolveMode::RttiVtable tier (resolve by the patch-stable mangled
         // name, which self-heals across the vtable relocations that move the byte ctor-LEA anchors), then falls back to
-        // those byte anchors; both yield the same vtable base.
+        // those byte anchors. Both yield the same vtable base.
         const auto vtableAddr = ::Transmog::resolve_address(::Transmog::k_gameAudioEffectVtableCandidates,
                                                             "HelmAudioFilter_GameAudioEffectVtable");
         if (vtableAddr == 0)
@@ -657,9 +638,9 @@ namespace Transmog::HelmAudioFilter
         }
         g_gameAudioEffectVtable = vtableAddr;
 
-        // Engine player static -- needed by the Kliff init-race fallback. On AOB failure we still install the hook; the
-        // fallback simply won't fire (asset-string scan still works for Damiane/Oongka and for Kliff once his assets
-        // wire up).
+        // Engine player static -- needed by the Kliff init-race fallback. On AOB failure we still install the hook. The
+        // fallback then does not fire (the asset-string scan still works for Damiane/Oongka, and for Kliff once his
+        // assets wire up).
         const auto playerStatic =
             ::Transmog::resolve_address(::Transmog::k_playerStaticCandidates, "HelmAudioFilter_PlayerStatic");
         if (playerStatic != 0)

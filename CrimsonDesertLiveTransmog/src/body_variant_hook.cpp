@@ -19,24 +19,24 @@ namespace Transmog::BodyVariantHook
 {
     namespace
     {
-        // sub_141F90630(arg1, arg2, arg3, arg4) -> void. arg1 (rcx) holds the per-body variant-entry list at +0x3E0
-        // and its count at +0x3E8 (stride 0x58). The sole caller discards rax, so the wrapper forwards no return. The
-        // args are taken at register width (uint64_t) to avoid any truncation across the trampoline; the engine reads
-        // only the low parts (edx, r8w).
+        // BodyVariantResolver(arg1, arg2, arg3, arg4) -> void. arg1 (rcx) holds the per-body variant-entry list at
+        // +0x408 and its count at +0x410 (entry stride 0x58). The sole caller discards rax, so the wrapper forwards no
+        // return. The args are taken at register width (uint64_t) to avoid any truncation across the trampoline. The
+        // engine reads only the low parts (edx, r8w).
         using ResolverFn = void (*)(void *, std::uint64_t, std::uint64_t, void *);
         ResolverFn g_origResolver = nullptr;
 
         // The char-class bypass jz byte inside the resolver's token-match loop (resolved via
-        // k_charClassBypassCandidates into resolved_addrs().charClassBypass). 0xEB force-accepts entry[0]; 0x74
+        // k_charClassBypassCandidates into resolved_addrs().charClassBypass). 0xEB force-accepts entry[0]. 0x74
         // restores the natural jz.
         std::uintptr_t g_bypassAddr = 0;
 
-        // Set true once install() has wired both hooks. Read by the transmog apply path via is_active() to decide
-        // whether to engage the legacy bypass-force fallback. Written once during init before any apply runs; the
+        // Set true once install() wires both hooks. Read by the transmog apply path via is_active() to decide whether
+        // to engage the transmog-side bypass-force fallback. Written once during init, before any apply runs. The
         // apply reads run on the game thread afterwards, so a relaxed atomic is sufficient.
         std::atomic<bool> g_active{false};
 
-        // Observation state for the current resolver call. The resolver and its render call run on the same thread;
+        // Observation state for the current resolver call. The resolver and its render call run on the same thread.
         // thread_local keeps the flags correct even if the engine resolves an appearance off the game thread.
         thread_local bool tl_inResolver = false;
         thread_local bool tl_rendered = false;
@@ -64,7 +64,7 @@ namespace Transmog::BodyVariantHook
 
         void on_resolver(void *arg1, std::uint64_t arg2, std::uint64_t arg3, void *arg4) noexcept
         {
-            // Only intervene during an LT transmog apply; real equips (and any other resolve) run untouched so the
+            // Only intervene during an LT transmog apply. Real equips, and any other resolve, run untouched, so the
             // engine still hides items that legitimately have no mesh for the wearer.
             if (!in_transmog().load(std::memory_order_relaxed))
             {
@@ -72,10 +72,10 @@ namespace Transmog::BodyVariantHook
                 return;
             }
 
-            // Run the natural, un-bypassed match and observe whether it rendered. Save/restore the flags so a nested
-            // resolver call (should the engine ever make one) keeps this frame's observation isolated. The engine
-            // resolver faults on early load (game data not ready); __finally restores the flags even on an SEH unwind
-            // so a fault cannot strand tl_inResolver true and mis-attribute a later frame's render.
+            // Run the natural, un-bypassed match and observe whether it rendered. Save and restore the flags so a
+            // nested resolver call (if the engine ever makes one) keeps this frame's observation isolated. The engine
+            // resolver faults on early load, when the game data is not ready. __finally restores the flags even on an
+            // SEH unwind, so a fault cannot strand tl_inResolver true and mis-attribute a later frame's render.
             const bool prevInResolver = tl_inResolver;
             const bool prevRendered = tl_rendered;
             bool rendered = false;
@@ -98,13 +98,13 @@ namespace Transmog::BodyVariantHook
                 return;
             }
 
-            // Nothing matched: an NPC/cross-class item that would otherwise be invisible on the player. Re-run the
-            // resolver with the char-class bypass so its match loop force-accepts entry[0] -- the same fallback the old
-            // transmog-side bypass gave, but now ONLY when the natural match failed. tl_inResolver is false here, so
-            // this forced pass is not observed. The bypass byte is a live GLOBAL code byte: __finally guarantees the
-            // 0x74 restore even if the forced pass SEH-unwinds, so a fault cannot leave the bypass forced-on for every
-            // later resolve (which would reintroduce the male-variant mis-render on all characters). A plain RAII guard
-            // is insufficient here -- under /EHsc, C++ destructors do not run during an async SEH unwind.
+            // Nothing matched: an NPC/cross-class item that is otherwise invisible on the player. Re-run the resolver
+            // with the char-class bypass so its match loop force-accepts entry[0] -- the same fallback the
+            // transmog-side bypass gives, but ONLY when the natural match fails. tl_inResolver is false here, so this
+            // forced pass is not observed. The bypass byte is a live GLOBAL code byte: __finally guarantees the 0x74
+            // restore even if the forced pass SEH-unwinds. A fault must never leave the bypass forced-on for every
+            // later resolve, because that reintroduces the male-variant mis-render on all characters. A plain RAII
+            // guard is insufficient here -- under /EHsc, C++ destructors do not run during an async SEH unwind.
             __try
             {
                 write_bypass(0xEB);
@@ -155,10 +155,10 @@ namespace Transmog::BodyVariantHook
         {
             logger.warning("[body-variant] resolver inline hook failed: {}",
                            DMK::Hook::error_to_string(resolverRes.error()));
-            // Roll back the render observer installed above. Without this a partial install leaves a dangling midhook
-            // firing on the render primitive for the rest of the process: on_render would keep taking the SafetyHook
-            // context save/restore round-trip on every render call while only ever no-op'ing (tl_inResolver never set,
-            // since the resolver hook that sets it did not install).
+            // Roll back the render observer installed above. Without this rollback, a partial install leaves a
+            // dangling midhook on the render primitive for the rest of the process. on_render then pays the SafetyHook
+            // context save/restore round-trip on every render call and never does anything, because tl_inResolver
+            // stays false: the resolver hook that sets it did not install.
             (void)hookMgr.remove_hook(*renderRes);
             return false;
         }

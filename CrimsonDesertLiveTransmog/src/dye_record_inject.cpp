@@ -1,18 +1,18 @@
 // Per-slot dye-record injector. See `dye_record_inject.hpp` for the architectural overview. This file installs one
 // inline detour and resolves one engine function pointer:
 //
-//   * DyeCopier (sub_141E019E0) -- INLINE DETOUR. After the engine's natural copy completes (with empty source for
-//     LT-fake), the detour synthesizes per-channel ARMOR_MOD records and APPENDS them to dst+120 by calling the DyeCopy
-//     primitive directly. This is independent of any real item the user wears.
+//   * DyeCopier -- INLINE DETOUR. After the engine's natural copy completes (with empty source for LT-fake), the
+//     detour synthesizes per-channel ARMOR_MOD records and writes them into the record vector at dst+120 through the
+//     DyeCopy primitive. This is independent of any real item the user wears.
 //
-//   * DyeCopy (sub_140CADEF0) -- function pointer only. The engine's 16-byte record-copy primitive; the detour calls it
-//     directly to append synthesized records. Resolved via AOB cascade so the call target tracks executable patches.
+//   * DyeCopy -- function pointer only. The engine's 16-byte record-copy primitive. The detour calls it directly to
+//     append synthesized records. Resolved through an AOB cascade so the call target tracks executable patches.
 //
 // Why an inline detour rather than a mid-hook here:
-//   * The engine writes the natural record vector inside the trampoline body; we must run AFTER it to append.
+//   * The engine writes the natural record vector inside the trampoline body. The injection must run AFTER it.
 //   * Substitution must be conditional on LT being active and a slot state being published. A mid-hook on entry runs
 //     unconditionally.
-//   * The DyeCopy primitive is reused as a function call, so we need a stable resolved address; reusing the
+//   * The DyeCopy primitive is reused as a function call, so the resolved address must stay stable. Reusing the
 //     AOB-resolved value keeps hook target and call target locked together.
 
 #include "dye_record_inject.hpp"
@@ -34,15 +34,16 @@ namespace Transmog::DyeRecordInject
     //
     //   s_injectActive: true if any channel has group_hash != 0.
     //   s_injectChannels: per-channel state.
-    //   s_injectConsumed: set after first inject in current slotpop;
-    //     prevents double-inject from the multiple sub_141E019E0
-    //     calls that fire per slot.
+    //   s_injectConsumed: marks that at least one inject ran for the currently published state. It does NOT gate
+    //     injection. DyeCopier fires several times per slot, and the call whose destination reaches the renderer is
+    //     not always the first one, so the detour injects on every call while a state is published. The per-channel
+    //     upsert in the detour makes that idempotent. This flag only keeps the diagnostic log to one line per slot.
     static thread_local bool s_injectActive = false;
     static thread_local ChannelState s_injectChannels[k_dyeChannelCount] = {};
     static thread_local bool s_injectConsumed = false;
-    // When true, the detour emits records ONLY for channels with group_hash != 0; inactive slots are skipped entirely
-    // instead of being filled with the first active channel's settings. Set by callers that mirror a real auth-table
-    // source (the restore path) where the original mesh never colored those channels.
+    // When true, the detour emits records ONLY for channels with group_hash != 0. It skips inactive channels entirely
+    // instead of filling them with the first active channel's settings. Callers that mirror a real auth-table source
+    // (the restore path) set this, because the original mesh never colored those channels.
     static thread_local bool s_injectSparse = false;
 
     // -- Counters -----------------------------------------------------
@@ -50,20 +51,21 @@ namespace Transmog::DyeRecordInject
 
     // -- SEH-protected memory primitives ------------------------------
     //
-    // The DyeCopy call may transiently fault on alloc or vector-header access during asset reload. Wrap it in SEH so a
+    // The DyeCopy call can transiently fault on alloc or vector-header access during asset reload. Wrap it in SEH so a
     // bad state fails the call instead of crashing the game thread. The SEH __try block lives in its own function
     // because it cannot share scope with C++ object unwinding (string, etc.).
 
     // -- DyeCopier inline detour (the injection site) -----------------
     //
-    // After the engine's own dye-copy completes (with empty source for LT-fake), we APPEND `k_dyeChannelCount` records
-    // by calling the engine's record-copy primitive directly. This is INDEPENDENT of any real item the user wears.
+    // After the engine's own dye-copy completes (with empty source for LT-fake), the detour writes up to
+    // `k_dyeChannelCount` records into the destination vector through the engine's record-copy primitive. Dense mode
+    // emits every channel. Sparse mode emits only the channels the slot overrides. This is INDEPENDENT of any real
+    // item the user wears.
     //
     // The detour is gated by:
-    //   1. `Transmog::in_transmog()` -- only patch during LT apply
-    //   2. `s_injectActive`          -- a slot state was published
-    //   3. `!s_injectConsumed`       -- only inject once per slotpop
-    //   4. `g_dye_copy_fn != nullptr` -- DyeCopy AOB resolved cleanly
+    //   1. `Transmog::in_transmog()`  -- only patch during LT apply
+    //   2. `s_injectActive`           -- a slot state was published
+    //   3. `g_dye_copy_fn != nullptr` -- DyeCopy AOB resolved cleanly
 
     using DyeCopier_t = std::int64_t(__fastcall *)(std::uintptr_t a1, std::uintptr_t a2);
     using DyeCopy_t = std::int64_t(__fastcall *)(std::uintptr_t a1, std::uintptr_t a2);
@@ -71,8 +73,8 @@ namespace Transmog::DyeRecordInject
     static DyeCopier_t g_dye_copier_trampoline = nullptr;
     static DyeCopy_t g_dye_copy_fn = nullptr;
 
-    // SEH wrapper around the DyeCopy call. The engine primitive touches the target vector header and may alloc; isolate
-    // faults.
+    // SEH wrapper around the DyeCopy call. The engine primitive touches the target vector header and can allocate.
+    // Isolate the faults.
     static bool seh_call_dye_copy(DyeCopy_t fn, std::uintptr_t target_vec, std::uintptr_t src_record) noexcept
     {
         __try
@@ -86,9 +88,39 @@ namespace Transmog::DyeRecordInject
         }
     }
 
+    // --- Engine layout constants ------------------------------------
+    //
+    // Dye-record vector header, relative to the vector base. Taken from the engine's own record-copy primitive: it
+    // reads capacity at +0x0C, count at +0x08, grows when capacity is not greater than count, writes the record at
+    // data + count * k_dyeRecordSize, then increments count.
+    static constexpr std::uintptr_t k_vecDataOffset = 0x00;
+    static constexpr std::uintptr_t k_vecCountOffset = 0x08;
+
+    // Offset of the dye-record vector inside the DyeCopier destination struct and inside an auth-table entry. Both
+    // structures share the layout, so both use this offset.
+    static constexpr std::uintptr_t k_dstDyeVectorOffset = 0x78;
+
+    // One ARMOR_MOD record is 16 bytes, but the engine primitive only copies the first 13 (+0x00 through +0x0C) and
+    // leaves the rest of the stride untouched. An in-place overwrite must write the same span to match its semantics.
+    static constexpr std::size_t k_dyeRecordSize = 16;
+    static constexpr std::size_t k_dyeRecordCopySpan = 13;
+
+    // Channel index inside one record, and the sentinel used when the read fails. k_noChannel is out of range for a
+    // valid channel, so a failed read never matches the channel the loop is looking for.
+    static constexpr std::uintptr_t k_recordChannelOffset = 6;
+    static constexpr std::uint8_t k_noChannel = 0xFF;
+
+    // Upper bound on the existing-record scan in the upsert path. The engine's copy leaves at most one record per
+    // channel, which is what lets the upsert below stop at the first match, so a sane vector never holds more than a
+    // handful of records and this ceiling is generous rather than tight. Its job is to reject a torn or relocated
+    // vector whose count field reads as a huge value, before that value drives a long scan over unmapped memory.
+    static constexpr std::uint32_t k_maxScanRecords = 256;
+    static constexpr std::uint32_t k_invalidCount = 0xFFFFFFFFu;
+    static constexpr std::uintptr_t k_minPlausiblePtr = 0x10000;
+
     // Build a 16-byte ARMOR_MOD record. See ChannelState in the header for the offset map. The +13 = 0x04 marker on
-    // indices 0 and 3 mirrors what natural captures show; the engine accepts records without it but matching the
-    // natural shape avoids any latent shape-validation we have not RE'd yet.
+    // indices 0 and 3 mirrors what natural captures show. The engine accepts records without it, but matching the
+    // natural shape avoids any shape validation that is not yet mapped.
     static void build_dye_record(std::uint8_t *out, std::size_t channel_idx, std::uint32_t group_hash, std::uint8_t r,
                                  std::uint8_t g, std::uint8_t b, std::uint16_t material_id,
                                  std::uint8_t repair_byte) noexcept
@@ -108,22 +140,35 @@ namespace Transmog::DyeRecordInject
 
     static std::int64_t __fastcall dye_copier_inline_detour(std::uintptr_t a1, std::uintptr_t a2) noexcept
     {
-        // Snapshot a1 -- RCX may be clobbered after the trampoline.
+        // Snapshot a1 -- RCX can be clobbered after the trampoline.
         const auto dst_struct = a1;
 
         const auto result = g_dye_copier_trampoline(a1, a2);
 
-        // Gate: skip when not in LT apply, no state published, already consumed for this slot, or DyeCopy never
-        // resolved.
+        // Gate: skip when not in LT apply, no state published, or DyeCopy never resolved.
+        //
+        // There is deliberately NO one-shot gate here. DyeCopier fires several times per slot (see the
+        // s_injectConsumed comment above), and the destination of the FIRST call is not the one that reaches the
+        // renderer. That first destination is a throwaway buffer that the engine tears down right after the apply, so
+        // a one-shot inject writes correct records into memory nobody reads.
+        //
+        // That failure mode is deceptive, so recognize it by its signature: the diagnostic below reports a fully
+        // correct destination -- full record count, correct group hash and RGB, zero leftover real-item records after
+        // the upsert -- and a read-back at that same vector address returns all zeroes seconds later, because the
+        // buffer is freed. Correcting WHAT the detour writes to that buffer never fixes the render.
+        //
+        // Injecting on every call while the state is published means whichever destination is the live one receives
+        // the records. This is only safe because the per-channel upsert below is idempotent: a repeat inject
+        // overwrites the record for the same channel instead of appending a duplicate.
         if (!in_transmog().load(std::memory_order_acquire))
             return result;
-        if (!s_injectActive || s_injectConsumed || g_dye_copy_fn == nullptr)
+        if (!s_injectActive || g_dye_copy_fn == nullptr)
             return result;
 
         // Locate the first active channel. In dense mode this also serves as the fill value for inactive channels. In
-        // sparse mode it is only used for diagnostics (the per-record emission loop skips inactives outright in sparse
-        // mode). Either way, if no channel is active there is nothing to emit and we skip out before touching the
-        // destination.
+        // sparse mode it is only used for diagnostics, because the per-record emission loop skips inactive channels
+        // outright. Either way, when no channel is active, there is nothing to emit. The detour returns before it
+        // touches the destination.
         const ChannelState *fallback = nullptr;
         for (std::size_t i = 0; i < k_dyeChannelCount; ++i)
         {
@@ -136,12 +181,35 @@ namespace Transmog::DyeRecordInject
         if (fallback == nullptr)
             return result;
 
-        // Append into the destination dye-record vector. On v1.13.00 this moved from dst+0x78 (120) to dst+0x70 (112)
-        // -- the same -8 shift as the auth-table entry and its dye header. Confirmed against the engine's own DyeCopier
-        // (sub_141F87550): its record-copy loop runs `lea rcx,[r14+0x70]; call <DyeCopy 0x140D1E5E0>` with a 16-byte
-        // record, i.e. it appends to dst+0x70 via the exact primitive we call here. Passing dst+0x78 handed
-        // g_dye_copy_fn the vector's count field instead of its base, so every append faulted (emitted=0/16, ok=false).
-        const auto target_vec = dst_struct + 112;
+        // Destination dye-record vector. The offset tracks the auth-table entry layout and moves with the entry
+        // stride: an entry stride of 0xC8 puts the vector at dst+0x70, an entry stride of 0xD0 puts it at dst+0x78. A
+        // stale value hands g_dye_copy_fn the vector's count field instead of its base, so every append faults.
+        //
+        // Vector header, relative to target_vec: +0x00 data pointer, +0x08 count, +0x0C capacity. That layout comes
+        // straight from the engine primitive: it reads capacity at +0x0C, count at +0x08, grows when capacity is not
+        // greater than count, writes the record at data + count * 16, then increments count.
+        const auto target_vec = dst_struct + k_dstDyeVectorOffset;
+
+        // Dedup precondition for the per-channel upsert below.
+        //
+        // The detour runs on every DyeCopier call while a slot state is published, because the call whose destination
+        // reaches the renderer is not always the first one. Repeated injection is only safe while it stays idempotent,
+        // which requires reading the existing records to find the one that already owns each channel. If the header is
+        // unreadable or the count is implausible, that scan cannot prove a channel is absent. A blind append then
+        // duplicates records on every call and grows the vector without bound. When the scan is not possible, skip
+        // this call instead. Another DyeCopier call follows.
+        const auto scan_data = DMKMemory::seh_read<std::uintptr_t>(target_vec + k_vecDataOffset).value_or(0);
+        const auto scan_count =
+            DMKMemory::seh_read<std::uint32_t>(target_vec + k_vecCountOffset).value_or(k_invalidCount);
+        const bool scannable = (scan_count == 0) || (scan_data >= k_minPlausiblePtr && scan_count <= k_maxScanRecords);
+        if (!scannable)
+        {
+            DMK::Logger::get_instance().debug("[dye-inject] skipped: destination vector not scannable "
+                                              "(data=0x{:X} count={})",
+                                              scan_data, scan_count);
+            return result;
+        }
+
         bool all_ok = true;
         std::size_t emitted = 0;
         const bool sparse = s_injectSparse;
@@ -151,18 +219,58 @@ namespace Transmog::DyeRecordInject
             if (!active && sparse)
                 continue;
             const auto &channel = active ? s_injectChannels[i] : *fallback;
-            std::uint8_t record[16];
+            std::uint8_t record[k_dyeRecordSize];
             build_dye_record(record, i, channel.group_hash, channel.r, channel.g, channel.b, channel.material_id,
                              channel.repair_byte);
-            all_ok = seh_call_dye_copy(g_dye_copy_fn, target_vec, reinterpret_cast<std::uintptr_t>(record));
+
+            // Upsert this channel instead of appending it.
+            //
+            // The engine's own copy loop runs inside the trampoline, before this code, and fills the destination with
+            // the records of the real item underneath the transmog. A plain append then leaves two records for the
+            // same channel. The consumer resolves the first match per channel, so the real item's record wins and the
+            // override never renders. Overwriting the record that already owns the channel is correct whichever way
+            // the consumer resolves. It also keeps the channels this slot does not override. A bulk reset of the count
+            // discards those channels in sparse mode.
+            //
+            // The header is re-read every iteration because an append can grow and relocate the array.
+            bool replaced = false;
+            const auto vec_data = DMKMemory::seh_read<std::uintptr_t>(target_vec + k_vecDataOffset).value_or(0);
+            const auto vec_count =
+                DMKMemory::seh_read<std::uint32_t>(target_vec + k_vecCountOffset).value_or(k_invalidCount);
+            if (vec_count > k_maxScanRecords || (vec_count > 0 && vec_data < k_minPlausiblePtr))
+            {
+                // Dedup is no longer possible mid-loop. Stop rather than append blind.
+                all_ok = false;
+                break;
+            }
+            if (vec_data >= k_minPlausiblePtr && vec_count > 0)
+            {
+                for (std::uint32_t k = 0; k < vec_count; ++k)
+                {
+                    const auto rec_addr = vec_data + static_cast<std::uintptr_t>(k) * k_dyeRecordSize;
+                    const auto existing_channel =
+                        DMKMemory::seh_read<std::uint8_t>(rec_addr + k_recordChannelOffset).value_or(k_noChannel);
+                    if (existing_channel != static_cast<std::uint8_t>(i))
+                        continue;
+                    replaced = DMKMemory::seh_write_bytes(rec_addr, record, k_dyeRecordCopySpan);
+                    break;
+                }
+            }
+
+            all_ok = replaced || seh_call_dye_copy(g_dye_copy_fn, target_vec, reinterpret_cast<std::uintptr_t>(record));
             if (all_ok)
                 ++emitted;
         }
 
+        // Marks that at least one inject ran for the published state. This flag does not gate injection. It keeps the
+        // summary below to one line per slot instead of one line per DyeCopier call.
+        const bool first_inject_for_slot = !s_injectConsumed;
         s_injectConsumed = true;
+        if (!first_inject_for_slot)
+            return result;
 
         const auto inject_count = g_dyeInjectCount.fetch_add(1, std::memory_order_relaxed);
-        DMK::Logger::get_instance().debug("[dye-inject] #{} dst+120=0x{:X} mode={} emitted={}/{} "
+        DMK::Logger::get_instance().debug("[dye-inject] #{} vec=0x{:X} mode={} emitted={}/{} "
                                           "first_hash=0x{:08X} rgb=({:02X},{:02X},{:02X}) ok={}",
                                           inject_count, target_vec, sparse ? "sparse" : "dense", emitted,
                                           k_dyeChannelCount, fallback->group_hash, fallback->r, fallback->g,
@@ -176,8 +284,8 @@ namespace Transmog::DyeRecordInject
     {
         auto &logger = DMK::Logger::get_instance();
 
-        // Resolve all targets via patch-proof AOB cascades before any hook is installed. resolve_address returns 0 on
-        // cascade failure; a hook against address 0 would smash the PE header.
+        // Resolve all targets through patch-proof AOB cascades before any hook is installed. resolve_address returns 0
+        // on cascade failure. A hook against address 0 smashes the PE header.
         const auto copy_target = resolve_address(k_dyeCopyCandidates, "DyeRecordInject_DyeCopy");
         if (copy_target == 0)
         {
@@ -196,7 +304,7 @@ namespace Transmog::DyeRecordInject
 
         auto &hookMgr = DMK::HookManager::get_instance();
 
-        // Bind the DyeCopy function pointer to the AOB-resolved address; the inline detour calls it directly to append
+        // Bind the DyeCopy function pointer to the AOB-resolved address. The inline detour calls it directly to append
         // records.
         g_dye_copy_fn = reinterpret_cast<DyeCopy_t>(copy_target);
 
@@ -280,12 +388,12 @@ namespace Transmog::DyeRecordInject
         s_injectActive = false;
         s_injectConsumed = false;
         s_injectSparse = false;
-        // NOTE: deliberately do NOT clear g_publishedRGB here. clear_slot_dye_state is called immediately after each
-        // apply_transmog completes -- the engine reads the dst+120 records once during slotPop and discards them, so
-        // clearing the ARMOR_MOD inject state is fine. But the per-property setter (sub_140A03810) fires DURING RENDER
-        // frames, long after apply_transmog returned, so the ColorOverride::SetterSubstitute hook needs the RGB
-        // snapshot to persist beyond apply. The snapshot gets overwritten on the next set_slot_dye_state (preset color
-        // change) so stale state self-clears on the next apply pass.
+        // NOTE: deliberately do NOT clear g_publishedRGB here. LT calls clear_slot_dye_state immediately after each
+        // apply_transmog completes. The engine reads the dst+120 records once during slotPop and discards them, so
+        // clearing the ARMOR_MOD inject state is fine. But the engine's per-property color setter fires DURING RENDER
+        // frames, long after apply_transmog returns, so the ColorOverride::SetterSubstitute hook needs the RGB
+        // snapshot to persist beyond apply. The next set_slot_dye_state (a preset color change) overwrites the
+        // snapshot, so stale state self-clears on the next apply pass.
     }
 
     bool get_published_first_active_rgb(std::uint8_t *r, std::uint8_t *g, std::uint8_t *b) noexcept
@@ -335,13 +443,15 @@ namespace Transmog::DyeRecordInject
         // Both call sites invoke this outside an SEH frame, so every read here is self-guarded: a faulting header read
         // yields 0 and the entry is treated as having no records.
         //
-        // The dye-vector header offsets track the auth-entry layout, which shrank 8 bytes on v1.13.00 (the entry
-        // reverted to the v1.04 stride 0xC8; see k_entrySlotTagOffset in real_part_tear_down.cpp). The data ptr moved
-        // +0x78 -> +0x70 and the count +0x80 -> +0x78. Verified live: a dyed entry holds a 16-byte-record array ptr at
-        // +0x70 with the channel count at +0x78.
-        const auto data = DMKMemory::seh_read<std::uintptr_t>(entryBase + 0x70).value_or(0);
-        auto count = DMKMemory::seh_read<std::uint32_t>(entryBase + 0x78).value_or(0);
-        if (data < 0x10000 || count == 0)
+        // The dye vector sits at the same offset inside an auth-table entry as it does inside the DyeCopier
+        // destination struct, so both paths read it through k_dstDyeVectorOffset. That offset tracks the auth-entry
+        // stride and MUST move with it: see k_entryStride and k_entrySlotTagOffset in real_part_tear_down.cpp. A
+        // stale value lands on the neighboring field and dereferences a garbage pointer instead of failing closed.
+        const auto data =
+            DMKMemory::seh_read<std::uintptr_t>(entryBase + k_dstDyeVectorOffset + k_vecDataOffset).value_or(0);
+        auto count =
+            DMKMemory::seh_read<std::uint32_t>(entryBase + k_dstDyeVectorOffset + k_vecCountOffset).value_or(0);
+        if (data < k_minPlausiblePtr || count == 0)
             return 0;
         if (count > k_dyeChannelCount)
             count = static_cast<std::uint32_t>(k_dyeChannelCount);
@@ -349,10 +459,10 @@ namespace Transmog::DyeRecordInject
         std::size_t filled = 0;
         for (std::uint32_t i = 0; i < count; ++i)
         {
-            const auto rec = data + i * 16;
-            // Copy the whole 16-byte record under one fault guard, then parse from the local buffer so a torn record
-            // cannot fault mid-field.
-            std::uint8_t buf[16];
+            const auto rec = data + i * k_dyeRecordSize;
+            // Copy the whole record under one fault guard, then parse from the local buffer so a torn record cannot
+            // fault mid-field.
+            std::uint8_t buf[k_dyeRecordSize];
             if (!DMKMemory::seh_read_bytes(rec, buf, sizeof(buf)))
                 continue;
 
