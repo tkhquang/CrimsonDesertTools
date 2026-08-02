@@ -2,6 +2,11 @@
 
 All notable changes to the CrimsonDesertEquipHide mod will be documented in this file.
 
+## [0.8.6] - Fixed broken weapon attachment
+
+- Fixed drawn weapons ending up attached incorrectly after hiding armor
+- Thanks to [Rubsi](https://www.nexusmods.com/profile/Rubsi) for reporting and fixing this
+
 ## [0.8.5] - Crimson Desert 1.16.00 support
 
 - Updated the mod to work with Crimson Desert version 1.16.00
@@ -278,6 +283,7 @@ All notable changes to the CrimsonDesertEquipHide mod will be documented in this
 - Customizable part lists per category via INI configuration
 - Configurable init delay and log level
 
+[0.8.6]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/equip-hide/v0.8.6
 [0.8.5]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/equip-hide/v0.8.5
 [0.8.4]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/equip-hide/v0.8.4
 [0.8.3]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/equip-hide/v0.8.3
