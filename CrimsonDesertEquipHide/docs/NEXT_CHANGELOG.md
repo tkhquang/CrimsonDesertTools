@@ -1,5 +1,4 @@
-## [Title for next release]
+## Fixed broken weapon attachment
 
-- New feature
-- Bug fix
-- Improvement
+- Fixed drawn weapons ending up attached incorrectly after hiding armor
+- Thanks to [Rubsi](https://www.nexusmods.com/profile/Rubsi) for reporting and fixing this

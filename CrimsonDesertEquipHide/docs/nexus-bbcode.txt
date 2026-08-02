@@ -291,6 +291,7 @@ Built with [url=https://github.com/tkhquang/DetourModKit]DetourModKit[/url] for 
 [*] [url=https://github.com/cursey]cursey[/url] for SafetyHook
 [*] Brodie Thiesfield for SimpleIni
 [*] [url=https://github.com/FransBouma]Frans 'Otis_Inf' Bouma[/url] for v1.05.00 AOB shift diagnosis
+[*] [url=https://www.nexusmods.com/profile/Rubsi]Rubsi[/url] for the weapon attachment fix
 [*] Pearl Abyss for creating Crimson Desert
 [/list]
 
