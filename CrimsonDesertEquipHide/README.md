@@ -338,6 +338,7 @@ The C++ sources follow a hard 120-column baseline and DetourModKit's coding conv
 - [cursey](https://github.com/cursey) -- for SafetyHook
 - [Brodie Thiesfield](https://github.com/brofield) -- for SimpleIni
 - [Frans 'Otis_Inf' Bouma](https://github.com/FransBouma) -- for v1.05.00 AOB shift diagnosis
+- [Rubsi](https://www.nexusmods.com/profile/Rubsi) -- for the weapon attachment fix
 - Pearl Abyss -- for Crimson Desert
 
 ## License
