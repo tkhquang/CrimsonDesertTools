@@ -167,6 +167,16 @@ namespace EquipHide
                 constexpr CategoryMask k_cascadeBodyMask =
                     category_bit(Category::Legs) | category_bit(Category::Gloves) | category_bit(Category::Boots);
 
+                // These parts are built through the PartInOutSocket path. A visible socket entry does not need the
+                // body-armor cache flush, and re-inserting it makes the engine re-process attachment state that this
+                // mod does not own. That can disturb the game's attachment state for drawn weapons. Keep the normal
+                // direct-write hide path intact; this guard applies only to visible-entry re-insertion.
+                constexpr CategoryMask k_socketPartMask =
+                    category_bit(Category::OneHandWeapons) | category_bit(Category::TwoHandWeapons) |
+                    category_bit(Category::Shields) | category_bit(Category::Bows) |
+                    category_bit(Category::SpecialWeapons) | category_bit(Category::Tools) |
+                    category_bit(Category::Lanterns);
+
                 // Per-character map drives both the part list AND the hide-mask classification: charIdx=-1 (unknown
                 // body or fallback path) collapses to the active-character map through get_part_map_for /
                 // is_any_category_hidden_for so single-character behaviour is preserved for unidentified slots.
@@ -175,6 +185,7 @@ namespace EquipHide
                                           : get_part_map();
 
                 int reinjected = 0;
+                int socket_reinjection_skipped = 0;
 
                 for (const auto &[hash, mask] : partMap)
                 {
@@ -189,6 +200,12 @@ namespace EquipHide
                            The re-insert path below forces the engine to re-process the entry and clear its cached
                            hidden state. Visible parts with no existing entry have nothing to flush, so skip unless the
                            cascade-fix path needs them. */
+                        if (existing && (mask & k_socketPartMask) != 0)
+                        {
+                            ++socket_reinjection_skipped;
+                            continue;
+                        }
+
                         if (!existing)
                         {
                             if (!cascadeOn || (mask & k_cascadeBodyMask) == 0)
@@ -279,8 +296,8 @@ namespace EquipHide
                 }
 
                 logger.debug("ArmorInject map: {} injected, {} existing updated, "
-                             "{} re-injected, {} skipped (no bucket key)",
-                             injected, existing_set, reinjected, skipped_key);
+                             "{} re-injected, {} socket re-injections skipped, {} skipped (no bucket key)",
+                             injected, existing_set, reinjected, socket_reinjection_skipped, skipped_key);
                 result = injected;
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
