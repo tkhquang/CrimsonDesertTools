@@ -6,6 +6,7 @@ import { joinAll, type JoinResult } from './parse';
 // dropping the matching CrimsonDesertLiveTransmog_*_<version>.tsv files into
 // docs/live-transmog/. The first entry is the default selection.
 export const CATALOG_VERSIONS = [
+  'v1.18.00',
   'v1.13.00',
   'v1.12.00',
   'v1.10.00',

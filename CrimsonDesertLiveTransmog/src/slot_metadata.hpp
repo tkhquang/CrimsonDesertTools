@@ -99,8 +99,13 @@ namespace Transmog
         // everywhere `slot_name()` is read; engine-side diagnostics still call this slot's gameTag 0x0D which
         // game_slot_name returns this same trimmed string for.
         { TransmogSlot::TwoHandWeapon, 0x0D, "TwoHand",       "cd_phm_02_",             "cd_phw_02_",            nullptr        , false },
-        // Tag 0x0E "Experimental" and 0x15 "OongkaRocket" intentionally omitted -- see TransmogSlot enum comments in
-        // shared_state.hpp.
+        // Tool takes empty prefab prefixes: the gathering-tool mesh family has not been identified, and an empty
+        // prefix keeps prefab_wrapper_swap on the carrier-only path instead of guessing a family. OffHand2 and Ranged2
+        // mirror their primary counterparts, which is the family their observed items come from.
+        { TransmogSlot::Tool,          0x0E, "Tool",          "",                       "",                      nullptr        , false },
+        { TransmogSlot::OffHand2,      0x17, "OffHand2",      "cd_phm_01_",             "cd_phw_01_",            nullptr        , false },
+        { TransmogSlot::Ranged2,       0x18, "Ranged2",       "cd_phm_04_",             "cd_phw_04_",            nullptr        , false },
+        // Tag 0x15 "OongkaRocket" intentionally omitted -- see TransmogSlot enum comments in shared_state.hpp.
         // clang-format on
     };
 
@@ -141,8 +146,8 @@ namespace Transmog
         return i < k_slotCount && k_slotMetadata[i].enabled;
     }
 
-    // Reverse lookup: engine slot tag -> TransmogSlot. Returns std::nullopt for tags LT does not manage (e.g. 0x0E or
-    // 0x15). Linear search over 20 entries -- cheap, called sparingly.
+    // Reverse lookup: engine slot tag -> TransmogSlot. Returns std::nullopt for tags LT does not manage (e.g. 0x15).
+    // Linear search over the table -- cheap, called sparingly.
     inline std::optional<TransmogSlot> slot_from_game_tag(std::int16_t gameTag) noexcept
     {
         for (const auto &m : k_slotMetadata)

@@ -55,21 +55,44 @@ namespace CDCore
         // (+0x63). Sub-manager Kliff / controlled slots (+0x30 / +0x38), the 16-byte vec[2] = ChildContainer slot, the
         // 100-entry actor-list capacity, the 16-byte ptr+flag stride, and the live-flag value 0x0101 round out the
         // layout.
-        // mgr -> userActor offset plus the sibling actor-array offsets, with
-        // runtime self-heal. The seeds come from controlled_char.hpp / the layout below; rtti_dissect re-resolves
-        // mgr->userActor from the live pa::ClientActorManager on the first walk, so a future manager re-layout
-        // self-corrects. heal_landmark checks the nominal slot first, so an unshifted binary short-circuits and the
-        // seeds stay (current behaviour byte-for-byte). The array/cap offsets sit in the same post-header region and
-        // shift by the same delta, so they are derived from the one healed delta rather than healed independently.
+        // mgr -> userActor offset, with runtime self-heal. The seed comes from controlled_char.hpp; rtti_dissect
+        // re-resolves mgr->userActor from the live pa::ClientActorManager on the first walk, so a future manager
+        // re-layout self-corrects. heal_landmark checks the nominal slot first, so an unshifted binary short-circuits
+        // and the seed stays.
+        //
+        // The actor-array descriptor is healed SEPARATELY (see heal_mgr_actor_array), NOT by applying this offset's
+        // healed delta to it. Both live in the post-header region, but they move independently: the descriptor block
+        // can shift while the userActor slot stays put, in which case a derived offset is silently wrong even though
+        // the userActor heal reports success. Deriving one offset from another couples two independent layout facts
+        // and downgrades a detectable miss into a wrong answer, so each is resolved against the live object on its
+        // own evidence.
         constexpr std::ptrdiff_t k_offUserActorNominal = ActorChainOffsets::k_actorManagerToUserActor;
-        constexpr std::ptrdiff_t k_offMgrActorArrayNominal = 0x130;
-        constexpr std::ptrdiff_t k_offMgrActorArrayCapNominal = 0x13C;
         constexpr std::string_view k_userActorMangled = ".?AVClientUserActor@pa@@";
 
         std::atomic<std::ptrdiff_t> s_offUserActor{k_offUserActorNominal};
-        std::atomic<std::ptrdiff_t> s_mgrHeaderDelta{0};
         std::atomic<bool> s_chainOffsetsHealed{false};
         std::atomic<int> s_chainHealAttempts{0};
+
+        // Actor-array descriptor. The manager keeps a run of uniform 16-byte records, each one
+        //
+        //     +0x00 qword  pointer to an 8-byte-stride CCOIA array
+        //     +0x08 u32    live element count
+        //     +0x0C u32    element capacity
+        //
+        // and the protagonist lookup wants the DENSEST of them (see heal_mgr_actor_array for how it is picked out).
+        // The nominal seed is the last verified location and is only a fallback: heal_mgr_actor_array re-derives it
+        // from the live object.
+        constexpr std::ptrdiff_t k_mgrArrayCountRel = 0x08;
+        constexpr std::ptrdiff_t k_mgrArrayCapRel = 0x0C;
+        constexpr std::ptrdiff_t k_offMgrActorArrayNominal = 0x128;
+
+        // Byte window of the manager object searched for the descriptor. Wide enough to cover the whole run of
+        // records plus room for the header to grow, small enough that a miss costs one bounded sweep.
+        constexpr std::ptrdiff_t k_mgrArrayHealWindow = 0x400;
+
+        std::atomic<std::ptrdiff_t> s_offMgrActorArray{k_offMgrActorArrayNominal};
+        std::atomic<bool> s_mgrArrayHealed{false};
+        std::atomic<int> s_mgrArrayHealAttempts{0};
 
         // Resolved self-heal window: the [Advanced] SelfHealWindow value clamped to the DMK maximum; a non-positive
         // (unset) value falls back to the default. Read once per heal attempt, never on a hot path.
@@ -89,12 +112,15 @@ namespace CDCore
 
         [[nodiscard]] std::ptrdiff_t off_mgr_actor_array() noexcept
         {
-            return k_offMgrActorArrayNominal + s_mgrHeaderDelta.load(std::memory_order_acquire);
+            return s_offMgrActorArray.load(std::memory_order_acquire);
         }
 
+        // Capacity lives inside the SAME descriptor record as the array pointer, at a fixed intra-record offset, so it
+        // follows the healed pointer offset by construction. A within-record relationship is safe to derive; a
+        // cross-region one is not, because the two regions can move independently.
         [[nodiscard]] std::ptrdiff_t off_mgr_actor_array_cap() noexcept
         {
-            return k_offMgrActorArrayCapNominal + s_mgrHeaderDelta.load(std::memory_order_acquire);
+            return off_mgr_actor_array() + k_mgrArrayCapRel;
         }
 
         // Re-entrant offset self-heal. Latches only on success (or the no-drift short-circuit inside heal_landmark).
@@ -137,7 +163,6 @@ namespace CDCore
             const std::ptrdiff_t healed = hit->healed_offset;
             const std::ptrdiff_t drift = healed - k_offUserActorNominal;
             s_offUserActor.store(healed, std::memory_order_release);
-            s_mgrHeaderDelta.store(drift, std::memory_order_release);
             s_chainOffsetsHealed.store(true, std::memory_order_release);
             // One-shot confirmation that the rtti_dissect path engaged and the mgr->userActor slot reverse-resolved to
             // pa::ClientUserActor. A nonzero drift is a manager re-layout that self-corrected on a patch; surface it as
@@ -158,8 +183,8 @@ namespace CDCore
         constexpr std::ptrdiff_t k_offVecChildSlot = 0x20; // vec[2] (16B stride)
         constexpr std::ptrdiff_t k_offChildList = 0x18;    // child +0x18
         // Actor-list constants. The ChildContainer holds a 100-entry list with 16-byte stride (ptr + live flag). The
-        // snapshot path no longer uses this list -- it pulls protagonists directly from ClientActorManager+0x130 -- but
-        // the diagnostic walker debug_enumerate_actor_list keeps using it.
+        // snapshot path no longer uses this list -- it pulls protagonists directly from the manager's actor-array
+        // descriptor -- but the diagnostic walker debug_enumerate_actor_list keeps using it.
         constexpr std::size_t k_actorListCapacity = 100;
         constexpr std::size_t k_actorListStride = 16;
 
@@ -168,28 +193,94 @@ namespace CDCore
         //     byte +0x60: session-local actor ID (load order; varies)
         //     byte +0x63: 0xA0 = Kliff, 0xB0 = everyone else
         //
-        // Direct protagonist lookup via ClientActorManager+0x130:
-        //   - +0x130: pointer to an 8-byte-stride CCOIA actor array.
-        //   - +0x13C: u32 element capacity of that array (order 1000).
-        // These sit in the same post-header region as the userActor field, so a manager re-layout shifts them by the
-        // same delta; off_mgr_actor_array()/_cap() derive that delta from the one healed mgr->userActor offset above
-        // (single source of truth). The array is a DENSE actor vector: every loaded character -- protagonists,
-        // companions, AND every humanoid NPC -- is appended here in spawn order. Protagonists do NOT cluster at the
-        // front. In a crowded scene (e.g. a large NPC battle) Kliff sits at [0] but the other protagonists can land
-        // hundreds of entries deep, interleaved with NPCs. The scan must therefore cover the whole live extent rather
-        // than a fixed prefix; a too-small bound silently drops protagonists that spawn late. Non-protagonist entries
-        // are rejected by the appearance-config classifier (their path carries no protagonist codename).
+        // Direct protagonist lookup through the manager's actor-array descriptor. The array is a DENSE actor vector:
+        // every loaded character -- protagonists, companions, AND every humanoid NPC -- is appended in spawn order.
+        // Protagonists do NOT cluster at the front. In a crowded scene (e.g. a large NPC battle) Kliff sits at [0] but
+        // the other protagonists can land hundreds of entries deep, interleaved with NPCs. The scan must therefore
+        // cover the whole live extent rather than a fixed prefix; a too-small bound silently drops protagonists that
+        // spawn late. Non-protagonist entries are rejected by the appearance-config classifier (their path carries no
+        // protagonist codename).
         constexpr std::ptrdiff_t k_offCcoiaIdentity = 0x60;
         constexpr std::uint8_t k_kliffHighByte = 0xA0;
 
-        // Scan bound for the ClientActorManager+0x130 array. We read the engine's own capacity field (+0x13C) on every
-        // call so the bound tracks the array as it grows, then clamp it to a sane window: a read below the floor is
-        // treated as torn/garbage and replaced with a generous fixed fallback, while a read above the ceiling is
-        // clamped down so worst-case work stays bounded. The snapshot runs at ~1 Hz off background poll threads, so
-        // even a full-extent sweep is cheap.
+        // Scan bound for the actor array. We read the engine's own capacity field on every call so the bound tracks
+        // the array as it grows, then clamp it to a sane window: a read below the floor is treated as torn/garbage and
+        // replaced with a generous fixed fallback, while a read above the ceiling is clamped down so worst-case work
+        // stays bounded. The snapshot runs at ~1 Hz off background poll threads, so even a full-extent sweep is cheap.
+        //
+        // The bound comes from the CAPACITY field, never the count: the engine clears the count and refills it as it
+        // rebuilds the list each tick, so a count read taken at an arbitrary moment is legitimately 0 on a fully
+        // populated world.
         constexpr std::uint32_t k_mgrArrayCapMin = 16;
         constexpr std::uint32_t k_mgrArrayCapHardCap = 8192;
         constexpr std::size_t k_mgrArrayScanFallback = 1024;
+
+        // Structural self-heal for the actor-array descriptor, resolved against the live manager instead of being
+        // derived from the userActor heal.
+        //
+        // Identification: sweep the manager for a record whose pointer slot is a plausible pointer, whose capacity is
+        // in range, whose count does not exceed that capacity, and whose array holds the known Kliff CCOIA at index 0.
+        // Several sibling lists satisfy all of that (the engine keeps per-system subsets that also lead with Kliff),
+        // so the widest capacity wins: the dense vector is by construction a superset of the filtered ones, and
+        // picking a subset would silently drop a companion that the subset does not track.
+        //
+        // Cost is one bounded sweep of the window per call until it latches. Callers already hold the walked chain, so
+        // the Kliff pointer needed as the discriminator is free.
+        //
+        // Never gives up and never latches on failure. A player can sit at the main menu with no chain wired for any
+        // length of time, and the lists are also momentarily empty mid-rebuild, so a miss is normal and the next walk
+        // simply retries. The nominal seed carries the meantime.
+        void heal_mgr_actor_array(std::uintptr_t mgrBase, std::uintptr_t kliffCcoia) noexcept
+        {
+            if (s_mgrArrayHealed.load(std::memory_order_acquire))
+                return;
+            if (mgrBase < k_minValidPtr || kliffCcoia < k_minValidPtr)
+                return;
+
+            std::ptrdiff_t bestOff = 0;
+            std::uint32_t bestCap = 0;
+            for (std::ptrdiff_t off = 0; off <= k_mgrArrayHealWindow;
+                 off += static_cast<std::ptrdiff_t>(sizeof(std::uintptr_t)))
+            {
+                const auto arr = DMKMemory::seh_read<std::uintptr_t>(mgrBase + off).value_or(0);
+                if (arr < k_minValidPtr)
+                    continue;
+                const auto cap = DMKMemory::seh_read<std::uint32_t>(mgrBase + off + k_mgrArrayCapRel).value_or(0);
+                if (cap < k_mgrArrayCapMin || cap > k_mgrArrayCapHardCap || cap <= bestCap)
+                    continue;
+                const auto count = DMKMemory::seh_read<std::uint32_t>(mgrBase + off + k_mgrArrayCountRel).value_or(0);
+                if (count > cap)
+                    continue;
+                if (DMKMemory::seh_read<std::uintptr_t>(arr).value_or(0) != kliffCcoia)
+                    continue;
+                bestCap = cap;
+                bestOff = off;
+            }
+
+            if (bestCap == 0)
+            {
+                // Surface a persistent failure on a geometric schedule (every power-of-two attempt) at DEBUG, so a
+                // real layout change stays diagnosable without spamming the per-walk path.
+                const int n = s_mgrArrayHealAttempts.fetch_add(1, std::memory_order_acq_rel) + 1;
+                if ((n & (n - 1)) == 0)
+                    DetourModKit::Logger::get_instance().debug(
+                        "MgrActorArray not healed yet after {} walk(s) (no descriptor in the window leads with the "
+                        "Kliff CCOIA); using nominal offset {:#x}, will keep retrying",
+                        n, k_offMgrActorArrayNominal);
+                return;
+            }
+
+            s_offMgrActorArray.store(bestOff, std::memory_order_release);
+            s_mgrArrayHealed.store(true, std::memory_order_release);
+            if (bestOff != k_offMgrActorArrayNominal)
+                DetourModKit::Logger::get_instance().warning(
+                    "MgrActorArray DRIFTED: descriptor {:#x} nominal {:#x} drift {} cap {} -- self-healed (manager "
+                    "layout changed)",
+                    bestOff, k_offMgrActorArrayNominal, bestOff - k_offMgrActorArrayNominal, bestCap);
+            else
+                DetourModKit::Logger::get_instance().info(
+                    "MgrActorArray self-heal OK: descriptor {:#x} cap {} (matches nominal)", bestOff, bestCap);
+        }
 
         // Appearance-config asset-path chain. The CCOIA's body component holder exposes a std::string carrying the
         // protagonist's appearance-config path; reading it yields a character-specific internal codename embedded in
@@ -673,10 +764,13 @@ namespace CDCore
         if (written >= cap)
             return written;
 
-        // Walk the ClientActorManager+0x130 actor array. For each non-Kliff entry, run the appearance-config
-        // classifier. NPCs and followers fail the codename-substring match (their appearance path does not contain
-        // `cd_phw_damian` or `cd_phm_oongka`), so the loop emits at most one
-        // Damiane and one Oongka entry.
+        // Resolve the actor-array descriptor against the live manager before reading it. The walked chain supplies the
+        // Kliff CCOIA the heal needs as its discriminator, and the call latches after the first success.
+        heal_mgr_actor_array(chain.mgr, chain.kliffCcoia);
+
+        // Walk the actor array. For each non-Kliff entry, run the appearance-config classifier. NPCs and followers
+        // fail the codename-substring match (their appearance path does not contain `cd_phw_damian` or
+        // `cd_phm_oongka`), so the loop emits at most one Damiane and one Oongka entry.
         //
         // We scan the array's full live extent rather than a fixed prefix: the bound comes from the engine's clamped
         // capacity field so a crowded scene that pushes a protagonist hundreds of entries deep still resolves.

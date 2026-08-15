@@ -214,10 +214,10 @@ namespace CDCore::Anchors
     };
 
     // -----------------------------------------------------------------------
-    // BatchEquip -- the function that fires when the player equips armor. Reads the entry table at a1+120, builds
-    // 216-byte dispatch entries, and calls the equip-change dispatcher to load meshes. Also the bottleneck for
-    // item-to-item visual swaps, which bypass VisualEquipChange. Named BatchEquip here. The EquipHide cascade code
-    // calls the same role VisualEquipSwap.
+    // BatchEquip -- the function that fires when the player equips armor. Walks the swap entry list handed in through
+    // a4, matches each entry against the actor authority table at a1+0x80, and calls the equip-change dispatcher to
+    // load meshes. Also the bottleneck for item-to-item visual swaps, which bypass VisualEquipChange. Named BatchEquip
+    // here. The EquipHide cascade code calls the same role VisualEquipSwap.
     //
     // Signature (x64 __fastcall):
     //   _DWORD* BatchEquip(
@@ -226,45 +226,51 @@ namespace CDCore::Anchors
     //       __int64** a3_old,
     //       __int64** a4_new)
     //
-    // 3-tier cascade: P1 = full prologue, P2 = post-alloca register shuffle, P3 = deepest body anchor past the on-stack
-    // scratch zero-init.
+    // 3-tier cascade: P1 = full prologue, P2 = arg shuffle plus scratch prep, P3 = deepest body anchor, past every
+    // argument-carrying instruction.
     //
-    // The engine arg shuffle assigns a1 to r14 (`4C 8B F1`, not the naive rsi form `48 8B F1`) and reads [a1+8] into
-    // r13 (`4C 8B 69 08`, not the r14 form `4C 8B 71 08`). Register allocation for this shuffle moves between builds,
-    // and such a move rewrites only the ModRM byte of each mov. The instruction lengths stay the same, so the -0x22 /
-    // -0x25 walk-backs still resolve to the function start. On patch day, verify these ModRM bytes first. Frame and
+    // The arg shuffle right after __chkstk is four moves in a fixed order: a3 into a callee-saved register, a2 into a
+    // callee-saved register, a1 into r14, and [a1+8] into a callee-saved register.
+    // The compiler rotates WHICH extended register each one lands in, and that rotation rewrites only the ModRM byte
+    // of each mov. P1 and P2 therefore wildcard those ModRM bytes and keep what the rotation cannot touch: the REX
+    // prefixes, the `8B` opcodes, and the `08` displacement of the [a1+8] load. Instruction lengths are unchanged by a
+    // rotation, so the -0x22 and -0x32 walk-backs still land on function start. If a later build moves one of these
+    // args into a non-extended register (rsi, rdi, rbx), the REX prefix changes as well and both rows stop matching.
+    // P3 exists for that case: it sits past the arg shuffle and pins no argument register at all. Frame and
     // function-size immediates stay wildcarded per section 2.
     // -----------------------------------------------------------------------
     inline constexpr AddrCandidate k_batchEquipCandidates[] = {
         // P1 -- full prologue: save rbx, push 7 callee-saves, lea rbp, mov eax=__chkstk size, call __chkstk, sub
-        // rsp,rax, first 3 post-alloca register moves, and on into the body shuffle. The wildcarded stack-size and
-        // function-size slots alone match several unrelated prologues. Per section 2, the tail bytes
-        // `48 2B E0 4D 8B F8 4C 8B E2 4C 8B F1 4C 8B 69 08` restore uniqueness without a hardcoded stack frame.
+        // rsp,rax, then the four-move arg shuffle. The wildcarded stack-size and function-size slots alone match
+        // several unrelated prologues. Per section 2, the `48 2B E0` plus the REX/opcode skeleton of the four moves
+        // restores uniqueness without a hardcoded stack frame and without pinning a register allocation.
         {"BatchEquip_P1_FullPrologue",
          "48 89 5C 24 10 55 56 57 41 54 41 55 41 56 41 57 "
          "48 8D AC 24 ?? ?? ?? ?? B8 ?? ?? ?? ?? "
-         "E8 ?? ?? ?? ?? 48 2B E0 4D 8B F8 4C 8B E2 4C 8B F1 4C 8B 69 08",
+         "E8 ?? ?? ?? ?? 48 2B E0 4D 8B ?? 4C 8B ?? 4C 8B ?? 4C 8B ?? 08",
          ResolveMode::Direct, 0, 0},
 
-        // P2 -- post-alloca register shuffle (sub rsp,rax; mov r15,r8; mov r12,rdx; mov r14,rcx; mov r13,[rcx+8]) plus
-        // the on-stack scratch prep (lea rax,[rbp+X]; mov [rbp+Y],rax; xor ecx,ecx). Stack disp8 offsets are
-        // wildcarded per section 2. Offset -0x22 backs up to function start.
+        // P2 -- arg shuffle (sub rsp,rax; mov r?,r8; mov r?,rdx; mov r?,rcx; mov r?,[rcx+8]) plus the first on-stack
+        // scratch descriptor (lea rax,[rbp+X]; mov [rbp+Y],rax; xor ecx,ecx). Stack disp8 offsets are wildcarded per
+        // section 2. Offset -0x22 backs up to function start.
         //
         // A push-frame-only candidate here is non-unique once its stack disp32 is wildcarded. P1 already covers the
         // push-frame region.
         {"BatchEquip_P2_PostAlloca",
-         "48 2B E0 4D 8B F8 4C 8B E2 4C 8B F1 4C 8B 69 08 "
+         "48 2B E0 4D 8B ?? 4C 8B ?? 4C 8B ?? 4C 8B ?? 08 "
          "48 8D 45 ?? 48 89 45 ?? 33 C9",
          ResolveMode::Direct, -0x22, 0},
 
-        // P3 -- deepest fallback: starts from `mov r15,r8` (after the sub rsp,rax) and extends past the on-stack
-        // scratch zero-init (mov [rbp+X],ecx; mov dword [rbp+Y], 2). Stack disp8 offsets are wildcarded. The
-        // `02 00 00 00` tail is SEMANTIC (the value-2 init flag) and stays literal, per the section 2 exception for
-        // semantic constants. Offset -0x25 backs up to function start.
-        {"BatchEquip_P3_BodyZeroInit",
-         "4D 8B F8 4C 8B E2 4C 8B F1 4C 8B 69 08 "
-         "48 8D 45 ?? 48 89 45 ?? 33 C9 89 4D ?? C7 45 ?? 02 00 00 00",
-         ResolveMode::Direct, -0x25, 0},
+        // P3 -- deepest fallback: the two on-stack scratch descriptors the function builds before it reads any
+        // argument. Shape per descriptor: lea rax,[rbp+X]; mov [rbp+Y],rax (buffer pointer); mov [rbp+Z],ecx (count,
+        // zeroed by the shared xor ecx,ecx); mov dword [rbp+W],imm (capacity). Both capacity immediates are SEMANTIC
+        // and stay literal per the section 2 exception; every stack displacement is wildcarded. This row survives an
+        // arg-register rotation and a REX change in the shuffle, which is the known failure mode of P1 and P2. Offset
+        // -0x32 backs up to function start.
+        {"BatchEquip_P3_BodyScratchInit",
+         "48 8D 45 ?? 48 89 45 ?? 33 C9 89 4D ?? C7 45 ?? 02 00 00 00 "
+         "48 8D 85 ?? ?? ?? ?? 48 89 85 ?? ?? ?? ?? 89 8D ?? ?? ?? ?? C7 85 ?? ?? ?? ?? 14 00 00 00",
+         ResolveMode::Direct, -0x32, 0},
     };
 
     // -----------------------------------------------------------------------
@@ -298,13 +304,20 @@ namespace CDCore::Anchors
         //   mov [rip+disp32], rax         ; sibling slot +8
         //   lea rax, [rdi+0x1B0]
         //   mov [rip+disp32], rax         ; sibling slot +16
-        // The literal +0x130 / +0x1B0 sub-field offsets are the manager's published sub-pointers and pin the function
-        // tightly without depending on any compiler-owned values. They track the manager layout, so a re-layout that
-        // shifts the chain offsets (see the doc above) also requires re-deriving these two immediates from the publish
-        // function. The disp32 of `mov [rip+disp32], rdi` is at match+3. The instruction is 7 bytes long.
+        // The two `lea` immediates are sub-object offsets inside the manager, so they move whenever the manager is
+        // re-laid-out. They are wildcarded for that reason, per section 2: an operand the engine is free to renumber
+        // does not belong in the signature body. Pinning them cost nothing in uniqueness and everything in lifetime,
+        // because a re-layout silently demoted this row and let the cascade fall through to P2. Note the two offsets
+        // do not even move with the actor-array descriptor, and have moved in the opposite direction from it, so
+        // there is no single delta to re-derive them from.
+        //
+        // What carries the match instead is the instruction skeleton: a publish store of the incoming pointer followed
+        // by two `lea`+store pairs that publish sub-pointers into consecutive global slots. That shape resolves to a
+        // single site across all executable pages, and require_unique keeps it honest if a future build duplicates it.
+        // The disp32 of `mov [rip+disp32], rdi` is at match+3. The instruction is 7 bytes long.
         {"ClientActorManagerGlobal_P1_PublishStore",
-         "48 89 3D ?? ?? ?? ?? 48 8D 87 30 01 00 00 "
-         "48 89 05 ?? ?? ?? ?? 48 8D 87 B0 01 00 00 "
+         "48 89 3D ?? ?? ?? ?? 48 8D 87 ?? ?? ?? ?? "
+         "48 89 05 ?? ?? ?? ?? 48 8D 87 ?? ?? ?? ?? "
          "48 89 05",
          ResolveMode::RipRelative, 3, 7},
 

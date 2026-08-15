@@ -103,10 +103,13 @@ namespace Transmog::RealPartTearDown
         constexpr std::uintptr_t k_entryGateOffset = 0x10;
 
         constexpr std::uint32_t k_maxPlausibleEntries = 0x1000;
-        // Slot-tag range covers the full engine taxonomy: 0x00..0x15. Tag 0x0E is engine-unused but harmless to
-        // include in the range. The auth-table walk never finds an entry for it.
+        // Slot-tag range covers the full engine taxonomy. This is a plausibility gate on a value read out of the auth
+        // table, not a list of tags LT manages, so it stays inclusive of tags that map to no TransmogSlot. The upper
+        // bound must cover the highest tag the engine emits, not the highest LT acts on: a tag above the bound is
+        // rejected with a warning, so a bound left behind the engine turns a newly added slot into a confusing
+        // rejection rather than a clean no-op. Re-read it from the auth-table dump when the engine gains a slot.
         constexpr std::uint16_t k_minPlausibleSlotTag = 0x0000;
-        constexpr std::uint16_t k_maxPlausibleSlotTag = 0x0015;
+        constexpr std::uint16_t k_maxPlausibleSlotTag = 0x0018;
 
         [[nodiscard]] bool plausible_slot_tag(std::uint16_t tag) noexcept
         {
@@ -114,15 +117,16 @@ namespace Transmog::RealPartTearDown
         }
 
         // Engine-only slot tags absent from `TransmogSlot` (and therefore from `slot_metadata.hpp::k_slotMetadata`) but
-        // still part of the engine taxonomy. Both kept here so the dump emits a readable label instead of "?".
+        // still part of the engine taxonomy. Kept here so the dump emits a readable label instead of "?".
         // `is_documented_slot` deliberately returns false for these so the dump still flags them as NEW SLOT TAG
         // candidates the mod has not lifted into TransmogSlot yet.
+        //
+        // Only reached for a tag `slot_from_game_tag` does not resolve, so a tag lifted into TransmogSlot must be
+        // dropped from this table: its case would be unreachable.
         [[nodiscard]] const char *engine_only_slot_name(std::uint16_t tag) noexcept
         {
             switch (tag)
             {
-            case 0x000E:
-                return "Unknown";
             case 0x0015:
                 return "OongkaRocket";
             default:
@@ -131,8 +135,8 @@ namespace Transmog::RealPartTearDown
         }
 
         // Slot label resolver. It defers to `slot_metadata.hpp` (single source of truth for per-slot static data) when
-        // the tag maps to a `TransmogSlot`. Otherwise it falls back to the engine-only override table for the two tags
-        // LT does not manage.
+        // the tag maps to a `TransmogSlot`. Otherwise it falls back to the engine-only override table for the tags LT
+        // does not manage.
         [[nodiscard]] const char *known_slot_name(std::uint16_t tag) noexcept
         {
             if (const auto s = slot_from_game_tag(static_cast<std::int16_t>(tag)))
@@ -141,8 +145,8 @@ namespace Transmog::RealPartTearDown
         }
 
         // A tag is "documented" iff it round-trips through `slot_metadata` (and therefore has a `TransmogSlot` enum
-        // entry). The two engine-only tags (0x000E Unknown, 0x0015 OongkaRocket) live outside the enum on purpose, so
-        // they fall through to the false branch and get flagged in the dump.
+        // entry). The engine-only tag 0x0015 (OongkaRocket) lives outside the enum on purpose, so it falls through to
+        // the false branch and gets flagged in the dump.
         [[nodiscard]] bool is_documented_slot(std::uint16_t tag) noexcept
         {
             return slot_from_game_tag(static_cast<std::int16_t>(tag)).has_value();
@@ -250,9 +254,18 @@ namespace Transmog::RealPartTearDown
 
                 // Auto-record (itemId -> TransmogSlot) for the picker catalog. The auth-table tag states which slot
                 // this item belongs in. That is ground truth, and it overrides the static type-code heuristic. The
-                // record is skipped when the tag has no TransmogSlot mapping (for example tag 0x0E "Unknown" or 0x15
-                // OongkaRocket, both intentionally outside TransmogSlot).
-                if (auto tslot = slot_from_game_slot(static_cast<std::int16_t>(tag)); tslot.has_value())
+                // record is skipped when the tag has no TransmogSlot mapping (for example tag 0x15 OongkaRocket, which
+                // is intentionally outside TransmogSlot).
+                //
+                // A DISABLED slot is skipped as well, because the binding is sticky for the session and its only
+                // consumer is the picker, which never lists a disabled slot. The overflow slots make that concrete:
+                // the engine parks a weapon there whenever its primary slot is taken (a shield lands in OffHand2 while
+                // a dual-wielded sword holds OffHand, a bow lands in Ranged2 while a sprayer holds Ranged). Recording
+                // that would rebind the item to a slot with no picker and drop it out of the primary slot's list for
+                // the rest of the session, even after the engine moves it back. Falling through to the static
+                // type-code map keeps such an item in the list it belongs to.
+                if (auto tslot = slot_from_game_slot(static_cast<std::int16_t>(tag));
+                    tslot.has_value() && Transmog::slot_enabled(*tslot))
                 {
                     itemTable.record_observed_slot(primary, *tslot);
                 }

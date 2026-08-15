@@ -42,10 +42,10 @@ namespace Transmog
         return actorMgr.has_value() && *actorMgr >= 0x10000;
     }
 
-    // --- VEC hook (sub_14076D520) ---
+    // --- VEC hook ---
     // The set of slot tags LT operates on is owned by slot_from_game_slot (the single source of truth -- returns
-    // nullopt for the engine-internal 0x0E and Oongka-only 0x15 and a TransmogSlot for every tag LT manages). The hook
-    // below queries it directly.
+    // nullopt for the Oongka-only 0x15 and a TransmogSlot for every tag LT manages). The hook below queries it
+    // directly.
 
     // Returns true iff a1 matches the controlled-character's actor
     // component (WS -> ActorManager+0x30 -> UserActor+0x58 -> +0xD8).
@@ -92,8 +92,8 @@ namespace Transmog
         if (!is_controlled_actor(a1))
             return ret;
 
-        // Skip equip events for slot tags LT doesn't manage (e.g. the engine-internal 0x0E or NPC-only 0x15). We still
-        // capture a1 so manual applies have the latest player pointer.
+        // Skip equip events for slot tags LT doesn't manage (e.g. the NPC-only 0x15). We still capture a1 so manual
+        // applies have the latest player pointer.
         player_a1().store(a1, std::memory_order_release);
         const auto tslotOpt = slot_from_game_slot(slotId);
         if (!tslotOpt)
@@ -112,7 +112,7 @@ namespace Transmog
         return ret;
     }
 
-    // --- BatchEquip hook (sub_14075BBF0) ---
+    // --- BatchEquip hook ---
 
     static uint32_t *__fastcall on_batch_equip_impl(__int64 a1, uint32_t *a2, __int64 **a3, __int64 **a4)
     {
