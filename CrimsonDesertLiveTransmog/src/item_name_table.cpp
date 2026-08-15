@@ -200,10 +200,10 @@ namespace Transmog
     //   0x08=Earring (Earring1/Earring2 share)
     //   0x09=Necklace
     //   0x0A=Ring (Ring1/Ring2 share)
-    //   0x37=Lantern
-    //   0x43=Backpack
-    //   0x46=Cloak
-    //   0x47=Bracelet  0x48=Glasses  0x49=Mask
+    //   0x38=Lantern
+    //   0x48=Backpack
+    //   0x4B=Cloak
+    //   0x4C=Bracelet  0x4D=Glasses  0x4E=Mask
     //
     // Weapons (typeCode varies by weapon FAMILY and sometimes by character variant -- all sharing the
     // MainHand/OffHand/Ranged/ SubWeapon/TwoHandWeapon auth-table slots):
@@ -218,38 +218,39 @@ namespace Transmog
     //     0x00=1H Sword            0x01=OneHandShield (generic)
     //     0x02=Damiane Shield      0x10=1H Axe
     //     0x13=1H Mace             0x1D=Fist (Item_Fist_*)
-    //     0x20=Tower Shield        0x27=Rapier
-    //     0x30=Knuckle/Ring_Drill
+    //     0x20=Tower Shield        0x28=Rapier
+    //     0x31=Knuckle/Ring_Drill
     //   Ranged:
-    //     0x03=Bow                 0x0D=Sprayer/utility (named BackPack)
+    //     0x03=Bow                 0x0D=Sprayer (named BackPack, filed ranged by the engine)
     //     0x22=Pistol              0x23=Musket
-    //     0x24=Shotgun             0x25=1H Cannon
-    //     0x2F=Crossbow            0x31=FlameThrower
-    //     0x32=IceThrower          0x33=LightningThrower
-    //     0x65=FishingRod
+    //     0x24=Shotgun             0x26=1H Cannon
+    //     0x30=Crossbow            0x32=FlameThrower
+    //     0x33=IceThrower          0x34=LightningThrower
+    //     0x6A=FishingRod
     //   Sub-weapons:
     //     0x0E=Dagger
-    //   2H weapons (combat + utility tools):
+    //   2H weapons:
     //     0x0F=2H Axe              0x11=Greatsword A
     //     0x12=Greatsword B (NPC)  0x14=WarHammer
     //     0x15=2H Spear/Polearm    0x1C=2H Hammer
-    //     0x1E=Drill               0x1F=Chainsaw
-    //     0x21=Halberd/Alebard     0x26=2H Cannon
-    //     0x55=Pickaxe             0x56=Iron Chain
-    //     0x57=Rake                0x58=Felling Axe (Boss_Reward_SuperWeapon)
-    //     0x59=Shovel              0x5A=Broom
-    //     0x5C=Hoe                 0x5D=Sickle/Scythe
-    //     0x5E=Work Hammer         0x60=Saw
-    //     0x63=Stick               0x67=PriestWand
-    //     0x69=Crutch
+    //     0x1F=Chainsaw            0x21=Halberd/Alebard
+    //     0x27=2H Cannon           0x35=BlowPipe
+    //   Tools (their own engine slot, not the two-hand slot, even though the meshes are held in both hands):
+    //     0x1E=Drill               0x5A=Pickaxe
+    //     0x5B=Iron Chain          0x5C=Rake
+    //     0x5D=Felling Axe (Boss_Reward_SuperWeapon)
+    //     0x5E=Shovel              0x5F=Broom
+    //     0x61=Hoe                 0x62=Sickle/Scythe
+    //     0x63=Work Hammer         0x65=Saw
+    //     0x67=Drum                0x68=Stick
+    //     0x6C=PriestWand          0x6E=Crutch
     //
     //   Intentionally NOT mapped (not character transmog):
     //     0x0B Oongka_Rocket_Helm (TransmogSlot::OongkaRocket commented)
-    //     0x17 Contribution_Flag, 0x18 Torch, 0x2B Witch_WingFan,
-    //     0x34 Poison_Stick (ambiguous -- let runtime observation handle it)
-    //     0x3A-0x3C PetArmor (pet/cat equipment)
-    //     0x3D-0x41 HorseArmor (mount equipment)
-    //     0x4A-0x53 WarRobot body parts (mech, not character), 0x54 dragon armor
+    //     0x17 Contribution_Flag, 0x18 Torch, 0x2C Witch_WingFan
+    //     0x3B-0x3D PetArmor (pet/cat equipment)
+    //     0x3E-0x42 HorseArmor (mount equipment), 0x43 animal body armor
+    //     0x4F-0x58 WarRobot body parts (mech, not character), 0x59 dragon armor
     //     Notepad/Pen, FlatBasket, Bucket, Pot_Head (household props). Their
     //       codes sit inside the shifting tool band described below, so read
     //       them off the [catalog-histogram] samples instead of trusting a
@@ -299,7 +300,7 @@ namespace Transmog
         // Superseded values are dropped rather than kept for back-compat, because a one-code shift makes the old
         // values collide with the current ones (an old Cloak code becomes the current Backpack code, and so on). The
         // auto-updating live game only ever presents the current build's codes.
-        case 0x46:
+        case 0x4B:
             return TransmogSlot::Cloak; // Soldier_General_Fabric_Cloak, WellsKnight_PlateArmor_Cloak
         case 0x08:
             return TransmogSlot::Earring1; // shared with Earring2
@@ -307,15 +308,15 @@ namespace Transmog
             return TransmogSlot::Necklace;
         case 0x0A:
             return TransmogSlot::Ring1; // shared with Ring2
-        case 0x37:
+        case 0x38:
             return TransmogSlot::Lantern;
-        case 0x43:
-            return TransmogSlot::Backpack; // Aggro_Backpack, Watcher_BackPack, Flolin_BackPack_FlowerDrone_I
-        case 0x47:
-            return TransmogSlot::Bracelet; // Daeil_Band + its OOngka_/Damian_ rig variants
         case 0x48:
+            return TransmogSlot::Backpack; // Aggro_Backpack, Bleed_Bomb_BackPack, WaterPower_BackPack
+        case 0x4C:
+            return TransmogSlot::Bracelet; // Daeil_Band + its OOngka_/Damian_ rig variants
+        case 0x4D:
             return TransmogSlot::Glasses; // Kliff_Glasses, Hernand_Crown, Demeniss_Crown
-        case 0x49:
+        case 0x4E:
             return TransmogSlot::Mask; // Kliff_Mask
         // Weapon codes below carry the engine's own EquipTypeInfo row name in the trailing comment. That table is the
         // authority: the code IS the row index the engine reads out of the descriptor to classify the item. To re-derive
@@ -334,35 +335,33 @@ namespace Transmog
         case 0x18: // OneHandTorch
         case 0x1B: // OneHandFlail
         case 0x1D: // OneHandFist
-        case 0x1E: // OneHandDrill
         case 0x1F: // OneHandSaw
-        case 0x27: // OneHandRapier
-        case 0x2B: // OneHandFan
-        case 0x2C: // OneHandHammer
-        case 0x30: // Gauntlet
-        case 0x35: // OneHandBomb
-        case 0x38: // OneHandBola
+        case 0x28: // OneHandRapier
+        case 0x2C: // OneHandFan
+        case 0x2D: // OneHandHammer
+        case 0x31: // Gauntlet
+        case 0x36: // OneHandBomb
+        case 0x39: // OneHandBola
             return TransmogSlot::MainHand;
         // Shields -- OffHand. The engine files every shield in its own rows, separate from the one-hand weapons above.
         case 0x01: // OneHandShield
         case 0x02: // OneHandShieldRight
         case 0x20: // OneHandTowerShield
             return TransmogSlot::OffHand;
-        // Ranged
+        // Ranged. The spray rig reads as a worn bag from its item name, but the engine files it in the ranged slot and
+        // the auth table is the authority, so it classifies as Ranged and not Backpack.
         case 0x03: // OneHandBow
+        case 0x0D: // SprayBag
         case 0x22: // OneHandPistol
         case 0x23: // OneHandMusket
         case 0x24: // OneHandShotgun
-        case 0x25: // OneHandCannon
-        case 0x2F: // OneHandCrossBow
-        case 0x65: // ToolFishingRod. Filed here rather than with the tools because it aims and casts.
+        case 0x26: // OneHandCannon
+        case 0x30: // OneHandCrossBow
+        case 0x6A: // ToolFishingRod. Filed here rather than with the tools because it aims and casts.
             return TransmogSlot::Ranged;
         // Sub-weapons
         case 0x0E:
             return TransmogSlot::SubWeapon; // OneHandDagger
-        // Backpacks. The spray rig is a worn bag, not a ranged weapon, even though its items read as sprayers.
-        case 0x0D: // SprayBag
-            return TransmogSlot::Backpack;
         // 2H weapons (combat + utility tools)
         case 0x0F: // TwoHandAxe
         case 0x11: // TwoHandSword
@@ -375,39 +374,46 @@ namespace Transmog
         case 0x1A: // TwoHandScythe
         case 0x1C: // TwoHandHammer
         case 0x21: // TwoHandHalberd
-        case 0x26: // TwoHandCannon
-        case 0x28: // TwoHandFlail
-        case 0x29: // TwoHandMace
-        case 0x2A: // TwoHandGiantMace
-        case 0x2D: // TwoHandGiantAxe
-        case 0x2E: // TwoHandGiantHammer
-        case 0x31: // TwoHandFlamethrower
-        case 0x32: // TwoHandIcethrower
-        case 0x33: // TwoHandLightningthrower
-        case 0x34: // TwoHandBlowPipe
-        case 0x36: // TwoHandFlag
+        case 0x27: // TwoHandCannon
+        case 0x29: // TwoHandFlail
+        case 0x2A: // TwoHandMace
+        case 0x2B: // TwoHandGiantMace
+        case 0x2E: // TwoHandGiantAxe
+        case 0x2F: // TwoHandGiantHammer
+        case 0x32: // TwoHandFlamethrower
+        case 0x33: // TwoHandIcethrower
+        case 0x34: // TwoHandLightningthrower
+        case 0x35: // TwoHandBlowPipe
+        case 0x37: // TwoHandFlag
+            return TransmogSlot::TwoHandWeapon;
+        // Gathering tools. The engine files these under their own equip tag rather than with the two-hand weapons,
+        // even though the meshes are held in both hands, so they classify as Tool and not TwoHandWeapon.
+        //
         // The tool and utility codes shift when the engine enum gains an entry inside their range. An insertion moves
         // ONLY the codes at and above the insertion point, so do not blanket-shift this whole block. Read the current
         // values off the EquipTypeInfo row names, the same way as the weapon codes above.
         //
         // Gaps in the case list are deliberate. Those rows carry hand-held props rather than equipment: baskets,
         // buckets, pots, and the writing set the engine files under Tooltrumpet. Count keeps them out of the picker.
-        case 0x55: // ToolPickaxe
-        case 0x56: // ToolHayfork
-        case 0x57: // ToolRake
-        case 0x58: // ToolAxe
-        case 0x59: // ToolShovel
-        case 0x5A: // ToolBroom
-        case 0x5C: // ToolHoe
-        case 0x5D: // ToolSythe
-        case 0x5E: // ToolHammer
-        case 0x60: // ToolSaw
-        case 0x62: // ToolDrum
-        case 0x63: // ToolStick
-        case 0x67: // ToolPriestWandBig
-        case 0x68: // ToolPriestWandSmall
-        case 0x69: // ToolCrutch
-            return TransmogSlot::TwoHandWeapon;
+        // The drill reads as a one-hand weapon from its type-code neighbourhood, but the engine files it in the tool
+        // slot, so it classifies as Tool for the same reason as the spray rig above.
+        case 0x1E: // OneHandDrill
+        case 0x5A: // ToolPickaxe
+        case 0x5B: // ToolHayfork
+        case 0x5C: // ToolRake
+        case 0x5D: // ToolAxe
+        case 0x5E: // ToolShovel
+        case 0x5F: // ToolBroom
+        case 0x61: // ToolHoe
+        case 0x62: // ToolSythe
+        case 0x63: // ToolHammer
+        case 0x65: // ToolSaw
+        case 0x67: // ToolDrum
+        case 0x68: // ToolStick
+        case 0x6C: // ToolPriestWandBig
+        case 0x6D: // ToolPriestWandSmall
+        case 0x6E: // ToolCrutch
+            return TransmogSlot::Tool;
         default:
             return TransmogSlot::Count;
         }

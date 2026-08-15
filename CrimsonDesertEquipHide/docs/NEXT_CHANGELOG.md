@@ -1,5 +1,3 @@
-## [Title for next release]
+## Crimson Desert 1.18.00 support
 
-- New feature
-- Bug fix
-- Improvement
+- Updated the mod to work with Crimson Desert version 1.18.00

@@ -63,6 +63,29 @@ namespace Transmog
             { "GreyWolf_OneHandBow"                          }, // Ranged
             { "Legendary_Shakatu_OneHandDagger"              }, // SubWeapon
             { "Legendary_Antumbra_TwoHandGiantBastard"       }, // TwoHandWeapon
+            // Tool / OffHand2 / Ranged2 are deliberately left without a carrier until their slots are enabled.
+            //
+            // The blocker is carrier COLLISION, not the disabled flag. A name in this table is seeded as that slot's
+            // prefab-swap source, and the seeding pass walks every row without consulting `SlotMetadata::enabled`, so
+            // ten already-disabled slots carry names here safely. What none of them do is name the same item in two
+            // slots that `slots_share_prefab_family` does not pair: every duplicate in this table (the MainHand and
+            // OffHand mirrors, Ring1 and Ring2) sits inside a declared pair, so the swap layer knows the two records
+            // reach one wrapper. OffHand2 and Ranged2 have no such pairing, and their natural carriers are exactly the
+            // items OffHand and Ranged already use, so filling them in publishes one wrapper through two unrelated
+            // records. An empty name is skipped by the seeding pass, which keeps the slot inert instead.
+            //
+            // Carriers observed in live auth-table dumps, recorded here so the values are not lost:
+            //   Tool      Kliff `Equip_Felling_Axe`, Damiane `Equip_Shovel`. The tool family is character-agnostic, so
+            //             one item can serve all three rows. Collides with nothing.
+            //   OffHand2  Kliff `Legendary_MarniTank_OneHandShield`. Unique, would not collide.
+            //   Ranged2   Kliff `GreyWolf_OneHandBow`. Collides with his Ranged carrier.
+            // Damiane and Oongka have no observed OffHand2 or Ranged2 item; anything put there today is a guess.
+            //
+            // To enable a slot: fill its cell, and either choose a carrier no other slot in the same character row
+            // uses, or add the slot pairing to `slots_share_prefab_family` so the shared wrapper is modelled.
+            { ""                                             }, // Tool     (see note above)
+            { ""                                             }, // OffHand2 (see note above)
+            { ""                                             }, // Ranged2  (see note above)
         },
 
         // ============================================================
@@ -91,6 +114,11 @@ namespace Transmog
             { "Damian_OneHandPistol"                         }, // Ranged
             { "Rikisis_OneHandDagger"                        }, // SubWeapon
             { "Tynion_Giant_TwoHandGiantBastard"             }, // TwoHandWeapon
+            // Observed: Tool `Equip_Shovel`. No observed OffHand2 or Ranged2 item. See the Kliff row for why all
+            // three stay empty.
+            { ""                                             }, // Tool
+            { ""                                             }, // OffHand2
+            { ""                                             }, // Ranged2
         },
 
         // ============================================================
@@ -128,6 +156,10 @@ namespace Transmog
             { "Orc_OneHandCannon"                            }, // Ranged
             { "Aurio_OneHandDagger"                          }, // SubWeapon
             { "Khadion_TwoHandSword"                         }, // TwoHandWeapon
+            // No observed Tool, OffHand2 or Ranged2 item for Oongka. See the Kliff row for why all three stay empty.
+            { ""                                             }, // Tool
+            { ""                                             }, // OffHand2
+            { ""                                             }, // Ranged2
         },
     };
     // clang-format on

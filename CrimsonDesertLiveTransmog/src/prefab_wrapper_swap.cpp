@@ -1172,6 +1172,9 @@ namespace Transmog::PrefabWrapperSwap
             {"_phm_04_", "_phw_04_", "_phm_06_", "_phw_06_", "_phm_13_", "_phw_13_", nullptr}, // Ranged
             {"_phm_01_dagger_", "_phw_01_dagger_", nullptr},                                   // SubWeapon
             {"_phm_02_", "_phw_02_", nullptr},                                                 // TwoHandWeapon
+            {nullptr},                                                                         // Tool (family unknown)
+            {"_phm_01_", "_phw_01_", "_03_shield_", nullptr},                                  // OffHand2 (1H+shield)
+            {"_phm_04_", "_phw_04_", "_phm_06_", "_phw_06_", "_phm_13_", "_phw_13_", nullptr}, // Ranged2
         };
 
         // Snapshot resolved sentinel (one atomic load per scan).

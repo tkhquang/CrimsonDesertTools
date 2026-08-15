@@ -54,10 +54,17 @@ namespace Transmog
         Ranged,        // engine tag 0x02 (bow/pistol)
         SubWeapon,     // engine tag 0x0C (dagger/axe family)
         TwoHandWeapon, // engine tag 0x0D (greatsword)
-        // Tag 0x0E is engine-unused for all three protagonists in any observed save. Kept out of the UI picker because
-        // its purpose is unknown. The slot-discovery dump still labels it "Unknown" so it stays visible in logs. To
-        // experiment with it, add an `Experimental, // engine tag 0x0E` row here AND wire it through the per-slot
-        // tables below (same checklist as OongkaRocket).
+        // Gathering-tool slot. Holds the felling axe / shovel / pickaxe family, which the engine equips into its own
+        // tag rather than into TwoHandWeapon even though the meshes are two-handed. Disabled in the metadata table:
+        // the items are multi-prefab like every other weapon-family slot.
+        Tool, // engine tag 0x0E
+        // Overflow slots, not a second loadout the player selects. The engine parks a weapon here when its natural
+        // slot is already taken: a shield lands in OffHand2 only while a dual-wielded one-hander occupies OffHand, and
+        // equipping that shield properly moves it into OffHand and drops the OffHand2 entry entirely. The ranged pair
+        // behaves the same way, with a bow pushed into Ranged2 while a sprayer holds Ranged. Both disabled for the
+        // usual weapon-family reason.
+        OffHand2, // engine tag 0x17
+        Ranged2,  // engine tag 0x18
         //
         // Tag 0x15 is the Oongka-only "Rocket Helm". Excluded because
         // Kliff and Damiane reject this slot (engine metadata does not include tag 0x15 for them) and the slot adds no

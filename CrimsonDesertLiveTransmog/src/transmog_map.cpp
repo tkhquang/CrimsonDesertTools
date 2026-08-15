@@ -68,16 +68,15 @@ namespace Transmog
         return mapping.targetItemId;
     }
 
-    // Engine slot tag -> TransmogSlot. Linear search of k_slotMetadata
-    // (20 entries; cheap; called sparingly). Returns std::nullopt for tags LT does not manage (e.g. 0x0E or Oongka-only
-    // 0x15).
+    // Engine slot tag -> TransmogSlot. Linear search of k_slotMetadata (cheap; called sparingly). Returns std::nullopt
+    // for tags LT does not manage (e.g. the Oongka-only 0x15).
     std::optional<TransmogSlot> slot_from_game_slot(int16_t gameSlotId)
     {
         return slot_from_game_tag(gameSlotId);
     }
 
     // Friendly engine-tag name. Looks up the matching SlotMetadata by gameTag and returns its displayName; "Unknown"
-    // for tags without a managed slot (0x0E, 0x15, anything > 0x15).
+    // for tags without a managed slot (0x15, anything the metadata table does not carry).
     const char *game_slot_name(int16_t gameSlotId)
     {
         if (auto s = slot_from_game_tag(gameSlotId))

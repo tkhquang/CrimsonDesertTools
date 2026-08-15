@@ -1563,9 +1563,9 @@ namespace Transmog
 
         // Snapshot the previously applied fakes BEFORE clearing lastIds. Iteration order across `k_slotMetadata` is
         // irrelevant for correctness: prevFakeId / prevCarrierId are indexed by `k` (the array slot), and the per-slot
-        // snapshot reads `lastIds` by `slot` (the TransmogSlot enum value). Engine-only tags 0x000E and 0x0015 are
-        // absent from `k_slotMetadata` by design (see `TransmogSlot` enum in `shared_state.hpp`), so the loop skips
-        // them automatically.
+        // snapshot reads `lastIds` by `slot` (the TransmogSlot enum value). The engine-only tag 0x0015 is absent from
+        // `k_slotMetadata` by design (see `TransmogSlot` enum in `shared_state.hpp`), so the loop skips it
+        // automatically.
         std::uint16_t prevFakeId[k_slotCount]{};
         for (std::size_t k = 0; k < k_slotCount; ++k)
         {
