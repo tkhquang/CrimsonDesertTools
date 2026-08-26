@@ -18,9 +18,6 @@ namespace Transmog
         uintptr_t safeTearDown = 0;        // sub_14075FE60 -- scene-graph tear-down used by real_part_tear_down
         uintptr_t indexedStringLookup = 0; // sub_1402D75D0 -- IndexedStringA short->hash; resolved via ItemNameTable
                                            // chain walk (50+ template siblings prevent direct AOB)
-        uintptr_t charClassBypass = 0; // jz byte in the CondPrefab evaluator's char-class hash check (AOB-resolved via
-                                       // k_charClassBypassCandidates -- moved to a new function on v1.13.00). Toggle
-                                       // 0x74<->0xEB for NPC/variant item support.
     };
 
     ResolvedAddresses &resolved_addrs();
@@ -171,6 +168,18 @@ namespace Transmog
     // loads meshes and transitions.
     using SlotPopulatorFn = __int64(__fastcall *)(__int64 a1, unsigned __int16 *a2_itemData, __int64 a3_swapEntry);
     SlotPopulatorFn &slot_populator_fn();
+
+    // Rebuilds a single slot's visual. f(a1, slotA, slotB, swapEntry) -- BOTH slot arguments must name the slot to
+    // refresh. SlotPopulator passes the item-derived slot for the first, which collapses the two halves of a paired
+    // slot onto one. Null when the AOB scan missed.
+    using PartSlotRefreshFn = __int64(__fastcall *)(__int64 a1, __int16 slotA, __int16 slotB, __int64 a4_swapEntry);
+    PartSlotRefreshFn &part_slot_refresh_fn();
+
+    // Resolves a slot TAG to the slot HANDLE PartSlotRefresh needs for its second argument. Writes 0xFFFF when the
+    // tag names no live part record.
+    using SlotTagToHandleFn = std::uint16_t *(__fastcall *)(__int64 a1, std::uint16_t *out, std::uint16_t slotTag,
+                                                            char flag);
+    SlotTagToHandleFn &slot_tag_to_handle_fn();
 
     // sub_141D451B0: Initializes a swap entry to defaults (all -1/zeros).
     using InitSwapEntryFn = __int64(__fastcall *)(__int64 dest);

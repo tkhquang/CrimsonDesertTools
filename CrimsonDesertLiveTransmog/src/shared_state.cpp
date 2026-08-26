@@ -38,6 +38,8 @@ namespace Transmog
     static std::atomic<bool> s_applyToEditing{true};
 
     static SlotPopulatorFn s_slotPopulator = nullptr;
+    static PartSlotRefreshFn s_partSlotRefresh = nullptr;
+    static SlotTagToHandleFn s_slotTagToHandle = nullptr;
     static InitSwapEntryFn s_initSwapEntry = nullptr;
 
     static std::atomic<bool> s_inTransmog{false};
@@ -105,6 +107,16 @@ namespace Transmog
     std::atomic<bool> &flag_apply_to_editing()
     {
         return s_applyToEditing;
+    }
+
+    PartSlotRefreshFn &part_slot_refresh_fn()
+    {
+        return s_partSlotRefresh;
+    }
+
+    SlotTagToHandleFn &slot_tag_to_handle_fn()
+    {
+        return s_slotTagToHandle;
     }
 
     SlotPopulatorFn &slot_populator_fn()

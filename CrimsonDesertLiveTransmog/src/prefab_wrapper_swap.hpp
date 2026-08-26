@@ -173,11 +173,6 @@ namespace Transmog::PrefabWrapperSwap
     /// True after a successful populate_slot_catalogs.
     [[nodiscard]] bool is_catalog_populated() noexcept;
 
-    /**
-     * Slot-prefix string used for catalog classification (also useful for the UI to strip the prefix from dropdown
-     * labels).
-     */
-    [[nodiscard]] const char *slot_prefix_str(Transmog::TransmogSlot slot) noexcept;
 
     /**
      * Per-slot catalog (sorted by name). Returns an empty vector for slots that have not been populated yet (e.g.
@@ -247,4 +242,16 @@ namespace Transmog::PrefabWrapperSwap
      * overlay where any change immediately reapplies that slot.
      */
     std::size_t reactivate_with_selections() noexcept;
+
+    /**
+     * Record a DIRECT fake -- a slot where the carrier item IS the target item, so it is equipped as itself and no
+     * prefab substitution happens at all.
+     *
+     * Such a slot installs a visual without ever passing through `on_struct_copy`, so nothing lands in this
+     * character's installed-wrapper set and the post-apply sweep has no victim to look for. Clearing the slot then
+     * leaves the mesh attached forever. Resolving the item's prefabs here and adding them to the installed set makes
+     * the existing park-then-subtract machinery cover direct fakes for free: the next apply parks them, the rebuilt
+     * set no longer lists them, so they fall out as orphans and get detached.
+     */
+    void register_direct_fake(std::uint16_t itemId) noexcept;
 } // namespace Transmog::PrefabWrapperSwap

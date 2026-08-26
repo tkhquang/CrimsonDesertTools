@@ -193,6 +193,46 @@ namespace Transmog
      *   +4:  int32  (-1)
      *   +12: uint16 secondary slot (0xFFFF to skip)
      */
+    // SlotTagToHandle -- f(a1, out_u16, slotTag, flag). Walks the 208-byte part records at a1+128, matches
+    // `record+200 == slotTag`, and writes `record+8` (the slot HANDLE) to *out. 0xFFFF when the tag is not present.
+    //
+    // PartSlotRefresh takes its two slot arguments in DIFFERENT namespaces: the first is a tag (matched against
+    // bucket keys and record+200), the second is a handle (dereferenced through a lookup). Passing a tag for the
+    // second faults. This is how the handle is obtained.
+    inline constexpr AddrCandidate k_slotTagToHandleCandidates[] = {
+        // P1 -- full prologue: three spills, push rdi, the 0x20 frame, then the `mov rax,[rcx+80h]` that loads the
+        // part-record container.
+        {"SlotTagToHandle_P1_FullPrologue",
+         "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 48 83 EC 20 "
+         "48 8B 81 80 00 00 00 48 8B FA 48 8B E9",
+         ResolveMode::Direct, 0, 0},
+
+        // P2 -- container load plus the argument shuffle and the base/count reads. Offset backs up to entry.
+        {"SlotTagToHandle_P2_ContainerLoad", "48 8B 81 80 00 00 00 48 8B FA 48 8B E9 48 8B 58 08 8B 40 10",
+         ResolveMode::Direct, -0x14, 0},
+    };
+
+    // PartSlotRefresh -- the per-slot rebuild SlotPopulator calls last, as f(a1, slotA, slotB, swapEntry).
+    //
+    // Every record it builds is keyed by its SECOND argument, which SlotPopulator fills with the slot DERIVED FROM
+    // THE ITEM. For a paired slot that derivation is identical for both halves (both rings are typeCode 0x000a, both
+    // earrings 0x0008), so an apply to the second half filed its entry under the right slot and then rebuilt the
+    // first one. Calling this directly with the intended slot in both argument positions is what refreshes the half
+    // the engine would otherwise skip.
+    inline constexpr AddrCandidate k_partSlotRefreshCandidates[] = {
+        // P1 -- full prologue: the two stack spills, the distinctive `mov [rsp+18h], r8w` (a WORD-sized argument
+        // spill, rare on its own), the five pushes, then the large-frame alloca setup.
+        {"PartSlotRefresh_P1_FullPrologue",
+         "48 89 5C 24 10 48 89 74 24 20 66 44 89 44 24 18 "
+         "55 57 41 54 41 56 41 57 "
+         "48 8D AC 24 ?? ?? ?? ?? B8 ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 2B E0 49 8B F1",
+         ResolveMode::Direct, 0, 0},
+
+        // P2 -- post-alloca shuffle: rsi=r9 (swapEntry), then the two WORD argument extractions and rcx=a1. Offset
+        // backs up to the function start.
+        {"PartSlotRefresh_P2_PostAlloca", "49 8B F1 41 0F B7 D8 0F B7 FA 4C 8B F1", ResolveMode::Direct, -0x2D, 0},
+    };
+
     inline constexpr AddrCandidate k_slotPopulatorCandidates[] = {
         // P1 -- full prologue through the register shuffle (mov r12,rdx; mov r13,rcx; xor edi,edi).
         {"SlotPopulator_P1_FullPrologue",
@@ -600,134 +640,8 @@ namespace Transmog
          ResolveMode::Direct, -0x0D, 0},
     };
 
-    /**
-     * @brief Patch site: CondPrefab evaluator secondary char-class hash check.
-     *
-     * The `jz` that fires when the item's char-class hash matches one of the player's allowed classes. NPC/monster
-     * items lack the player's class in that array, so the jz never fires -> the evaluator emits no resource names ->
-     * no mesh. Toggling this one byte 0x74 (jz rel8) -> 0xEB (jmp rel8) forces the match, so NPC/variant items render
-     * on the carrier's body.
-     *
-     * DISAMBIGUATION, and the reason this row cannot be loosened. A STRUCTURALLY IDENTICAL loop lives in an UNRELATED
-     * function that is never on the carrier-apply path. The look-alike loads the allowed-class array through r13
-     * (`4D 8B 45`) and carries no `90` nop between the movzx and the cmp. The real gate loads it through rbx
-     * (`4C 8B 43`) and does carry that nop. A pattern that relocks onto the look-alike still resolves and still
-     * patches, so the bypass toggles dead code and the failure is SILENT. Keep `4C 8B 43` and the `90` literal.
-     *
-     * The real gate reads the item's char-class at `word[rax+0xAC]`, and the jz sits at match + 0x12. The nop and the
-     * rbx base also separate this loop from the +0x70 sibling loop in the same function. The trailing `EB` is the
-     * OUTER loop's no-match jmp, NOT the patch target, and stays in the window as an extra anchor. The scan must
-     * return one match module-wide.
-     *
-     * Branch-encoding constraint (aob-signatures.md section 9, the short Jcc rel8 rule): the `74` rel8 opcode is
-     * intentionally literal and must
-     * NOT be wildcarded. It is the exact byte the mod flips at runtime. A future compiler that emits this jz in its
-     * 6-byte `0F 84` rel32 form requires new RE work, not a pattern tweak. Every candidate stops matching and the
-     * feature fails soft through the scanner's null return.
-     */
-    inline constexpr AddrCandidate k_charClassBypassCandidates[] = {
-        // P1 -- mov r8,[rbx+??] (allowed-class array) + movzx r9d,word[rax+??] (item class @+0xAC) + `90` nop + inner
-        // cmp/jz/loop + jmp. Patch byte (the jz) at match + 0x12. One match module-wide.
-        {"CharClassBypass_P1_MovzxCmpLoop",
-         "4C 8B 43 ?? 44 0F B7 88 ?? ?? 00 00 90 "
-         "66 45 3B 0C 48 74 ?? FF C1 3B CA 72 ?? EB",
-         ResolveMode::Direct, 0x12, 0},
 
-        // P2 -- test edx,edx + jz + [P1 loop]. Deeper anchor. Patch byte at match + 0x16.
-        {"CharClassBypass_P2_TestMovzxCmp",
-         "85 D2 74 ?? 4C 8B 43 ?? 44 0F B7 88 ?? ?? 00 00 90 "
-         "66 45 3B 0C 48 74 ?? FF C1 3B CA 72 ?? EB",
-         ResolveMode::Direct, 0x16, 0},
 
-        // P3 -- xor ecx,ecx + test + jz + [P1 loop]. Deepest anchor. Patch byte at match + 0x18.
-        {"CharClassBypass_P3_XorTestCmpLoop",
-         "33 C9 85 D2 74 ?? 4C 8B 43 ?? 44 0F B7 88 ?? ?? 00 00 90 "
-         "66 45 3B 0C 48 74 ?? FF C1 3B CA 72 ?? EB",
-         ResolveMode::Direct, 0x18, 0},
-    };
-
-    // -----------------------------------------------------------------------
-    // BodyVariantHook targets: the per-body mesh variant resolver + its render primitive.
-    //
-    //   BodyVariantResolver : walks each item's per-body variant entries (list at arg1+0x3E0, count +0x3E8, stride
-    //                         0x58) and renders the entry whose token list matches the wearer's body token, or
-    //                         nothing if none match. Inline-hooked so LT keeps the natural per-body match yet can
-    //                         still force entry[0] for NPC items the player cannot naturally wear. The char-class
-    //                         bypass jz (see k_charClassBypassCandidates, resolved inside this same function) is the
-    //                         force lever. Returns void (its sole caller discards rax).
-    //   BodyVariantRender   : render primitive the resolver calls once per matched entry (call site: rcx=ctx,
-    //                         rdx=entry+0x10 mesh, r8d=entry+0x18). Midhooked as a pure observer, so LT can tell
-    //                         whether the un-bypassed resolver rendered.
-    //
-    // Each target carries a 3-anchor cascade per the ordering rule in
-    // CrimsonDesertCore/external/DetourModKit/docs/misc/aob-signatures.md: P1 is the full prologue (most specific),
-    // P2 and P3 are progressively deeper body landmarks that walk back to the function start via a negative dispOffset.
-    // P2 and P3 both anchor PAST the SafetyHook 5-byte prologue window, so if a sibling mod inline-hooks the prologue
-    // the regular cascade still resolves the function without depending on the prologue-overwrite fallback. All six
-    // patterns must resolve to a single unique hit (require_unique) module-wide.
-    inline constexpr AddrCandidate k_bodyVariantResolverCandidates[] = {
-        // This function is a repeat offender for operand drift. Three operand classes move on it across builds:
-        //   1. Prologue register allocation. The fifth callee-saved push and the argument-holder register swap roles
-        //      between r14 and r15, which also moves the variant-walk end pointer.
-        //   2. The registry sub-object displacement, which tracks the pa::StaticInfoManager2 layout.
-        //   3. The variant list and count field offsets on the character record.
-        // Every row below therefore wildcards the operand classes that move (reallocated ModRM low bits and shifted
-        // field offsets) and keeps only opcodes literal. P2 and P3 also anchor past the five-byte SafetyHook prologue
-        // window, so a sibling mod that inline-hooks the prologue cannot shadow resolution.
-        //
-        // WARNING: a SIBLING function shares the identical variant-walk shape, including the 0x58 entry stride. P3 is
-        // separated from it only by the register encodings, not by the stride. P3 therefore survives field-offset
-        // drift but NOT another register reallocation. P2 is the more durable row. Do not trust P3 on its own.
-
-        // P1 -- full prologue: five callee-saved pushes, the 0x30 frame, the this-pointer capture and the argument
-        // spill, ending on the opcode of the registry load `mov rcx,[rip+disp32]`. The disp32 is left off the tail
-        // rather than wildcarded, so the row commits to no shifting field.
-        {"BodyVariantResolver_P1_Prologue",
-         "40 55 57 41 54 41 55 41 56 48 83 EC 30 4C 8B E9 89 54 24 68 48 8B 0D",
-         ResolveMode::Direct, 0, 0},
-
-        // P2 -- post-prologue registry-lookup setup: mov r13,rcx / spill edx / load registry global (RIP disp32
-        // wildcarded) / lea rdx,[rsp+0x68] / add rcx,<sub-object off> / mov r14,r9 / movzx edi,r8w. The add's imm8 and
-        // the arg4-holder ModRM are wildcarded because both move across builds, so this row matches the old and the
-        // new build shape alike. Anchors at function start + 0xD.
-        {"BodyVariantResolver_P2_RegistryLookupSetup",
-         "4C 8B E9 89 54 24 68 48 8B 0D ?? ?? ?? ?? 48 8D 54 24 68 48 83 C1 ?? 4D 8B ?? 41 0F B7 F8",
-         ResolveMode::Direct, -0xD, 0},
-
-        // P3 -- the variant-list walk that defines this function: mov rsi,[r13+off] (entry list) / mov eax,[r13+off]
-        // (count) / imul r15,rax,0x58 (entry stride) / add r15,rsi / cmp rsi,r15 (empty-list guard). The field offsets
-        // are wildcarded because they shift across builds. The 0x58 stride stays literal. Anchors at function start +
-        // 0x8B, so walk-back -0x8B. See the sibling-function warning above before trusting this row alone.
-        {"BodyVariantResolver_P3_VariantListWalk",
-         "49 8B B5 ?? ?? 00 00 41 8B 85 ?? ?? 00 00 4C 6B ?? 58 4C 03 ?? 49 3B ??",
-         ResolveMode::Direct, -0x8B, 0},
-
-    };
-
-    inline constexpr AddrCandidate k_bodyVariantRenderCandidates[] = {
-        // P1 -- full prologue: two shadow-slot spills + push rdi + 0x20 frame + the argument shuffle
-        // (mov rbx,rcx / mov esi,r8d / mov rcx,[rcx] / mov rdi,rdx). All-literal; no field the linker can move.
-        {"BodyVariantRender_P1_Prologue",
-         "48 89 5C 24 10 48 89 74 24 18 57 48 83 EC 20 48 8B D9 41 8B F0 48 8B 09 48 8B FA",
-         ResolveMode::Direct, 0, 0},
-
-        // P2 -- the argument shuffle + list deref/null-test after the frame setup: mov rbx,rcx / mov esi,r8d /
-        // mov rcx,[rcx] (deref the entry-list holder) / mov rdi,rdx / test rcx,rcx. Anchors at function start + 0xF, so
-        // walk-back -0xF. Stops before the rel8 early-out jz, which is not anchored on (jz flips between rel8 and rel32
-        // encodings across builds).
-        {"BodyVariantRender_P2_ArgShuffleListDeref",
-         "48 8B D9 41 8B F0 48 8B 09 48 8B FA 48 85 C9",
-         ResolveMode::Direct, -0xF, 0},
-
-        // P3 -- the empty-list early-out tail: mov r8d,esi (pass the count through) / restore rbx from [rsp+0x38] and
-        // rsi from [rsp+0x40] / add rsp,0x20 / pop rdi / jmp (tail-call to the fallback; the rel32 jmp opcode is the
-        // trailing anchor, its displacement left off the tail). The r8d passthrough plus the exact shadow-slot restores
-        // make this site function-specific where the shared vector-insert body further down does not. Anchors at
-        // function start + 0x20, so walk-back -0x20.
-        {"BodyVariantRender_P3_EmptyListTailCall",
-         "44 8B C6 48 8B 5C 24 38 48 8B 74 24 40 48 83 C4 20 5F E9",
-         ResolveMode::Direct, -0x20, 0},
-    };
 
     // -----------------------------------------------------------------------
     // PrefabWrapperSwap module function targets.
@@ -890,6 +804,75 @@ namespace Transmog
      * mov [src], rax ; movzx-byte transfers from [src+8..src+0xA] into [dst+8..]`. Re-anchor on the byte-transfer
      * block (P3 below). It is the most function-specific shape and the least likely to shuffle.
      */
+    /**
+     * @brief Part-list assembly function -- merges an actor's part lists into its render container.
+     *
+     * Signature `f(a1 = assembly node, a2 = container, a3 = destination container)`.
+     *
+     * LT hooks this purely to learn WHICH actor the following struct-copy calls belong to. The node at `a1` carries
+     * its appearance asset path at `+0x18` (a StringInfo wrapper), which
+     * `CDCore::classify_appearance_by_path` maps to a protagonist index. The struct-copy chokepoint itself receives
+     * only a staging-vector slot as its first argument, so it has no actor identity of its own.
+     *
+     * The `lea rbp, [rsp-disp32]` frame size, the chkstk immediate and its call displacement are wildcarded so a
+     * frame-size change does not invalidate the anchor.
+     */
+    inline constexpr AddrCandidate k_partListMergeCandidates[] = {
+        // P1 -- prologue through the argument shuffle. The register-save block ALONE is not unique (the 7-push plus
+        // large-frame-lea shape matches double digits of functions module-wide), so the pattern deliberately runs on
+        // through chkstk into `mov r14,r8 / mov r12,rdx / mov r13,rcx`, which is what makes it a single hit.
+        {"PartListMerge_P1_PrologueThroughArgShuffle",
+         "48 89 5C 24 20 48 89 54 24 10 "
+         "55 56 57 41 54 41 55 41 56 41 57 "
+         "48 8D AC 24 ?? ?? ?? ?? "
+         "B8 ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 2B E0 "
+         "4D 8B F0 4C 8B E2 4C 8B E9",
+         ResolveMode::Direct, 0, 0},
+
+        // P2 -- argument shuffle plus the three-way count sum that sizes the destination reserve
+        // (`list2count + list1count + a2count`). Unique on its own and independent of the prologue, so it survives a
+        // register-save reshuffle that P1 would miss. It matches INSIDE the function, so disp_offset walks back to the
+        // entry; re-measure that delta on patch day, and note the caller's prologue sanity check is what catches it
+        // when the delta drifts.
+        {"PartListMerge_P2_ArgShuffleCountSum",
+         "4D 8B F0 4C 8B E2 4C 8B E9 "
+         "8B 51 60 03 51 48 41 03 54 24 08",
+         ResolveMode::Direct, -0x2A, 0},
+    };
+
+    /**
+     * @brief UnlinkByWrapper -- direct unlink-a-single-wrapper-from-a-body primitive.
+     *
+     * Signature `__int64 __fastcall(parent, _QWORD **wrapper, a3, a4)`. **`a3` / `a4` are optional out-vectors and
+     * are safe to pass 0.** Returns the number of records unlinked.
+     *
+     * Walks the body's attached-record vector (`parent+0x58` data, `parent+0x60` count; each entry's `+0x08` leads to
+     * a record whose `+0x40` holds the identity wrapper), exact-matches against `**a2`, and swap-and-pop unlinks every
+     * match.
+     *
+     * NaturalPipeline calls this per input wrapper after its router step. Calling it DIRECTLY is what lets LT evict a
+     * specific stale visual without synthesizing a NaturalPipeline call (which would need two simultaneously-valid
+     * input lists) and without driving `SafeTearDown`.
+     */
+    inline constexpr AddrCandidate k_unlinkByWrapperCandidates[] = {
+        // P1 -- prologue through the argument shuffle. The two argument spills (`rbx` to `rsp+0x10`, `r9` to
+        // `rsp+0x20`) plus the 7 pushes and the `mov r15,r8 / mov rdi,rdx` tail make this a single hit. Verified
+        // count == 1 against the live image; the bare prologue alone is NOT unique in this binary.
+        {"UnlinkByWrapper_P1_PrologueThroughArgShuffle",
+         "48 89 5C 24 10 4C 89 4C 24 20 "
+         "55 56 57 41 54 41 55 41 56 41 57 "
+         "48 83 EC 70 4D 8B F8 48 8B FA",
+         ResolveMode::Direct, 0, 0},
+
+        // P2 -- the record-vector scan head, which encodes the structure rather than the frame: load `a1+0x58`, load
+        // `a1+0x60`, scale by 16, form the end pointer, and bail when empty. Survives a prologue reshuffle. Matches
+        // INSIDE the function, so disp_offset walks back to the entry; re-measure that delta on patch day, and note
+        // the caller's prologue check is what catches it when it drifts.
+        {"UnlinkByWrapper_P2_RecordVectorScanHead",
+         "4C 8B 51 58 44 8B 59 60 49 C1 E3 04 4D 03 DA",
+         ResolveMode::Direct, -0x22, 0},
+    };
+
     inline constexpr AddrCandidate k_structCopyCandidates[] = {
         // P1 -- full prologue + first qword copy + vtable load. The single RIP-rel `lea rax, [rip+disp32]` that loads
         // the StringInfo vtable sentinel is wildcarded. One match module-wide.

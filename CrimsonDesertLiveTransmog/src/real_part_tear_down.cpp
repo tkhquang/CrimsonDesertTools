@@ -18,6 +18,74 @@
 
 namespace Transmog::RealPartTearDown
 {
+    // --- Scene-graph tear-down ------------------------------------------------------------------------------------
+    //
+    // Being evaluated for removal: PrefabWrapperSwap's synthesised NaturalPipeline detach may be able to do this job
+    // without the full scene-graph walk, which costs a visible stall before every apply.
+    //
+    // Two bugs previously kept that sweep from ever seeing a victim, and both are fixed:
+    //
+    //   - Direct fakes install nothing through `on_struct_copy`, so they landed in no ledger at all. They now have
+    //     their own (`s_directFakesPerChar`), since the swap-target set is rebuilt from swap plans on every apply and
+    //     wiped anything parked there.
+    //   - The wrapper lookup searched a single slot catalog, but catalogs are per-slot, so an item filed under any
+    //     other slot resolved to zero wrappers and produced an empty victim set.
+    //
+    // ON, but no longer on every apply -- see tear_down_needed_for_slot. It runs ONLY for a slot that ends up empty,
+    // which is where the stall actually bought something. A slot that merely changes target does not need it: the
+    // carrier stays equipped, so the swap redirects to the new target and replaces the mesh in place.
+    //
+    // The sweep cannot replace this for the empty case. It reaches the right node, matches attached records by name,
+    // and swapped meshes do land in the claim list at `+0x58`/`+0x60` alongside the base body -- but the synthesised
+    // NaturalPipeline call removes nothing.
+    //
+    // Two candidate explanations were tested against the decompile and BOTH were ruled out. The parent is not wrong:
+    // the actor-manager chain this function walks (see resolve_natpipe_parent) resolves to the very same object the
+    // sweep was already passing. And the call this function makes afterwards is a material rebind
+    // (MaterialKeyBinding), not a commit that finalises a detach.
+    //
+    // What remains different is WHICH wrapper goes in the list. This function does not use the attached record's own
+    // identity pointer at all: it resolves mesh ids from the equipped ITEM, then takes the canonical asset wrapper
+    // from the interner entry (+0x18) for each. The sweep passes the record identity instead. That is the next thing
+    // to try, and it is untested.
+    //
+    // One visible leftover turned out not to be this function's business at all: a backpack's strap and holder
+    // (cd_phm_00_bag_belt_*, cd_phm_00_bag_*_z) belong to neither carrier nor target -- every item emits exactly one
+    // mesh -- and are attached by the engine whenever a bag is worn. They are live parts, so no tear-down removes
+    // them and none should.
+    static constexpr bool k_sceneGraphTearDownEnabled = true;
+
+    /**
+     * Is scene-graph tear-down needed for this slot on THIS apply?
+     *
+     * Only when the slot ends up EMPTY. Tearing a slot down costs a visible stall before the apply, and for a slot
+     * that merely changes target it buys nothing: the carrier stays equipped, so the swap redirects the same source
+     * wrapper to the new target and the mesh is replaced in place. Nothing is left to remove.
+     *
+     * Going empty is the opposite case, and the one the swap's own detach provably cannot cover. There is no new
+     * target to redirect to, the carrier is unequipped, and the visual has to come off through the engine. Running it
+     * here also leaves the engine's own state consistent -- it must not go on believing the slot is equipped.
+     *
+     * Empty means either untouched by LT (`!active`) or ticked with no target (`targetItemId == 0`, i.e. hide).
+     */
+    static bool tear_down_needed_for_slot(std::uint16_t gameSlotTag) noexcept
+    {
+        if constexpr (!k_sceneGraphTearDownEnabled)
+            return false;
+
+        const auto &mappings = Transmog::slot_mappings();
+        for (std::size_t i = 0; i < static_cast<std::size_t>(Transmog::TransmogSlot::Count); ++i)
+        {
+            const auto tag = Transmog::game_slot_from_transmog(static_cast<Transmog::TransmogSlot>(i));
+            if (tag < 0 || static_cast<std::uint16_t>(tag) != gameSlotTag)
+                continue;
+            return !mappings[i].active || mappings[i].targetItemId == 0;
+        }
+        // Unknown tag -- no mapping owns it, so LT is not filling it. Treat as empty and tear down: skipping would
+        // risk leaving a visual with nothing tracking it.
+        return true;
+    }
+
     namespace
     {
         // Helper function pointer types. Addresses come from Transmog::resolved_addrs() (populated elsewhere in
@@ -441,6 +509,12 @@ namespace Transmog::RealPartTearDown
         g_safeTearDown.store(reinterpret_cast<SafeTearDownFn>(safeAddr), std::memory_order_release);
         g_indexedStringLookup.store(reinterpret_cast<IndexedStringLookupFn>(lookupAddr), std::memory_order_release);
 
+        if constexpr (!k_sceneGraphTearDownEnabled)
+        {
+            logger.warning("[dispatch] scene-graph tear-down is DISABLED -- hiding a slot and clearing a "
+                           "direct-applied fake (Mask) will not work. Experiment only.");
+        }
+
         g_ready.store(true, std::memory_order_release);
 
         logger.info("[dispatch] tear_down helpers resolved: safe={:#x} lookup={:#x}",
@@ -450,6 +524,9 @@ namespace Transmog::RealPartTearDown
 
     bool tear_down_real_part(void *a1Raw, std::uint16_t gameSlotTag) noexcept
     {
+        if (!tear_down_needed_for_slot(gameSlotTag))
+            return false; // slot keeps a target -- the swap replaces its mesh in place, no tear-down stall needed
+
         auto &logger = DMK::Logger::get_instance();
 
         if (!g_ready.load(std::memory_order_acquire))
@@ -622,6 +699,9 @@ namespace Transmog::RealPartTearDown
 
     bool tear_down_by_item_id(void *a1Raw, std::uint16_t itemId, std::uint16_t gameSlotTag) noexcept
     {
+        if (!tear_down_needed_for_slot(gameSlotTag))
+            return false; // slot keeps a target -- the swap replaces its mesh in place, no tear-down stall needed
+
         auto &logger = DMK::Logger::get_instance();
 
         if (!g_ready.load(std::memory_order_acquire) || itemId == 0)

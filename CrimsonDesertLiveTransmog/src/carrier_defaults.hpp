@@ -40,14 +40,24 @@ namespace Transmog
     // clang-format off
     inline constexpr CarrierDefault k_carriers[k_carrierCharCount][k_slotCount] = {
         // ============================================================
-        // Kliff (male). Default carriers per slot from the live slot-discovery dump.
+        // Kliff (male). Armor slots use the Kairos plate set (`Kliff_PlateArmor_*`); the remaining slots come from the
+        // live slot-discovery dump.
+        //
+        // The armor carriers must RENDER on their own now. They used to be pure descriptor shells: the carrier's id
+        // was equipped while the item catalog pointed at the target's descriptor, so the carrier's own mesh never
+        // mattered. The prefab-wrapper swap supplies the visual instead, which means a carrier whose prefab never
+        // resolves to a live wrapper produces an empty slot rather than a swapped one.
+        //
+        // The Kairos set is chosen for that: every piece is catalog-resident, non-variant, and resolves to a bare
+        // prefab name that yields a real wrapper. The previous helm carrier (`Scovi_Fabric_Helm`) is the exact failure
+        // this guards against -- the same bare-helm-name no-op already documented for Oongka's Lardein helm below.
         // ============================================================
         {
-            { "Scovi_Fabric_Helm"                            }, // Helm
-            { "Mercenary_Leather_Armor"                      }, // Chest
-            { "Mercenary_Leather_Cloak"                      }, // Cloak
-            { "Mercenary_Gloves"                             }, // Gloves
-            { "Mercenary_Leather_Boots"                      }, // Boots
+            { "Kliff_PlateArmor_Helm"                        }, // Helm
+            { "Kliff_PlateArmor_Armor"                       }, // Chest
+            { "Kliff_PlateArmor_Cloak"                       }, // Cloak
+            { "Kliff_PlateArmor_Gloves"                      }, // Gloves
+            { "Kliff_Plate_Boots"                            }, // Boots
             { "Hexe_Earring"                                 }, // Earring1
             { "Ancient_People_Earring"                       }, // Earring2
             { "Titan_Necklace"                               }, // Necklace

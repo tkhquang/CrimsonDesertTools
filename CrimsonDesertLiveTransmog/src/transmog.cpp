@@ -1,6 +1,5 @@
 #include "transmog.hpp"
 #include "aob_resolver.hpp"
-#include "body_variant_hook.hpp"
 #include "color_override/color_override.hpp"
 #include "color_override/color_token_table.hpp"
 #include "color_override/host_scope.hpp"
@@ -707,13 +706,42 @@ namespace Transmog
         const CDCore::Glue::BatchRequest initBatch[] = {
             {k_slotPopulatorCandidates, "SlotPopulator"}, {k_mapLookupCandidates, "MapLookup"},
             {k_subTranslatorCandidates, "SubTranslator"}, {k_safeTearDownCandidates, "SafeTearDown"},
-            {k_initSwapEntryCandidates, "InitSwapEntry"}, {k_charClassBypassCandidates, "CharClassBypass"},
+            {k_initSwapEntryCandidates, "InitSwapEntry"},
+            {k_partSlotRefreshCandidates, "PartSlotRefresh"},
+            {k_slotTagToHandleCandidates, "SlotTagToHandle"},
         };
         std::uintptr_t initAddrs[std::size(initBatch)] = {};
         CDCore::Glue::resolve_address_batch(initBatch, initAddrs);
 
         // SlotPopulator: the KEY function for transmog.
         addrs.slotPopulator = initAddrs[0];
+
+        // PartSlotRefresh: rebuilds ONE slot's visual. SlotPopulator calls it with the slot derived from the ITEM,
+        // which is the same value for both halves of a paired slot -- so an apply to the second half rebuilt the
+        // first. Calling it directly with the intended slot is what reaches the other half.
+        {
+            const auto refreshAddr = initAddrs[std::size(initBatch) - 2];
+            const auto tagToHandleAddr = initAddrs[std::size(initBatch) - 1];
+            if (tagToHandleAddr)
+            {
+                slot_tag_to_handle_fn() = reinterpret_cast<SlotTagToHandleFn>(tagToHandleAddr);
+                logger.info("SlotTagToHandle resolved at {:#x}", tagToHandleAddr);
+            }
+            else
+            {
+                logger.warning("SlotTagToHandle AOB scan failed -- paired slots cannot be refreshed");
+            }
+            if (refreshAddr)
+            {
+                part_slot_refresh_fn() = reinterpret_cast<PartSlotRefreshFn>(refreshAddr);
+                logger.info("PartSlotRefresh resolved at {:#x}", refreshAddr);
+            }
+            else
+            {
+                logger.warning("PartSlotRefresh AOB scan failed -- the second half of a paired slot "
+                               "(Ring2/Earring2) will not refresh");
+            }
+        }
 
         if (!addrs.slotPopulator)
             logger.warning("SlotPopulator AOB scan failed -- transmog will not work");
@@ -823,41 +851,6 @@ namespace Transmog
             }
         }
 
-        // CharClassBypass: single-byte patch site in CondPrefab evaluator. Toggled 0x74<->0xEB around each carrier
-        // apply so NPC items pass the character-class hash check.
-        addrs.charClassBypass = initAddrs[5];
-        if (addrs.charClassBypass)
-        {
-            // Verify the resolved byte is 0x74 (jz). SEH-isolated via noinline lambda (C++ objects in parent block
-            // unwinding).
-            uint8_t probe = 0;
-            [&]() __declspec(noinline)
-            {
-                __try
-                {
-                    probe = *reinterpret_cast<volatile uint8_t *>(addrs.charClassBypass);
-                }
-                __except (EXCEPTION_EXECUTE_HANDLER)
-                {
-                    probe = 0;
-                }
-            }();
-            if (probe == 0x74)
-                logger.info("CharClassBypass at 0x{:X} (byte=0x{:02X} OK)", addrs.charClassBypass, probe);
-            else
-            {
-                logger.warning("CharClassBypass at 0x{:X} byte=0x{:02X} "
-                               "(expected 0x74) -- disabling",
-                               addrs.charClassBypass, probe);
-                addrs.charClassBypass = 0;
-            }
-        }
-        else
-        {
-            logger.warning("CharClassBypass AOB scan failed -- NPC-variant transmog "
-                           "will fall back to direct apply (may not render)");
-        }
-
         // --- Load presets ---
 
         {
@@ -949,13 +942,6 @@ namespace Transmog
             }
         }
 
-        // BodyVariantHook lets each character render its correct per-body mesh variant on transmog. It keeps the
-        // engine's natural per-body match and forces entry[0] only for items the wearer cannot equip. It supersedes
-        // the transmog-side char-class bypass toggling (see body_variant_hook.hpp). If either of its AOBs fails to
-        // resolve, install() returns false and BodyVariantHook::is_active() stays false. The apply path then falls
-        // back to the legacy bypass force (see legacy_bypass_force_needed in transmog_apply.cpp), so a failed hook
-        // cannot block transmog rendering.
-        (void)BodyVariantHook::install();
 
         // PartAddShow inline hook -- transition-flash polish.
         //

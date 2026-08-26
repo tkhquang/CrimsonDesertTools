@@ -92,7 +92,6 @@ set(COMMON_SOURCES
     src/input_handler.cpp
     src/transmog.cpp
     src/transmog_apply.cpp
-    src/body_variant_hook.cpp
     src/transmog_hooks.cpp
     src/transmog_worker.cpp
     src/dx_overlay.cpp

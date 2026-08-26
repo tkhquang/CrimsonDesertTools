@@ -540,8 +540,8 @@ namespace Transmog
                 // entry point for browsing the merged catalog. This way the user can pick any prefab from any slot's
                 // picker. After populate_slot_catalogs unified the per-slot vectors (every slot now holds the FULL
                 // prefab set), iterating every slot would push each prefab 20x with a meaningless [Type] tag. Iterate
-                // slot 0 only and derive the visual [Type] label per row from the prefab name's prefix (slot_metadata's
-                // prefabPrefixMale/Female columns).
+                // slot 0 only and derive the visual [Type] label per row from the prefab NAME, via
+                // slot_metadata.hpp's slot_for_prefab_name() substring/role classifier.
                 //
                 // Pass 1 builds a flat index of catalog positions matching the search filter; pass 2 manually clips to
                 // the visible scroll window (see manual virtualization comment below).

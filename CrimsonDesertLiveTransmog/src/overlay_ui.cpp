@@ -370,10 +370,18 @@ namespace Transmog
                                 // the user's signal to revert to plain carrier mode. The existing body-mesh swap
                                 // selection is also cleared via reactivate so the two states stay mutually exclusive.
                                 const bool hadPrior = !ui.pickedPrefabName.empty();
+
+                                // Drop the body-mesh selection UNCONDITIONALLY, not only when the UI label happens to
+                                // be populated. The label and the PWS target index can disagree: a preset load
+                                // restores the selection but fills the label lazily, so a slot can carry a live prefab
+                                // target with an empty label. Gating on the label then leaves the selection alive, the
+                                // carrier gets re-forced on the next apply, and picking "(none)" appears to do
+                                // nothing. The two states are meant to be mutually exclusive, so clearing is always
+                                // correct here.
+                                PWS::set_selection(tslot, PWS::selection_src_index(tslot), -1);
                                 if (hadPrior)
                                 {
                                     ui.pickedPrefabName.clear();
-                                    PWS::set_selection(tslot, curSrc, -1);
                                     // Drop the saved prior-carrier snapshot. The user explicitly picked a new real
                                     // item, so the popup-set m.targetItemId is authoritative -- restoring the prior
                                     // carrier here would clobber the fresh pick.

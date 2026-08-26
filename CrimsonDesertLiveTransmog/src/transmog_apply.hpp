@@ -13,17 +13,24 @@ namespace Transmog
     void apply_transmog(__int64 a1, std::uint16_t targetId);
 
     /**
-     * Applies transmog using a carrier item to bypass equip gates.
+     * Equips the carrier AS ITSELF; the transmog visual comes from the prefab-wrapper swap.
      *
-     * Temporarily swaps the carrier's descriptor pointer in the global iteminfo ptrArray to point at the target's
-     * descriptor, then calls SlotPopulator with the carrier's itemId. The game reads the target's visual data (mesh
-     * hashes, CondPrefab, etc.) while all equip gates see a valid carrier. Restores the original pointer immediately
-     * after.
+     * The carrier is a legitimately equippable item, so no equip gate has to be defeated and no descriptor is
+     * falsified. The swap map binds the carrier's own prefab to the target item's prefab, which is what makes the
+     * target mesh render.
      *
-     * @param carrierId  Valid Kliff-equippable item for the slot
-     * @param targetId   Item whose visual to display (may be NPC variant)
+     * @param carrierId  Item the wearer can equip in this slot. 0 falls back to equipping targetId directly.
+     * @param targetId   Item whose visual is wanted; used for logging and by the swap-map target derivation.
      */
-    void apply_transmog_with_carrier(__int64 a1, std::uint16_t carrierId, std::uint16_t targetId);
+    /**
+     * @param slotSel Engine slot to equip into, or 0xFFFF to let the engine derive it from the item.
+     *
+     * Deriving is only unambiguous for slots whose item type maps to exactly one slot. Paired slots (Ring1/Ring2,
+     * Earring1/Earring2) share one type, so a derived equip always resolves to the first of the pair and the second
+     * can never be filled. Pass the slot tag for those.
+     */
+    void apply_transmog_with_carrier(__int64 a1, std::uint16_t carrierId, std::uint16_t targetId,
+                                     std::uint16_t slotSel = 0xFFFF);
 
     /**
      * Resolve the default carrier itemId for a given transmog slot and currently-active character. Each character needs
@@ -32,12 +39,6 @@ namespace Transmog
      */
     std::uint16_t default_carrier_for_slot(TransmogSlot slot, const std::string &charName);
 
-    /**
-     * Returns true if the given item needs the carrier-patch path when applied on the given character. An item needs
-     * carrier when either it carries NPC variant metadata, or its equip-type at desc+0x42 doesn't match the active
-     * character's slot class (otherwise the engine rejects it at equip time).
-     */
-    bool needs_carrier(std::uint16_t itemId, const std::string &charName);
 
     /**
      * Single-slot apply: tears down and re-applies only the given slot. Used by hover-preview to avoid full-gear
