@@ -226,6 +226,20 @@ namespace Transmog
         s_lastAppliedCarrierIds.fill(0);
     }
 
+    std::uint32_t char_idx_for_equip_slot(std::uintptr_t a1) noexcept
+    {
+        if (a1 < 0x10000)
+            return 0;
+        std::array<CDCore::BodyCacheEntry, 3> entries{};
+        const auto n = CDCore::snapshot_body_cache(entries.data(), entries.size());
+        for (std::size_t i = 0; i < n; ++i)
+        {
+            if (CDCore::equip_slot_for_ccoia(entries[i].body) == a1)
+                return entries[i].charIdx;
+        }
+        return 0;
+    }
+
     void reset_all_applied_state() noexcept
     {
         s_lastAppliedIds.fill(0);

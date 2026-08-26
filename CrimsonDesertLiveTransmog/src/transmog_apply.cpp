@@ -567,6 +567,48 @@ namespace Transmog
         apply_transmog_core(a1, carrierId, slotSel, excludeTag);
     }
 
+    /**
+     * Refuse an apply whose preset owner and target body disagree.
+     *
+     * LT picks WHAT to apply from `current_apply_owner()` -- a name held in PresetManager -- and WHERE to apply it
+     * from the `a1` it was handed. Nothing tied those two together, so any window where one updates before the other
+     * let a character's preset land on a different character's body. Observed twice: a save-load that forces a
+     * character switch, and a hot reload while controlling a non-Kliff character, both leaving Kliff wearing the
+     * previous character's parts.
+     *
+     * Only blocks when BOTH sides resolve AND they disagree. A zero host index means the body is not a protagonist at
+     * all (a targeted apply onto a companion, which is legitimate) or the actor chain is mid-teardown -- neither is a
+     * mismatch, and blocking there would break working paths.
+     */
+    static bool apply_host_matches_owner(std::uintptr_t a1, const char *site) noexcept
+    {
+        const auto hostIdx = char_idx_for_equip_slot(a1);
+        if (hostIdx == 0)
+            return true; // not a protagonist body, or the chain is mid-teardown -- not a mismatch
+
+        // Accept the host if it matches EITHER preset axis.
+        //
+        // current_apply_owner() alone is not a safe comparand: it returns the pinned EDITING character when pinning
+        // is engaged, and the world-entry loop legitimately walks every protagonist in turn with
+        // set_active_character() moving underneath it. Comparing against only the owner would block every iteration
+        // but one. A body that matches neither axis is the actual defect this guard exists for.
+        auto &pm = PresetManager::instance();
+        const auto activeIdx = CDCore::character_idx_from_name(pm.active_character());
+        const auto editingIdx =
+            pm.editing_pinned() ? CDCore::character_idx_from_name(pm.editing_character()) : std::uint32_t{0};
+        if (activeIdx == 0 && editingIdx == 0)
+            return true; // nothing bound yet -- the caller's own gating decides
+        if (hostIdx == activeIdx || hostIdx == editingIdx)
+            return true;
+
+        DMK::Logger::get_instance().warning(
+            "{}: HOST MISMATCH -- a1 0x{:X} is charIdx {}'s body, but the preset axes are active='{}' ({}) "
+            "editing='{}' ({}); skipping so the wrong character is not dressed",
+            site, static_cast<std::uint64_t>(a1), hostIdx, pm.active_character(), activeIdx,
+            pm.editing_pinned() ? pm.editing_character() : std::string{}, editingIdx);
+        return false;
+    }
+
     void apply_single_slot_transmog(__int64 a1, std::size_t slotIdx)
     {
         if (slotIdx >= k_slotCount)
@@ -586,6 +628,9 @@ namespace Transmog
             if (fresh > 0x10000)
                 a1 = fresh;
         }
+
+        if (!apply_host_matches_owner(static_cast<std::uintptr_t>(a1), "apply_single_slot"))
+            return;
 
         __try
         {
@@ -935,6 +980,9 @@ namespace Transmog
             if (fresh > 0x10000)
                 a1 = fresh;
         }
+
+        if (!apply_host_matches_owner(static_cast<std::uintptr_t>(a1), "apply_all_transmog"))
+            return;
 
         __try
         {
@@ -1446,15 +1494,6 @@ namespace Transmog
             }
 
             DyeRecordInject::clear_slot_dye_state();
-            uint32_t postCount = 0;
-            __try
-            {
-                postCount = *reinterpret_cast<volatile uint32_t *>(a1 + k_compSlotCacheCountOffset);
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-            }
-            logger.trace("[dispatch] post-apply slot={} liveCount={}", i, postCount);
             lastIds[i] = m.targetItemId;
             last_applied_carrier_ids()[i] = (useCarrier && carrierId != 0) ? carrierId : 0;
             ++ourWrittenCount;

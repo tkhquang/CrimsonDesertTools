@@ -659,7 +659,7 @@ namespace Transmog
         // through to the actor list" from "chain reached the list, save only has Kliff").
         CDCore::ActorListDebugSummary summary{};
         {
-            std::array<CDCore::ActorListDebugEntry, 24> rawEntries{};
+            std::array<CDCore::ActorListDebugEntry, 24> rawEntries{}; // filled for the count only
             summary = CDCore::debug_enumerate_actor_list(rawEntries.data(), rawEntries.size());
             logger.trace("[multi-apply-diag] chain mgr=0x{:X} ua=0x{:X} "
                          "sub=0x{:X} kliff=0x{:X} ctrl=0x{:X} vec=0x{:X} "
@@ -669,16 +669,9 @@ namespace Transmog
                          static_cast<std::uint64_t>(summary.controlled), static_cast<std::uint64_t>(summary.vecData),
                          static_cast<std::uint64_t>(summary.childContainer),
                          static_cast<std::uint64_t>(summary.actorList), summary.rawEntries);
-            for (std::size_t i = 0; i < summary.rawEntries; ++i)
-            {
-                const auto &e = rawEntries[i];
-                logger.trace("[multi-apply-diag]   [{:>2}] ccoia=0x{:X} "
-                             "flag=0x{:016X} +0x60=0x{:08X} hi=0x{:02X} "
-                             "lo=0x{:02X}",
-                             i, static_cast<std::uint64_t>(e.ccoia), e.flag, e.identity,
-                             static_cast<unsigned>((e.identity >> 24) & 0xFF),
-                             static_cast<unsigned>(e.identity & 0xFF));
-            }
+            // The per-entry actor dump belonged to the actor-array drift investigation and re-printed every entry on
+            // every apply. The summary line above already carries what the retry oracle reads. Raise the level here
+            // only while chasing the actor list again.
         }
 
         std::array<CDCore::BodyCacheEntry, 3> entries{};

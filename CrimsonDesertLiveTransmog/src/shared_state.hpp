@@ -91,6 +91,19 @@ namespace Transmog
      * Item IDs that were last written to slot_mappings (saved before preset switch). Used by clear_all_transmog to know
      * what to unequip.
      */
+    /**
+     * @brief Which protagonist owns this equip-slot component (`a1`), 1-based, or 0.
+     *
+     * Resolved from the LIVE actor chain -- snapshot_body_cache enumerates the player CCOIAs with their character
+     * index, and equip_slot_for_ccoia maps each to the `a1` LT applies against. Returns 0 for companions, NPCs and
+     * wildlife, and while the chain is mid-teardown.
+     *
+     * Use this, NOT resolve_player_component(), to answer "whose body is this?". resolve_player_component() always
+     * returns KLIFF's component whatever character is controlled, so comparing against it silently accepts every
+     * other character's body.
+     */
+    [[nodiscard]] std::uint32_t char_idx_for_equip_slot(std::uintptr_t a1) noexcept;
+
     std::array<uint16_t, k_slotCount> &last_applied_ids();
 
     /**

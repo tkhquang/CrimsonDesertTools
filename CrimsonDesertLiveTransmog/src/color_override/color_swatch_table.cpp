@@ -513,7 +513,7 @@ namespace Transmog::ColorOverride::SwatchTable
             if (ovr.submesh_name[0] == '\0')
             {
                 ++drop_no_submesh;
-                logger.debug("[persist-probe] slot={} row={} DROP (empty "
+                logger.trace("[persist-probe] slot={} row={} DROP (empty "
                              "submesh) tok=0x{:04X} rgb=({:02X},{:02X},"
                              "{:02X})",
                              slot, i, e.token_id.load(std::memory_order_relaxed), ovr.r, ovr.g, ovr.b);
@@ -523,7 +523,7 @@ namespace Transmog::ColorOverride::SwatchTable
             if (tokenId == 0)
             {
                 ++drop_no_token_id;
-                logger.debug("[persist-probe] slot={} row={} DROP "
+                logger.trace("[persist-probe] slot={} row={} DROP "
                              "(token_id=0) submesh='{}' rgb=({:02X},"
                              "{:02X},{:02X})",
                              slot, i, ovr.submesh_name, ovr.r, ovr.g, ovr.b);
@@ -533,7 +533,7 @@ namespace Transmog::ColorOverride::SwatchTable
             if (tokenName == nullptr)
             {
                 ++drop_no_token_label;
-                logger.debug("[persist-probe] slot={} row={} DROP "
+                logger.trace("[persist-probe] slot={} row={} DROP "
                              "(unresolved token 0x{:04X}) submesh='{}' "
                              "hash={:#x} stable={:#x} tpl={:#x} rgb=({:02X},"
                              "{:02X},{:02X})",
@@ -552,10 +552,15 @@ namespace Transmog::ColorOverride::SwatchTable
             ++kept;
         }
 
-        logger.debug("[persist-probe] slot={} total_rows={} kept={} "
-                     "drop_inactive={} drop_no_submesh={} drop_no_token_id={} "
-                     "drop_no_token_label={}",
-                     slot, total, kept, drop_inactive, drop_no_submesh, drop_no_token_id, drop_no_token_label);
+        // Empty slots say nothing. Reporting all 23 every probe produced 276 identical `total_rows=0 kept=0` lines
+        // per session and buried the handful of slots that actually hold rows.
+        if (total != 0)
+        {
+            logger.trace("[persist-probe] slot={} total_rows={} kept={} "
+                         "drop_inactive={} drop_no_submesh={} drop_no_token_id={} "
+                         "drop_no_token_label={}",
+                         slot, total, kept, drop_inactive, drop_no_submesh, drop_no_token_id, drop_no_token_label);
+        }
 
         return out;
     }
@@ -928,7 +933,7 @@ namespace Transmog::ColorOverride::SwatchTable
             // is observation, not invariant -- if it diverges the first one is still useful as a hint).
             const auto firstTpl = g_table[s][rows.front()].template_id.load(std::memory_order_relaxed);
             const auto firstStable = g_table[s][rows.front()].stable_id.load(std::memory_order_relaxed);
-            log.debug("  submesh='{}' tpl=0x{:04X} stable=0x{:016X} rows={}", name, firstTpl,
+            log.trace("  submesh='{}' tpl=0x{:04X} stable=0x{:016X} rows={}", name, firstTpl,
                       static_cast<unsigned long long>(firstStable), rows.size());
             for (auto idx : rows)
             {
@@ -948,7 +953,7 @@ namespace Transmog::ColorOverride::SwatchTable
                                         ? "FROZEN" // pruned by Reinit
                                                    // first-fire pending capture
                                         : "PENDING";
-                log.debug("    {} (0x{:04X}) def=#{:02X}{:02X}{:02X} "
+                log.trace("    {} (0x{:04X}) def=#{:02X}{:02X}{:02X} "
                           "user=#{:02X}{:02X}{:02X} hash=0x{:08X} [{}]",
                           tokName ? tokName : "(unnamed-tok)", tok, def_r, def_g, def_b, ovr.r, ovr.g, ovr.b, hash,
                           state);
@@ -959,10 +964,10 @@ namespace Transmog::ColorOverride::SwatchTable
     void dump_all_slots() noexcept
     {
         auto &log = DetourModKit::Logger::get_instance();
-        log.debug("[swatch-dump] ===== begin all-slot snapshot =====");
+        log.trace("[swatch-dump] ===== begin all-slot snapshot =====");
         for (std::size_t s = 0; s < k_slotCount; ++s)
             dump_slot(static_cast<int>(s));
-        log.debug("[swatch-dump] ===== end all-slot snapshot =====");
+        log.trace("[swatch-dump] ===== end all-slot snapshot =====");
     }
 
     void lock_all_slots() noexcept

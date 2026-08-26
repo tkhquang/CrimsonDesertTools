@@ -2170,7 +2170,7 @@ namespace Transmog::PrefabWrapperSwap
     //
     // The claim list (`node+0x58` data / `node+0x60` count) is the layer ABOVE realized components: adding or removing
     // a claim makes the engine build or drop the part itself. That is where a fast removal and the empty-slot add case
-    // have to happen -- see docs/plans/appearance-claim-api.md.
+    // have to happen -- see the appearance-claim API notes (kept out of tree).
     //
     // This logs the protagonist's node address and claim-list shape because the node is otherwise unobtainable from
     // outside the hook. It names a concrete live object to watch for claim-list writes, which is how the engine's own
@@ -2198,6 +2198,10 @@ namespace Transmog::PrefabWrapperSwap
     //
     // Instead the old set is parked here, the install runs, and afterwards we sweep only what the new set does NOT
     // contain -- so an unchanged slot's wrapper appears in both and survives.
+    /// Attached-record enumeration cap for the sweep's diagnostics. Past this the `have` list is truncated, which
+    /// is what makes a miss unprovable rather than merely uneventful.
+    static constexpr std::uint32_t k_sweepEnumerationCap = 64;
+
     static std::unordered_set<std::uintptr_t> s_pendingStalePerChar[3];
 
     static void log_claim_shape(std::int64_t node, std::uint32_t charIdx) noexcept
@@ -2416,8 +2420,19 @@ namespace Transmog::PrefabWrapperSwap
         const bool a4Written =
             a4ReadableAfter && std::memcmp(a4Before, a4After, sizeof(a4Before)) != 0;
 
-        // Report each distinct (name, delta, a3, a4) shape once. a3/a4 are in the key because learning which values
-        // the engine passes IS the point -- a repeat with different args is new information, not noise.
+        // Report only calls where something actually HAPPENED: a claim was erased, or the engine wrote through a4.
+        //
+        // This hook fires for every claim erase in the process, not just LT's. The two questions it was built to
+        // answer are answered -- a4 is an out-param (it is written on a minority of calls), and the argument shapes
+        // the engine passes are known, with the conclusion recorded at the canonical-wrapper comment in the sweep
+        // below. What is left is the running signal: which erases succeed. Logging the no-ops as well produced 1514
+        // of 1533 lines saying "nothing was removed from something I could not even name" -- 41% of the whole log,
+        // three quarters of which could not resolve a prefab name at all.
+        if (result == 0 && !a4Written)
+            return result;
+
+        // Report each distinct (name, delta, a3, a4) shape once. a3/a4 are in the key because a repeat with different
+        // args is new information, not noise.
         auto key = std::format("{}|{}->{}|{:X}|{}", name, before, after, static_cast<std::uintptr_t>(a3), a4Written);
         bool fresh = false;
         {
@@ -2426,7 +2441,7 @@ namespace Transmog::PrefabWrapperSwap
         }
         if (fresh)
         {
-            DMK::Logger::get_instance().info(
+            DMK::Logger::get_instance().debug(
                 "[claim-remove] node=0x{:X} prefab=\"{}\" claims {}->{} ret=0x{:X} a3=0x{:X} a4=0x{:X} "
                 "a4Written={} a4[0..3] before=[{:X} {:X} {:X} {:X}] after=[{:X} {:X} {:X} {:X}]",
                 static_cast<std::uintptr_t>(a1), name, before, after, static_cast<std::uintptr_t>(result),
@@ -3498,6 +3513,19 @@ namespace Transmog::PrefabWrapperSwap
         if (activeIdx < 1 || activeIdx > 3)
             return;
 
+        // Deriving a target needs the per-slot prefab catalog, and on a cold load that arrives in TWO phases: the
+        // StringInfo walk, then the loader-registry merge, with the catalog published only after the second. A reader
+        // landing in that window resolves every target against an empty catalog, warns "variant meshes ... absent
+        // from this slot's catalog (0 entries)" on every slot, and shows the carrier's visual instead.
+        //
+        // Worse than the noise: the stamp is written BEFORE the rebuild, so that empty result would be recorded as
+        // current for this (world, character) and no later reader would retry it.
+        //
+        // Deferring is the fix. Leaving the stamp untouched means the next reader -- the next socket build or apply,
+        // both of which happen right after the catalog lands -- rebuilds properly.
+        if (!s_catalogPopulated.load(std::memory_order_acquire))
+            return;
+
         {
             std::scoped_lock lk(s_targetTableStampMtx);
             if (s_targetTableWorldGen == worldGen && s_targetTableCharIdx == activeIdx)
@@ -3516,6 +3544,12 @@ namespace Transmog::PrefabWrapperSwap
         DMK::Logger::get_instance().info(
             "[prefab-swap] target table rebuilt for world {} char[{}] (uncommitted picks discarded)", worldGen,
             activeIdx - 1);
+    }
+
+    std::uint32_t target_table_char_idx() noexcept
+    {
+        std::scoped_lock lk(s_targetTableStampMtx);
+        return s_targetTableCharIdx;
     }
 
     std::uintptr_t target_wrapper_for_slot(std::size_t slotIdx) noexcept
@@ -3732,7 +3766,7 @@ namespace Transmog::PrefabWrapperSwap
                     for (const auto &n : targetNames)
                         want += (want.empty() ? "" : ", ") + n;
                     std::string have;
-                    for (std::uint32_t i = 0; i < count && i < 64; ++i)
+                    for (std::uint32_t i = 0; i < count && i < k_sweepEnumerationCap; ++i)
                     {
                         const auto rec =
                             DMKMemory::seh_read<std::uint64_t>(data + static_cast<std::size_t>(i) * 16 + 8).value_or(0);
@@ -3748,10 +3782,31 @@ namespace Transmog::PrefabWrapperSwap
                         std::scoped_lock lk(s_claimLogMtx);
                         fresh = s_claimLogged.insert("MISS|" + want).second;
                     }
+
+                    // Say which of the two cases this is, instead of warning about both.
+                    //
+                    // Victims are matched by POINTER **or** by NAME above, so an empty victim list means none of the
+                    // wanted meshes is on this body under either identity. When the enumeration also covered every
+                    // attached record, that is a proof of absence: there is nothing to retract and the sweep has
+                    // simply been handed targets that were registered but never installed on this body (the parked
+                    // set has no provenance -- see the post-refactor review notes (kept out of tree)).
+                    // That is routine and must not read as a failure.
+                    //
+                    // A TRUNCATED enumeration is the case worth a warning: the wrapper could be attached beyond the
+                    // records examined, and then a stale mesh really is left rendering.
+                    const bool enumerationComplete = count <= k_sweepEnumerationCap;
                     if (fresh)
-                        DMK::Logger::get_instance().warning(
-                            "[prefab-swap] sweep MISS ({}): wanted [{}] but body 0x{:X} has [{}]", reason, want, body,
-                            have);
+                    {
+                        auto &lg = DMK::Logger::get_instance();
+                        if (enumerationComplete)
+                            lg.debug("[prefab-swap] sweep no-op ({}): none of [{}] is attached to body 0x{:X} "
+                                     "({} record(s), all examined) -- nothing to retract",
+                                     reason, want, body, count);
+                        else
+                            lg.warning("[prefab-swap] sweep MISS ({}): wanted [{}] but body 0x{:X} has [{}] "
+                                       "-- enumeration stopped at {} of {} records, so absence is NOT proven",
+                                       reason, want, body, have, k_sweepEnumerationCap, count);
+                    }
                     continue;
                 }
                 attempted += victims.size();

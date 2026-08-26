@@ -1,5 +1,6 @@
 #include "socket_mesh_override.hpp"
 
+#include <cdcore/controlled_char.hpp>
 #include "aob_resolver.hpp"
 #include "dye_record_inject.hpp"
 #include "prefab_wrapper_swap.hpp"
@@ -208,15 +209,50 @@ namespace Transmog::SocketMeshOverride
             if (!mapping.active || mapping.targetItemId == 0)
                 return trampoline(a1, partId, slotTag, a4, a5, record, outList);
 
-            // Unlike the equip hooks, this fires for companions, NPCs and wildlife too. The controlled-actor test is
-            // what keeps LT's target off every other body wearing the same gear.
-            const auto controlled = resolve_player_component();
-            if (controlled != 0 && a1 != controlled)
-                return trampoline(a1, partId, slotTag, a4, a5, record, outList);
-
+            // Resolve the target FIRST: this also brings the per-slot table up to date for the current world and
+            // character, so the ownership test below reads a settled stamp.
             const auto target = PrefabWrapperSwap::target_wrapper_for_slot(slotIdx);
             if (target < 0x10000)
                 return trampoline(a1, partId, slotTag, a4, a5, record, outList);
+
+            // The body being built must belong to the character whose targets the table holds.
+            //
+            // This hook fires for companions, NPCs and wildlife as well as the player, so it needs an ownership test.
+            // The previous one compared a1 against resolve_player_component() -- which always returns KLIFF's
+            // component regardless of who is controlled. It therefore asked "is this Kliff's body?" and never "does
+            // this body belong to the character these targets came from". With the table holding Oongka's targets and
+            // the engine rebuilding Kliff (a save-load forcing a character switch, or a hot reload while controlling
+            // Oongka), it passed and dressed Kliff in Oongka's meshes.
+            //
+            // char_idx_for_equip_slot resolves the body through the live actor chain, so it cannot be fooled by state
+            // a save-load or hot reload left stale. A zero on either side means "not a protagonist body" or "table
+            // unbound" -- both fall through rather than guess.
+            const auto tableIdx = PrefabWrapperSwap::target_table_char_idx();
+            const auto hostIdx = char_idx_for_equip_slot(static_cast<std::uintptr_t>(a1));
+            if (tableIdx == 0 || hostIdx == 0 || hostIdx != tableIdx)
+            {
+                // Name the cross-character case. A zero on either side is ordinary -- every companion, NPC and
+                // wildlife socket lands here, and so does any build before the table binds -- so those stay silent.
+                // Two DIFFERENT protagonists is the bug this gate exists for, and it is silent refusal that made it
+                // cost three rounds of log-reading to find. Rate-limited to one line per (host, table) pair per world
+                // so a persistent mismatch reports once instead of per socket per build.
+                if (tableIdx != 0 && hostIdx != 0)
+                {
+                    const auto worldGen = CDCore::world_generation();
+                    const auto key = (worldGen << 8) | (static_cast<std::uint64_t>(hostIdx) << 4) | tableIdx;
+                    static std::atomic<std::uint64_t> s_lastMismatchKey{0};
+                    if (s_lastMismatchKey.exchange(key, std::memory_order_relaxed) != key)
+                    {
+                        DMK::Logger::get_instance().warning(
+                            "[socket-override] HOST MISMATCH: body 0x{:X} belongs to charIdx {}, but the target "
+                            "table holds charIdx {}'s targets -- refusing to dress it. Slot={} tag={:#06x}. "
+                            "Expect the character's own apply to redress it once the table rebinds.",
+                            static_cast<std::uint64_t>(a1), hostIdx, tableIdx, slot_name(*slotOpt),
+                            static_cast<unsigned>(slotTag));
+                    }
+                }
+                return trampoline(a1, partId, slotTag, a4, a5, record, outList);
+            }
 
             // Point the record's dye entries at LT's colours for the duration of the build.
             //

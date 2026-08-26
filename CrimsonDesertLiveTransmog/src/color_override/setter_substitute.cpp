@@ -130,7 +130,7 @@ namespace Transmog::ColorOverride::SetterSubstitute
             std::uint32_t w[16]{};
             for (int i = 0; i < 16; ++i)
                 w[i] = seh_read_u32(dst_prop + std::uintptr_t(i) * 4);
-            DetourModKit::Logger::get_instance().debug("[dye-setter-sub] desc@{:#x}  "
+            DetourModKit::Logger::get_instance().trace("[color-setter-sub] desc@{:#x}  "
                                                        "+00={:08X} +04={:08X} +08={:08X} +0C={:08X} "
                                                        "+10={:08X} +14={:08X} +18={:08X} +1C={:08X} "
                                                        "+20=hashKey{:08X} +24={:08X} +28=tok16{:08X} +2C={:08X} "
@@ -207,9 +207,11 @@ namespace Transmog::ColorOverride::SetterSubstitute
         {
             g_hookFires.fetch_add(1, std::memory_order_relaxed);
 
-            // Periodic counter dump every ~12k fires.
+            // Periodic counter dump. The cadence is deliberately coarse: these are running totals, so a sample every
+            // ~12k fires produced ~82 near-identical blocks per session while a handful conveys the same trend.
+            constexpr std::uint64_t k_counterDumpEveryFires = 98304;
             const auto fires = g_hookFires.load(std::memory_order_relaxed);
-            if (fires % 12288 == 0)
+            if (fires % k_counterDumpEveryFires == 0)
             {
                 std::uint8_t r = 0, g = 0, b = 0;
                 bool active = DyeRecordInject::get_published_first_active_rgb(&r, &g, &b);
@@ -221,7 +223,7 @@ namespace Transmog::ColorOverride::SetterSubstitute
                 const bool winOpen = g_applyWindowActive.load(std::memory_order_relaxed);
                 const auto winAge = now_ms() - g_windowEndMs.load(std::memory_order_relaxed);
                 DetourModKit::Logger::get_instance().trace(
-                    "[dye-setter-sub] fires={} subs={} defs={} miss={} "
+                    "[color-setter-sub] fires={} subs={} defs={} miss={} "
                     "noSlot={} hostRej={} windowOpen={} winAge_ms={} "
                     "tailMs={} "
                     "active={} rgb=({:02X},{:02X},{:02X}) "
@@ -267,10 +269,16 @@ namespace Transmog::ColorOverride::SetterSubstitute
                 }
                 if (g_seenTokens.insert_unique(tokId))
                 {
-                    DetourModKit::Logger::get_instance().debug("[dye-setter-sub] token seen: 0x{:08X} layer={} "
-                                                               "channel={}",
-                                                               tokId, ColorOverride::TokenTable::token_layer(tokId),
-                                                               ColorOverride::TokenTable::channel_kind(tokId));
+                    // Only report a token that CLASSIFIES. layer/channel == -1 means the token table does not know
+                    // it, which was useful while the table was being discovered and is now just noise -- 110 of the
+                    // 144 of these carried -1/-1. [token-discovery] owns that job.
+                    const auto layer = ColorOverride::TokenTable::token_layer(tokId);
+                    const auto channel = ColorOverride::TokenTable::channel_kind(tokId);
+                    if (layer >= 0 || channel >= 0)
+                    {
+                        DetourModKit::Logger::get_instance().trace(
+                            "[color-setter-sub] token seen: 0x{:08X} layer={} channel={}", tokId, layer, channel);
+                    }
                 }
             }
             if (tokId == 0)
@@ -343,7 +351,7 @@ namespace Transmog::ColorOverride::SetterSubstitute
             // verify which C++ classes the active carrier emits and whether they ever shift after a carrier swap.
             if (g_seenVtables.insert_unique(mf.vtable))
             {
-                DetourModKit::Logger::get_instance().debug("[dye-setter-sub] vtable observed: 0x{:X} "
+                DetourModKit::Logger::get_instance().debug("[color-setter-sub] vtable observed: 0x{:X} "
                                                            "(slot={} hash=0x{:08X} template=0x{:04X})",
                                                            mf.vtable, slot, mf.content_hash, mf.template_id);
             }
@@ -368,12 +376,12 @@ namespace Transmog::ColorOverride::SetterSubstitute
             }
             // First-fire log per (slot, content_hash). A per-slot SET (not last-hash dedup) is required so hair/eye
             // re-fires can't mask a chest matInst between its own fires.
-            if (g_seenSlotHashes[slot].insert_unique(mf.content_hash))
+            // Name-less regions are skipped immediately below, so reporting them says only "here is another one I
+            // ignored". Report the ones that carry a usable submesh name.
+            if (nameOk && g_seenSlotHashes[slot].insert_unique(mf.content_hash))
             {
-                DetourModKit::Logger::get_instance().debug("[dye-setter-sub] slot={} hash={:#x} "
-                                                           "submesh='{}'{}",
-                                                           slot, mf.content_hash, sm_name[0] ? sm_name : "",
-                                                           nameOk ? "" : " (no-name)");
+                DetourModKit::Logger::get_instance().trace("[color-setter-sub] slot={} hash={:#x} submesh='{}'", slot,
+                                                           mf.content_hash, sm_name[0] ? sm_name : "");
             }
 
             // Skip name-less regions (hair, eyes, internal effect materials). Their parent has no `_subMeshName`
@@ -474,7 +482,7 @@ namespace Transmog::ColorOverride::SetterSubstitute
         auto res = hookMgr.create_mid_hook("ColorOverride::SetterSubstitute", target, &on_setter_mid);
         if (!res.has_value())
         {
-            log.warning("[dye-setter-sub] mid-hook FAILED at {:#x}: {}", target,
+            log.warning("[color-setter-sub] mid-hook FAILED at {:#x}: {}", target,
                         DetourModKit::Hook::error_to_string(res.error()));
             return false;
         }
@@ -482,7 +490,7 @@ namespace Transmog::ColorOverride::SetterSubstitute
         // called as descriptor vtbl[89] from the 4-arg dispatch wrapper -- itself reached as vtbl[66] from the publish
         // iterator. Writes 4 bytes at `target + desc[+0x70]` then fires the publish-notify helper. See
         // `log_descriptor_shape` above for the full publish-chain map.
-        log.info("[dye-setter-sub] mid-hook installed at {:#x} "
+        log.info("[color-setter-sub] mid-hook installed at {:#x} "
                  "(per-row swatch table active)",
                  target);
         return true;

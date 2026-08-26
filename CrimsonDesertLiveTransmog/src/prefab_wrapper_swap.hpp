@@ -95,6 +95,16 @@ namespace Transmog::PrefabWrapperSwap
      * Target wrapper bound to @p slotIdx for the character currently being applied, or 0 when the slot has no
      * target. Answers "what should this SOCKET wear", which the source-hash-keyed swap map cannot.
      */
+    /**
+     * Character index (1-based, matching CDCore) the per-slot target table currently holds targets for; 0 when
+     * unbound.
+     *
+     * The table holds ONE character's targets at a time. Anything that installs those targets onto a body must check
+     * this against the body's own character (Transmog::char_idx_for_equip_slot) -- otherwise it dresses whichever
+     * body it is handed with whichever character's table happens to be current.
+     */
+    [[nodiscard]] std::uint32_t target_table_char_idx() noexcept;
+
     [[nodiscard]] std::uintptr_t target_wrapper_for_slot(std::size_t slotIdx) noexcept;
 
     /**

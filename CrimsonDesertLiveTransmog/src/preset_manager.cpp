@@ -731,9 +731,10 @@ namespace Transmog
 
         file << root.dump(2);
         logger.info("Presets saved to '{}'", path);
-        // Diagnostic: dump the live swatch tree so the log captures exactly what was persisted alongside the JSON write
-        // event.
-        ColorOverride::SwatchTable::dump_all_slots();
+        // dump_all_slots() is NOT called here any more. It walks every row of every populated slot and printed ~430
+        // lines on each save -- an automatic full snapshot, which is the shape that makes a log unreadable. The
+        // function stays available (see color_swatch_table.hpp) for a deliberate, on-demand dump when a colour
+        // problem is actually being chased; the JSON that was just written is the same state anyway.
         dye_dirty().store(false, std::memory_order_release);
         // The just-saved state IS the new baseline -- subsequent edits become "dirty" relative to this point.
         capture_dye_snapshot();
