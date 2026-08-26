@@ -2,6 +2,18 @@
 
 All notable changes to the CrimsonDesertLiveTransmog mod will be documented in this file.
 
+## [0.14.0] - Crimson Desert 2.00.00 support, paired accessories, and instant outfit changes
+
+- Updated the mod to work with Crimson Desert version 2.00.00
+- Refreshed the item name list for game version 2.00.00
+- Outfits are now built with the mesh-swap system by default, retiring a large amount of older code
+- Earrings and rings can now be transmogged, each with its own look
+- Your real gear no longer flashes on screen before the transmog replaces it
+- Changing a slot's look now applies instantly instead of pausing while the old piece is removed
+- Clicking quickly through presets now only builds the one you land on, instead of every preset on the way
+- Dye color changes now update just that slot, without re-dressing the whole outfit
+- Much quieter log file
+
 ## [0.13.2] - Crimson Desert 1.18.00 support
 
 - Updated the mod to work with Crimson Desert version 1.18.00
@@ -278,6 +290,7 @@ All notable changes to the CrimsonDesertLiveTransmog mod will be documented in t
 - Modular code split: `transmog_apply` (apply/clear logic), `transmog_hooks` (VEC/BatchEquip callbacks), `transmog_worker` (debounce/load-detect/nametable threads), `shared_state` (cross-TU atomics)
 - Docs clarify ReShade is required for GUI; without it, users edit JSON manually via Capture hotkey
 
+[0.14.0]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.14.0
 [0.13.2]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.13.2
 [0.13.1]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.13.1
 [0.13.0]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.13.0
