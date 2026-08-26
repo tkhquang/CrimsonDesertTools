@@ -1,6 +1,7 @@
 #pragma once
 
 #include "shared_state.hpp"
+#include "slot_metadata.hpp"
 
 #include <cstdint>
 
@@ -13,17 +14,40 @@ namespace Transmog
     void apply_transmog(__int64 a1, std::uint16_t targetId);
 
     /**
-     * Applies transmog using a carrier item to bypass equip gates.
+     * @brief Rebuild ONE slot in place -- no tear-down, no equip, no SlotPopulator.
      *
-     * Temporarily swaps the carrier's descriptor pointer in the global iteminfo ptrArray to point at the target's
-     * descriptor, then calls SlotPopulator with the carrier's itemId. The game reads the target's visual data (mesh
-     * hashes, CondPrefab, etc.) while all equip gates see a valid carrier. Restores the original pointer immediately
-     * after.
+     * @details Publishes the slot's dye state exactly as a full apply does and binds the slot for the setter
+     *          substitute, then drives the engine's own per-slot rebuild with both apply windows open. The prefab
+     *          swap keeps substituting (so the transmogged mesh survives), the dye injector sees its state on the
+     *          DyeCopier call the rebuild drives, and Color Override's material writes are routed to the chosen
+     *          colour.
      *
-     * @param carrierId  Valid Kliff-equippable item for the slot
-     * @param targetId   Item whose visual to display (may be NPC variant)
+     *          This is the ONLY correct way to rebuild a slot from outside this file. The bare engine rebuild it
+     *          wraps is deliberately not exported: driven with no dye published, it makes the engine re-emit its
+     *          natural records and silently strips the colour a preceding apply just injected.
+     * @return false when the rebuild is unavailable, in which case the caller should fall back to a full apply.
      */
-    void apply_transmog_with_carrier(__int64 a1, std::uint16_t carrierId, std::uint16_t targetId);
+    bool refresh_slot_appearance(std::size_t slotIdx);
+
+    /**
+     * @brief Equips the carrier AS ITSELF; the transmog visual comes from the prefab-wrapper swap.
+     *
+     * @details The carrier is a legitimately equippable item, so no equip gate has to be defeated and no descriptor
+     *          is falsified. The swap map binds the carrier's own prefab to the target item's prefab, which is what
+     *          makes the target mesh render.
+     * @param carrierId Item the wearer can equip in this slot. 0 falls back to equipping targetId directly.
+     * @param targetId Item whose visual is wanted; used for logging and by the swap-map target derivation.
+     * @param slotSel Engine slot to equip into, or @ref k_noGameTag to let the engine derive it from the item.
+     *        Deriving is unambiguous only for slots whose item type maps to exactly one slot. Paired slots
+     *        (Ring1/Ring2, Earring1/Earring2) share one type, so a derived equip always resolves to the first of the
+     *        pair and the second can never be filled -- pass the slot tag for those.
+     * @param excludeTag Slot to hide from the engine's item -> slot resolution for the duration of this equip, or
+     *        @ref k_noGameTag. Reaches a paired slot's second half when naming the destination outright is not
+     *        possible because that slot owns no part record yet.
+     */
+    void apply_transmog_with_carrier(__int64 a1, std::uint16_t carrierId, std::uint16_t targetId,
+                                     std::uint16_t slotSel = k_noGameTag,
+                                     std::uint16_t excludeTag = k_noGameTag);
 
     /**
      * Resolve the default carrier itemId for a given transmog slot and currently-active character. Each character needs
@@ -31,13 +55,6 @@ namespace Transmog
      * Damiane (and vice versa). Returns 0 if the name can't be resolved.
      */
     std::uint16_t default_carrier_for_slot(TransmogSlot slot, const std::string &charName);
-
-    /**
-     * Returns true if the given item needs the carrier-patch path when applied on the given character. An item needs
-     * carrier when either it carries NPC variant metadata, or its equip-type at desc+0x42 doesn't match the active
-     * character's slot class (otherwise the engine rejects it at equip time).
-     */
-    bool needs_carrier(std::uint16_t itemId, const std::string &charName);
 
     /**
      * Single-slot apply: tears down and re-applies only the given slot. Used by hover-preview to avoid full-gear

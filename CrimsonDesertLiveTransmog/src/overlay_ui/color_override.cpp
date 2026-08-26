@@ -165,11 +165,24 @@ namespace Transmog
                 // Reset is a pending change: the JSON still has the old swatch rows. Flip dirty so the top "Save *"
                 // button surfaces, but don't auto-write JSON -- user commits explicitly.
                 Transmog::dye_dirty().store(true, std::memory_order_release);
-                if (s_autoApply)
-                {
-                    flag_enabled().store(true, std::memory_order_relaxed);
-                    manual_apply_slot(slot);
-                }
+                // Re-render the slot. Reset changes only COLOUR state -- the transmog target is untouched -- so a
+                // plain manual_apply_slot hits the `targetId == prevId` early-out in apply_single_slot_transmog and
+                // returns without rebuilding. That is what left a wiped slot still showing its old override colour.
+                //
+                // force_apply_pending is the documented bypass for exactly this case (the dye popup sets it for the
+                // same reason). It is read-and-cleared by the apply, and it costs exactly ONE rebuild.
+                //
+                // Deliberately NOT schedule_color_commit_retick, which is what "Revert to default" uses: that is a
+                // two-phase cycle (TeardownApply unticks the slot, TeardownWait, then CarrierApply re-applies), so it
+                // empties the slot for over a second and reads as a double remount. Revert needs those phases to make
+                // the engine re-emit its natural colours; Reset does not, because the swatch table is wiped and the
+                // single rebuild below re-captures it.
+                //
+                // Not gated on s_autoApply: this is an explicit button press, and re-capturing is the whole point of
+                // the button (see its tooltip). Auto-apply governs whether EDITS apply on their own.
+                force_apply_pending()[static_cast<std::size_t>(slot)] = true;
+                flag_enabled().store(true, std::memory_order_relaxed);
+                manual_apply_slot(slot);
             }
         }
 
@@ -677,11 +690,11 @@ namespace Transmog
                     Transmog::ColorOverride::SwatchTable::clear_dye_state_for_slot(static_cast<int>(slot));
                     Transmog::ColorOverride::PendingOverrides::clear_slot(static_cast<int>(slot));
                     Transmog::dye_dirty().store(true, std::memory_order_release);
-                    if (s_autoApply)
-                    {
-                        flag_enabled().store(true, std::memory_order_relaxed);
-                        manual_apply_slot(slot);
-                    }
+                    // Same re-render path as the Reset slot button at the top of this panel -- see the comment there
+                    // for why manual_apply_slot needs the force flag, and why the commit-retick is not used here.
+                    force_apply_pending()[static_cast<std::size_t>(slot)] = true;
+                    flag_enabled().store(true, std::memory_order_relaxed);
+                    manual_apply_slot(slot);
                 }
 
                 // "Revert": soft reset that keeps the captured swatch list intact (no Re-init needed afterwards), but

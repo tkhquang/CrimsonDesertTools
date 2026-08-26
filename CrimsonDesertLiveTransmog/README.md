@@ -11,7 +11,7 @@
 ## Features
 
 - Built-in overlay GUI -- no external tools required (toggle with **Home** key)
-- In-game item browser with search-filterable dropdown, auto-categorized by slot (helm, chest, cloak, gloves, boots, necklace, lantern, glasses, mask, backpack)
+- In-game item browser with search-filterable dropdown, auto-categorized by slot (helm, chest, cloak, gloves, boots, earrings, necklace, rings, lantern, glasses, mask, backpack)
 - Optional body-mesh prefab picker for swapping individual prefab variants onto a slot
 - Preset system: save, load, rename, and cycle through multiple transmog presets per character
 - Multi-character support: independent preset lists for Kliff, Damiane, and Oongka. Every visible protagonist's preset is applied automatically on world entry (and to followers as soon as they're summoned in-game), and the active preset follows whoever you control

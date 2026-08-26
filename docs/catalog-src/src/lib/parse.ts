@@ -22,8 +22,10 @@ function* splitLines(text: string): Generator<string> {
 export interface DisplayInfo {
   display: string;
   // Wearer-body marking from the display_names 3rd column: 'Male', 'Female', or
-  // '' when the item is not body-restricted. This is the item's authoritative
-  // equip-eligibility from the game data, unlike a rig-token guess.
+  // '' when the item is not body-restricted. This is the engine's EQUIP-ELIGIBILITY:
+  // which bodies the game lets equip the item. It is NOT a statement that a fitted
+  // mesh exists for that body, and the two disagree on a small number of items. When
+  // what the player would actually SEE is the question, the prefab rig token wins.
   body: string;
 }
 

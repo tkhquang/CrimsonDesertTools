@@ -170,11 +170,11 @@ namespace Transmog
                 ui.navMoved = true;
             }
         }
-        // Prefabs toggle: only meaningful for slots that have a body-mesh carrier (default source from
-        // k_defaultSrcByEnumSlot OR an INI Pair_N_Source). Accessory slots without a mesh carrier (Earring1/2,
-        // Necklace, Ring1/2) get -1 from selection_src_index so the toggle is hidden -- there's no point browsing
-        // prefabs from a slot that can never receive one. Force prefabMode off for those slots so a pre-existing true
-        // value doesn't blank the popup.
+        // Prefabs toggle: only meaningful for slots that have a body-mesh carrier. The source comes from the slot's
+        // carrier item in carrier_defaults.hpp, resolved to a rig mesh at runtime. A slot with no carrier named there
+        // gets -1 from selection_src_index and the toggle is hidden -- there's no point browsing prefabs from a slot
+        // that can never receive one. Force prefabMode off for those slots so a pre-existing true value doesn't blank
+        // the popup.
         {
             const bool slotHasCarrier = (Transmog::PrefabWrapperSwap::selection_src_index(slotCategory) >= 0);
             if (slotHasCarrier)
@@ -540,8 +540,8 @@ namespace Transmog
                 // entry point for browsing the merged catalog. This way the user can pick any prefab from any slot's
                 // picker. After populate_slot_catalogs unified the per-slot vectors (every slot now holds the FULL
                 // prefab set), iterating every slot would push each prefab 20x with a meaningless [Type] tag. Iterate
-                // slot 0 only and derive the visual [Type] label per row from the prefab name's prefix (slot_metadata's
-                // prefabPrefixMale/Female columns).
+                // slot 0 only and derive the visual [Type] label per row from the prefab NAME, via
+                // slot_metadata.hpp's slot_for_prefab_name() substring/role classifier.
                 //
                 // Pass 1 builds a flat index of catalog positions matching the search filter; pass 2 manually clips to
                 // the visible scroll window (see manual virtualization comment below).

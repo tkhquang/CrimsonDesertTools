@@ -29,7 +29,8 @@ export interface CatalogRow {
   rigFamily?: string;
   // Wearer body from the display_names mark: 'Male' or 'Female' when the item is
   // restricted to one body, undefined otherwise (unmarked or no display entry).
-  // Authoritative equip-eligibility from the game data.
+  // Equip-eligibility from the game data: which bodies may equip the item. Not a
+  // guarantee that a fitted mesh exists for that body.
   bodyType?: string;
   // How many mesh prefabs have this row's item as their exact item. > 1 marks a
   // multi-prefab item: one item with several distinct meshes (e.g. a character

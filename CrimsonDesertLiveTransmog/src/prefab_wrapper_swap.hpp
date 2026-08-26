@@ -92,6 +92,65 @@ namespace Transmog::PrefabWrapperSwap
     std::size_t ensure_armed_for_slot_apply() noexcept;
 
     /**
+     * @brief Character index (1-based, matching CDCore) the per-slot target table currently holds targets for; 0 when
+     *        unbound.
+     *
+     * @details The table holds ONE character's targets at a time. Anything that installs those targets onto a body
+     *          must check this against the body's own character (Transmog::char_idx_for_equip_slot), or it dresses
+     *          whichever body it is handed with whichever character's table happens to be current.
+     */
+    [[nodiscard]] std::uint32_t target_table_char_idx() noexcept;
+
+    /**
+     * @brief Target wrapper bound to @p slotIdx for the character currently being applied, or 0 when the slot has no
+     *        target.
+     *
+     * @details Answers "what should this SOCKET wear", which the source-hash-keyed swap map cannot.
+     */
+    [[nodiscard]] std::uintptr_t target_wrapper_for_slot(std::size_t slotIdx) noexcept;
+
+    /**
+     * Discard uncommitted prefab picks so a save-load starts from the preset alone. Call before
+     * PresetManager::apply_to_state, which re-mirrors the preset's own picks.
+     *
+     * Clears the TARGET column only. The source column is a derived default, seeded once from each character's
+     * carrier item, and nothing re-derives it -- see the note in the definition.
+     */
+    void resync_to_preset() noexcept;
+
+    /**
+     * Rebuild the per-slot target table from current selections and slot targets. Needs no live actor, so it can run
+     * while a new world is still building -- which is when SocketMeshOverride reads it.
+     */
+    void rebuild_target_table() noexcept;
+
+    /**
+     * Mark ONE slot's previous target as stale, so the post-apply sweep removes it.
+     *
+     * The full apply gets this for free: `notify_apply_starting` runs a deactivate cycle that parks every installed
+     * target, the rebuild re-registers only what is still selected, and the sweep detaches the difference. A
+     * single-slot apply cannot use that cycle -- parking everything while only one slot re-installs would sweep the
+     * other slots' live targets off the body -- so it parks just the target it is replacing.
+     *
+     * Without this a single-slot target change parks nothing, the sweep finds no candidates, and the previous mesh
+     * stays on screen. It is the whole reason an Instant-Apply pick behaved differently from Apply All.
+     *
+     * Call BEFORE @ref ensure_armed_for_slot_apply, and only when the target actually changes -- passing the id that
+     * is being re-installed would park the wrappers the sweep is about to see as live.
+     *
+     * @param prevItemId The target being replaced. Zero is a no-op.
+     */
+    void park_slot_target_for_sweep(std::uint16_t prevItemId) noexcept;
+
+    /**
+     * Run the post-apply sweep for a single-slot apply.
+     *
+     * Same sweep `notify_apply_finished` drives, exposed for the path that does not go through it. Detaches parked
+     * wrappers that the just-completed apply did not re-install. Safe with nothing parked -- it returns immediately.
+     */
+    void sweep_after_slot_apply() noexcept;
+
+    /**
      * Notify the module of an upcoming apply's slot itemIds. The itemIds decide between an install pass and a
      * cleanup-only pass. An install pass rebuilds the swap map and activates. A cleanup-only pass (every id zero)
      * deactivates, so the tear-down calls that follow run with the hook in passthrough.
@@ -123,10 +182,6 @@ namespace Transmog::PrefabWrapperSwap
         // AppearanceTableLoader catalog but not yet loaded into StringInfo (no wrapper resident).
         std::vector<std::uintptr_t> wrappers;
         std::uint32_t hash; // entry+0x00 / metadata+0x10
-        // 24-byte metadata pointer returned by the AppearanceTableLoader lookup primitive (see lookup_prefab_metadata).
-        // 0 if either the loader was not captured at startup or the name is absent from the loader's table. Owned by
-        // the engine; never freed by us.
-        std::uintptr_t metadata{0};
         // True iff at least one usable wrapper is currently resident in StringInfo (i.e. the engine can render this
         // prefab right now without an async load). When false, the picker may still show the entry to the user but
         // selecting it is a best-effort operation -- a force-load pass may be required.
@@ -137,22 +192,12 @@ namespace Transmog::PrefabWrapperSwap
     //
     // The PartPrefab table is a 252,480-entry container the engine builds at boot from .pappt parser output. Its loader
     // instance lives at `[[ResMgr+0x40]+0x88]` -- captured by hooking the first call to `sub_1408AF8F0` (game-init).
-    // The container itself is `loader+8`, vtable `0x144D24308`.
+    // The container itself is `loader+8`.
     //
-    // We expose a read-only lookup against this container so the picker can surface prefabs that exist in the engine's
-    // catalog but are not yet StringInfo-resident (i.e. have no live wrapper). No INI keys in this module.
-
-    /**
-     * Returns the 24-byte AppearanceTableLoader metadata pointer for `name` if present in the boot-loaded PartPrefab
-     * container. Returns 0 on miss OR if the loader was not captured at startup. Pure read-only -- safe to call from
-     * the UI thread.
-     */
-    [[nodiscard]] std::uintptr_t lookup_prefab_metadata(const char *name) noexcept;
-
-    /**
-     * True if the AppearanceTableLoader hook fired and we hold valid snapshots of partPrefabContainer.
-     */
-    [[nodiscard]] bool is_loader_ready() noexcept;
+    // There is deliberately no per-name lookup against it here. Backing one with the engine's own primitive costs an
+    // AOB cascade to maintain and produces a value nothing consumes; `for_each_loader_prefab_name` below is the part
+    // with a real consumer, and the picker indexes its walk to answer per-name questions in-process. No INI keys in
+    // this module.
 
     /**
      * Walk every entry in the AppearanceTableLoader registry singleton (the AOB-resolved partprefab name-to-wrapper
@@ -174,12 +219,6 @@ namespace Transmog::PrefabWrapperSwap
     [[nodiscard]] bool is_catalog_populated() noexcept;
 
     /**
-     * Slot-prefix string used for catalog classification (also useful for the UI to strip the prefix from dropdown
-     * labels).
-     */
-    [[nodiscard]] const char *slot_prefix_str(Transmog::TransmogSlot slot) noexcept;
-
-    /**
      * Per-slot catalog (sorted by name). Returns an empty vector for slots that have not been populated yet (e.g.
      * catalog walk hasn't run, or the slot has no matching prefabs in StringInfo).
      */
@@ -190,7 +229,18 @@ namespace Transmog::PrefabWrapperSwap
      */
     [[nodiscard]] int selection_src_index(Transmog::TransmogSlot slot) noexcept;
     [[nodiscard]] int selection_tgt_index(Transmog::TransmogSlot slot) noexcept;
-    void set_selection(Transmog::TransmogSlot slot, int srcIdx, int tgtIdx) noexcept;
+    /**
+     * @brief Write a slot's source and target selection, mirroring it into a character's per-character row.
+     *
+     * @param site Short caller tag, logged with the write at trace level. Diagnostic only: a poisoned per-character
+     *        row is only findable when the log names who wrote it.
+     * @param charIdxFor Bucket to mirror into, 1-based; 0 means "whichever character is bound right now".
+     * @warning A caller that already knows which character it is writing for MUST pass @p charIdxFor. Reading the
+     *          bound character inside this function re-samples a global another thread can change mid-loop, so a
+     *          per-slot restore loop could start writing one character's bucket and finish writing another's.
+     */
+    void set_selection(Transmog::TransmogSlot slot, int srcIdx, int tgtIdx, std::string_view site = "?",
+                       std::uint32_t charIdxFor = 0) noexcept;
 
     /**
      * Bind the writes done by `set_selection` (and the "active editing view" exposed via selection_*_index) to a
@@ -247,4 +297,16 @@ namespace Transmog::PrefabWrapperSwap
      * overlay where any change immediately reapplies that slot.
      */
     std::size_t reactivate_with_selections() noexcept;
+
+    /**
+     * Record a DIRECT fake -- a slot where the carrier item IS the target item, so it is equipped as itself and no
+     * prefab substitution happens at all.
+     *
+     * Such a slot installs a visual without ever passing through `on_struct_copy`, so nothing lands in this
+     * character's installed-wrapper set and the post-apply sweep has no victim to look for. Clearing the slot then
+     * leaves the mesh attached forever. Resolving the item's prefabs here and adding them to the installed set makes
+     * the existing park-then-subtract machinery cover direct fakes for free: the next apply parks them, the rebuilt
+     * set no longer lists them, so they fall out as orphans and get detached.
+     */
+    void register_direct_fake(std::uint16_t itemId) noexcept;
 } // namespace Transmog::PrefabWrapperSwap

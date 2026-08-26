@@ -109,6 +109,12 @@ namespace Transmog::ColorOverride::Reinit
             const int curMode = st.mode.load(std::memory_order_acquire);
             return curMode == SlotReinitState::ModeCommitRetick;
         }
+        // The unmount is REQUIRED, not ceremony. Entering at CarrierApply -- one apply, no tear-down -- runs cleanly
+        // and the new colour simply does not take: the engine keeps the material state it already resolved and only
+        // re-reads it after the slot is torn down. Measured, so do not "optimise" this into a single apply.
+        //
+        // Dye is different and does not need this: its records are injected on the next DyeCopier call, which a plain
+        // per-slot rebuild drives (see refresh_slot_appearance).
         int expected = SlotReinitState::Idle;
         if (!st.phase.compare_exchange_strong(expected, SlotReinitState::TeardownApply, std::memory_order_acq_rel))
             return st.mode.load(std::memory_order_acquire) == SlotReinitState::ModeCommitRetick;

@@ -38,6 +38,9 @@ namespace Transmog
     static std::atomic<bool> s_applyToEditing{true};
 
     static SlotPopulatorFn s_slotPopulator = nullptr;
+    static PartSlotRefreshFn s_partSlotRefresh = nullptr;
+    static SlotTagToHandleFn s_slotTagToHandle = nullptr;
+    static ItemToSlotResolveFn s_itemToSlotResolve = nullptr;
     static InitSwapEntryFn s_initSwapEntry = nullptr;
 
     static std::atomic<bool> s_inTransmog{false};
@@ -107,6 +110,21 @@ namespace Transmog
         return s_applyToEditing;
     }
 
+    PartSlotRefreshFn &part_slot_refresh_fn()
+    {
+        return s_partSlotRefresh;
+    }
+
+    SlotTagToHandleFn &slot_tag_to_handle_fn()
+    {
+        return s_slotTagToHandle;
+    }
+
+    ItemToSlotResolveFn &item_to_slot_resolve_fn()
+    {
+        return s_itemToSlotResolve;
+    }
+
     SlotPopulatorFn &slot_populator_fn()
     {
         return s_slotPopulator;
@@ -119,10 +137,6 @@ namespace Transmog
     std::atomic<bool> &in_transmog()
     {
         return s_inTransmog;
-    }
-    std::atomic<bool> &suppress_vec()
-    {
-        return s_suppressVEC;
     }
     std::atomic<__int64> &player_a1()
     {
@@ -210,6 +224,26 @@ namespace Transmog
         s_realDamaged.fill(false);
         s_lastAppliedRealIds.fill(0);
         s_lastAppliedCarrierIds.fill(0);
+    }
+
+    std::uint32_t char_idx_for_equip_slot(std::uintptr_t a1) noexcept
+    {
+        if (a1 < 0x10000)
+            return 0;
+        std::array<CDCore::BodyCacheEntry, 3> entries{};
+        const auto n = CDCore::snapshot_body_cache(entries.data(), entries.size());
+        for (std::size_t i = 0; i < n; ++i)
+        {
+            if (CDCore::equip_slot_for_ccoia(entries[i].body) == a1)
+                return entries[i].charIdx;
+        }
+        return 0;
+    }
+
+    std::atomic<std::uint32_t> &slot_mappings_owner() noexcept
+    {
+        static std::atomic<std::uint32_t> s_owner{0};
+        return s_owner;
     }
 
     void reset_all_applied_state() noexcept

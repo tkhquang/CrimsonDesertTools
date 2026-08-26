@@ -18,11 +18,26 @@ namespace Transmog
     // part_show_suppress.cpp) read this table; no parallel slot tables anywhere else.
     struct SlotMetadata
     {
-        TransmogSlot slot;              // == array index, asserted at compile time
-        std::int16_t gameTag;           // engine slot tag (sub_148EB6700-verified)
-        const char *displayName;        // "Helm", "Chest", ... (UI / log labels)
-        const char *prefabPrefixMale;   // PWS catalog prefix for male characters
-        const char *prefabPrefixFemale; // PWS catalog prefix for female characters
+        TransmogSlot slot; // == array index, asserted at compile time
+        // Engine slot tag: the character's equip-slot enum, as it appears at `record+0xC8` of the auth-table part
+        // records and as the first argument to the tag->handle lookup.
+        //
+        // These are written down rather than derived, unlike the item taxonomy in item_name_table.cpp, and the reason
+        // is that they index a different KIND of enum. Item type codes index EquipTypeInfo, ~117 rows that grow every
+        // time content adds a weapon family, and that band has shifted in both directions. Equip slots are a
+        // gameplay-design constant: no tag here has changed across any game version this mod has shipped against, and
+        // patches have only ever APPENDED (Tool, then the two overflow slots).
+        //
+        // A runtime derivation is also not available. The auth table lists only FILLED slots -- eleven of these
+        // twenty-three on a fully equipped character -- so it can never produce the whole table, and the table is
+        // needed at apply time. EquipTypeInfo rows are variable-length with no tag at a fixed offset, and the part
+        // records carry no name.
+        //
+        // What IS derived is a CHECK. The auth-table walk in real_part_tear_down.cpp compares every live
+        // `(tag, itemId)` pair against the catalog's own name-derived classification and warns on disagreement, so a
+        // patch that renumbers this column reports itself instead of silently routing applies into the wrong slot.
+        std::int16_t gameTag;
+        const char *displayName; // "Helm", "Chest", ... (UI / log labels)
         // PartShowSuppress IndexedStringA hash key (CD_*). nullptr when the slot does NOT participate in
         // PartShowSuppress (only the 5 armor slots have CD_* hashes; accessory/weapon slots use different suppression
         // mechanisms or none at all).
@@ -60,51 +75,43 @@ namespace Transmog
 
     inline constexpr SlotMetadata k_slotMetadata[k_slotCount] = {
         // clang-format off
-        // slot              gameTag  displayName       prefabPrefixMale          prefabPrefixFemale       partShowHashKey   enabled
-        // -- 5 armor slots: original transmog targets, fully working via PartShowSuppress + cd_phm_/cd_phw_ wrapper
-        // swap.
-        { TransmogSlot::Helm,          0x03, "Helm",          "cd_phm_00_hel_00_",      "cd_phw_00_hel_00_",     "CD_Helm"      , true  },
-        { TransmogSlot::Chest,         0x04, "Chest",         "cd_phm_00_ub_00_",       "cd_phw_00_ub_00_",      "CD_Upperbody" , true  },
-        { TransmogSlot::Cloak,         0x10, "Cloak",         "cd_phm_00_cloak_00_",    "cd_phw_00_cloak_00_",   "CD_Cloak"     , true  },
-        { TransmogSlot::Gloves,        0x05, "Gloves",        "cd_phm_00_hand_00_",     "cd_phw_00_hand_00_",    "CD_Hand"      , true  },
-        { TransmogSlot::Boots,         0x06, "Boots",         "cd_phm_00_foot_00_",     "cd_phw_00_foot_00_",    "CD_Foot"      , true  },
-        // -- DISABLED (multi-prefab + duplicate-tag): rings/earrings emit
-        //    multiple prefabs per item AND share tags within a pair, so
-        //    SlotPopulator can't tell Ring1 from Ring2. See SlotMetadata
-        //    `enabled` doc-block above for the refactor plan.
-        { TransmogSlot::Earring1,      0x07, "Earring1",      "",                       "",                      nullptr        , false },
-        { TransmogSlot::Earring2,      0x08, "Earring2",      "",                       "",                      nullptr        , false },
+        // slot              gameTag  displayName       partShowHashKey   enabled
+        // -- 5 armor slots: the original transmog targets, driven by PartShowSuppress plus the wrapper swap.
+        { TransmogSlot::Helm,          0x03, "Helm",          "CD_Helm"      , true  },
+        { TransmogSlot::Chest,         0x04, "Chest",         "CD_Upperbody" , true  },
+        { TransmogSlot::Cloak,         0x10, "Cloak",         "CD_Cloak"     , true  },
+        { TransmogSlot::Gloves,        0x05, "Gloves",        "CD_Hand"      , true  },
+        { TransmogSlot::Boots,         0x06, "Boots",         "CD_Foot"      , true  },
+        // -- Paired accessory slots. Both halves of a pair share one item TYPE, so an equip that lets the engine
+        //    derive its destination can only ever reach the first half. They are enabled because the apply path names
+        //    the destination explicitly for them -- see slot_needs_explicit_destination below.
+        { TransmogSlot::Earring1,      0x07, "Earring1",      nullptr        , true  },
+        { TransmogSlot::Earring2,      0x08, "Earring2",      nullptr        , true  },
         // -- Necklace: single-prefab single-tag, treated like an armor slot.
-        { TransmogSlot::Necklace,      0x09, "Necklace",      "",                       "",                      nullptr        , true  },
-        { TransmogSlot::Ring1,         0x0A, "Ring1",         "cd_phm_00_ring_",        "cd_phw_00_ring_",       nullptr        , false },
-        { TransmogSlot::Ring2,         0x0B, "Ring2",         "cd_phm_00_ring_",        "cd_phw_00_ring_",       nullptr        , false },
-        // Lantern uses cd_t0000_* on both genders (gender-shared family).
-        { TransmogSlot::Lantern,       0x0F, "Lantern",       "cd_t0000_lantern_",      "cd_t0000_lantern_",     nullptr        , true  },
-        { TransmogSlot::Glasses,       0x11, "Glasses",       "cd_phm_00_glasses_",     "cd_phw_00_glasses_",    nullptr        , true  },
-        { TransmogSlot::Mask,          0x12, "Mask",          "cd_phm_00_mask_00_",     "cd_phw_00_mask_00_",    nullptr        , true  },
-        { TransmogSlot::Backpack,      0x13, "Backpack",      "cd_phm_00_bag_0",        "cd_phw_00_bag_0",       nullptr        , true  },
-        // Bracelet uses cd_phw_*_rinkband_ on BOTH genders (phw natively, even for male characters -- engine quirk
-        // verified live). Marked disabled (`enabled=false`) because it is a multi-prefab, non-armor slot the current
-        // pipeline does not handle.
-        { TransmogSlot::Bracelet,      0x14, "Bracelet",      "cd_phw_00_rinkband_",    "cd_phw_00_rinkband_",   nullptr        , false },
-        // Weapon family slots below are marked disabled (`enabled=false`):
-        // every weapon slot emits multiple prefabs per item (mesh + scabbard + FX + binds), and MainHand/OffHand share
-        // tag space when dual-wielding. A separate cd_phw_* weapon pipeline plus sub-index disambiguation in
-        // SlotPopulator is required before re-enabling them.
-        { TransmogSlot::MainHand,     0x00, "MainHand",     "cd_phm_01_",             "cd_phw_01_",            nullptr        , false },
-        { TransmogSlot::OffHand,      0x01, "OffHand",      "cd_phm_01_",             "cd_phw_01_",            nullptr        , false },
-        { TransmogSlot::Ranged,        0x02, "Ranged",        "cd_phm_04_",             "cd_phw_04_",            nullptr        , false },
-        { TransmogSlot::SubWeapon,     0x0C, "SubWeapon",     "cd_phm_01_dagger_",      "cd_phw_01_dagger_",     nullptr        , false },
-        // displayName intentionally trimmed to "TwoHand" (was "TwoHandWeapon") to fit the overlay's slot column. Used
-        // everywhere `slot_name()` is read; engine-side diagnostics still call this slot's gameTag 0x0D which
-        // game_slot_name returns this same trimmed string for.
-        { TransmogSlot::TwoHandWeapon, 0x0D, "TwoHand",       "cd_phm_02_",             "cd_phw_02_",            nullptr        , false },
-        // Tool takes empty prefab prefixes: the gathering-tool mesh family has not been identified, and an empty
-        // prefix keeps prefab_wrapper_swap on the carrier-only path instead of guessing a family. OffHand2 and Ranged2
-        // mirror their primary counterparts, which is the family their observed items come from.
-        { TransmogSlot::Tool,          0x0E, "Tool",          "",                       "",                      nullptr        , false },
-        { TransmogSlot::OffHand2,      0x17, "OffHand2",      "cd_phm_01_",             "cd_phw_01_",            nullptr        , false },
-        { TransmogSlot::Ranged2,       0x18, "Ranged2",       "cd_phm_04_",             "cd_phw_04_",            nullptr        , false },
+        { TransmogSlot::Necklace,      0x09, "Necklace",      nullptr        , true  },
+        { TransmogSlot::Ring1,         0x0A, "Ring1",         nullptr        , true  },
+        { TransmogSlot::Ring2,         0x0B, "Ring2",         nullptr        , true  },
+        { TransmogSlot::Lantern,       0x0F, "Lantern",       nullptr        , true  },
+        { TransmogSlot::Glasses,       0x11, "Glasses",       nullptr        , true  },
+        { TransmogSlot::Mask,          0x12, "Mask",          nullptr        , true  },
+        { TransmogSlot::Backpack,      0x13, "Backpack",      nullptr        , true  },
+        // Bracelet stays disabled: it is a multi-prefab, non-armor slot the current pipeline does not handle.
+        { TransmogSlot::Bracelet,      0x14, "Bracelet",      nullptr        , false },
+        // Weapon family slots below stay disabled: every weapon slot emits multiple prefabs per item (mesh,
+        // scabbard, FX and binds), and MainHand/OffHand share tag space when dual-wielding. Re-enabling them needs a
+        // weapon-side swap pipeline plus sub-index disambiguation in SlotPopulator.
+        { TransmogSlot::MainHand,      0x00, "MainHand",      nullptr        , false },
+        { TransmogSlot::OffHand,       0x01, "OffHand",       nullptr        , false },
+        { TransmogSlot::Ranged,        0x02, "Ranged",        nullptr        , false },
+        { TransmogSlot::SubWeapon,     0x0C, "SubWeapon",     nullptr        , false },
+        // displayName is trimmed to "TwoHand" so it fits the overlay's slot column. It is what `slot_name()` and
+        // `game_slot_name()` both return for this slot.
+        { TransmogSlot::TwoHandWeapon, 0x0D, "TwoHand",       nullptr        , false },
+        // Tool stays disabled: the gathering-tool mesh family has not been identified. OffHand2 and Ranged2 are the
+        // engine's overflow parking slots for a weapon whose primary slot is taken.
+        { TransmogSlot::Tool,          0x0E, "Tool",          nullptr        , false },
+        { TransmogSlot::OffHand2,      0x17, "OffHand2",      nullptr        , false },
+        { TransmogSlot::Ranged2,       0x18, "Ranged2",       nullptr        , false },
         // Tag 0x15 "OongkaRocket" intentionally omitted -- see TransmogSlot enum comments in shared_state.hpp.
         // clang-format on
     };
@@ -271,6 +278,52 @@ namespace Transmog
             return TransmogSlot::Backpack;
 
         return std::nullopt;
+    }
+
+    /// Sentinel meaning "no slot named" wherever a game tag is passed or returned as an unsigned word.
+    inline constexpr std::uint16_t k_noGameTag = 0xFFFF;
+
+    /**
+     * @brief For the SECOND half of a paired slot, the game tag of the FIRST half. @ref k_noGameTag otherwise.
+     *
+     * @details The engine resolves an item to a slot by walking the character's candidate list and taking the first
+     *          entry that validates. Both halves of a pair share one item type, so the first half always wins and the
+     *          second is unreachable. Knowing the first half's tag allows it to be excluded for one equip.
+     * @note The tags are read out of @ref k_slotMetadata rather than restated, so a patch that renumbers the column
+     *       cannot leave this function pointing at the old value.
+     */
+    inline constexpr std::uint16_t paired_first_half_tag(TransmogSlot s) noexcept
+    {
+        const auto tag_of = [](TransmogSlot first) constexpr
+        { return static_cast<std::uint16_t>(k_slotMetadata[static_cast<std::size_t>(first)].gameTag); };
+        if (s == TransmogSlot::Earring2)
+            return tag_of(TransmogSlot::Earring1);
+        if (s == TransmogSlot::Ring2)
+            return tag_of(TransmogSlot::Ring1);
+        return k_noGameTag;
+    }
+
+    // The pair tags themselves are deliberately NOT pinned to literals here: they are derived from k_slotMetadata so
+    // a renumbered column propagates on its own, and a live mismatch is reported by the TAG DRIFT check in
+    // real_part_tear_down.cpp. What is pinned is this function's own contract -- a slot that is not the second half
+    // of a pair must name no first half, or the apply path would exclude an unrelated slot from resolution.
+    static_assert(paired_first_half_tag(TransmogSlot::Helm) == k_noGameTag, "only paired slots may name a first half");
+    static_assert(paired_first_half_tag(TransmogSlot::Earring1) == k_noGameTag,
+                  "the FIRST half of a pair must name no first half");
+
+    /**
+     * @brief Does this slot share its item TYPE with a sibling slot?
+     *
+     * @details Both rings report one item type and both earrings another, so an equip that lets the engine derive its
+     *          destination from the item can only ever resolve to the first of the pair -- the second is unreachable.
+     *          These are the only slots that need the destination named explicitly.
+     * @warning Every other slot must NOT name it. The engine's own derivation is already correct there, and forcing
+     *          the issue makes the slot refresh twice, which visibly corrupts it.
+     */
+    inline constexpr bool slot_needs_explicit_destination(TransmogSlot s) noexcept
+    {
+        return s == TransmogSlot::Ring1 || s == TransmogSlot::Ring2 || s == TransmogSlot::Earring1 ||
+               s == TransmogSlot::Earring2;
     }
 
     // Picker-side compatibility: when the user opens slot X's picker in prefab mode with the Exact filter on, prefabs

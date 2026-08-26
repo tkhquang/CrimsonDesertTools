@@ -40,14 +40,23 @@ namespace Transmog
     // clang-format off
     inline constexpr CarrierDefault k_carriers[k_carrierCharCount][k_slotCount] = {
         // ============================================================
-        // Kliff (male). Default carriers per slot from the live slot-discovery dump.
+        // Kliff (male). Armor slots use the Kairos plate set (`Kliff_PlateArmor_*`); the remaining slots come from the
+        // live slot-discovery dump.
+        //
+        // Every armor carrier must RENDER on its own. The prefab-wrapper swap supplies the visual by redirecting the
+        // carrier's own mesh, so a carrier whose prefab never resolves to a live wrapper produces an EMPTY slot
+        // rather than a swapped one.
+        //
+        // The Kairos set is chosen for that: every piece is catalog-resident, non-variant, and resolves to a bare
+        // prefab name that yields a real wrapper. The previous helm carrier (`Scovi_Fabric_Helm`) is the exact failure
+        // this guards against -- the same bare-helm-name no-op already documented for Oongka's Lardein helm below.
         // ============================================================
         {
-            { "Scovi_Fabric_Helm"                            }, // Helm
-            { "Mercenary_Leather_Armor"                      }, // Chest
-            { "Mercenary_Leather_Cloak"                      }, // Cloak
-            { "Mercenary_Gloves"                             }, // Gloves
-            { "Mercenary_Leather_Boots"                      }, // Boots
+            { "Kliff_PlateArmor_Helm"                        }, // Helm
+            { "Kliff_PlateArmor_Armor"                       }, // Chest
+            { "Kliff_PlateArmor_Cloak"                       }, // Cloak
+            { "Kliff_PlateArmor_Gloves"                      }, // Gloves
+            { "Kliff_Plate_Boots"                            }, // Boots
             { "Hexe_Earring"                                 }, // Earring1
             { "Ancient_People_Earring"                       }, // Earring2
             { "Titan_Necklace"                               }, // Necklace
@@ -136,11 +145,14 @@ namespace Transmog
         // pool: the bare name must yield no wrapper, and the `_dd` name must yield one.
         // ============================================================
         {
-            { "Lardein_Fabric_Helm"                          }, // Helm (see _dd note above)
-            { "Oongka_Basic_Leather_Armor"                   }, // Chest
-            { "Oongka_Basic_Leather_Cloak"                   }, // Cloak
-            { "Oongka_Basic_Leather_Gloves"                  }, // Gloves
-            { "Langust_Leather_Boots"                        }, // Boots
+            // Oongka's plate set exists only in tiered form (_II Valortread, _III Belkandor); there is no bare
+            // `Oongka_PlateArmor_Helm`. Both tiers are complete five-piece sets, so unlike Kliff this row needs no
+            // odd boots exception.
+            { "Oongka_PlateArmor_Helm_III"                   }, // Helm
+            { "Oongka_PlateArmor_Armor_III"                  }, // Chest
+            { "Oongka_PlateArmor_Cloak_III"                  }, // Cloak
+            { "Oongka_PlateArmor_Gloves_III"                 }, // Gloves
+            { "Oongka_PlateArmor_Boots_III"                  }, // Boots
             { "Bilibili_Earring"                             }, // Earring1
             { "WhiteHorn_Earring"                            }, // Earring2
             { "Bilibili_Necklace"                            }, // Necklace
@@ -175,6 +187,23 @@ namespace Transmog
         if (name == "Oongka")
             return CarrierChar::Oongka;
         return std::nullopt;
+    }
+
+    /// Character name for a CarrierChar. Inverse of @ref carrier_char_from_name; the names are the same keys
+    /// PresetManager stores per-character state under.
+    inline constexpr std::string_view carrier_char_name(CarrierChar c) noexcept
+    {
+        switch (c)
+        {
+        case CarrierChar::Kliff:
+            return "Kliff";
+        case CarrierChar::Damiane:
+            return "Damiane";
+        case CarrierChar::Oongka:
+            return "Oongka";
+        default:
+            return {};
+        }
     }
 
     inline constexpr const CarrierDefault &carrier_for(CarrierChar c, TransmogSlot s) noexcept

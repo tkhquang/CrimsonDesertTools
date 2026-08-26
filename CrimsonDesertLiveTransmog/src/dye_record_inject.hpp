@@ -57,6 +57,32 @@ namespace Transmog::DyeRecordInject
     };
 
     /**
+     * @brief Dye-record vector geometry.
+     *
+     * @details The same {qword data, u32 count, u32 capacity} header sits at this offset on BOTH an auth-table entry
+     *          and the DyeCopier destination struct -- the two structures share the layout. It is published here so
+     *          every consumer reads one copy: the injector, the capture path and the socket override all walk the
+     *          same vector.
+     * @note The offset moves with the auth-table entry geometry (see auth_table.hpp) on patch day. A stale value
+     *       lands on the neighbouring field and dereferences a garbage pointer instead of failing closed.
+     */
+    inline constexpr std::size_t k_dyeVectorOffset = 0x78; // vector header, from the record / entry base
+    inline constexpr std::size_t k_vecDataOffset = 0x00;   // within the header: qword heap ptr
+    inline constexpr std::size_t k_vecCountOffset = 0x08;  // within the header: u32 valid record count
+    inline constexpr std::size_t k_dyeRecordSize = 16;
+
+    /**
+     * @brief Fill one 16-byte ARMOR_MOD record.
+     * @details The single writer for the field layout documented on @ref ChannelState above. Callers must not
+     *          open-code it, or the layout ends up stated in as many places as there are producers.
+     * @param out Destination, at least @ref k_dyeRecordSize bytes.
+     * @param channel_idx Channel this record describes, below @ref k_dyeChannelCount.
+     */
+    void build_dye_record(std::uint8_t *out, std::size_t channel_idx, std::uint32_t group_hash, std::uint8_t r,
+                          std::uint8_t g, std::uint8_t b, std::uint16_t material_id,
+                          std::uint8_t repair_byte) noexcept;
+
+    /**
      * Resolve target functions via AOB cascades and install hooks. Returns true on success. Failure to resolve any
      * required target disables injection (logged as a warning); the rest of LT continues to function.
      */

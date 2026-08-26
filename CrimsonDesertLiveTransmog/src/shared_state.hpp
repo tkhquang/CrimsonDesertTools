@@ -18,9 +18,6 @@ namespace Transmog
         uintptr_t safeTearDown = 0;        // sub_14075FE60 -- scene-graph tear-down used by real_part_tear_down
         uintptr_t indexedStringLookup = 0; // sub_1402D75D0 -- IndexedStringA short->hash; resolved via ItemNameTable
                                            // chain walk (50+ template siblings prevent direct AOB)
-        uintptr_t charClassBypass = 0; // jz byte in the CondPrefab evaluator's char-class hash check (AOB-resolved via
-                                       // k_charClassBypassCandidates -- moved to a new function on v1.13.00). Toggle
-                                       // 0x74<->0xEB for NPC/variant item support.
     };
 
     ResolvedAddresses &resolved_addrs();
@@ -71,10 +68,9 @@ namespace Transmog
         // transmog value for the typical case. To re-enable, add an `OongkaRocket, // engine tag 0x15` row here AND
         // extend every per-slot table that indexes by TransmogSlot:
         //   slot_metadata.hpp       (k_slotMetadata -- master row:
-        //                            gameTag, displayName, prefab
-        //                            prefixes, partShowHashKey, enabled)
-        //   carrier_defaults.hpp    (k_carriers -- one carrier item +
-        //                            prefab per character per slot)
+        //                            gameTag, displayName, partShowHashKey, enabled)
+        //   carrier_defaults.hpp    (k_carriers -- one carrier item
+        //                            per character per slot)
         //   prefab_wrapper_swap.cpp (k_slotTagPatterns -- registry
         //                            classifier patterns)
         Count
@@ -89,6 +85,29 @@ namespace Transmog
     };
 
     std::array<SlotMapping, k_slotCount> &slot_mappings();
+
+    /**
+     * @brief Which protagonist owns this equip-slot component (`a1`), 1-based, or 0.
+     *
+     * @details Resolved from the LIVE actor chain -- snapshot_body_cache enumerates the player CCOIAs with their
+     *          character index, and equip_slot_for_ccoia maps each to the `a1` LT applies against. Returns 0 for
+     *          companions, NPCs and wildlife, and while the chain is mid-teardown.
+     * @warning Use this, NOT resolve_player_component(), to answer "whose body is this?". resolve_player_component()
+     *          always returns Kliff's component whatever character is controlled, so comparing against it silently
+     *          accepts every other character's body.
+     */
+    [[nodiscard]] std::uint32_t char_idx_for_equip_slot(std::uintptr_t a1) noexcept;
+
+    /**
+     * @brief Which character `slot_mappings()` currently describes: 1 Kliff, 2 Damiane, 3 Oongka, 0 unbound.
+     *
+     * @details `slot_mappings()` is ONE global array reused for whichever character is being edited or applied, so on
+     *          its own it cannot say whose targets it holds. Set by PresetManager::apply_to_state, the only place a
+     *          different character's preset is loaded in.
+     * @warning Anything that writes per-character state derived from `slot_mappings()` must check this against the
+     *          character it is writing FOR, or one character's preset lands in another's bucket.
+     */
+    std::atomic<std::uint32_t> &slot_mappings_owner() noexcept;
 
     /**
      * Item IDs that were last written to slot_mappings (saved before preset switch). Used by clear_all_transmog to know
@@ -172,6 +191,23 @@ namespace Transmog
     using SlotPopulatorFn = __int64(__fastcall *)(__int64 a1, unsigned __int16 *a2_itemData, __int64 a3_swapEntry);
     SlotPopulatorFn &slot_populator_fn();
 
+    // Rebuilds a single slot's visual. f(a1, slotA, slotB, swapEntry) -- BOTH slot arguments must name the slot to
+    // refresh. SlotPopulator passes the item-derived slot for the first, which collapses the two halves of a paired
+    // slot onto one. Null when the AOB scan missed.
+    using PartSlotRefreshFn = __int64(__fastcall *)(__int64 a1, __int16 slotA, __int16 slotB, __int64 a4_swapEntry);
+    PartSlotRefreshFn &part_slot_refresh_fn();
+
+    // Resolves a slot TAG to the slot HANDLE PartSlotRefresh needs for its second argument. Writes 0xFFFF when the
+    // tag names no live part record.
+    using SlotTagToHandleFn = std::uint16_t *(__fastcall *)(__int64 a1, std::uint16_t *out, std::uint16_t slotTag,
+                                                            char flag);
+    SlotTagToHandleFn &slot_tag_to_handle_fn();
+
+    // Item -> slot handle, or 0xFFFF when the engine will not place the item. SlotPopulator calls this first and
+    // bails on 0xFFFF, so it decides whether a carrier can be equipped at all.
+    using ItemToSlotResolveFn = std::int64_t(__fastcall *)(std::int64_t a1, std::int16_t itemId);
+    ItemToSlotResolveFn &item_to_slot_resolve_fn();
+
     // sub_141D451B0: Initializes a swap entry to defaults (all -1/zeros).
     using InitSwapEntryFn = __int64(__fastcall *)(__int64 dest);
     InitSwapEntryFn &init_swap_entry_fn();
@@ -180,13 +216,11 @@ namespace Transmog
     // Atomics and arrays accessed by multiple translation units (hooks, workers, apply logic). Accessor pattern mirrors
     // the flag/fn-ptr accessors above to keep linkage internal to shared_state.cpp.
 
-    /// Recursion guard: prevents infinite loop when SlotPopulator calls VEC.
+    /// Recursion guard: set while LT is driving an apply, so its own engine calls are not treated as the
+    /// player's. Read by SocketMeshOverride and the prefab-swap hooks.
     std::atomic<bool> &in_transmog();
 
-    /// Suppress VEC hook scheduling during clear+apply cycle.
-    std::atomic<bool> &suppress_vec();
-
-    /// Last known player a1 (captured from BatchEquip hook / VEC hook).
+    /// Last known player a1 (resolved lazily, and stored by the load-detect thread each poll).
     std::atomic<__int64> &player_a1();
 
     /**

@@ -79,11 +79,19 @@ namespace Transmog
         // wearer body-class token array at entry+0x40 with its count at +0x48. The dump links every entry's mesh
         // regardless of which body selects it, so it does not need those two.
         //
-        // The list offset and its count offset move when the item descriptor is reshaped. The entry stride 0x58 and the
-        // per-entry mesh pointer at +0x10 stay put across such a reshape. The BodyVariantResolver walks the same list,
-        // so its disassembly is the independent cross-check for new values on patch day.
-        constexpr ptrdiff_t kOffDescVariantEntries = 0x408;
-        constexpr ptrdiff_t kOffDescVariantCount = 0x410;
+        // The list offset and its count offset move when the item descriptor is reshaped, and they move ALONE: a
+        // past reshape pushed them forward while the neighbouring rule list and variant-meta pointer stayed put, so
+        // the growth is local and cannot be extrapolated from any other field. The entry stride 0x58 and the
+        // per-entry mesh pointer at +0x10 do stay put across such a reshape.
+        //
+        // A stale pair fails SILENTLY: the read returns a non-pointer or an absurd count, resolve_variant_meshes
+        // returns empty, and every target reports "variant meshes [<none>] absent from this slot's catalog" while the
+        // catalog itself looks healthy. That is why `resolve_variant_list_offset` below probes rather than trusting
+        // the nominal value.
+        constexpr ptrdiff_t kOffDescVariantEntriesNominal = 0x418;
+        constexpr ptrdiff_t kOffDescVariantProbeLow = 0x380;
+        constexpr ptrdiff_t kOffDescVariantProbeHigh = 0x480;
+        constexpr ptrdiff_t kOffDescVariantCountDelta = 0x08; // count sits immediately after the pointer
         constexpr ptrdiff_t kVariantEntryStride = 0x58;
         constexpr ptrdiff_t kOffEntryMesh = 0x10; // pointer into the variant table -> mesh handle
         constexpr uint32_t kVariantEntryCap = 32;
@@ -720,15 +728,104 @@ namespace Transmog
         // (`..._dropitem_...`) is skipped, because it is a shared prop, not a wearer variant. Returns the deduplicated
         // meshes in entry order, where the first is the item's default/primary mesh. Returns empty for items with no
         // variant list, which fall back to their icon-derived prefab.
-        std::vector<std::string> resolve_variant_meshes(uintptr_t desc, uintptr_t stringArr,
-                                                        uint32_t stringCount) noexcept
+        /**
+         * Does `off` look like the variant-entry list on this descriptor? Validates the whole shape, not just the
+         * pointer: plausible entries pointer, a sane count, and a first entry whose mesh handle indexes stringinfo.
+         * A neighbouring field can satisfy any one of those on its own; satisfying all three together is what makes
+         * the probe safe to trust.
+         */
+        static bool variant_list_shape_ok(uintptr_t desc, ptrdiff_t off, uint32_t stringCount) noexcept
+        {
+            bool ok = false;
+            const uintptr_t entries = read_qword_safe(desc + off, ok);
+            if (!ok || !DMKMemory::plausible_userspace_ptr(entries))
+                return false;
+            const uint32_t count = read_u32_safe(desc + off + kOffDescVariantCountDelta, ok);
+            if (!ok || count == 0 || count > kVariantEntryCap)
+                return false;
+            const uintptr_t meshPtr = read_qword_safe(entries + kOffEntryMesh, ok);
+            if (!ok || !DMKMemory::plausible_userspace_ptr(meshPtr))
+                return false;
+            const uintptr_t handle = read_qword_safe(meshPtr, ok);
+            if (!ok)
+                return false;
+            const uint16_t slot = static_cast<uint16_t>(handle & 0xFFFFu);
+            return slot != 0xFFFF && slot < stringCount;
+        }
+
+        /**
+         * Resolve the variant-list offset once per session, self-healing across a descriptor reshape.
+         *
+         * The nominal value is tried first and is what a healthy build uses. When a patch moves the field, the probe
+         * walks a bounded window and adopts the first offset that validates on several DIFFERENT items -- several,
+         * because a single item can have a neighbouring field that coincidentally passes. Drift is logged as a
+         * WARNING even though it self-corrected, so patch day is visible in the log rather than silent.
+         */
+        static ptrdiff_t resolve_variant_list_offset(uintptr_t itemArr, uint32_t itemCount,
+                                                     uint32_t stringCount) noexcept
+        {
+            auto &logger = DMK::Logger::get_instance();
+            constexpr uint32_t k_probeSamples = 8;  // distinct items an offset must satisfy
+            constexpr uint32_t k_probeScanCap = 512; // descriptors examined before giving up
+
+            const auto score = [&](ptrdiff_t off) noexcept
+            {
+                uint32_t hits = 0;
+                bool ok = false;
+                for (uint32_t id = 0; id < (std::min)(itemCount, k_probeScanCap) && hits < k_probeSamples; ++id)
+                {
+                    const uintptr_t desc = read_qword_safe(itemArr + static_cast<uintptr_t>(id) * 8, ok);
+                    if (!ok || !DMKMemory::plausible_userspace_ptr(desc))
+                        continue;
+                    if (variant_list_shape_ok(desc, off, stringCount))
+                        ++hits;
+                }
+                return hits;
+            };
+
+            if (score(kOffDescVariantEntriesNominal) >= k_probeSamples)
+                return kOffDescVariantEntriesNominal;
+
+            for (ptrdiff_t off = kOffDescVariantProbeLow; off <= kOffDescVariantProbeHigh; off += 8)
+            {
+                if (off == kOffDescVariantEntriesNominal)
+                    continue;
+                if (score(off) >= k_probeSamples)
+                {
+                    logger.warning("[itemmesh] variant list DRIFTED: nominal {:#x} no longer validates, using {:#x} "
+                                   "({:+#x}). Update kOffDescVariantEntriesNominal in itemmesh_dumper.cpp.",
+                                   kOffDescVariantEntriesNominal, off, off - kOffDescVariantEntriesNominal);
+                    return off;
+                }
+            }
+
+            logger.warning("[itemmesh] variant list NOT FOUND in {:#x}..{:#x} -- per-item mesh derivation is "
+                           "disabled, so targets fall back to the carrier's own visual.",
+                           kOffDescVariantProbeLow, kOffDescVariantProbeHigh);
+            return 0;
+        }
+
+        /// Session cache for the probed offset. Both the solver and the TSV dump walk the same descriptors, so the
+        /// probe runs once rather than once per caller.
+        static ptrdiff_t cached_variant_list_offset(uintptr_t itemArr, uint32_t itemCount,
+                                                    uint32_t stringCount) noexcept
+        {
+            static std::once_flag once;
+            static ptrdiff_t s_off = 0;
+            std::call_once(once,
+                           [&] { s_off = resolve_variant_list_offset(itemArr, itemCount, stringCount); });
+            return s_off;
+        }
+
+        std::vector<std::string> resolve_variant_meshes(uintptr_t desc, uintptr_t stringArr, uint32_t stringCount,
+                                                        ptrdiff_t variantListOff) noexcept
         {
             std::vector<std::string> meshes;
-            if (!desc || !stringArr)
+            if (!desc || !stringArr || variantListOff == 0)
                 return meshes;
             bool ok = false;
-            const uintptr_t entries = read_qword_safe(desc + kOffDescVariantEntries, ok);
-            const uint32_t count = read_u32_safe(desc + kOffDescVariantCount, ok);
+            const uintptr_t entries = read_qword_safe(desc + variantListOff, ok);
+            const uint32_t count = read_u32_safe(desc + variantListOff + kOffDescVariantCountDelta, ok);
             if (!entries || count == 0 || count > kVariantEntryCap)
                 return meshes;
             for (uint32_t e = 0; e < count; ++e)
@@ -824,7 +921,8 @@ namespace Transmog
 
         // Authoritative per-body variant list. Empty for single-rig items -> fall back to the rule-chain primary body
         // mesh so the result is non-empty for any item that owns a real mesh.
-        std::vector<std::string> meshes = resolve_variant_meshes(desc, stringArr, stringCount);
+        std::vector<std::string> meshes = resolve_variant_meshes(
+            desc, stringArr, stringCount, cached_variant_list_offset(itemArr, itemCount, stringCount));
         if (meshes.empty())
         {
             std::string primary = resolve_rule_body_mesh(desc, stringArr, stringCount, std::string_view{});
@@ -1008,7 +1106,8 @@ namespace Transmog
             // mesh equals the icon prefab and this is a no-op.
             // The variant entry list is the authoritative source of every mesh the item uses across bodies. Resolve it
             // once and reuse it for both the primary-prefab recovery below and the per-body-variant linkage in PASS 3.
-            std::vector<std::string> variantMeshes = resolve_variant_meshes(desc, stringArr, stringCount);
+            std::vector<std::string> variantMeshes = resolve_variant_meshes(
+                desc, stringArr, stringCount, cached_variant_list_offset(itemArr, itemCount, stringCount));
 
             std::string bodyMesh = resolve_rule_body_mesh(desc, stringArr, stringCount, strip_rig_prefix(iconPrefab));
             std::string resolvedPrefab;

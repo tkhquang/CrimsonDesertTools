@@ -1,12 +1,14 @@
 #include "transmog.hpp"
 #include "aob_resolver.hpp"
-#include "body_variant_hook.hpp"
+#include "auth_table.hpp"
 #include "color_override/color_override.hpp"
 #include "color_override/color_token_table.hpp"
 #include "color_override/host_scope.hpp"
 #include "dye_record_inject.hpp"
 #include "color_override/setter_substitute.hpp"
 #include "generated/dye_color_table.hpp"
+#include "claim_walk_guard.hpp"
+#include "socket_mesh_override.hpp"
 #include "prefab_wrapper_swap.hpp"
 #include "constants.hpp"
 #include "indexed_string_table.hpp"
@@ -20,7 +22,6 @@
 #include "slot_metadata.hpp"
 #include "overlay.hpp"
 #include "transmog_apply.hpp"
-#include "transmog_hooks.hpp"
 #include "transmog_map.hpp"
 #include "transmog_worker.hpp"
 #include "helm_audio_filter.hpp"
@@ -146,29 +147,8 @@ namespace Transmog
 
     // --- Player-component layout ---
     //
-    // Pointer to the PartDef/auth-table container on the SlotPopulator descriptor (a1). The container is the entry
-    // table used by the capture path:
-    //
-    //   container +0x08  QWORD   entry array base
-    //   container +0x10  DWORD   live entry count
-    //   container +0x14  DWORD   capacity
-    //
-    // The pointer slot itself moves whenever pa::ClientEquipSlotActorComponent grows or shrinks fields in front of it.
-    // A stale offset reads a neighboring field that is not a container pointer, and the capture path then logs
-    // "Capture: no entry table". Verify the offset against live memory on patch day. This constant mirrors
-    // k_containerPtrOffset in real_part_tear_down.cpp, which carries the full silent-failure analysis.
-    constexpr std::ptrdiff_t k_compEntryTablePtrOffset = 0x80;
-
-    // Entry layout within the auth-table array. The stride and the slot-tag offset always move together by 8, so
-    // verify both together. The engine auth-table search loop states both literally:
-    //   `imul rcx,rax,0xD0 ; cmp [rdx+0xC8],r8w ; add rdx,0xD0`
-    //
-    // The primary item id at +0x08 is stable across patches. Slot-tag VALUES are stable too (Helm=0x03, Chest=0x04,
-    // Gloves=0x05, Boots=0x06, Cloak=0x10). Only the position within the entry shifts. These constants mirror
-    // k_entryStride / k_entrySlotTagOffset in real_part_tear_down.cpp.
-    constexpr std::ptrdiff_t k_compEntryStride = 0xD0;
-    constexpr std::ptrdiff_t k_compEntryItemIdOffset = 0x08;
-    constexpr std::ptrdiff_t k_compEntrySlotTagOffset = 0xC8;
+    // Auth-table geometry (container pointer, entry stride, field offsets) lives in auth_table.hpp -- one copy for
+    // the whole mod, because the whole struct moves as a unit on patch day.
 
     // --- Public interface ---
 
@@ -339,20 +319,10 @@ namespace Transmog
 
     // Walks the live auth-table entry array and snapshots each LT-managed slot's dye records into the active preset's
     // SlotDyeChannels through read_entry_dye_records(). The per-entry dye-record vector sits inside the auth entry, so
-    // its offset moves together with k_compEntrySlotTagOffset whenever the entry geometry changes. The authoritative
-    // values live in dye_record_inject.cpp (k_dstDyeVectorOffset for the vector base, k_vecDataOffset and
-    // k_vecCountOffset within it). They currently place the header at these offsets from the entry base:
-    //
-    //   +0x78  qword  data_ptr  -- heap address of contiguous 16-byte records
-    //   +0x80  dword  count     -- number of valid records (0..N)
-    //   +0x84  dword  capacity  -- allocation cap, ignored here
-    //
-    // Each 16-byte record matches DyeRecordInject::ChannelState:
-    //   +0..3   group_hash
-    //   +4..5   material_id
-    //   +6      channel index (0..k_dyeChannelCount-1)
-    //   +7..9   R / G / B
-    //   +11     repair_byte
+    // its offset moves together with the auth-table entry geometry. The vector header and the 16-byte record layout
+    // are declared once in dye_record_inject.hpp (k_dyeVectorOffset / k_vecDataOffset / k_vecCountOffset, and the
+    // field map on ChannelState); this function reaches them only through read_entry_dye_records(), so the offsets are
+    // deliberately NOT restated here.
     //
     // This function is split out of capture_outfit() for the same MSVC C2712 reason as apply_live_dye_to_preset_slot
     // above. The caller's __try/__except therefore covers any access fault from a stale auth table here too, and this
@@ -382,9 +352,9 @@ namespace Transmog
         bool any = false;
         for (uint32_t e = 0; e < entryCount && entryArray > 0x10000; ++e)
         {
-            auto base = entryArray + e * k_compEntryStride;
-            auto gameSlot = *reinterpret_cast<int16_t *>(base + k_compEntrySlotTagOffset);
-            auto itemId = *reinterpret_cast<uint16_t *>(base + k_compEntryItemIdOffset);
+            auto base = entryArray + e * AuthTable::k_entryStride;
+            auto gameSlot = *reinterpret_cast<int16_t *>(base + AuthTable::k_entrySlotTagOffset);
+            auto itemId = *reinterpret_cast<uint16_t *>(base + AuthTable::k_entryItemIdOffset);
             if (itemId == 0 || itemId == 0xFFFF)
                 continue;
             auto tmSlot = slot_from_game_slot(gameSlot);
@@ -428,14 +398,14 @@ namespace Transmog
 
         __try
         {
-            auto entryDesc = *reinterpret_cast<uintptr_t *>(a1 + k_compEntryTablePtrOffset);
+            auto entryDesc = *reinterpret_cast<uintptr_t *>(a1 + AuthTable::k_containerPtrOffset);
             if (entryDesc < 0x10000)
             {
                 logger.warning("Capture: no entry table");
                 return;
             }
-            auto entryArray = *reinterpret_cast<uintptr_t *>(entryDesc + 8);
-            auto entryCount = *reinterpret_cast<uint32_t *>(entryDesc + 16);
+            auto entryArray = *reinterpret_cast<uintptr_t *>(entryDesc + AuthTable::k_containerArrayBaseOffset);
+            auto entryCount = *reinterpret_cast<uint32_t *>(entryDesc + AuthTable::k_containerCountOffset);
 
             logger.info("=== CAPTURE: {} equipment slots ===", entryCount);
 
@@ -452,7 +422,7 @@ namespace Transmog
                     continue;
                 const auto tslot = static_cast<TransmogSlot>(i);
                 const int curSrc = PWS::selection_src_index(tslot);
-                PWS::set_selection(tslot, curSrc, -1);
+                PWS::set_selection(tslot, curSrc, -1, "capture");
             }
 
             for (std::size_t i = 0; i < k_slotCount; ++i)
@@ -466,9 +436,9 @@ namespace Transmog
             int captured = 0;
             for (uint32_t e = 0; e < entryCount && entryArray > 0x10000; ++e)
             {
-                auto base = entryArray + e * k_compEntryStride;
-                auto gameSlot = *reinterpret_cast<int16_t *>(base + k_compEntrySlotTagOffset);
-                auto itemId = *reinterpret_cast<uint16_t *>(base + k_compEntryItemIdOffset);
+                auto base = entryArray + e * AuthTable::k_entryStride;
+                auto gameSlot = *reinterpret_cast<int16_t *>(base + AuthTable::k_entrySlotTagOffset);
+                auto itemId = *reinterpret_cast<uint16_t *>(base + AuthTable::k_entryItemIdOffset);
 
                 logger.info("  Slot {:>2} ({:<12}) = item {:#06x}", gameSlot, game_slot_name(gameSlot), itemId);
 
@@ -520,7 +490,7 @@ namespace Transmog
                 continue;
             const auto tslot = static_cast<TransmogSlot>(i);
             const int curSrc = PWS::selection_src_index(tslot);
-            PWS::set_selection(tslot, curSrc, -1);
+            PWS::set_selection(tslot, curSrc, -1, "capture");
         }
 
         for (std::size_t i = 0; i < k_slotCount; ++i)
@@ -533,17 +503,17 @@ namespace Transmog
 
         __try
         {
-            auto entryDesc = *reinterpret_cast<uintptr_t *>(a1 + k_compEntryTablePtrOffset);
+            auto entryDesc = *reinterpret_cast<uintptr_t *>(a1 + AuthTable::k_containerPtrOffset);
             if (entryDesc < 0x10000)
                 return;
-            auto entryArray = *reinterpret_cast<uintptr_t *>(entryDesc + 8);
-            auto entryCount = *reinterpret_cast<uint32_t *>(entryDesc + 16);
+            auto entryArray = *reinterpret_cast<uintptr_t *>(entryDesc + AuthTable::k_containerArrayBaseOffset);
+            auto entryCount = *reinterpret_cast<uint32_t *>(entryDesc + AuthTable::k_containerCountOffset);
 
             for (uint32_t e = 0; e < entryCount && entryArray > 0x10000; ++e)
             {
-                auto base = entryArray + e * k_compEntryStride;
-                auto gameSlot = *reinterpret_cast<int16_t *>(base + k_compEntrySlotTagOffset);
-                auto itemId = *reinterpret_cast<uint16_t *>(base + k_compEntryItemIdOffset);
+                auto base = entryArray + e * AuthTable::k_entryStride;
+                auto gameSlot = *reinterpret_cast<int16_t *>(base + AuthTable::k_entrySlotTagOffset);
+                auto itemId = *reinterpret_cast<uint16_t *>(base + AuthTable::k_entryItemIdOffset);
 
                 auto tmSlot = slot_from_game_slot(gameSlot);
                 if (tmSlot.has_value() && itemId != 0 && itemId != 0xFFFF)
@@ -568,15 +538,15 @@ namespace Transmog
         uintptr_t entryBase = 0;
         __try
         {
-            const auto entryDesc = *reinterpret_cast<uintptr_t *>(a1 + k_compEntryTablePtrOffset);
+            const auto entryDesc = *reinterpret_cast<uintptr_t *>(a1 + AuthTable::k_containerPtrOffset);
             if (entryDesc < 0x10000)
                 return 0;
-            const auto entryArray = *reinterpret_cast<uintptr_t *>(entryDesc + 8);
-            const auto entryCount = *reinterpret_cast<uint32_t *>(entryDesc + 16);
+            const auto entryArray = *reinterpret_cast<uintptr_t *>(entryDesc + AuthTable::k_containerArrayBaseOffset);
+            const auto entryCount = *reinterpret_cast<uint32_t *>(entryDesc + AuthTable::k_containerCountOffset);
             for (uint32_t e = 0; e < entryCount && entryArray > 0x10000; ++e)
             {
-                const auto base = entryArray + e * k_compEntryStride;
-                const auto sl = *reinterpret_cast<int16_t *>(base + k_compEntrySlotTagOffset);
+                const auto base = entryArray + e * AuthTable::k_entryStride;
+                const auto sl = *reinterpret_cast<int16_t *>(base + AuthTable::k_entrySlotTagOffset);
                 if (sl == gameTag)
                 {
                     entryBase = base;
@@ -696,31 +666,74 @@ namespace Transmog
 
         // --- Resolve AOB addresses ---
         //
-        // These six targets are independent: each scans a static candidate table and none reads another's resolved
-        // address. They all live in the host EXE, so resolve them in one fork-join batch rather than six serial
-        // host-module scans. Each per-target validation and side-effect block below runs in the batch order, and every
-        // block touches only its own address, so the hoisted scans preserve behavior. The initBatch order defines the
-        // initAddrs order.
+        // These targets are independent: each scans a static candidate table and none reads another's resolved
+        // address. They all live in the host EXE, so resolve them in one fork-join batch rather than one serial
+        // host-module scan each. Each per-target validation and side-effect block below runs in the batch order, and
+        // every block touches only its own address, so the hoisted scans preserve behavior.
+        //
+        // The InitAddr enumerators ARE the initBatch order. Index the results through them and never through a
+        // literal or an offset from the end -- inserting a row otherwise silently re-points every later consumer.
 
         auto &addrs = resolved_addrs();
 
-        const CDCore::Glue::BatchRequest initBatch[] = {
-            {k_slotPopulatorCandidates, "SlotPopulator"}, {k_mapLookupCandidates, "MapLookup"},
-            {k_subTranslatorCandidates, "SubTranslator"}, {k_safeTearDownCandidates, "SafeTearDown"},
-            {k_initSwapEntryCandidates, "InitSwapEntry"}, {k_charClassBypassCandidates, "CharClassBypass"},
+        enum InitAddr : std::size_t
+        {
+            SlotPopulatorAddr = 0,
+            MapLookupAddr,
+            SubTranslatorAddr,
+            SafeTearDownAddr,
+            InitSwapEntryAddr,
+            PartSlotRefreshAddr,
+            SlotTagToHandleAddr,
+            InitAddrCount,
         };
+
+        const CDCore::Glue::BatchRequest initBatch[] = {
+            {k_slotPopulatorCandidates, "SlotPopulator"},   {k_mapLookupCandidates, "MapLookup"},
+            {k_subTranslatorCandidates, "SubTranslator"},   {k_safeTearDownCandidates, "SafeTearDown"},
+            {k_initSwapEntryCandidates, "InitSwapEntry"},   {k_partSlotRefreshCandidates, "PartSlotRefresh"},
+            {k_slotTagToHandleCandidates, "SlotTagToHandle"},
+        };
+        static_assert(std::size(initBatch) == InitAddrCount, "InitAddr must mirror initBatch one-for-one");
         std::uintptr_t initAddrs[std::size(initBatch)] = {};
         CDCore::Glue::resolve_address_batch(initBatch, initAddrs);
 
         // SlotPopulator: the KEY function for transmog.
-        addrs.slotPopulator = initAddrs[0];
+        addrs.slotPopulator = initAddrs[SlotPopulatorAddr];
+
+        // PartSlotRefresh: rebuilds ONE slot's visual. SlotPopulator calls it with the slot derived from the ITEM,
+        // which is the same value for both halves of a paired slot, so an apply to the second half rebuilds the
+        // first. Calling it directly with the intended slot is what reaches the other half.
+        {
+            const auto refreshAddr = initAddrs[PartSlotRefreshAddr];
+            const auto tagToHandleAddr = initAddrs[SlotTagToHandleAddr];
+            if (tagToHandleAddr)
+            {
+                slot_tag_to_handle_fn() = reinterpret_cast<SlotTagToHandleFn>(tagToHandleAddr);
+                logger.info("SlotTagToHandle resolved at {:#x}", tagToHandleAddr);
+            }
+            else
+            {
+                logger.warning("SlotTagToHandle AOB scan failed -- paired slots cannot be refreshed");
+            }
+            if (refreshAddr)
+            {
+                part_slot_refresh_fn() = reinterpret_cast<PartSlotRefreshFn>(refreshAddr);
+                logger.info("PartSlotRefresh resolved at {:#x}", refreshAddr);
+            }
+            else
+            {
+                logger.warning("PartSlotRefresh AOB scan failed -- the second half of a paired slot "
+                               "(Ring2/Earring2) will not refresh");
+            }
+        }
 
         if (!addrs.slotPopulator)
             logger.warning("SlotPopulator AOB scan failed -- transmog will not work");
 
         // MapLookup: IndexedStringA::lookup. Not hooked -- RIP anchor for scan_indexed_string_table(). Must be resolved
         // before PartShowSuppress::init_slot_hashes.
-        addrs.mapLookup = initAddrs[1];
+        addrs.mapLookup = initAddrs[MapLookupAddr];
 
         if (addrs.mapLookup)
         {
@@ -738,11 +751,15 @@ namespace Transmog
                            "PartShowSuppress will be inert this session");
         }
 
-        // SubTranslator: anchor for the item-name catalog scan.
-        addrs.subTranslator = initAddrs[2];
-
+        // SubTranslator: anchor for the item-name catalog scan, and the item -> slot resolver LT calls to ask whether
+        // a carrier can be placed at all. One function, both roles -- see its cascade doc in aob_resolver.hpp.
+        addrs.subTranslator = initAddrs[SubTranslatorAddr];
         if (addrs.subTranslator)
         {
+            // Wire the resolver BEFORE the catalog build: the build can take the deferred path and hand off to the
+            // worker, and nothing downstream should have to care whether the pointer landed first.
+            item_to_slot_resolve_fn() = reinterpret_cast<ItemToSlotResolveFn>(addrs.subTranslator);
+
             using BR = ItemNameTable::BuildResult;
             const auto result = ItemNameTable::instance().build(addrs.subTranslator);
             if (result == BR::Ok)
@@ -787,12 +804,12 @@ namespace Transmog
         }
         else
         {
-            logger.warning("SubTranslator AOB scan failed -- cannot build item-name table, "
-                           "presets will fall back to raw itemId only");
+            logger.warning("SubTranslator AOB scan failed -- cannot build the item-name table (presets fall back to "
+                           "raw itemIds) and carrier equip-eligibility checks are unavailable");
         }
 
         // SafeTearDown: scene-graph tear-down.
-        addrs.safeTearDown = initAddrs[3];
+        addrs.safeTearDown = initAddrs[SafeTearDownAddr];
         if (!addrs.safeTearDown)
         {
             logger.warning("SafeTearDown AOB scan failed -- real_part_tear_down will "
@@ -801,7 +818,7 @@ namespace Transmog
 
         // InitSwapEntry: zero-init helper for the 0x80-byte swap entry passed to SlotPopulator.
         {
-            auto iseAddr = initAddrs[4];
+            auto iseAddr = initAddrs[InitSwapEntryAddr];
 
             if (iseAddr && !DMK::Scanner::is_likely_function_prologue(iseAddr))
             {
@@ -821,41 +838,6 @@ namespace Transmog
                 logger.warning("InitSwapEntry AOB scan failed -- transmog apply will "
                                "be disabled this session");
             }
-        }
-
-        // CharClassBypass: single-byte patch site in CondPrefab evaluator. Toggled 0x74<->0xEB around each carrier
-        // apply so NPC items pass the character-class hash check.
-        addrs.charClassBypass = initAddrs[5];
-        if (addrs.charClassBypass)
-        {
-            // Verify the resolved byte is 0x74 (jz). SEH-isolated via noinline lambda (C++ objects in parent block
-            // unwinding).
-            uint8_t probe = 0;
-            [&]() __declspec(noinline)
-            {
-                __try
-                {
-                    probe = *reinterpret_cast<volatile uint8_t *>(addrs.charClassBypass);
-                }
-                __except (EXCEPTION_EXECUTE_HANDLER)
-                {
-                    probe = 0;
-                }
-            }();
-            if (probe == 0x74)
-                logger.info("CharClassBypass at 0x{:X} (byte=0x{:02X} OK)", addrs.charClassBypass, probe);
-            else
-            {
-                logger.warning("CharClassBypass at 0x{:X} byte=0x{:02X} "
-                               "(expected 0x74) -- disabling",
-                               addrs.charClassBypass, probe);
-                addrs.charClassBypass = 0;
-            }
-        }
-        else
-        {
-            logger.warning("CharClassBypass AOB scan failed -- NPC-variant transmog "
-                           "will fall back to direct apply (may not render)");
         }
 
         // --- Load presets ---
@@ -890,72 +872,20 @@ namespace Transmog
             }
         }
 
-        // BatchEquip: THE equip trigger function.
-        {
-            auto beAddr = resolve_address(k_batchEquipCandidates, std::size(k_batchEquipCandidates), "BatchEquip");
-
-            if (beAddr && !DMK::Scanner::is_likely_function_prologue(beAddr))
-            {
-                logger.warning("BatchEquip resolved to 0x{:X} but prologue byte "
-                               "looks wrong -- rejecting",
-                               beAddr);
-                beAddr = 0;
-            }
-
-            if (beAddr)
-            {
-                BatchEquipFn trampoline = nullptr;
-                auto result = hookMgr.create_inline_hook("BatchEquip", beAddr, reinterpret_cast<void *>(on_batch_equip),
-                                                         reinterpret_cast<void **>(&trampoline));
-
-                if (result.has_value())
-                {
-                    orig_batch_equip() = trampoline;
-                }
-                else
-                {
-                    logger.warning("BatchEquip hook failed: {}", DetourModKit::Hook::error_to_string(result.error()));
-                }
-            }
-            else
-            {
-                logger.warning("BatchEquip AOB scan failed -- transmog equip trigger disabled");
-            }
-        }
-
-        // VEC hook: catches unequip events to re-apply transmog.
-        {
-            auto vecAddr = resolve_address(k_vecCandidates, std::size(k_vecCandidates), "VEC");
-            if (vecAddr && !DMK::Scanner::is_likely_function_prologue(vecAddr))
-            {
-                logger.warning("VEC resolved to 0x{:X} but prologue byte looks "
-                               "wrong -- rejecting",
-                               vecAddr);
-                vecAddr = 0;
-            }
-            if (vecAddr)
-            {
-                VisualEquipChangeFn trampoline = nullptr;
-                auto result = hookMgr.create_inline_hook("VEC", vecAddr, reinterpret_cast<void *>(on_vec),
-                                                         reinterpret_cast<void **>(&trampoline));
-                if (result.has_value())
-                {
-                    orig_vec() = trampoline;
-                }
-                else
-                {
-                    logger.warning("VEC hook failed: {}", DetourModKit::Hook::error_to_string(result.error()));
-                }
-            }
-        }
-
-        // BodyVariantHook lets each character render its correct per-body mesh variant on transmog. It keeps the
-        // engine's natural per-body match and forces entry[0] only for items the wearer cannot equip. It supersedes
-        // the transmog-side char-class bypass toggling (see body_variant_hook.hpp). If either of its AOBs fails to
-        // resolve, install() returns false and BodyVariantHook::is_active() stays false. The apply path then falls
-        // back to the legacy bypass force (see legacy_bypass_force_needed in transmog_apply.cpp), so a failed hook
-        // cannot block transmog rendering.
-        (void)BodyVariantHook::install();
+        // Deliberately NO BatchEquip or VisualEquipChange hook.
+        //
+        // Both would only notice a real equip change and schedule an apply that re-dresses the slot afterwards, which
+        // is what makes the real item visible in the meantime. SocketMeshOverride overrides the mesh and its dye as
+        // the part is BUILT, so the slot is already correct before anything is drawn, and it covers changes neither
+        // hook sees: an item-to-item replace bypasses VisualEquipChange entirely, and several further callers reach
+        // the same builder.
+        //
+        // The other jobs those hooks did are covered elsewhere. The player component is cached lazily through
+        // resolve_player_component and stored by the load-detect thread each poll; the per-character ledger reset on
+        // an actor change is the load-detect thread's body-change branch.
+        //
+        // If a slot ever keeps a stale look until the UI is touched, that is the case to re-examine: the override
+        // only fires when the engine BUILDS a part, so a visual change with no rebuild has nothing driving it.
 
         // PartAddShow inline hook -- transition-flash polish.
         //
@@ -1038,7 +968,17 @@ namespace Transmog
             }
         }
 
+        // Install BEFORE anything can drive an equip or a tear-down. The guard makes the engine's claim-vector
+        // walks tolerate the null-owner window its own non-atomic erase opens; until it is in place, any erase that
+        // overlaps a walk on a job thread can fault. See claim_walk_guard.hpp.
+        // Each install() logs its own failure, and neither is fatal, so the result is deliberately discarded.
+        (void)ClaimWalkGuard::install();
+
         PrefabWrapperSwap::init();
+
+        // Override the mesh a socket is about to wear, so a real item is never built for a slot LT is dressing.
+        // Installed after PWS because it reads PWS's per-slot target. See socket_mesh_override.hpp.
+        (void)SocketMeshOverride::install();
 
         // Helm-audio filter. It intervenes at the passive-skill REGISTRATION boundary, BEFORE the muffle tag enters
         // the character's skill registry, so no downstream Wwise / RTPC / Switch path ever observes it. The combined
@@ -1126,11 +1066,12 @@ namespace Transmog
 
         PrefabWrapperSwap::shutdown();
 
-        // Full DMK teardown: it removes every managed hook (BatchEquip, VEC, PartAddShow), stops and clears the
-        // InputManager poller together with its registered bindings, stops the ConfigWatcher, and clears the Config
-        // registered-items list. It is idempotent and safe to re-init from on the next Logic-DLL load. Each detour
-        // body snapshots its trampoline pointer at entry and bails to a benign default if the snapshot is null. That
-        // defends the brief drain window between hook removal and DLL unmap.
+        // Full DMK teardown: it removes every managed hook (PartAddShow, the claim-walk guard, the socket-mesh
+        // override and the rest), stops and clears the InputManager poller together with its registered bindings,
+        // stops the ConfigWatcher, and clears the Config registered-items list. It is idempotent and safe to re-init
+        // from on the next Logic-DLL load. Each detour body snapshots its trampoline pointer at entry and bails to a
+        // benign default if the snapshot is null. That defends the brief drain window between hook removal and DLL
+        // unmap.
         DMK_Shutdown();
 
         clear_hotkey_guards();

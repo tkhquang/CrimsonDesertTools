@@ -731,9 +731,10 @@ namespace Transmog
 
         file << root.dump(2);
         logger.info("Presets saved to '{}'", path);
-        // Diagnostic: dump the live swatch tree so the log captures exactly what was persisted alongside the JSON write
-        // event.
-        ColorOverride::SwatchTable::dump_all_slots();
+        // Deliberately no dump_all_slots() here. It walks every row of every populated slot, so an automatic call on
+        // each save buries the log under hundreds of lines describing state the JSON just written already holds. The
+        // function stays available (see color_swatch_table.hpp) for a deliberate, on-demand dump when a colour
+        // problem is actually being chased.
         dye_dirty().store(false, std::memory_order_release);
         // The just-saved state IS the new baseline -- subsequent edits become "dirty" relative to this point.
         capture_dye_snapshot();
@@ -953,7 +954,10 @@ namespace Transmog
 
     void PresetManager::append_from_state()
     {
-        auto &cp = ensure_character(m_editingCharacter);
+        // Snapshot the editing character: the load-detect thread can rotate it mid-call, which would land the
+        // mutation below on one character and the apply_to_state() that follows on another.
+        const std::string editing = m_editingCharacter;
+        auto &cp = ensure_character(editing);
         // Snapshot the OUTGOING preset's swatches so they survive the active-index flip; then wipe live state because
         // the new blank preset has none.
         if (!cp.presets.empty())
@@ -990,7 +994,10 @@ namespace Transmog
 
     void PresetManager::duplicate_current()
     {
-        auto &cp = ensure_character(m_editingCharacter);
+        // Snapshot the editing character: the load-detect thread can rotate it mid-call, which would land the
+        // mutation below on one character and the apply_to_state() that follows on another.
+        const std::string editing = m_editingCharacter;
+        auto &cp = ensure_character(editing);
         const int idx = static_cast<int>(cp.presets.size());
         std::string name = "Preset " + std::to_string(idx);
 
@@ -1017,7 +1024,10 @@ namespace Transmog
 
     void PresetManager::save_as_new_from_state()
     {
-        auto &cp = ensure_character(m_editingCharacter);
+        // Snapshot the editing character: the load-detect thread can rotate it mid-call, which would land the
+        // mutation below on one character and the apply_to_state() that follows on another.
+        const std::string editing = m_editingCharacter;
+        auto &cp = ensure_character(editing);
         const int idx = static_cast<int>(cp.presets.size());
         std::string name = "Preset " + std::to_string(idx);
         auto captured = capture_from_state(name);
@@ -1121,7 +1131,10 @@ namespace Transmog
 
     void PresetManager::next_preset()
     {
-        auto it = m_characters.find(m_editingCharacter);
+        // Snapshot the editing character: the load-detect thread can rotate it mid-call, which would land the
+        // mutation below on one character and the apply_to_state() that follows on another.
+        const std::string editing = m_editingCharacter;
+        auto it = m_characters.find(editing);
         if (it == m_characters.end() || it->second.presets.empty())
             return;
 
@@ -1157,7 +1170,10 @@ namespace Transmog
 
     void PresetManager::prev_preset()
     {
-        auto it = m_characters.find(m_editingCharacter);
+        // Snapshot the editing character: the load-detect thread can rotate it mid-call, which would land the
+        // mutation below on one character and the apply_to_state() that follows on another.
+        const std::string editing = m_editingCharacter;
+        auto it = m_characters.find(editing);
         if (it == m_characters.end() || it->second.presets.empty())
             return;
 
@@ -1221,13 +1237,16 @@ namespace Transmog
 
     void PresetManager::set_active_preset(int index)
     {
-        auto it = m_characters.find(m_editingCharacter);
+        // Snapshot the editing character: the load-detect thread can rotate it mid-call, which would land the
+        // mutation below on one character and the apply_to_state() that follows on another.
+        const std::string editing = m_editingCharacter;
+        auto it = m_characters.find(editing);
         if (it == m_characters.end() || it->second.presets.empty())
             return;
 
         DMK::Logger::get_instance().info("[preset] set_active_preset(index={}) char='{}' "
                                          "(prev_active={})",
-                                         index, m_editingCharacter, it->second.activePreset);
+                                         index, editing, it->second.activePreset);
 
         auto &cp = it->second;
         // Snapshot OUTGOING ColorOverride swatches BEFORE the dye-mod revert. Order matters: the snapshot helper checks
@@ -1308,13 +1327,41 @@ namespace Transmog
         // bails at its activeIdx < 1 guard, and the picked body mesh renders as the bare carrier instead of the chosen
         // prefab. The bind is independent of the preset, so set_selection can still mirror picks into the correct
         // per-char row and the swap arms.
-        PWS::set_active_char_idx(CDCore::character_idx_from_name(m_editingCharacter));
-
-        const auto *p = active_preset();
-        if (!p)
-            return;
+        //
+        // Snapshot the editing character ONCE and resolve everything from that snapshot.
+        //
+        // m_editingCharacter must NOT be read twice here -- once for the bind and again inside active_preset(), which
+        // re-reads the member. The load-detect thread mutates it through set_active_character ->
+        // rotate_editing_target_to, so it can change BETWEEN the two reads: the bind then names one character while
+        // the preset that follows belongs to another, and the restore loop below writes that preset's prefab picks
+        // into the bound character's per-character row. Every later identity check passes, because by then the rows
+        // genuinely ARE the bound character's registered selections, so neither the body ownership guards nor the
+        // mappings-owner stamp can catch it.
+        //
+        // active_preset_of() is the read-only by-name sibling that exists for this reason.
+        const std::string editing = m_editingCharacter;
+        const auto boundIdx = CDCore::character_idx_from_name(editing);
+        PWS::set_active_char_idx(boundIdx);
 
         auto &mappings = slot_mappings();
+
+        const auto *p = active_preset_of(editing);
+        if (!p)
+        {
+            // A character with no saved preset still BINDS above -- see the note there. What must not happen is
+            // returning with the bind pointing at this character while `mappings` still holds the PREVIOUS
+            // character's slots: apply_selections_to_swap_map writes the bound character's bucket from those
+            // mappings, so the last character's targets would end up installed on this one.
+            //
+            // "No preset" means "nothing active", so say that rather than leaving someone else's answer in place.
+            for (std::size_t i = 0; i < k_slotCount; ++i)
+            {
+                mappings[i].active = false;
+                mappings[i].targetItemId = 0;
+            }
+            slot_mappings_owner().store(boundIdx, std::memory_order_release);
+            return;
+        }
 
         // NOTE: must NOT touch last_applied_ids() here. lastIds tracks what apply_all_transmog has actively injected
         // into the game -- the diff logic depends on lastIds holding the PREVIOUS applied state so it can compute
@@ -1357,6 +1404,10 @@ namespace Transmog
             }
         }
 
+        // Stamp ownership only now that `mappings` actually holds this character's slots. Stamping before the fill
+        // leaves a window where the stamp says one character and the contents are still the previous one's.
+        slot_mappings_owner().store(boundIdx, std::memory_order_release);
+
         // Sync body-mesh prefab selections. For each slot, if the preset stores a prefabName, look it up in the slot's
         // catalog and set the PWS target index. Empty prefabName clears the target (slot reverts to plain carrier
         // rendering). When the catalog isn't yet populated (boot heap walk in progress) resolution silently misses; the
@@ -1370,13 +1421,13 @@ namespace Transmog
             // keep a target index live (which the natural-pipeline hook would otherwise still apply against).
             if (!Transmog::slot_enabled(i))
             {
-                PWS::set_selection(tslot, curSrc, -1);
+                PWS::set_selection(tslot, curSrc, -1, "apply_to_state", boundIdx);
                 continue;
             }
             const auto &name = p->slots[i].prefabName;
             if (name.empty())
             {
-                PWS::set_selection(tslot, curSrc, -1);
+                PWS::set_selection(tslot, curSrc, -1, "apply_to_state", boundIdx);
                 continue;
             }
             const auto &cat = PWS::slot_catalog(tslot);
@@ -1389,7 +1440,7 @@ namespace Transmog
                     break;
                 }
             }
-            PWS::set_selection(tslot, curSrc, found);
+            PWS::set_selection(tslot, curSrc, found, "apply_to_state", boundIdx);
         }
     }
 

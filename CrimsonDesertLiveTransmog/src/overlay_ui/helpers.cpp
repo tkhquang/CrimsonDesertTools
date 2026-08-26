@@ -135,7 +135,7 @@ namespace Transmog
             const auto tslot = static_cast<Transmog::TransmogSlot>(i);
             // Clear the body-mesh tgt selection. Source is left intact so future picks reuse the same auto-seeded src.
             const int curSrc = PWS::selection_src_index(tslot);
-            PWS::set_selection(tslot, curSrc, -1);
+            PWS::set_selection(tslot, curSrc, -1, "ui-reset-all");
         }
         // Selections only: the actual swap-map rebuild happens on the next apply via notify_apply_starting (apply-only
         // lifecycle, mirroring the carrier hybrid pattern).
