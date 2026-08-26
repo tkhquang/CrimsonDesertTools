@@ -110,6 +110,9 @@ namespace Transmog::PrefabWrapperSwap
     /**
      * Discard uncommitted prefab picks so a save-load starts from the preset alone. Call before
      * PresetManager::apply_to_state, which re-mirrors the preset's own picks.
+     *
+     * Clears the TARGET column only. The source column is a derived default, seeded once from each character's
+     * carrier item, and nothing re-derives it -- see the note in the definition.
      */
     void resync_to_preset() noexcept;
 

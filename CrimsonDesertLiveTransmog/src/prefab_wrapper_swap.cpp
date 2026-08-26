@@ -3639,10 +3639,17 @@ namespace Transmog::PrefabWrapperSwap
         // away work in progress. A save-load is different: the preset on disk is the truth, and a pick that was never
         // committed to it must not dress the new body. PresetManager::apply_to_state re-mirrors the preset's own
         // picks immediately after this, so clearing here loses nothing the preset still asks for.
+        //
+        // TARGETS ONLY. The source column is not a pick -- nothing in the UI writes it, every set_selection caller
+        // passes the source straight back in unchanged, and ensure_default_sources_seeded derives it from the
+        // character's carrier item exactly once behind a latch that never resets. Clearing it here therefore does not
+        // get re-derived: selection_src_index returns -1 for every slot of every character from the first save-load
+        // or character switch onward, and stays there. The visible symptom is the picker's "Prefabs" checkbox
+        // vanishing everywhere, since that is gated on the slot having a source. The swap itself keeps working, which
+        // is what hides the breakage -- apply_selections_to_swap_map derives its source from the carrier item rather
+        // than from this column. Same reasoning as the note in reset_per_char_state.
         {
             std::scoped_lock lk(s_mapMtx);
-            for (auto &row : s_selSrcIdxPerChar)
-                row.fill(-1);
             for (auto &row : s_selTgtIdxPerChar)
                 row.fill(-1);
         }

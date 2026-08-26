@@ -170,11 +170,11 @@ namespace Transmog
                 ui.navMoved = true;
             }
         }
-        // Prefabs toggle: only meaningful for slots that have a body-mesh carrier (default source from
-        // k_defaultSrcByEnumSlot OR an INI Pair_N_Source). Accessory slots without a mesh carrier (Earring1/2,
-        // Necklace, Ring1/2) get -1 from selection_src_index so the toggle is hidden -- there's no point browsing
-        // prefabs from a slot that can never receive one. Force prefabMode off for those slots so a pre-existing true
-        // value doesn't blank the popup.
+        // Prefabs toggle: only meaningful for slots that have a body-mesh carrier. The source comes from the slot's
+        // carrier item in carrier_defaults.hpp, resolved to a rig mesh at runtime. A slot with no carrier named there
+        // gets -1 from selection_src_index and the toggle is hidden -- there's no point browsing prefabs from a slot
+        // that can never receive one. Force prefabMode off for those slots so a pre-existing true value doesn't blank
+        // the popup.
         {
             const bool slotHasCarrier = (Transmog::PrefabWrapperSwap::selection_src_index(slotCategory) >= 0);
             if (slotHasCarrier)
