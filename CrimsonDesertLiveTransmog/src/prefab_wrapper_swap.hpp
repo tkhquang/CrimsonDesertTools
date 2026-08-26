@@ -92,6 +92,32 @@ namespace Transmog::PrefabWrapperSwap
     std::size_t ensure_armed_for_slot_apply() noexcept;
 
     /**
+     * Mark ONE slot's previous target as stale, so the post-apply sweep removes it.
+     *
+     * The full apply gets this for free: `notify_apply_starting` runs a deactivate cycle that parks every installed
+     * target, the rebuild re-registers only what is still selected, and the sweep detaches the difference. A
+     * single-slot apply cannot use that cycle -- parking everything while only one slot re-installs would sweep the
+     * other slots' live targets off the body -- so it parks just the target it is replacing.
+     *
+     * Without this a single-slot target change parks nothing, the sweep finds no candidates, and the previous mesh
+     * stays on screen. It is the whole reason an Instant-Apply pick behaved differently from Apply All.
+     *
+     * Call BEFORE @ref ensure_armed_for_slot_apply, and only when the target actually changes -- passing the id that
+     * is being re-installed would park the wrappers the sweep is about to see as live.
+     *
+     * @param prevItemId The target being replaced. Zero is a no-op.
+     */
+    void park_slot_target_for_sweep(std::uint16_t prevItemId) noexcept;
+
+    /**
+     * Run the post-apply sweep for a single-slot apply.
+     *
+     * Same sweep `notify_apply_finished` drives, exposed for the path that does not go through it. Detaches parked
+     * wrappers that the just-completed apply did not re-install. Safe with nothing parked -- it returns immediately.
+     */
+    void sweep_after_slot_apply() noexcept;
+
+    /**
      * Notify the module of an upcoming apply's slot itemIds. The itemIds decide between an install pass and a
      * cleanup-only pass. An install pass rebuilds the swap map and activates. A cleanup-only pass (every id zero)
      * deactivates, so the tear-down calls that follow run with the hook in passthrough.

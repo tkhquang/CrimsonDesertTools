@@ -43,8 +43,19 @@ namespace Transmog
      */
     bool refresh_slot_visual(TransmogSlot slot);
 
+    /**
+     * @brief Apply a dye or Color Override change to one slot by rebuilding it -- no tear-down, no re-equip.
+     *
+     * Publishes the slot's dye state exactly as a full apply does and binds the slot for the setter substitute, then
+     * drives the engine's per-slot rebuild. The dye injector sees its state on the next DyeCopier call and Color
+     * Override's material writes are routed while the apply window is open.
+     *
+     * @return false when the rebuild is unavailable, in which case the caller should fall back to a full apply.
+     */
+    bool refresh_slot_appearance(std::size_t slotIdx);
+
     void apply_transmog_with_carrier(__int64 a1, std::uint16_t carrierId, std::uint16_t targetId,
-                                     std::uint16_t slotSel = 0xFFFF);
+                                     std::uint16_t slotSel = 0xFFFF, std::uint16_t excludeTag = 0xFFFF);
 
     /**
      * Resolve the default carrier itemId for a given transmog slot and currently-active character. Each character needs

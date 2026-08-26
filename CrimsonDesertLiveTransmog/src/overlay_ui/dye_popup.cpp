@@ -289,7 +289,9 @@ namespace Transmog
             // Mark unsaved -- picker writes dye directly into the active preset, so a Save button check against
             // slot_mappings can't catch it.
             dye_dirty().store(true, std::memory_order_relaxed);
-            manual_apply_slot(slot);
+            // A dye edit only needs the slot rebuilt. Fall back to the full apply when the rebuild is unavailable.
+            if (!refresh_slot_appearance(slot))
+                manual_apply_slot(slot);
         };
 
         // Helper lambda: render the picker body for one specific channel index. Used inside the expanded mod row.

@@ -146,11 +146,14 @@ namespace Transmog
         // pool: the bare name must yield no wrapper, and the `_dd` name must yield one.
         // ============================================================
         {
-            { "Lardein_Fabric_Helm"                          }, // Helm (see _dd note above)
-            { "Oongka_Basic_Leather_Armor"                   }, // Chest
-            { "Oongka_Basic_Leather_Cloak"                   }, // Cloak
-            { "Oongka_Basic_Leather_Gloves"                  }, // Gloves
-            { "Langust_Leather_Boots"                        }, // Boots
+            // Oongka's plate set exists only in tiered form (_II Valortread, _III Belkandor); there is no bare
+            // `Oongka_PlateArmor_Helm`. Both tiers are complete five-piece sets, so unlike Kliff this row needs no
+            // odd boots exception.
+            { "Oongka_PlateArmor_Helm_III"                   }, // Helm
+            { "Oongka_PlateArmor_Armor_III"                  }, // Chest
+            { "Oongka_PlateArmor_Cloak_III"                  }, // Cloak
+            { "Oongka_PlateArmor_Gloves_III"                 }, // Gloves
+            { "Oongka_PlateArmor_Boots_III"                  }, // Boots
             { "Bilibili_Earring"                             }, // Earring1
             { "WhiteHorn_Earring"                            }, // Earring2
             { "Bilibili_Necklace"                            }, // Necklace
@@ -185,6 +188,23 @@ namespace Transmog
         if (name == "Oongka")
             return CarrierChar::Oongka;
         return std::nullopt;
+    }
+
+    /// Character name for a CarrierChar. Inverse of @ref carrier_char_from_name; the names are the same keys
+    /// PresetManager stores per-character state under.
+    inline constexpr std::string_view carrier_char_name(CarrierChar c) noexcept
+    {
+        switch (c)
+        {
+        case CarrierChar::Kliff:
+            return "Kliff";
+        case CarrierChar::Damiane:
+            return "Damiane";
+        case CarrierChar::Oongka:
+            return "Oongka";
+        default:
+            return {};
+        }
     }
 
     inline constexpr const CarrierDefault &carrier_for(CarrierChar c, TransmogSlot s) noexcept

@@ -913,6 +913,36 @@ namespace Transmog
          ResolveMode::Direct, -0x22, 0},
     };
 
+    /**
+     * @brief Claim-walk deref site -- the shape ClaimWalkGuard patches. NOT an AddrCandidate cascade.
+     *
+     * Deliberately outside the cascade: `resolve_address` requires a UNIQUE match, and this pattern is expected to
+     * hit MORE THAN ONE site (two, at time of writing). Feeding a knowingly non-unique signature through the cascade
+     * would mean weakening `require_unique`, which is the invariant that catches a drifted signature on patch day.
+     * It lives here anyway so the whole engine-address inventory stays in one file.
+     *
+     *   mov  rax, [rbx+8]        48 8B 43 08     entry's owning pointer (claim vector, `node+0x58`)
+     *   mov  rcx, [rax+28h]      48 8B 48 28     faults when the owner is null
+     *   test rcx, rcx            48 85 C9
+     *   jz   <next entry>        74 ??           rel8 to the loop-continue label
+     *
+     * The claim erase nulls owner slots while they are still inside the count and only decrements the count once its
+     * shift finishes, so a walk overlapping an erase reads a null owner here. Nothing locks: the engine is safe only
+     * because its own erases and walks are scheduled as jobs that never overlap. LT drives erases from its apply
+     * worker, so they can. See claim_walk_guard.hpp for the guard and the reasoning.
+     *
+     * Patch day: the guard logs the site count it found and warns when it is not the expected two. Only the
+     * RBX-based encoding is listed -- a walker allocated to another register would need its site branch-checked by
+     * hand before being added.
+     */
+    inline constexpr const char *k_claimWalkSiteAob = "48 8B 43 08 48 8B 48 28 48 85 C9 74 ??";
+
+    /// Sites @ref k_claimWalkSiteAob is known to occupy. A mismatch means the walk survey needs redoing.
+    inline constexpr std::size_t k_claimWalkExpectedSites = 2;
+
+    /// Offset from @ref k_claimWalkSiteAob to `mov rcx,[rax+28h]` -- the instruction the guard precedes.
+    inline constexpr std::size_t k_claimWalkDerefOffset = 4;
+
     inline constexpr AddrCandidate k_structCopyCandidates[] = {
         // P1 -- full prologue + first qword copy + vtable load. The single RIP-rel `lea rax, [rip+disp32]` that loads
         // the StringInfo vtable sentinel is wildcarded. One match module-wide.

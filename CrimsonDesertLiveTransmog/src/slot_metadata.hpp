@@ -272,6 +272,22 @@ namespace Transmog
     }
 
     /**
+     * For the SECOND half of a paired slot, the game tag of the FIRST half. 0xFFFF otherwise.
+     *
+     * The engine resolves an item to a slot by walking the character's candidate list and taking the first entry
+     * that validates. Both halves of a pair share one item type, so the first half always wins and the second is
+     * unreachable. Knowing the first half's tag allows it to be excluded for the duration of one equip.
+     */
+    inline constexpr std::uint16_t paired_first_half_tag(TransmogSlot s) noexcept
+    {
+        if (s == TransmogSlot::Earring2)
+            return 0x0007;
+        if (s == TransmogSlot::Ring2)
+            return 0x000A;
+        return 0xFFFF;
+    }
+
+    /**
      * Does this slot share its item TYPE with a sibling slot?
      *
      * Both rings report typeCode 0x000a and both earrings 0x0008, so an equip that lets the engine derive its

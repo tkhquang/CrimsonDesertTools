@@ -9,6 +9,21 @@ namespace Transmog
     inline constexpr std::uint64_t k_applyDebounceMs = 1500;
     inline constexpr std::uint64_t k_manualDebounceMs = 100;
 
+    // Debounce window used once requests start arriving in a run, replacing the 100 ms above.
+    //
+    // 100 ms only collapses requests landing within 100 ms of each other, which a person clicking through presets
+    // never does -- measured spacing is 300-400 ms. So every switch ran its own full apply, and the intermediate
+    // presets were each visibly built and torn down on the way to the one actually wanted.
+    //
+    // A request arriving within this window of the PREVIOUS REQUEST is treated as part of a burst and re-arms the
+    // deadline this far out. While the clicking continues the deadline keeps moving and nothing is built; once it
+    // stops, ONE apply runs and reads live state, so only the preset landed on is applied. A lone switch is not
+    // affected -- with no recent request it keeps the short debounce and applies immediately.
+    //
+    // Sized above the observed 300-400 ms click spacing so an ordinary burst coalesces. Raising it absorbs slower
+    // clicking, at the cost of a longer wait after the last one.
+    inline constexpr std::uint64_t k_burstCoalesceMs = 500;
+
     // --- Player component resolution ---
 
     /**

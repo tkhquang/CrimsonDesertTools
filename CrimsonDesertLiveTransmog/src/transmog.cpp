@@ -6,6 +6,7 @@
 #include "dye_record_inject.hpp"
 #include "color_override/setter_substitute.hpp"
 #include "generated/dye_color_table.hpp"
+#include "claim_walk_guard.hpp"
 #include "prefab_wrapper_swap.hpp"
 #include "constants.hpp"
 #include "indexed_string_table.hpp"
@@ -1035,6 +1036,11 @@ namespace Transmog
             }
         }
 
+        // Install BEFORE anything can drive an equip or a tear-down. The guard makes the engine's claim-vector
+        // walks tolerate the null-owner window its own non-atomic erase opens; until it is in place, any erase that
+        // overlaps a walk on a job thread can fault. See claim_walk_guard.hpp.
+        ClaimWalkGuard::install();
+
         PrefabWrapperSwap::init();
 
         // Helm-audio filter. It intervenes at the passive-skill REGISTRATION boundary, BEFORE the muffle tag enters
@@ -1122,6 +1128,7 @@ namespace Transmog
         join_deferred_slot_hash_scan();
 
         PrefabWrapperSwap::shutdown();
+
 
         // Full DMK teardown: it removes every managed hook (BatchEquip, VEC, PartAddShow), stops and clears the
         // InputManager poller together with its registered bindings, stops the ConfigWatcher, and clears the Config

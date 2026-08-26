@@ -366,6 +366,10 @@ namespace Transmog
     static std::atomic<std::uint64_t> s_applyDeadlineTick{0};
     static std::atomic<bool> s_applyPending{false};
 
+    // Tick of the previous apply REQUEST (not of the previous apply). Zero until the first request. This is what
+    // decides whether an incoming request belongs to a burst -- see schedule_transmog_ms and k_burstCoalesceMs.
+    static std::atomic<std::uint64_t> s_lastRequestTick{0};
+
     // One-shot redirect: the editing character's 1-based idx that the next scheduled apply should target instead of the
     // controlled body. Set by overlay-UI entry points via set_targeted_apply_char_idx() and exchange-consumed by
     // run_debounced_apply. Engine-triggered hook paths never touch this atomic, so the controlled body remains the
@@ -1000,7 +1004,25 @@ namespace Transmog
         // targeted-redirect flag), so Phase A needs the controlled char's installed-state to make correct teardown
         // decisions when the user swaps presets back-and-forth across protagonists.
         const auto controlledIdx = CDCore::current_controlled_character_idx();
-        rehydrate_applied_state_for_char(controlledIdx);
+
+        // Same body-reallocation check the multi-apply path makes. Switching protagonists hands back a FRESH body
+        // wearing vanilla gear, so the snapshot describes fakes that live on the freed body and are gone. Rehydrating
+        // it makes the tear-down gate believe a fake is already installed for a slot, skip the tear-down that a fresh
+        // body needs, and leave the real part under the transmog.
+        const auto controlledCcoia = CDCore::current_controlled_ccoia();
+        const auto prevControlledCcoia = applied_ccoia_for_char(controlledIdx);
+        if (controlledCcoia != 0 && controlledCcoia != prevControlledCcoia)
+        {
+            if (prevControlledCcoia != 0)
+                logger.info("[apply] controlled body reallocated (ccoia 0x{:X} -> 0x{:X}); wiping stale apply-cache",
+                            static_cast<std::uint64_t>(prevControlledCcoia),
+                            static_cast<std::uint64_t>(controlledCcoia));
+            reset_applied_state_for_char(controlledIdx);
+        }
+        else
+        {
+            rehydrate_applied_state_for_char(controlledIdx);
+        }
 
         bool faulted = false;
         __try
@@ -1035,6 +1057,8 @@ namespace Transmog
         else
         {
             capture_applied_state_for_char(controlledIdx);
+            if (controlledCcoia != 0)
+                set_applied_ccoia_for_char(controlledIdx, controlledCcoia);
             s_lastApplyOk.store(true, std::memory_order_release);
         }
     }
@@ -1056,6 +1080,10 @@ namespace Transmog
                 return;
 
             // Wait until the deadline expires, picking up any later re-schedules as they arrive by looping on wait_for.
+            //
+            // Every new request pushes the deadline out (see schedule_transmog_ms), so during a run of fast preset
+            // switches this loop keeps re-waiting and never reaches the apply. Once the switching stops, ONE apply
+            // runs and it reads live state -- so the preset finally landed on is the only one built.
             for (;;)
             {
                 const std::uint64_t deadline = s_applyDeadlineTick.load(std::memory_order_acquire);
@@ -1085,9 +1113,23 @@ namespace Transmog
 
     void schedule_transmog_ms(std::uint64_t debounce_ms)
     {
+        const std::uint64_t now = GetTickCount64();
+
+        // Widen the window when this request lands close behind the previous one. A lone action keeps its short
+        // debounce and applies right away; a run of them (clicking down a preset list) keeps pushing the deadline out
+        // by the wider window, so nothing is built until the clicking stops and only the final selection applies.
+        //
+        // Keyed off the previous REQUEST, not the previous apply: during a burst no apply is running, so an
+        // apply-based test would decide the burst had ended and fire mid-run -- which is what let every preset
+        // through before.
+        const std::uint64_t prevRequest = s_lastRequestTick.exchange(now, std::memory_order_acq_rel);
+        const bool inBurst = prevRequest != 0 && now - prevRequest < k_burstCoalesceMs;
+        if (inBurst && debounce_ms < k_burstCoalesceMs)
+            debounce_ms = k_burstCoalesceMs;
+
         {
             std::lock_guard<std::mutex> lk(s_applyCvMtx);
-            s_applyDeadlineTick.store(GetTickCount64() + debounce_ms, std::memory_order_release);
+            s_applyDeadlineTick.store(now + debounce_ms, std::memory_order_release);
             s_applyPending.store(true, std::memory_order_release);
         }
         s_applyCv.notify_all();
