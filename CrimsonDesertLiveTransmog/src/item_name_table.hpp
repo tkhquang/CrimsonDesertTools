@@ -156,9 +156,8 @@ namespace Transmog
          * Rebuilt lazily on first access after build(). It is stable thereafter. Returned by const reference so the
          * overlay can hold onto it without copying the several thousand entries per frame.
          *
-         * `category` is the transmog slot derived from the canonical item-type code at
-         * `desc+k_descTypeCodeOffset` (see `category_of` below), or `TransmogSlot::Count` if the item is not a
-         * transmog-eligible armor slot (weapon, shield, horse armor, quest item, etc).
+         * `category` is the transmog slot derived from the item's ItemGroupInfo membership (see `category_of` below),
+         * or `TransmogSlot::Count` if the item is not transmog-eligible equipment (horse armor, quest item, etc).
          */
         /**
          * Body-type classification that drives the picker's per-character visibility: an item rendered on the wrong
@@ -221,27 +220,31 @@ namespace Transmog
         /**
          * @brief Look up the transmog slot for an item id.
          *
-         * Driven by the canonical item-type code captured at `desc+k_descTypeCodeOffset` during the catalog build.
-         * That field is the game-side classifier. See `slot_from_type_code` for the authoritative typeCode->slot
-         * table.
+         * Resolved at catalog-build time in two steps: the item's ItemGroupInfo membership matched by GROUP NAME,
+         * then, for items whose groups name no slot (NPC and boss gear), a `typeCode -> slot` table LEARNED from the
+         * items the first step classified. See the slot-classification block and `k_descTypeCodeOffset` in
+         * item_name_table.cpp. Nothing is hardcoded to a type-code value, because those are row indices that renumber
+         * on patches.
          *
-         * Every code that does not map to a transmog-eligible armor slot (shields, horse armor, quest items, ...) or an
-         * unknown id returns `TransmogSlot::Count`.
+         * Anything not in a mapped group (shields aside, that means horse and pet gear, quest items, consumables) and
+         * any unknown id returns `TransmogSlot::Count`.
          */
         TransmogSlot category_of(uint16_t itemId) const noexcept;
 
         /**
-         * Raw item-type code u16 at `desc+k_descTypeCodeOffset` for the given item, or 0xFFFF if unknown. Useful for
-         * slot-discovery research. Print it next to the live engine slot tag to reveal the (typeCode -> slot) mapping
-         * that drives `slot_from_type_code`, so accessory and weapon codes can be added without static guessing.
+         * @brief `category_of` WITHOUT the runtime-observed override -- the catalog's own answer.
+         *
+         * Used to cross-check the engine's live slot tags against `k_slotMetadata`. `category_of` consults
+         * `m_observedSlot` first, and that map is written from the same auth-table walk that performs the check, so
+         * comparing against it would be self-fulfilling and could never report drift.
          */
-        std::uint16_t type_code_of(std::uint16_t itemId) const noexcept;
+        TransmogSlot catalog_category_of(uint16_t itemId) const noexcept;
 
         /**
          * Record an observed `(itemId -> slot)` binding seen in the engine's live auth-table. `category_of()` consults
-         * the runtime map BEFORE the static type-code map, so any item the engine actually equipped becomes correctly
-         * categorized for the picker even when its type code is not yet listed in the static switch. Slot ==
-         * `TransmogSlot::Count` clears the entry. Thread-safe and cheap: one hash insert per call.
+         * the runtime map BEFORE the catalog classification, so an item the engine actually equipped is categorized
+         * from ground truth. Slot == `TransmogSlot::Count` clears the entry. Thread-safe and cheap: one hash insert
+         * per call.
          */
         void record_observed_slot(std::uint16_t itemId, TransmogSlot slot) noexcept;
 
@@ -281,10 +284,12 @@ namespace Transmog
         std::unordered_map<uint16_t, std::string> m_idToName;
         std::unordered_map<std::string, uint16_t> m_nameToId;
         std::unordered_map<uint16_t, uint8_t> m_variantFlag;
-        std::unordered_map<uint16_t, uint16_t> m_typeCode; // canonical item-type code from the descriptor
+        // `itemId -> TransmogSlot`, classified during build() from the item's ItemGroupInfo membership. Items that
+        // belong to no mapped group are ABSENT rather than stored as Count, so the map sizes to the equipment subset.
+        std::unordered_map<uint16_t, TransmogSlot> m_slotById;
         // Runtime-learned `itemId -> TransmogSlot` map. Populated by `record_observed_slot` (called from the
-        // slot-discovery dump when it observes live auth-table bindings). Authoritative override for the static
-        // type-code switch: if the engine actually equipped an item in a given slot, that beats any heuristic.
+        // slot-discovery dump when it observes live auth-table bindings). Authoritative override for the catalog
+        // classification: if the engine actually equipped an item in a given slot, that beats any derivation.
         // Session-scoped, with no disk persistence.
         std::unordered_map<uint16_t, TransmogSlot> m_observedSlot;
         std::unordered_map<std::string, std::string> m_displayNames; // lowercase internal -> display

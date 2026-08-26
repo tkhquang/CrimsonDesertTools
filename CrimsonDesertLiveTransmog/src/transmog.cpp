@@ -1,5 +1,6 @@
 #include "transmog.hpp"
 #include "aob_resolver.hpp"
+#include "auth_table.hpp"
 #include "color_override/color_override.hpp"
 #include "color_override/color_token_table.hpp"
 #include "color_override/host_scope.hpp"
@@ -146,29 +147,8 @@ namespace Transmog
 
     // --- Player-component layout ---
     //
-    // Pointer to the PartDef/auth-table container on the SlotPopulator descriptor (a1). The container is the entry
-    // table used by the capture path:
-    //
-    //   container +0x08  QWORD   entry array base
-    //   container +0x10  DWORD   live entry count
-    //   container +0x14  DWORD   capacity
-    //
-    // The pointer slot itself moves whenever pa::ClientEquipSlotActorComponent grows or shrinks fields in front of it.
-    // A stale offset reads a neighboring field that is not a container pointer, and the capture path then logs
-    // "Capture: no entry table". Verify the offset against live memory on patch day. This constant mirrors
-    // k_containerPtrOffset in real_part_tear_down.cpp, which carries the full silent-failure analysis.
-    constexpr std::ptrdiff_t k_compEntryTablePtrOffset = 0x80;
-
-    // Entry layout within the auth-table array. The stride and the slot-tag offset always move together by 8, so
-    // verify both together. The engine auth-table search loop states both literally:
-    //   `imul rcx,rax,0xD0 ; cmp [rdx+0xC8],r8w ; add rdx,0xD0`
-    //
-    // The primary item id at +0x08 is stable across patches. Slot-tag VALUES are stable too (Helm=0x03, Chest=0x04,
-    // Gloves=0x05, Boots=0x06, Cloak=0x10). Only the position within the entry shifts. These constants mirror
-    // k_entryStride / k_entrySlotTagOffset in real_part_tear_down.cpp.
-    constexpr std::ptrdiff_t k_compEntryStride = 0xD0;
-    constexpr std::ptrdiff_t k_compEntryItemIdOffset = 0x08;
-    constexpr std::ptrdiff_t k_compEntrySlotTagOffset = 0xC8;
+    // Auth-table geometry (container pointer, entry stride, field offsets) lives in auth_table.hpp -- one copy for
+    // the whole mod, because the whole struct moves as a unit on patch day.
 
     // --- Public interface ---
 
@@ -339,20 +319,10 @@ namespace Transmog
 
     // Walks the live auth-table entry array and snapshots each LT-managed slot's dye records into the active preset's
     // SlotDyeChannels through read_entry_dye_records(). The per-entry dye-record vector sits inside the auth entry, so
-    // its offset moves together with k_compEntrySlotTagOffset whenever the entry geometry changes. The authoritative
-    // values live in dye_record_inject.cpp (k_dstDyeVectorOffset for the vector base, k_vecDataOffset and
-    // k_vecCountOffset within it). They currently place the header at these offsets from the entry base:
-    //
-    //   +0x78  qword  data_ptr  -- heap address of contiguous 16-byte records
-    //   +0x80  dword  count     -- number of valid records (0..N)
-    //   +0x84  dword  capacity  -- allocation cap, ignored here
-    //
-    // Each 16-byte record matches DyeRecordInject::ChannelState:
-    //   +0..3   group_hash
-    //   +4..5   material_id
-    //   +6      channel index (0..k_dyeChannelCount-1)
-    //   +7..9   R / G / B
-    //   +11     repair_byte
+    // its offset moves together with the auth-table entry geometry. The vector header and the 16-byte record layout
+    // are declared once in dye_record_inject.hpp (k_dyeVectorOffset / k_vecDataOffset / k_vecCountOffset, and the
+    // field map on ChannelState); this function reaches them only through read_entry_dye_records(), so the offsets are
+    // deliberately NOT restated here.
     //
     // This function is split out of capture_outfit() for the same MSVC C2712 reason as apply_live_dye_to_preset_slot
     // above. The caller's __try/__except therefore covers any access fault from a stale auth table here too, and this
@@ -382,9 +352,9 @@ namespace Transmog
         bool any = false;
         for (uint32_t e = 0; e < entryCount && entryArray > 0x10000; ++e)
         {
-            auto base = entryArray + e * k_compEntryStride;
-            auto gameSlot = *reinterpret_cast<int16_t *>(base + k_compEntrySlotTagOffset);
-            auto itemId = *reinterpret_cast<uint16_t *>(base + k_compEntryItemIdOffset);
+            auto base = entryArray + e * AuthTable::k_entryStride;
+            auto gameSlot = *reinterpret_cast<int16_t *>(base + AuthTable::k_entrySlotTagOffset);
+            auto itemId = *reinterpret_cast<uint16_t *>(base + AuthTable::k_entryItemIdOffset);
             if (itemId == 0 || itemId == 0xFFFF)
                 continue;
             auto tmSlot = slot_from_game_slot(gameSlot);
@@ -428,14 +398,14 @@ namespace Transmog
 
         __try
         {
-            auto entryDesc = *reinterpret_cast<uintptr_t *>(a1 + k_compEntryTablePtrOffset);
+            auto entryDesc = *reinterpret_cast<uintptr_t *>(a1 + AuthTable::k_containerPtrOffset);
             if (entryDesc < 0x10000)
             {
                 logger.warning("Capture: no entry table");
                 return;
             }
-            auto entryArray = *reinterpret_cast<uintptr_t *>(entryDesc + 8);
-            auto entryCount = *reinterpret_cast<uint32_t *>(entryDesc + 16);
+            auto entryArray = *reinterpret_cast<uintptr_t *>(entryDesc + AuthTable::k_containerArrayBaseOffset);
+            auto entryCount = *reinterpret_cast<uint32_t *>(entryDesc + AuthTable::k_containerCountOffset);
 
             logger.info("=== CAPTURE: {} equipment slots ===", entryCount);
 
@@ -466,9 +436,9 @@ namespace Transmog
             int captured = 0;
             for (uint32_t e = 0; e < entryCount && entryArray > 0x10000; ++e)
             {
-                auto base = entryArray + e * k_compEntryStride;
-                auto gameSlot = *reinterpret_cast<int16_t *>(base + k_compEntrySlotTagOffset);
-                auto itemId = *reinterpret_cast<uint16_t *>(base + k_compEntryItemIdOffset);
+                auto base = entryArray + e * AuthTable::k_entryStride;
+                auto gameSlot = *reinterpret_cast<int16_t *>(base + AuthTable::k_entrySlotTagOffset);
+                auto itemId = *reinterpret_cast<uint16_t *>(base + AuthTable::k_entryItemIdOffset);
 
                 logger.info("  Slot {:>2} ({:<12}) = item {:#06x}", gameSlot, game_slot_name(gameSlot), itemId);
 
@@ -533,17 +503,17 @@ namespace Transmog
 
         __try
         {
-            auto entryDesc = *reinterpret_cast<uintptr_t *>(a1 + k_compEntryTablePtrOffset);
+            auto entryDesc = *reinterpret_cast<uintptr_t *>(a1 + AuthTable::k_containerPtrOffset);
             if (entryDesc < 0x10000)
                 return;
-            auto entryArray = *reinterpret_cast<uintptr_t *>(entryDesc + 8);
-            auto entryCount = *reinterpret_cast<uint32_t *>(entryDesc + 16);
+            auto entryArray = *reinterpret_cast<uintptr_t *>(entryDesc + AuthTable::k_containerArrayBaseOffset);
+            auto entryCount = *reinterpret_cast<uint32_t *>(entryDesc + AuthTable::k_containerCountOffset);
 
             for (uint32_t e = 0; e < entryCount && entryArray > 0x10000; ++e)
             {
-                auto base = entryArray + e * k_compEntryStride;
-                auto gameSlot = *reinterpret_cast<int16_t *>(base + k_compEntrySlotTagOffset);
-                auto itemId = *reinterpret_cast<uint16_t *>(base + k_compEntryItemIdOffset);
+                auto base = entryArray + e * AuthTable::k_entryStride;
+                auto gameSlot = *reinterpret_cast<int16_t *>(base + AuthTable::k_entrySlotTagOffset);
+                auto itemId = *reinterpret_cast<uint16_t *>(base + AuthTable::k_entryItemIdOffset);
 
                 auto tmSlot = slot_from_game_slot(gameSlot);
                 if (tmSlot.has_value() && itemId != 0 && itemId != 0xFFFF)
@@ -568,15 +538,15 @@ namespace Transmog
         uintptr_t entryBase = 0;
         __try
         {
-            const auto entryDesc = *reinterpret_cast<uintptr_t *>(a1 + k_compEntryTablePtrOffset);
+            const auto entryDesc = *reinterpret_cast<uintptr_t *>(a1 + AuthTable::k_containerPtrOffset);
             if (entryDesc < 0x10000)
                 return 0;
-            const auto entryArray = *reinterpret_cast<uintptr_t *>(entryDesc + 8);
-            const auto entryCount = *reinterpret_cast<uint32_t *>(entryDesc + 16);
+            const auto entryArray = *reinterpret_cast<uintptr_t *>(entryDesc + AuthTable::k_containerArrayBaseOffset);
+            const auto entryCount = *reinterpret_cast<uint32_t *>(entryDesc + AuthTable::k_containerCountOffset);
             for (uint32_t e = 0; e < entryCount && entryArray > 0x10000; ++e)
             {
-                const auto base = entryArray + e * k_compEntryStride;
-                const auto sl = *reinterpret_cast<int16_t *>(base + k_compEntrySlotTagOffset);
+                const auto base = entryArray + e * AuthTable::k_entryStride;
+                const auto sl = *reinterpret_cast<int16_t *>(base + AuthTable::k_entrySlotTagOffset);
                 if (sl == gameTag)
                 {
                     entryBase = base;

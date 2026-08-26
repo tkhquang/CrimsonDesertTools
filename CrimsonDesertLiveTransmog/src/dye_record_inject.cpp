@@ -93,16 +93,10 @@ namespace Transmog::DyeRecordInject
     // Dye-record vector header, relative to the vector base. Taken from the engine's own record-copy primitive: it
     // reads capacity at +0x0C, count at +0x08, grows when capacity is not greater than count, writes the record at
     // data + count * k_dyeRecordSize, then increments count.
-    static constexpr std::uintptr_t k_vecDataOffset = 0x00;
-    static constexpr std::uintptr_t k_vecCountOffset = 0x08;
 
-    // Offset of the dye-record vector inside the DyeCopier destination struct and inside an auth-table entry. Both
-    // structures share the layout, so both use this offset.
-    static constexpr std::uintptr_t k_dstDyeVectorOffset = 0x78;
 
     // One ARMOR_MOD record is 16 bytes, but the engine primitive only copies the first 13 (+0x00 through +0x0C) and
     // leaves the rest of the stride untouched. An in-place overwrite must write the same span to match its semantics.
-    static constexpr std::size_t k_dyeRecordSize = 16;
     static constexpr std::size_t k_dyeRecordCopySpan = 13;
 
     // Channel index inside one record, and the sentinel used when the read fails. k_noChannel is out of range for a
@@ -121,7 +115,7 @@ namespace Transmog::DyeRecordInject
     // Build a 16-byte ARMOR_MOD record. See ChannelState in the header for the offset map. The +13 = 0x04 marker on
     // indices 0 and 3 mirrors what natural captures show. The engine accepts records without it, but matching the
     // natural shape avoids any shape validation that is not yet mapped.
-    static void build_dye_record(std::uint8_t *out, std::size_t channel_idx, std::uint32_t group_hash, std::uint8_t r,
+    void build_dye_record(std::uint8_t *out, std::size_t channel_idx, std::uint32_t group_hash, std::uint8_t r,
                                  std::uint8_t g, std::uint8_t b, std::uint16_t material_id,
                                  std::uint8_t repair_byte) noexcept
     {
@@ -188,7 +182,7 @@ namespace Transmog::DyeRecordInject
         // Vector header, relative to target_vec: +0x00 data pointer, +0x08 count, +0x0C capacity. That layout comes
         // straight from the engine primitive: it reads capacity at +0x0C, count at +0x08, grows when capacity is not
         // greater than count, writes the record at data + count * 16, then increments count.
-        const auto target_vec = dst_struct + k_dstDyeVectorOffset;
+        const auto target_vec = dst_struct + k_dyeVectorOffset;
 
         // Dedup precondition for the per-channel upsert below.
         //
@@ -444,13 +438,13 @@ namespace Transmog::DyeRecordInject
         // yields 0 and the entry is treated as having no records.
         //
         // The dye vector sits at the same offset inside an auth-table entry as it does inside the DyeCopier
-        // destination struct, so both paths read it through k_dstDyeVectorOffset. That offset tracks the auth-entry
+        // destination struct, so both paths read it through k_dyeVectorOffset. That offset tracks the auth-entry
         // stride and MUST move with it: see k_entryStride and k_entrySlotTagOffset in real_part_tear_down.cpp. A
         // stale value lands on the neighboring field and dereferences a garbage pointer instead of failing closed.
         const auto data =
-            DMKMemory::seh_read<std::uintptr_t>(entryBase + k_dstDyeVectorOffset + k_vecDataOffset).value_or(0);
+            DMKMemory::seh_read<std::uintptr_t>(entryBase + k_dyeVectorOffset + k_vecDataOffset).value_or(0);
         auto count =
-            DMKMemory::seh_read<std::uint32_t>(entryBase + k_dstDyeVectorOffset + k_vecCountOffset).value_or(0);
+            DMKMemory::seh_read<std::uint32_t>(entryBase + k_dyeVectorOffset + k_vecCountOffset).value_or(0);
         if (data < k_minPlausiblePtr || count == 0)
             return 0;
         if (count > k_dyeChannelCount)

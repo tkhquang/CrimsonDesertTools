@@ -18,8 +18,25 @@ namespace Transmog
     // part_show_suppress.cpp) read this table; no parallel slot tables anywhere else.
     struct SlotMetadata
     {
-        TransmogSlot slot;              // == array index, asserted at compile time
-        std::int16_t gameTag;           // engine slot tag (sub_148EB6700-verified)
+        TransmogSlot slot; // == array index, asserted at compile time
+        // Engine slot tag: the character's equip-slot enum, as it appears at `record+0xC8` of the auth-table part
+        // records and as the first argument to the tag->handle lookup.
+        //
+        // These are written down rather than derived, unlike the item taxonomy in item_name_table.cpp, and the reason
+        // is that they index a different KIND of enum. Item type codes index EquipTypeInfo, ~117 rows that grow every
+        // time content adds a weapon family, and that band has shifted in both directions. Equip slots are a
+        // gameplay-design constant: no tag here has changed across any game version this mod has shipped against, and
+        // patches have only ever APPENDED (Tool, then the two overflow slots).
+        //
+        // A runtime derivation is also not available. The auth table lists only FILLED slots -- eleven of these
+        // twenty-three on a fully equipped character -- so it can never produce the whole table, and the table is
+        // needed at apply time. EquipTypeInfo rows are variable-length with no tag at a fixed offset, and the part
+        // records carry no name.
+        //
+        // What IS derived is a CHECK. The auth-table walk in real_part_tear_down.cpp compares every live
+        // `(tag, itemId)` pair against the catalog's own name-derived classification and warns on disagreement, so a
+        // patch that renumbers this column reports itself instead of silently routing applies into the wrong slot.
+        std::int16_t gameTag;
         const char *displayName; // "Helm", "Chest", ... (UI / log labels)
         // PartShowSuppress IndexedStringA hash key (CD_*). nullptr when the slot does NOT participate in
         // PartShowSuppress (only the 5 armor slots have CD_* hashes; accessory/weapon slots use different suppression

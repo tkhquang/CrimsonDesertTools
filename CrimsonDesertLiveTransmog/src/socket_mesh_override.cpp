@@ -39,9 +39,13 @@ namespace Transmog::SocketMeshOverride
         /// Refcount field on a StringInfo wrapper.
         constexpr std::size_t k_wrapperRefcountOffset = 0x10;
 
-        /// Dye entry array on the part record the descriptor's dye is built from: data ptr and u32 count.
-        constexpr std::size_t k_recordDyeDataOffset = 120;
-        constexpr std::size_t k_recordDyeCountOffset = 128;
+        /// Dye entry array on the part record the descriptor's dye is built from. Geometry and the record writer
+        /// both come from DyeRecordInject -- this module is a second PRODUCER of those records, not a second
+        /// definition of them.
+        constexpr std::size_t k_recordDyeDataOffset =
+            DyeRecordInject::k_dyeVectorOffset + DyeRecordInject::k_vecDataOffset;
+        constexpr std::size_t k_recordDyeCountOffset =
+            DyeRecordInject::k_dyeVectorOffset + DyeRecordInject::k_vecCountOffset;
         /// Buffer capacity in records. Sparse mode starts from the engine's own entries, which can outnumber the
         /// channel count, so this sits above it.
         constexpr std::size_t k_maxDyeRecords = 32;
@@ -100,27 +104,19 @@ namespace Transmog::SocketMeshOverride
                     for (std::uint32_t i = 0; i < n; ++i)
                         if (out[static_cast<std::size_t>(i) * 16 + 6] == static_cast<std::uint8_t>(k))
                         {
-                            rec = out + static_cast<std::size_t>(i) * 16;
+                            rec = out + static_cast<std::size_t>(i) * DyeRecordInject::k_dyeRecordSize;
                             break;
                         }
                     if (rec == nullptr)
                     {
                         if (n >= k_maxDyeRecords)
                             continue;
-                        rec = out + static_cast<std::size_t>(n) * 16;
-                        std::memset(rec, 0, 16);
+                        rec = out + static_cast<std::size_t>(n) * DyeRecordInject::k_dyeRecordSize;
+                        std::memset(rec, 0, DyeRecordInject::k_dyeRecordSize);
                         ++n;
                     }
-                    std::memcpy(rec + 0, &ch.group_hash, 4);
-                    std::memcpy(rec + 4, &ch.material_id, 2);
-                    rec[6] = static_cast<std::uint8_t>(k);
-                    rec[7] = ch.r;
-                    rec[8] = ch.g;
-                    rec[9] = ch.b;
-                    rec[10] = 0xFF;
-                    rec[11] = ch.repair_byte;
-                    if (k == 0 || k == 3)
-                        rec[13] = 0x04;
+                    DyeRecordInject::build_dye_record(rec, k, ch.group_hash, ch.r, ch.g, ch.b, ch.material_id,
+                                                     ch.repair_byte);
                 }
                 return n;
             }
@@ -142,18 +138,10 @@ namespace Transmog::SocketMeshOverride
             for (std::size_t k = 0; k < DyeRecordInject::k_dyeChannelCount && n < k_maxDyeRecords; ++k)
             {
                 const auto &ch = (dye[k].group_hash != 0) ? dye[k] : *fallback;
-                std::uint8_t *rec = out + static_cast<std::size_t>(n) * 16;
-                std::memset(rec, 0, 16);
-                std::memcpy(rec + 0, &ch.group_hash, 4);
-                std::memcpy(rec + 4, &ch.material_id, 2);
-                rec[6] = static_cast<std::uint8_t>(k);
-                rec[7] = ch.r;
-                rec[8] = ch.g;
-                rec[9] = ch.b;
-                rec[10] = 0xFF;
-                rec[11] = ch.repair_byte;
-                if (k == 0 || k == 3)
-                    rec[13] = 0x04;
+                std::uint8_t *rec = out + static_cast<std::size_t>(n) * DyeRecordInject::k_dyeRecordSize;
+                std::memset(rec, 0, DyeRecordInject::k_dyeRecordSize);
+                DyeRecordInject::build_dye_record(rec, k, ch.group_hash, ch.r, ch.g, ch.b, ch.material_id,
+                                                 ch.repair_byte);
                 ++n;
             }
             return n;

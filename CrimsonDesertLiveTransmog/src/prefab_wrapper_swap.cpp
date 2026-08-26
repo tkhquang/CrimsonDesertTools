@@ -63,6 +63,8 @@ namespace Transmog::PrefabWrapperSwap
     constexpr std::size_t k_inlineNameOff = 0x20;
     constexpr std::size_t k_wrapperPtrOff = 0x18;
     constexpr std::size_t k_extNameMax = 256;
+    // Cap on a loader-resolved prefab name. Used by both name-resolution sites in this file.
+    constexpr std::size_t k_loaderNameCap = 96;
     constexpr std::uint32_t k_minPlausibleCount = 100;
     constexpr std::uint32_t k_maxPlausibleCount = 200000;
 
@@ -75,19 +77,13 @@ namespace Transmog::PrefabWrapperSwap
     static std::atomic<std::uintptr_t> s_stringInfoRegistry{0};
     static std::atomic<std::uintptr_t> s_stringInfoVtable{0};
     static std::atomic<std::uintptr_t> s_loaderRegistrySingleton{0};
-    static std::atomic<std::uintptr_t> s_apptContainerVtable{0};
 
     // The four cascades consumed below are defined in aob_resolver.hpp:
-    //   k_apptResMgrInitCandidates    -- ResMgr init entry, the AppearanceTableLoader capture hook site
-    //   k_apptInnerLookupCandidates   -- PartPrefab container lookup primitive
-    //   k_apptStringInternCandidates  -- StringInfo string-intern primitive
     //   k_structCopyCandidates        -- wrapper struct-copy hot path
     // Each is a 3-anchor cascade per the AOB ordering rules in docs/aob-signatures.md (most-specific candidate first).
 
     // Offset within the container where the boot-loaded hash table struct begins. The boot loader populates
     // `container + 0x70` through the container insert primitive. The lookup primitive resolved by
-    // k_apptInnerLookupCandidates takes the SAME table-struct pointer.
-    static constexpr std::size_t k_apptHashTableOff = 0x70;
 
     // Module is "active" when at least one slot has a resolved swap pair installed in any s_swapMapPerChar bucket.
     // Selection is overlay-driven. There are no INI keys for this feature.
@@ -304,30 +300,11 @@ namespace Transmog::PrefabWrapperSwap
     //   a1[0] (_appearanceContainer)       -- intermediate vtable
     //   a1[1] (_partPrefabDataContainer)   -- the one we want.
     // The walk-forward scan picks the SECOND `lea rax,[rip+disp32] ; mov [rdi],rax` pair inside the ctor.
-    static constexpr std::size_t k_apptResMgrOff = 0x40;
-    static constexpr std::size_t k_apptLoaderOff = 0x88;
-    static constexpr std::size_t k_apptContainerOff = 0x08;
 
-    static std::atomic<std::uintptr_t> s_apptContainer{0};
-    static std::atomic<bool> s_apptCaptureDone{false};
-    // Only the container snapshot is consumed by lookup_prefab_metadata.
 
     // Container-chain lookup primitives, resolved by AOB at init. They resolve in init() before the capture hook is
-    // installed, so they are callable as soon as the snapshot lands. lookup_prefab_metadata no longer routes through
-    // them -- it uses s_apptNameLookup below.
-    using ApptStringInternFn = std::uintptr_t(__fastcall *)(const char *);
-    using ApptLookupFn = std::int64_t(__fastcall *)(std::uintptr_t table_struct, std::uintptr_t *key_wrapper_ptr);
-    // Name-based wrapper lookup. Pass any name string. It returns the value field (entry+8) of the matching registry
-    // entry, or 0 on a miss. Internally it lowercases the name and interns it before it queries the name->wrapper
-    // registry at loaderRegistrySingleton+0x50. AOB-resolved at init.
-    using ApptNameLookupFn = std::int64_t(__fastcall *)(std::int64_t unused_a1, const char *name);
-    static ApptStringInternFn s_apptStringIntern = nullptr;
-    static ApptLookupFn s_apptLookup = nullptr;
-    static ApptNameLookupFn s_apptNameLookup = nullptr;
+    // installed, so they are callable as soon as the snapshot lands.
 
-    // Trampoline for the ResMgr init entry hook.
-    using ApptResMgrInitFn = char(__fastcall *)(std::int64_t a1, void *a2);
-    static ApptResMgrInitFn s_apptResMgrInitOrig = nullptr;
 
     // Wrapper +0x40 slot inside the scene-graph struct.
     static constexpr std::size_t k_sceneGraphWrapperOff = 0x40;
@@ -487,128 +464,7 @@ namespace Transmog::PrefabWrapperSwap
         }
     }
 
-    // --- AppearanceTableLoader hook callback ---
-    //
-    // SafetyHook entry hook on the ResMgr init entry. We invoke the trampoline first (so the engine's allocation path
-    // runs unmodified), then snapshot ResMgr / loader / container by walking the documented chain:
-    //
-    //   ResMgr     = *(QWORD*)(a1 + 0x40)
-    //   loader     = *(QWORD*)(ResMgr + 0x88)
-    //   container  = *(QWORD*)(loader + 0x08)
-    //
-    // After capture we validate the container's vtable against s_apptContainerVtable (the PartPrefabDataContainer
-    // vtable) before we publish the pointers atomically. A single capture is enough -- subsequent calls pass through.
-    static char __fastcall on_appt_resmgr_init(std::int64_t a1, void *a2) noexcept
-    {
-        // Run the engine's path first. The capture must read fields that the inner allocator populates.
-        char rv = 0;
-        if (s_apptResMgrInitOrig)
-        {
-            [&]() __declspec(noinline)
-            {
-                __try
-                {
-                    rv = s_apptResMgrInitOrig(a1, a2);
-                }
-                __except (EXCEPTION_EXECUTE_HANDLER)
-                {
-                    rv = 0;
-                }
-            }();
-        }
-
-        // Already captured? Pass-through.
-        if (s_apptCaptureDone.load(std::memory_order_acquire))
-            return rv;
-
-        auto &logger = DMK::Logger::get_instance();
-
-        std::uintptr_t resMgr = 0;
-        std::uintptr_t loader = 0;
-        std::uintptr_t container = 0;
-        std::uintptr_t vtable = 0;
-        [&]() __declspec(noinline)
-        {
-            __try
-            {
-                resMgr =
-                    *reinterpret_cast<volatile std::uintptr_t *>(static_cast<std::uintptr_t>(a1) + k_apptResMgrOff);
-                if (resMgr < 0x10000ULL)
-                    return;
-                loader = *reinterpret_cast<volatile std::uintptr_t *>(resMgr + k_apptLoaderOff);
-                if (loader < 0x10000ULL)
-                    return;
-                container = *reinterpret_cast<volatile std::uintptr_t *>(loader + k_apptContainerOff);
-                if (container < 0x10000ULL)
-                    return;
-                vtable = *reinterpret_cast<volatile std::uintptr_t *>(container);
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                resMgr = 0;
-                loader = 0;
-                container = 0;
-                vtable = 0;
-            }
-        }();
-
-        // Validate. If any field is bogus, log and let the next call try again. This is safe: pass-through behavior is
-        // preserved.
-        const auto expectedVtable = s_apptContainerVtable.load(std::memory_order_acquire);
-        if (container == 0 || vtable != expectedVtable)
-        {
-            logger.debug("[prefab-swap] AppearanceTableLoader capture "
-                         "deferred: a1=0x{:X} resMgr=0x{:X} loader=0x{:X} "
-                         "container=0x{:X} vt=0x{:X} (expected 0x{:X})",
-                         static_cast<std::uintptr_t>(a1), resMgr, loader, container, vtable, expectedVtable);
-            return rv;
-        }
-
-        s_apptContainer.store(container, std::memory_order_release);
-        s_apptCaptureDone.store(true, std::memory_order_release);
-
-        logger.info("[prefab-swap] AppearanceTableLoader captured: "
-                    "resMgr=0x{:X} loader=0x{:X} container=0x{:X} "
-                    "(vtable 0x{:X} verified)",
-                    resMgr, loader, container, vtable);
-        return rv;
-    }
-
     // --- AppearanceTableLoader public API ---
-
-    bool is_loader_ready() noexcept
-    {
-        // The AOB-resolved name lookup is self-contained: it queries the name->wrapper registry at
-        // loaderRegistrySingleton+0x50 directly, so the container capture and its scan machinery are not needed here.
-        // Verify only that the function pointer is wired.
-        return s_apptNameLookup != nullptr;
-    }
-
-    std::uintptr_t lookup_prefab_metadata(const char *name) noexcept
-    {
-        if (!name || !*name)
-            return 0;
-        if (!s_apptNameLookup)
-            return 0;
-
-        // The primitive handles the full lookup chain internally: lowercase -> intern -> query the global
-        // name->wrapper registry at loaderRegistrySingleton+0x50. It returns entry+8 on a hit (the value field, so a
-        // non-zero result means the prefab is registered and has a wrapper alive somewhere in the engine), or 0 on a
-        // miss. It is pure read-only and safe from any thread.
-        std::uintptr_t result = 0;
-        [&]() __declspec(noinline)
-        {
-            __try
-            {
-                result = static_cast<std::uintptr_t>(s_apptNameLookup(0, name));
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                result = 0;
-            }
-        }();
-        return result;
-    }
 
     void for_each_loader_prefab_name(const std::function<void(std::string_view)> &cb) noexcept
     {
@@ -647,7 +503,6 @@ namespace Transmog::PrefabWrapperSwap
                 continue;
             if (wrapper == vtableSentinel)
                 continue;
-            constexpr std::size_t k_loaderNameCap = 96;
             const auto rlen = read_cstr_seh(reinterpret_cast<const void *>(wrapper + 0x18), nameBuf, k_loaderNameCap);
             if (rlen == SIZE_MAX || rlen == 0)
                 continue;
@@ -1457,7 +1312,6 @@ namespace Transmog::PrefabWrapperSwap
                 continue;
 
             // Read inline name at wrapper+0x18 (max 96 chars per spec but we use k_extNameMax==256 for the buffer cap).
-            constexpr std::size_t k_loaderNameCap = 96;
             const auto rlen = read_cstr_seh(reinterpret_cast<const void *>(wrapper + 0x18), nameBuf, k_loaderNameCap);
             if (rlen == SIZE_MAX || rlen == 0)
                 continue;
@@ -1535,8 +1389,7 @@ namespace Transmog::PrefabWrapperSwap
                         PrefabEntry e;
                         e.name = p.name;
                         e.wrappers = {p.wrapper};
-                        e.hash = 0;         // filled by enrichment
-                        e.metadata = 0;     // filled by enrichment
+                        e.hash = 0;
                         e.is_loaded = true; // wrapper present
                         idxByName.emplace(e.name, cat.size());
                         cat.push_back(std::move(e));
@@ -1612,7 +1465,6 @@ namespace Transmog::PrefabWrapperSwap
                                  e.name = std::string(name);
                                  e.wrappers = {wrapper};
                                  e.hash = hash;
-                                 e.metadata = 0;     // filled post-walk
                                  e.is_loaded = true; // wrapper present
                                  shared.push_back(std::move(e));
                              });
@@ -1777,53 +1629,6 @@ namespace Transmog::PrefabWrapperSwap
                 if (s_selTgtIdx[i] >= sz)
                     s_selTgtIdx[i] = -1;
             }
-        }
-
-        // --- AppearanceTableLoader metadata enrichment ---
-        //
-        // Cross-references each catalog entry against the engine's name->wrapper registry at
-        // loaderRegistrySingleton+0x50, through the AOB-resolved name lookup primitive. One direct call per name, and
-        // no heap scan.
-
-        // For every catalog entry seeded above (StringInfo-resident), ask the loader whether it knows about the same
-        // name. We record the metadata pointer so the picker / future force-load logic can verify the engine's catalog
-        // membership. is_loaded stays true here -- the entry came from a StringInfo walk so a wrapper IS resident.
-        //
-        // A full iteration of the loader container to surface NOT-YET-loaded prefabs needs a walk of the hash-bucket
-        // structure inside the container. The bucket shape is documented (+0x68/+0x70 hash buckets), but the
-        // iteration semantics and the lock-acquisition discipline are not. The safer path is the on-demand lookup
-        // already exposed via `lookup_prefab_metadata` -- the picker can call it when the user types a name not in the
-        // catalog, then surface a synthetic "(unloaded)" entry on a hit.
-        //
-        // SEH-isolated: the lookup can touch engine memory if the loader captured during this populate cycle.
-        std::size_t metaEnriched = 0;
-        if (is_loader_ready())
-        {
-            std::scoped_lock lk(s_catalogMtx);
-            for (auto &cat : s_slotCatalogs)
-            {
-                for (auto &e : cat)
-                {
-                    const auto m = lookup_prefab_metadata(e.name.c_str());
-                    if (m)
-                    {
-                        e.metadata = m;
-                        ++metaEnriched;
-                    }
-                }
-            }
-        }
-        if (is_loader_ready())
-        {
-            logger.debug("[prefab-swap] Catalog metadata enrichment: "
-                         "{} entries cross-referenced against the "
-                         "AppearanceTableLoader catalog.",
-                         metaEnriched);
-        }
-        else
-        {
-            logger.debug("[prefab-swap] Catalog metadata enrichment "
-                         "skipped -- AppearanceTableLoader not yet captured.");
         }
 
         // Publish AFTER the heap-walk merge so apply paths waiting on the catalog see fully-resolved wrapper vectors
@@ -3186,66 +2991,6 @@ namespace Transmog::PrefabWrapperSwap
                                "-- AppearanceTableLoader enumeration disabled.");
             }
 
-            // Resolve the part-prefab data container vtable by its RTTI name first: the class name is patch-stable
-            // while the vtable address and the ctor's lea layout move between builds. Reverse RTTI therefore
-            // self-heals where the byte scan below drifts. The lea-walk fallback runs only when reverse RTTI is
-            // unavailable.
-            if (const auto rttiVt =
-                    DetourModKit::Rtti::vtable_for_type(
-                        ".?AV?$ThreadSafeRefCountedContainerBase@VstaticstringA@pa@@VAppearanceTableData@2@UDefaultUserData@2@@pa@@")
-                        .value_or(0))
-            {
-                s_apptContainerVtable.store(rttiVt, std::memory_order_release);
-                logger.debug("[prefab-swap] ApptContainerVtable via RTTI: 0x{:X}", rttiVt);
-            }
-            // ApptContainerVtable: the cascade locates the AppearanceTableLoader ctor. Walk forward inside its first
-            // 0x400 bytes for the SECOND `48 8D 05 ?? ?? ?? ?? 48 89 07` pair. The FIRST pair assigns the
-            // intermediate `_appearanceContainer` vtable. The SECOND assigns the `_partPrefabDataContainer` vtable we
-            // want. The scan is bounded. On a miss the container-vtable filter is skipped, which is safe: the check
-            // is read-only, so its loss removes a sentinel, not a correctness guarantee.
-            const auto ctorAbs = resolve_address(k_apptLoaderCtorCandidates, "ApptLoaderCtor");
-            if (ctorAbs && s_apptContainerVtable.load(std::memory_order_acquire) == 0)
-            {
-                const auto *body = reinterpret_cast<const std::uint8_t *>(ctorAbs);
-                constexpr std::size_t k_scanLen = 0x400;
-                std::uintptr_t resolved = 0;
-                std::size_t leaPairs = 0;
-                for (std::size_t i = 0; i + 10 <= k_scanLen; ++i)
-                {
-                    if (body[i] == 0x48 && body[i + 1] == 0x8D && body[i + 2] == 0x05 && body[i + 7] == 0x48 &&
-                        body[i + 8] == 0x89 && body[i + 9] == 0x07)
-                    {
-                        ++leaPairs;
-                        if (leaPairs == 2)
-                        {
-                            std::int32_t disp = 0;
-                            std::memcpy(&disp, body + i + 3, sizeof(disp));
-                            const std::uintptr_t instrEnd = ctorAbs + i + 7;
-                            resolved = instrEnd + static_cast<std::intptr_t>(disp);
-                            break;
-                        }
-                    }
-                }
-                if (resolved)
-                {
-                    s_apptContainerVtable.store(resolved, std::memory_order_release);
-                    logger.debug("[prefab-swap] ApptContainerVtable resolved "
-                                 "at 0x{:X} (ctor 0x{:X}, lea#2)",
-                                 resolved, ctorAbs);
-                }
-                else
-                {
-                    logger.warning("[prefab-swap] ApptContainerVtable: ctor "
-                                   "0x{:X} contained <2 `lea+mov [rdi]` pairs "
-                                   "in 0x{:X} bytes -- vtable filter disabled.",
-                                   ctorAbs, k_scanLen);
-                }
-            }
-            else if (s_apptContainerVtable.load(std::memory_order_acquire) == 0)
-            {
-                logger.warning("[prefab-swap] ApptContainerVtable cascade "
-                               "FAILED -- container vtable filter disabled.");
-            }
         }
 
         const auto addr =
@@ -3337,95 +3082,8 @@ namespace Transmog::PrefabWrapperSwap
         // AOB failure is non-fatal -- lookup_prefab_metadata returns 0 and the picker falls back to StringInfo-only
         // behavior.
         //
-        // The PRIMARY lookup is a self-contained name->wrapper primitive that operates on
-        // loaderRegistrySingleton+0x50. Resolved through the k_apptNameLookupCandidates cascade (3 anchors, see
-        // aob_resolver.hpp). On cascade failure lookup_prefab_metadata returns 0 and the picker falls back to
-        // StringInfo-only behavior.
-        {
-            const auto fnAbs = resolve_address(k_apptNameLookupCandidates, std::size(k_apptNameLookupCandidates),
-                                               "PrefabWrapperSwap_ApptNameLookup");
-            if (!fnAbs)
-            {
-                logger.warning("[prefab-swap] ApptNameLookup AOB resolve "
-                               "FAILED -- lookup_prefab_metadata will return 0; "
-                               "picker falls back to StringInfo-only behavior.");
-            }
-            else if (!DMK::Scanner::is_likely_function_prologue(fnAbs))
-            {
-                logger.warning("[prefab-swap] ApptNameLookup resolved at 0x{:X} "
-                               "but prologue check failed -- skipping. "
-                               "lookup_prefab_metadata will return 0.",
-                               fnAbs);
-            }
-            else
-            {
-                s_apptNameLookup = reinterpret_cast<ApptNameLookupFn>(fnAbs);
-                // The target is the name->wrapper lookup against loaderRegistrySingleton+0x50.
-                logger.debug("[prefab-swap] ApptNameLookup resolved at 0x{:X}", fnAbs);
-            }
-        }
-
-        const auto stringInternAddr =
-            resolve_address(k_apptStringInternCandidates, std::size(k_apptStringInternCandidates),
-                            "PrefabWrapperSwap_ApptStringIntern");
-        if (stringInternAddr)
-        {
-            s_apptStringIntern = reinterpret_cast<ApptStringInternFn>(stringInternAddr);
-            // The target is the StringInfo intern primitive for AppearanceTableLoader lookups.
-            logger.debug("[prefab-swap] ApptStringIntern resolved at 0x{:X}", stringInternAddr);
-        }
-        else
-        {
-            logger.warning("[prefab-swap] ApptStringIntern AOB scan failed "
-                           "-- AppearanceTableLoader lookups disabled.");
-        }
-
-        const auto apptLookupAddr = resolve_address(k_apptInnerLookupCandidates, std::size(k_apptInnerLookupCandidates),
-                                                    "PrefabWrapperSwap_ApptInnerLookup");
-        if (apptLookupAddr)
-        {
-            s_apptLookup = reinterpret_cast<ApptLookupFn>(apptLookupAddr);
-            // The target is the PartPrefab container lookup. It is pure read-only and returns 24B metadata, or 0 on a
-            // miss.
-            logger.debug("[prefab-swap] ApptLookup resolved at 0x{:X}", apptLookupAddr);
-        }
-        else
-        {
-            logger.warning("[prefab-swap] ApptLookup AOB scan failed "
-                           "-- AppearanceTableLoader lookups disabled.");
-        }
-
-        // Capture hook on the ResMgr init entry. We run the trampoline first, then read the populated chain. The
-        // capture is a one-shot. Subsequent calls pass through.
-        const auto apptInitAddr = resolve_address(k_apptResMgrInitCandidates, std::size(k_apptResMgrInitCandidates),
-                                                  "PrefabWrapperSwap_ApptResMgrInit");
-        if (apptInitAddr)
-        {
-            ApptResMgrInitFn apptInitTrampoline = nullptr;
-            auto apptResult = hookMgr.create_inline_hook("PrefabWrapperSwap_ApptResMgrInit", apptInitAddr,
-                                                         reinterpret_cast<void *>(on_appt_resmgr_init),
-                                                         reinterpret_cast<void **>(&apptInitTrampoline));
-            if (!apptResult.has_value())
-            {
-                logger.warning("[prefab-swap] ApptResMgrInit hook install "
-                               "FAILED: {} -- AppearanceTableLoader capture "
-                               "disabled; picker will only see StringInfo-resident "
-                               "prefabs.",
-                               DetourModKit::Hook::error_to_string(apptResult.error()));
-            }
-            else
-            {
-                s_apptResMgrInitOrig = apptInitTrampoline;
-                // On the first fire the entry hook snapshots ResMgr/loader/container. Every subsequent call passes
-                // through (one-shot capture).
-            }
-        }
-        else
-        {
-            logger.warning("[prefab-swap] ApptResMgrInit AOB scan failed "
-                           "-- AppearanceTableLoader capture disabled; picker "
-                           "will only see StringInfo-resident prefabs.");
-        }
+        // The AppearanceTableLoader capture hook and its two lookup primitives were removed: the only consumer
+        // was lookup_prefab_metadata, whose result was written to a field no code read. See prefab_wrapper_swap.hpp.
 
         // Boot-time auto-scan: kick off a detached thread that waits for the world to be ready, then walks StringInfo
         // to populate the per-slot catalog. That also triggers the heap-walk merge for parallel-pool wrappers, and it
@@ -3580,12 +3238,6 @@ namespace Transmog::PrefabWrapperSwap
         // Reset AppearanceTableLoader capture state. Do NOT null the lookup function pointers -- they are
         // trampoline-resolved addresses and HookManager owns the trampoline lifetime. The next init() re-resolves
         // them.
-        s_apptContainer.store(0, std::memory_order_relaxed);
-        s_apptCaptureDone.store(false, std::memory_order_release);
-        s_apptResMgrInitOrig = nullptr;
-        s_apptStringIntern = nullptr;
-        s_apptLookup = nullptr;
-        s_apptNameLookup = nullptr;
     }
 
     void notify_apply_starting(const std::uint16_t (&itemIds)[5])

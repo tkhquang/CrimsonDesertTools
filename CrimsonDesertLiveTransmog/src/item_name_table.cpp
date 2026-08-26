@@ -46,17 +46,24 @@ namespace Transmog
     // by base items.
     static constexpr std::ptrdiff_t k_descVariantMetaOffset = 0x3B0;
 
-    // Canonical item-type code, u16. This is the field the engine itself reads to classify an item: the SlotPopulator
-    // loads the descriptor through the item accessor and then runs `movzx ecx, word ptr [desc+<this offset>]` to index
-    // its EquipTypeInfo table. Slot derivation follows the same field so the mod and the engine agree.
+    // Item-type code, u16. This is the engine's own equip-slot key: SlotPopulator reads it out of the descriptor to
+    // index its EquipTypeInfo table.
     //
-    // The offset moves when the descriptor head changes width. A wrong value fails SILENTLY, because a neighboring
-    // offset still reads as a plausible u16. Verify it the same way it was derived: walk every descriptor, build a
-    // value histogram, and keep the offset whose values cluster by item family. The correct field yields on the order
-    // of a hundred distinct codes with large per-family runs (helms, chests, gloves, boots) plus one dominant 0xFFFF
-    // bucket for arrows and quest items. A wrong offset yields either a near-constant value or hundreds of singleton
-    // values that are byte fragments of an adjacent pointer.
+    // LT does NOT interpret the VALUE. The value is a row index and renumbers whenever that table gains an entry,
+    // which is exactly what made the old static switch rot. It is used only as a JOIN KEY: items the group taxonomy
+    // already classified vote for their type code, and the winning slot then classifies every other item sharing that
+    // code (see `learn` in build()).
+    //
+    // That join is what recovers NPC and boss gear. The engine files it under ItemGroup_Equip_Armor_Mon, which names
+    // a family but no slot, so groups alone leave it unclassified -- yet it shares its type code with the player armor
+    // of the same slot. It also keeps pet, horse, WarRobot and dragon gear OUT with no exclusion list: no player item
+    // shares their codes, so nothing ever votes for them.
+    //
+    // The offset moves when the descriptor head changes width. A wrong value no longer mis-slots items silently: it
+    // yields scattered keys that nothing votes for twice, so the learned table collapses and the [catalog-slots]
+    // histogram drops to the group-only counts.
     static constexpr std::ptrdiff_t k_descTypeCodeOffset = 0x42;
+    static constexpr uint16_t k_typeCodeNone = 0xFFFF; // arrows, quest items, anything with no equip slot
 
     // --- iteminfo container layout ---
     // These are runtime data offsets, not code, so they cannot be AOB-scanned. If a future patch reshapes the struct,
@@ -185,238 +192,302 @@ namespace Transmog
 
     // --- Slot classification ---
     //
-    // Driven entirely by the canonical item-type code at desc+k_descTypeCodeOffset as captured during the catalog
-    // build. Name-parsing heuristics are NOT used: they produce false positives on non-armor items whose names contain
-    // tokens like "_Armor_" (horse armors, shields, quest treasure maps, etc). The game's own type code is
-    // unambiguous. The fallback is to treat anything unmapped as non-equipment.
+    // Driven by the item's own group membership, resolved by NAME at runtime. Every item descriptor carries
+    // `_itemGroupInfoList`, a vector of u16 values naming the ItemGroupInfo rows the item belongs to. Those rows carry
+    // the engine's own equipment taxonomy:
+    //
+    //     ..._Equip_Armor_Player_Helm / _Armor / _Cloak / _Gloves / _Boots
+    //     ..._equip_accessory_Necklace / _Ring
+    //     ..._Equip_Accessory_Glasses / _Mask
+    //     ..._Equip_BackPack
+    //     ..._Equip_Weapon_OneHand / _Shield / _TwoHand / _Range / _OneHandDagger
+    //     ..._Equip_Tool / _Tool_NPC
+    //
+    // The taxonomy is stated twice, once as `ItemGroup_SubCategory_<tail>` and once as `ItemGroup_<tail>`, so the
+    // rules match on the tail and cover both. Every item has at most ONE sub-category (verified catalog-wide: 5824
+    // with one, 749 with none, none with two), and the family rows agree with it, so the match is unambiguous.
+    //
+    // Keying on the NAME is the point. The previous classifier read a u16 type code out of the descriptor and mapped
+    // it through a static switch, but that code is a ROW INDEX into an engine table: inserting one row renumbers
+    // everything above it, and the accessory band moved in both directions across past patches. A stale index table
+    // does not fail loudly -- the codes the band vacates belong to WarRobot parts, so mech parts appear in the Glasses
+    // and Mask pickers while real masks fall through to unmapped. Group names do not renumber.
+    //
+    // Non-player families (pet, horse, riding, vehicle) carry their own sub-categories and simply do not appear in the
+    // table, so they classify as Count and stay out of every picker without needing an exclusion list.
+    //
+    // Three slots are absent from the taxonomy and are recovered from a more specific group the item also belongs to.
+    // The engine spreads these across per-promotion rows (Equip_Tool_Lantern, Equip_Twitch_Special_Lantern, ...) with
+    // no single covering row, so they match a short suffix instead:
+    //
+    //     *_Earring   -- earrings have no taxonomy row at all
+    //     *_Lantern   -- lanterns are filed under Equip_Tool
+    //     *_Band      -- bracelets sub-categorize as Control
+    //
+    // These outrank the taxonomy rules, which is what keeps lanterns out of the Tool picker.
+    //
+    // Name-parsing of the ITEM name is still not used: it produces false positives on anything whose name contains
+    // tokens like "_Armor_" (horse armor, shields, quest treasure maps). Only group names are parsed, and those are
+    // the engine's own classification rather than a display string.
 
-    // Slot mapping for the canonical item-type code at desc+k_descTypeCodeOffset.
-    //
-    // Armor block (the most stable codes -- they sit at the bottom of the engine enum and stay put across patches):
-    //   0x04=Helm  0x05=Chest  0x06=Gloves  0x07=Boots
-    //
-    // Accessories. Earring/Necklace/Ring/Lantern also sit below the shifting band and stay put. Backpack..Mask,
-    // Cloak included, ride the band described at the `case` labels below and are NOT stable across patches:
-    //   0x08=Earring (Earring1/Earring2 share)
-    //   0x09=Necklace
-    //   0x0A=Ring (Ring1/Ring2 share)
-    //   0x38=Lantern
-    //   0x48=Backpack
-    //   0x4B=Cloak
-    //   0x4C=Bracelet  0x4D=Glasses  0x4E=Mask
-    //
-    // Weapons (typeCode varies by weapon FAMILY and sometimes by character variant -- all sharing the
-    // MainHand/OffHand/Ranged/ SubWeapon/TwoHandWeapon auth-table slots):
-    //   Weapon families come from iterating every descriptor's typeCode
-    //   against sample item names. Live-equipped items give ground truth
-    //   for confirmed entries. The rest come from sample-name conventions
-    //   (e.g. *_TwoHandHammer = TwoHandWeapon, *_OneHandShotgun = Ranged).
-    //   Items whose slot cannot be inferred from the name stay unmapped.
-    //   Runtime observation handles them when the user equips one.
-    //
-    //   1H families (MainHand, paired-pickered with OffHand):
-    //     0x00=1H Sword            0x01=OneHandShield (generic)
-    //     0x02=Damiane Shield      0x10=1H Axe
-    //     0x13=1H Mace             0x1D=Fist (Item_Fist_*)
-    //     0x20=Tower Shield        0x28=Rapier
-    //     0x31=Knuckle/Ring_Drill
-    //   Ranged:
-    //     0x03=Bow                 0x0D=Sprayer (named BackPack, filed ranged by the engine)
-    //     0x22=Pistol              0x23=Musket
-    //     0x24=Shotgun             0x26=1H Cannon
-    //     0x30=Crossbow            0x32=FlameThrower
-    //     0x33=IceThrower          0x34=LightningThrower
-    //     0x6A=FishingRod
-    //   Sub-weapons:
-    //     0x0E=Dagger
-    //   2H weapons:
-    //     0x0F=2H Axe              0x11=Greatsword A
-    //     0x12=Greatsword B (NPC)  0x14=WarHammer
-    //     0x15=2H Spear/Polearm    0x1C=2H Hammer
-    //     0x1F=Chainsaw            0x21=Halberd/Alebard
-    //     0x27=2H Cannon           0x35=BlowPipe
-    //   Tools (their own engine slot, not the two-hand slot, even though the meshes are held in both hands):
-    //     0x1E=Drill               0x5A=Pickaxe
-    //     0x5B=Iron Chain          0x5C=Rake
-    //     0x5D=Felling Axe (Boss_Reward_SuperWeapon)
-    //     0x5E=Shovel              0x5F=Broom
-    //     0x61=Hoe                 0x62=Sickle/Scythe
-    //     0x63=Work Hammer         0x65=Saw
-    //     0x67=Drum                0x68=Stick
-    //     0x6C=PriestWand          0x6E=Crutch
-    //
-    //   Intentionally NOT mapped (not character transmog):
-    //     0x0B Oongka_Rocket_Helm (TransmogSlot::OongkaRocket commented)
-    //     0x17 Contribution_Flag, 0x18 Torch, 0x2C Witch_WingFan
-    //     0x3B-0x3D PetArmor (pet/cat equipment)
-    //     0x3E-0x42 HorseArmor (mount equipment), 0x43 animal body armor
-    //     0x4F-0x58 WarRobot body parts (mech, not character), 0x59 dragon armor
-    //     Notepad/Pen, FlatBasket, Bucket, Pot_Head (household props). Their
-    //       codes sit inside the shifting tool band described below, so read
-    //       them off the [catalog-histogram] samples instead of trusting a
-    //       written value.
-    //     0xFFFF Arrow/Quiver/Quest items
-    //
-    // The 0x11 vs 0x12 split for 2H bastard swords looks like a character/body variant axis. They are the "same"
-    // weapon class visually, but the engine tags them differently per protagonist. Both go in the TwoHandWeapon slot.
-    //
-    // More weapon-family typeCodes will surface as users equip new classes (crossbow, polearm, etc). Runtime
-    // `record_observed_slot` covers any unmapped family automatically once an item appears in the auth-table.
-    //
-    // Excluded by design (not LT-targeted):
-    //   0x0B=OongkaRocket Helm. The OongkaRocket TransmogSlot is not
-    //        mapped, so leaving 0x0B unmapped keeps those items out of
-    //        every picker.
-    //
-    // For paired slots (weapons/earrings/rings) the static map points at the lower-indexed half of the pair. The picker
-    // UI uses `slots_share_picker` so both halves of a pair show the same items. The actual auth-table slot used at
-    // apply time is whichever TransmogSlot row the user committed against.
-    //
-    // Other observed codes rejected: pet and mount armor, WarRobot parts, dragon armor, and 0xFFFF quest /
-    // non-equipment.
-    static TransmogSlot slot_from_type_code(std::uint16_t code) noexcept
+    // Priority band for a group -> slot rule. Lower wins, so a specific-slot match beats the broad taxonomy: a lantern
+    // is in a `*_Lantern` group AND in `Equip_Tool`, and it belongs in the Lantern picker.
+    enum : std::uint8_t
     {
-        switch (code)
+        k_groupPrioritySpecific = 0,
+        k_groupPriorityTaxonomy = 1,
+        k_groupPriorityNone = 0xFF,
+    };
+
+    struct GroupSlot
+    {
+        TransmogSlot slot = TransmogSlot::Count;
+        std::uint8_t priority = k_groupPriorityNone;
+    };
+
+    struct GroupRule
+    {
+        std::string_view name;
+        TransmogSlot slot;
+    };
+
+    // The taxonomy, matched on the END of the group name.
+    //
+    // Suffix rather than whole-name, because the engine states the same taxonomy twice: once as the item's
+    // sub-category (`ItemGroup_SubCategory_Equip_Weapon_OneHand`) and once as a plain family row
+    // (`ItemGroup_Equip_Weapon_OneHand`). They differ only by the `_SubCategory` infix, so one tail matches both. That
+    // second layer is not redundant -- NPC props carry only the family row, which is how the boss knuckles reach
+    // MainHand and the NPC torch, saw, drum, stick, priest wand and crutch reach Tool.
+    //
+    // Casing in the game data is inconsistent ("equip_accessory_Ring" vs "Equip_Accessory_Mask"), so every comparison
+    // is case-insensitive. Tails are specific enough not to over-match: `_Equip_BackPack` does not catch
+    // `Equip_SpecialBackPack` or `Equip_BackPack_Normal`, and `_Equip_Weapon_OneHand` does not catch
+    // `Equip_Weapon_OneHandDagger`.
+    static constexpr GroupRule k_taxonomyTailRules[] = {
+        {"_Equip_Armor_Player_Helm", TransmogSlot::Helm},
+        {"_Equip_Armor_Player_Armor", TransmogSlot::Chest},
+        {"_Equip_Armor_Player_Cloak", TransmogSlot::Cloak},
+        {"_Equip_Armor_Player_Gloves", TransmogSlot::Gloves},
+        {"_Equip_Armor_Player_Boots", TransmogSlot::Boots},
+        {"_Equip_Accessory_Necklace", TransmogSlot::Necklace},
+        {"_Equip_Accessory_Ring", TransmogSlot::Ring1},
+        {"_Equip_Accessory_Glasses", TransmogSlot::Glasses},
+        {"_Equip_Accessory_Mask", TransmogSlot::Mask},
+        {"_Equip_BackPack", TransmogSlot::Backpack},
+        {"_Equip_Weapon_OneHand", TransmogSlot::MainHand},
+        {"_Equip_Weapon_Shield", TransmogSlot::OffHand},
+        {"_Equip_Weapon_TwoHand", TransmogSlot::TwoHandWeapon},
+        {"_Equip_Weapon_Range", TransmogSlot::Ranged},
+        {"_Equip_Weapon_OneHandDagger", TransmogSlot::SubWeapon},
+        {"_Equip_Tool", TransmogSlot::Tool},
+        {"_Equip_Tool_NPC", TransmogSlot::Tool},
+    };
+
+    // Suffix matches for the three slots the sub-category layer does not separate. Paired slots resolve to the
+    // lower-indexed half; the picker shares its list across the pair via `slots_share_picker`, and the half actually
+    // written is whichever row the user committed against.
+    static constexpr GroupRule k_groupSuffixRules[] = {
+        {"_Earring", TransmogSlot::Earring1},
+        {"_Lantern", TransmogSlot::Lantern},
+        {"_Band", TransmogSlot::Bracelet},
+    };
+
+    static bool iequals(std::string_view a, std::string_view b) noexcept
+    {
+        if (a.size() != b.size())
+            return false;
+        for (std::size_t i = 0; i < a.size(); ++i)
         {
-        // Armor
-        case 0x04:
-            return TransmogSlot::Helm;
-        case 0x05:
-            return TransmogSlot::Chest;
-        case 0x06:
-            return TransmogSlot::Gloves;
-        case 0x07:
-            return TransmogSlot::Boots;
-        // The accessory band (Backpack..Mask) shifts as a BLOCK whenever the engine's item-type enum gains or loses an
-        // entry below it. The shift went in both directions across past patches, so do not assume a direction and do
-        // not extrapolate one. Armor (Helm..Boots 0x04..0x07) and Earring/Necklace/Ring/Lantern sit below the band and
-        // stay put.
-        //
-        // Re-derive the band by diffing a fresh catalog dump against the previous one BY NAME, or by reading the
-        // sample names in the [catalog-histogram] log lines. A stale band is not merely a miss. The codes the band
-        // vacates belong to WarRobot parts, so a stale table lists mech parts in the Glasses and Mask pickers while
-        // every real bracelet, pair of glasses and mask falls through to unmapped.
-        //
-        // Superseded values are dropped rather than kept for back-compat, because a one-code shift makes the old
-        // values collide with the current ones (an old Cloak code becomes the current Backpack code, and so on). The
-        // auto-updating live game only ever presents the current build's codes.
-        case 0x4B:
-            return TransmogSlot::Cloak; // Soldier_General_Fabric_Cloak, WellsKnight_PlateArmor_Cloak
-        case 0x08:
-            return TransmogSlot::Earring1; // shared with Earring2
-        case 0x09:
-            return TransmogSlot::Necklace;
-        case 0x0A:
-            return TransmogSlot::Ring1; // shared with Ring2
-        case 0x38:
-            return TransmogSlot::Lantern;
-        case 0x48:
-            return TransmogSlot::Backpack; // Aggro_Backpack, Bleed_Bomb_BackPack, WaterPower_BackPack
-        case 0x4C:
-            return TransmogSlot::Bracelet; // Daeil_Band + its OOngka_/Damian_ rig variants
-        case 0x4D:
-            return TransmogSlot::Glasses; // Kliff_Glasses, Hernand_Crown, Demeniss_Crown
-        case 0x4E:
-            return TransmogSlot::Mask; // Kliff_Mask
-        // Weapon codes below carry the engine's own EquipTypeInfo row name in the trailing comment. That table is the
-        // authority: the code IS the row index the engine reads out of the descriptor to classify the item. To re-derive
-        // or extend this block, dump the EquipTypeInfo manager's entry array and read each row's name, rather than
-        // guessing from item names. A one-hand and two-hand pair often shares a weapon family, so the name is the only
-        // reliable way to tell which hand a code belongs to.
-        //
-        // Codes for non-player families stay UNMAPPED on purpose and fall through to Count: Ammo, HiddenEquip, Cushion,
-        // Pet*, Horse*, Robot*, DragonArmor, SpecialVehicleArmor, GhostWeapon, Battery. The mesh binder crashes on
-        // non-humanoid rigs, and Count is what keeps them out of the picker.
-        //
-        // 1H weapons -- MainHand
-        case 0x00: // OneHandSword
-        case 0x10: // OneHandAxe
-        case 0x13: // OneHandMace
-        case 0x18: // OneHandTorch
-        case 0x1B: // OneHandFlail
-        case 0x1D: // OneHandFist
-        case 0x1F: // OneHandSaw
-        case 0x28: // OneHandRapier
-        case 0x2C: // OneHandFan
-        case 0x2D: // OneHandHammer
-        case 0x31: // Gauntlet
-        case 0x36: // OneHandBomb
-        case 0x39: // OneHandBola
-            return TransmogSlot::MainHand;
-        // Shields -- OffHand. The engine files every shield in its own rows, separate from the one-hand weapons above.
-        case 0x01: // OneHandShield
-        case 0x02: // OneHandShieldRight
-        case 0x20: // OneHandTowerShield
-            return TransmogSlot::OffHand;
-        // Ranged. The spray rig reads as a worn bag from its item name, but the engine files it in the ranged slot and
-        // the auth table is the authority, so it classifies as Ranged and not Backpack.
-        case 0x03: // OneHandBow
-        case 0x0D: // SprayBag
-        case 0x22: // OneHandPistol
-        case 0x23: // OneHandMusket
-        case 0x24: // OneHandShotgun
-        case 0x26: // OneHandCannon
-        case 0x30: // OneHandCrossBow
-        case 0x6A: // ToolFishingRod. Filed here rather than with the tools because it aims and casts.
-            return TransmogSlot::Ranged;
-        // Sub-weapons
-        case 0x0E:
-            return TransmogSlot::SubWeapon; // OneHandDagger
-        // 2H weapons (combat + utility tools)
-        case 0x0F: // TwoHandAxe
-        case 0x11: // TwoHandSword
-        case 0x12: // TwoHandGiantSword
-        case 0x14: // TwoHandWarHammer
-        case 0x15: // TwoHandSpear
-        case 0x16: // TwoHandGiantSpear
-        case 0x17: // TwoHandPike
-        case 0x19: // TwoHandRod
-        case 0x1A: // TwoHandScythe
-        case 0x1C: // TwoHandHammer
-        case 0x21: // TwoHandHalberd
-        case 0x27: // TwoHandCannon
-        case 0x29: // TwoHandFlail
-        case 0x2A: // TwoHandMace
-        case 0x2B: // TwoHandGiantMace
-        case 0x2E: // TwoHandGiantAxe
-        case 0x2F: // TwoHandGiantHammer
-        case 0x32: // TwoHandFlamethrower
-        case 0x33: // TwoHandIcethrower
-        case 0x34: // TwoHandLightningthrower
-        case 0x35: // TwoHandBlowPipe
-        case 0x37: // TwoHandFlag
-            return TransmogSlot::TwoHandWeapon;
-        // Gathering tools. The engine files these under their own equip tag rather than with the two-hand weapons,
-        // even though the meshes are held in both hands, so they classify as Tool and not TwoHandWeapon.
-        //
-        // The tool and utility codes shift when the engine enum gains an entry inside their range. An insertion moves
-        // ONLY the codes at and above the insertion point, so do not blanket-shift this whole block. Read the current
-        // values off the EquipTypeInfo row names, the same way as the weapon codes above.
-        //
-        // Gaps in the case list are deliberate. Those rows carry hand-held props rather than equipment: baskets,
-        // buckets, pots, and the writing set the engine files under Tooltrumpet. Count keeps them out of the picker.
-        // The drill reads as a one-hand weapon from its type-code neighbourhood, but the engine files it in the tool
-        // slot, so it classifies as Tool for the same reason as the spray rig above.
-        case 0x1E: // OneHandDrill
-        case 0x5A: // ToolPickaxe
-        case 0x5B: // ToolHayfork
-        case 0x5C: // ToolRake
-        case 0x5D: // ToolAxe
-        case 0x5E: // ToolShovel
-        case 0x5F: // ToolBroom
-        case 0x61: // ToolHoe
-        case 0x62: // ToolSythe
-        case 0x63: // ToolHammer
-        case 0x65: // ToolSaw
-        case 0x67: // ToolDrum
-        case 0x68: // ToolStick
-        case 0x6C: // ToolPriestWandBig
-        case 0x6D: // ToolPriestWandSmall
-        case 0x6E: // ToolCrutch
-            return TransmogSlot::Tool;
-        default:
-            return TransmogSlot::Count;
+            const auto ca = std::tolower(static_cast<unsigned char>(a[i]));
+            const auto cb = std::tolower(static_cast<unsigned char>(b[i]));
+            if (ca != cb)
+                return false;
         }
+        return true;
+    }
+
+    static bool iends_with(std::string_view name, std::string_view tail) noexcept
+    {
+        return name.size() >= tail.size() && iequals(name.substr(name.size() - tail.size()), tail);
+    }
+
+    static GroupSlot slot_from_group_name(std::string_view name) noexcept
+    {
+        for (const auto &rule : k_groupSuffixRules)
+        {
+            if (iends_with(name, rule.name))
+                return {rule.slot, k_groupPrioritySpecific};
+        }
+        for (const auto &rule : k_taxonomyTailRules)
+        {
+            if (iends_with(name, rule.name))
+                return {rule.slot, k_groupPriorityTaxonomy};
+        }
+        return {};
+    }
+
+    // --- ItemGroupInfo registry ---
+    //
+    // `_itemGroupInfoList` on the item descriptor: a vector of u16 group values. The generated deserializer resolves
+    // each serialized key through the group registry's hash map at load time and stores `index + 1`, reserving 0 for
+    // "key not found" (every item carries one such 0). So the def-array index is `value - 1`.
+    // The vector is {qword data, dword size, dword capacity}. Size and capacity hold the same value on a loaded
+    // descriptor, so reading the pair as one qword yields a huge number rather than a wrong-but-plausible count.
+    static constexpr std::ptrdiff_t k_descItemGroupDataOffset = 0x350;  // qword, base of the u16 array
+    static constexpr std::ptrdiff_t k_descItemGroupCountOffset = 0x358; // dword element count
+    static constexpr std::size_t k_maxItemGroupsPerItem = 64;
+
+    // The registry is a pa::StaticInfoManager2 like iteminfo -- same count and def-array offsets -- and its holder
+    // sits in the same block of globals. The holder is FOUND rather than hardcoded: probe the neighbouring qwords and
+    // keep the first whose rows carry "ItemGroup..." names. Exactly one candidate in the window qualifies, so the
+    // probe self-heals when a patch reorders that block.
+    static constexpr std::ptrdiff_t k_groupHolderProbeLow = -0x80;
+    static constexpr std::ptrdiff_t k_groupHolderProbeHigh = 0x100;
+    static constexpr std::size_t k_groupHolderProbeRows = 16; // rows sampled per candidate before rejecting it
+
+    static constexpr std::ptrdiff_t k_groupRowDefOffset = 0x18; // registry row -> group-def object
+
+    // The name's {ptr,len} wrapper sits at a VARIABLE offset inside the def object: a name short enough to live in the
+    // object's inline buffer pushes the wrapper past it, and the neighbouring member is a variable-length u16 array of
+    // member item ids. Scan a bounded window for a pair that resolves to a string of exactly the stated length whose
+    // prefix is "ItemGroup". A wrong pair fails all three checks, so the scan cannot silently pick up a neighbour.
+    static constexpr std::ptrdiff_t k_groupNameScanBegin = 0x18;
+    static constexpr std::ptrdiff_t k_groupNameScanEnd = 0x60;
+    static constexpr std::size_t k_maxGroupNameLen = 160;
+    static constexpr std::string_view k_groupNamePrefix = "ItemGroup";
+
+    static constexpr uint32_t k_maxGroupCount = 0x20000;
+
+    /**
+     * Read one group row's name. Returns an empty string when the row does not resolve to an "ItemGroup..." name.
+     */
+    static std::string read_group_name(uintptr_t row) noexcept
+    {
+        bool ok = false;
+        const uintptr_t def = read_qword_safe(row + k_groupRowDefOffset, ok);
+        if (!ok || !DMKMemory::plausible_userspace_ptr(def))
+            return {};
+
+        char buf[k_maxGroupNameLen + 1];
+        for (std::ptrdiff_t off = k_groupNameScanBegin; off <= k_groupNameScanEnd; off += 4)
+        {
+            const uintptr_t strPtr = read_qword_safe(def + off, ok);
+            if (!ok || !DMKMemory::plausible_userspace_ptr(strPtr))
+                continue;
+            const uint32_t len = read_u32_safe(def + off + 8, ok);
+            if (!ok || len < k_groupNamePrefix.size() || len > k_maxGroupNameLen)
+                continue;
+            const auto got = read_cstring_safe(strPtr, buf, sizeof(buf));
+            if (got != len)
+                continue;
+            const std::string_view name(buf, got);
+            if (name.substr(0, k_groupNamePrefix.size()) == k_groupNamePrefix)
+                return std::string(name);
+        }
+        return {};
+    }
+
+    /**
+     * Locate the ItemGroupInfo registry holder by probing the globals around the iteminfo holder. Returns 0 when no
+     * candidate in the window exposes "ItemGroup..." rows. Cached by the caller, because the answer is an address of a
+     * global and does not change within a process lifetime.
+     */
+    static uintptr_t probe_group_registry_holder(uintptr_t iteminfoHolder) noexcept
+    {
+        for (std::ptrdiff_t off = k_groupHolderProbeLow; off <= k_groupHolderProbeHigh; off += 8)
+        {
+            const uintptr_t holder = iteminfoHolder + off;
+            bool ok = false;
+            const uintptr_t mgr = read_qword_safe(holder, ok);
+            if (!ok || !DMKMemory::plausible_userspace_ptr(mgr))
+                continue;
+
+            const uint32_t count = read_u32_safe(mgr + k_iteminfoCountOffset, ok);
+            if (!ok || count == 0 || count > k_maxGroupCount)
+                continue;
+            const uintptr_t rows = read_qword_safe(mgr + k_iteminfoPtrArrayOffset, ok);
+            if (!ok || !DMKMemory::plausible_userspace_ptr(rows))
+                continue;
+
+            const auto sample = (std::min)(static_cast<std::size_t>(count), k_groupHolderProbeRows);
+            for (std::size_t i = 0; i < sample; ++i)
+            {
+                const uintptr_t row = read_qword_safe(rows + i * 8ull, ok);
+                if (!ok || !DMKMemory::plausible_userspace_ptr(row))
+                    continue;
+                if (!read_group_name(row).empty())
+                    return holder;
+            }
+        }
+        return 0;
+    }
+
+    /**
+     * Build `defIndex -> GroupSlot` for the whole registry. An empty result means the registry did not resolve, which
+     * the caller treats as "defer and retry" rather than publishing an unclassified catalog.
+     */
+    static std::vector<GroupSlot> build_group_slot_table(uintptr_t groupHolder, std::size_t &mappedOut) noexcept
+    {
+        mappedOut = 0;
+        std::vector<GroupSlot> table;
+
+        bool ok = false;
+        const uintptr_t mgr = read_qword_safe(groupHolder, ok);
+        if (!ok || !DMKMemory::plausible_userspace_ptr(mgr))
+            return table;
+        const uint32_t count = read_u32_safe(mgr + k_iteminfoCountOffset, ok);
+        if (!ok || count == 0 || count > k_maxGroupCount)
+            return table;
+        const uintptr_t rows = read_qword_safe(mgr + k_iteminfoPtrArrayOffset, ok);
+        if (!ok || !DMKMemory::plausible_userspace_ptr(rows))
+            return table;
+
+        table.resize(count);
+        for (uint32_t i = 0; i < count; ++i)
+        {
+            const uintptr_t row = read_qword_safe(rows + i * 8ull, ok);
+            if (!ok || !DMKMemory::plausible_userspace_ptr(row))
+                continue;
+            const auto name = read_group_name(row);
+            if (name.empty())
+                continue;
+            const auto mapped = slot_from_group_name(name);
+            if (mapped.priority == k_groupPriorityNone)
+                continue;
+            table[i] = mapped;
+            ++mappedOut;
+        }
+        return table;
+    }
+
+    /**
+     * Classify one item from its group membership. Returns Count when the item belongs to no mapped group, which is
+     * the normal answer for consumables, quest items and non-player equipment.
+     */
+    static TransmogSlot slot_from_item_groups(uintptr_t descPtr, const std::vector<GroupSlot> &groupSlots) noexcept
+    {
+        bool ok = false;
+        const uintptr_t data = read_qword_safe(descPtr + k_descItemGroupDataOffset, ok);
+        if (!ok || !DMKMemory::plausible_userspace_ptr(data))
+            return TransmogSlot::Count;
+        const uint32_t count = read_u32_safe(descPtr + k_descItemGroupCountOffset, ok);
+        if (!ok || count == 0 || count > k_maxItemGroupsPerItem)
+            return TransmogSlot::Count;
+
+        GroupSlot best;
+        for (uint32_t i = 0; i < count; ++i)
+        {
+            const uint16_t value = read_u16_safe(data + i * 2ull, ok);
+            if (!ok || value == 0) // 0 is the deserializer's "key not resolved" filler
+                continue;
+            const std::size_t index = value - 1u;
+            if (index >= groupSlots.size())
+                continue;
+            const auto &candidate = groupSlots[index];
+            if (candidate.priority < best.priority)
+                best = candidate;
+        }
+        return best.slot;
     }
 
     // --- Singleton ---
@@ -638,9 +709,38 @@ namespace Transmog
             return BuildResult::Deferred;
         }
 
+        // Step C: resolve the ItemGroupInfo registry and turn it into `defIndex -> slot`. Slot classification depends
+        // on it entirely, so a miss defers rather than publishing a catalog in which every item reads as
+        // non-equipment. The holder address is stable for the process, so it is probed once.
+        static uintptr_t s_groupHolder = 0;
+        if (s_groupHolder == 0)
+        {
+            s_groupHolder = probe_group_registry_holder(globalHolder);
+            if (s_groupHolder == 0)
+            {
+                logger.trace("[nametable] ItemGroupInfo registry not found near the iteminfo holder "
+                             "(0x{:X}) -- deferring",
+                             globalHolder);
+                return BuildResult::Deferred;
+            }
+            logger.info("[nametable] ItemGroupInfo holder = 0x{:X} (iteminfo holder {:+#x})",
+                        s_groupHolder, static_cast<std::ptrdiff_t>(s_groupHolder - globalHolder));
+        }
+
+        std::size_t mappedGroups = 0;
+        const auto groupSlots = build_group_slot_table(s_groupHolder, mappedGroups);
+        if (groupSlots.empty() || mappedGroups == 0)
+        {
+            logger.trace("[nametable] ItemGroupInfo registry empty or unnamed "
+                         "({} rows, {} mapped) -- deferring",
+                         groupSlots.size(), mappedGroups);
+            return BuildResult::Deferred;
+        }
+
         logger.info("[nametable] scanning item catalog: count={} "
-                    "globalPtr=0x{:X} ptrArray=0x{:X}",
-                    count, globalPtr, ptrArray);
+                    "globalPtr=0x{:X} ptrArray=0x{:X} "
+                    "(item groups: {} rows, {} mapped to slots)",
+                    count, globalPtr, ptrArray, groupSlots.size(), mappedGroups);
 
         const auto t0 = std::chrono::steady_clock::now();
 
@@ -649,21 +749,22 @@ namespace Transmog
         std::unordered_map<uint16_t, std::string> idToName;
         std::unordered_map<std::string, uint16_t> nameToId;
         std::unordered_map<uint16_t, uint8_t> variantFlag;
-        std::unordered_map<uint16_t, uint16_t> typeCodeMap;
+        std::unordered_map<uint16_t, TransmogSlot> slotMap;
         idToName.reserve(count);
         nameToId.reserve(count);
         variantFlag.reserve(count);
-        typeCodeMap.reserve(count);
+        slotMap.reserve(count);
 
-        // Pass 1: walk the catalog and collect the name, the variant-meta pointer and the item-type code for every
+        // Pass 1: walk the catalog and collect the name, the variant-meta pointer and the transmog slot for every
         // valid descriptor. The variant flag cannot be resolved yet, because pass 2 derives the sentinel
         // statistically from the values this pass collects.
         struct ScratchEntry
         {
             uint16_t id;
             std::string name;
-            uintptr_t metaPtr; // 0 on read fault
-            uint16_t typeCode; // canonical item-type code
+            uintptr_t metaPtr;  // 0 on read fault
+            TransmogSlot slot;  // from the item's group membership, Count when its groups name no slot
+            uint16_t typeCode;  // join key for the learned pass below
         };
         std::vector<ScratchEntry> scratch;
         scratch.reserve(count);
@@ -698,14 +799,14 @@ namespace Transmog
             // m_bodyByName), applied at query time in sorted_entries and is_player_compatible.
             // scripts/gen_item_body_table.py fills that column from the packed gamedata.
             //
-            // Item-type code, u16 at k_descTypeCodeOffset:
-            //   0x04=Helm, 0x05=Chest, 0x06=Gloves, 0x07=Boots,
-            //   0x08=Earring, 0x09=Necklace, 0x0A=Ring, 0x37=Lantern,
-            //   0x43=Backpack, 0x46=Cloak, 0x47=Bracelet, 0x48=Glasses, 0x49=Mask,
-            //   0x4A..0x53=WarRobot parts, 0x54=Dragon armor,
-            //   0xFFFF=Quest/Non-equipment.
-            // This is the canonical game-side classifier for item category. Slot derivation does not depend on parsing
-            // the item name.
+            // Transmog slot from the item's own group membership. See the slot-classification block at the top of this
+            // file: the item names the ItemGroupInfo rows it belongs to, and those rows carry the engine's equipment
+            // taxonomy by NAME. Anything not in a mapped group (consumables, quest items, pet and mount gear) resolves
+            // to Count and stays out of every picker.
+            // Items whose groups name no slot (NPC and boss gear, which files under Armor_Mon) stay Count here and are
+            // resolved by the learned type-code pass after the walk.
+            const TransmogSlot slot = slot_from_item_groups(descPtr, groupSlots);
+
             bool tcOk = false;
             const uint16_t typeCode = read_u16_safe(descPtr + k_descTypeCodeOffset, tcOk);
 
@@ -713,7 +814,8 @@ namespace Transmog
                 id16,
                 std::string(buf, len),
                 ok ? metaPtr : 0,
-                tcOk ? typeCode : uint16_t{0xFFFF},
+                slot,
+                tcOk ? typeCode : k_typeCodeNone,
             });
             ++valid;
         }
@@ -760,6 +862,50 @@ namespace Transmog
             }
         }
 
+        // Pass 2b -- learn `typeCode -> slot` from the items the group taxonomy classified.
+        //
+        // The group names carry the slot only for PLAYER equipment. NPC and boss gear sits in families like
+        // ItemGroup_Equip_Armor_Mon that name no slot, so groups alone leave roughly two thirds of the wearable
+        // catalog unclassified. The type code closes that gap: a boss helm shares its code with player helms.
+        //
+        // Majority vote rather than first-wins, because a handful of items carry a sub-category that disagrees with
+        // their code (one item votes Helm for the chest code). Those lose by two orders of magnitude. A contested code
+        // is logged, not suppressed -- a code that starts splitting evenly means the join stopped being sound.
+        std::unordered_map<uint16_t, TransmogSlot> learnedSlot;
+        std::size_t contestedCodes = 0;
+        {
+            std::unordered_map<uint16_t, std::unordered_map<TransmogSlot, uint32_t>> votes;
+            for (const auto &e : scratch)
+            {
+                if (e.slot != TransmogSlot::Count && e.typeCode != k_typeCodeNone)
+                    ++votes[e.typeCode][e.slot];
+            }
+
+            learnedSlot.reserve(votes.size());
+            for (const auto &[code, tally] : votes)
+            {
+                TransmogSlot winner = TransmogSlot::Count;
+                uint32_t topVotes = 0;
+                uint32_t total = 0;
+                for (const auto &[slot, n] : tally)
+                {
+                    total += n;
+                    if (n > topVotes)
+                    {
+                        topVotes = n;
+                        winner = slot;
+                    }
+                }
+                if (topVotes < total)
+                {
+                    ++contestedCodes;
+                    logger.trace("[catalog-slots] type code {:#06x} contested: {} of {} votes for {}",
+                                 code, topVotes, total, slot_name(winner));
+                }
+                learnedSlot.emplace(code, winner);
+            }
+        }
+
         // Pass 3 -- publish the scratch rows into the maps and flag variants against the resolved sentinel.
         std::size_t variantCount = 0;
         for (auto &e : scratch)
@@ -782,7 +928,15 @@ namespace Transmog
             if (!inserted)
                 ++collisions;
             variantFlag.emplace(e.id, hasVariant ? uint8_t{1} : uint8_t{0});
-            typeCodeMap.emplace(e.id, e.typeCode);
+
+            TransmogSlot slot = e.slot;
+            if (slot == TransmogSlot::Count && e.typeCode != k_typeCodeNone)
+            {
+                if (auto lit = learnedSlot.find(e.typeCode); lit != learnedSlot.end())
+                    slot = lit->second;
+            }
+            if (slot != TransmogSlot::Count)
+                slotMap.emplace(e.id, slot);
         }
 
         // Stability check: the game sets the iteminfo count to its final value early, but it populates the descriptor
@@ -805,52 +959,41 @@ namespace Transmog
         }
         // valid > 0 && valid == m_lastBuildValid -> catalog stabilized.
 
-        // Catalog typeCode histogram. It groups every cataloged item by its desc+k_descTypeCodeOffset typeCode and
-        // emits one log line per distinct code: count, current `slot_from_type_code` verdict, and 3 sample item names.
-        // The user then sees the FULL universe of typeCodes in one game launch instead of discovering each one by
-        // wearing an item. Unmapped codes show with their sample names, so the names identify the slot they belong in
-        // (e.g. "samples: Crossbow_Iron_I, ..." => crossbow family => Ranged). Runs once per successful build.
+        // Per-slot histogram of the classification, with sample names. A patch that reshapes the group registry or
+        // renames a sub-category shows up here as a slot that went to zero, which is the failure this classifier is
+        // meant to make visible: the old type-code table failed silently by listing the WRONG items instead.
         {
-            std::unordered_map<std::uint16_t, std::vector<std::uint16_t>> bucket;
-            bucket.reserve(64);
-            for (const auto &kv : typeCodeMap)
+            std::unordered_map<TransmogSlot, std::vector<std::uint16_t>> bucket;
+            bucket.reserve(static_cast<std::size_t>(TransmogSlot::Count));
+            for (const auto &kv : slotMap)
                 bucket[kv.second].push_back(kv.first);
 
-            // Sort typeCodes descending by item count so high-volume codes show first.
-            std::vector<std::uint16_t> codes;
-            codes.reserve(bucket.size());
-            for (const auto &kv : bucket)
-                codes.push_back(kv.first);
-            std::sort(codes.begin(), codes.end(),
-                      [&](std::uint16_t a, std::uint16_t b) { return bucket[a].size() > bucket[b].size(); });
+            logger.trace("[catalog-slots] {}/{} items classified across {} slots "
+                         "({} type codes learned from group names, {} contested)",
+                         slotMap.size(), valid, bucket.size(), learnedSlot.size(), contestedCodes);
 
-            logger.trace("[catalog-histogram] {} distinct typeCodes across {} items"
-                         " (unmapped codes show samples so you can identify them "
-                         "and add static slot_from_type_code cases)",
-                         codes.size(), valid);
-
-            for (std::uint16_t code : codes)
+            for (std::uint8_t s = 0; s < static_cast<std::uint8_t>(TransmogSlot::Count); ++s)
             {
-                auto &ids = bucket[code];
-                // Sort itemIds ascending and pick first 3 names for a stable sample window.
+                const auto slot = static_cast<TransmogSlot>(s);
+                auto it = bucket.find(slot);
+                if (it == bucket.end())
+                    continue;
+
+                // Sort itemIds ascending and pick the first 3 names for a stable sample window.
+                auto &ids = it->second;
                 std::sort(ids.begin(), ids.end());
                 const auto take = std::min<std::size_t>(3, ids.size());
 
                 std::string samples;
                 for (std::size_t k = 0; k < take; ++k)
                 {
-                    auto it = idToName.find(ids[k]);
+                    auto nit = idToName.find(ids[k]);
                     if (k > 0)
                         samples += ", ";
-                    samples += (it != idToName.end()) ? it->second : "<unknown>";
+                    samples += (nit != idToName.end()) ? nit->second : "<unknown>";
                 }
 
-                const TransmogSlot slot = slot_from_type_code(code);
-                const char *slotStr = (slot == TransmogSlot::Count) ? "<UNMAPPED>" : slot_name(slot);
-
-                logger.trace("[catalog-histogram]   typeCode={:#06x} count={:>4} "
-                             "slot={:<13} samples: {}",
-                             code, ids.size(), slotStr, samples);
+                logger.trace("[catalog-slots]   {:<13} count={:>4} samples: {}", slot_name(slot), ids.size(), samples);
             }
         }
 
@@ -859,7 +1002,7 @@ namespace Transmog
             m_idToName = std::move(idToName);
             m_nameToId = std::move(nameToId);
             m_variantFlag = std::move(variantFlag);
-            m_typeCode = std::move(typeCodeMap);
+            m_slotById = std::move(slotMap);
             m_sortedCache.clear(); // will be rebuilt lazily on next access
         }
 
@@ -930,25 +1073,20 @@ namespace Transmog
     TransmogSlot ItemNameTable::category_of(uint16_t itemId) const noexcept
     {
         std::lock_guard<std::mutex> lk(s_tableMtx);
-        // Runtime-observed binding wins. If the engine actually equipped this itemId in a slot, that beats the static
-        // type-code heuristic. Accessory and weapon items then show up in the correct picker the moment the
-        // auth-table reveals them, even when `slot_from_type_code` does not know their typeCode yet.
+        // Runtime-observed binding wins. If the engine actually equipped this itemId in a slot, that is ground truth
+        // and beats the catalog classification.
         if (auto obs = m_observedSlot.find(itemId); obs != m_observedSlot.end())
             return obs->second;
 
-        auto it = m_typeCode.find(itemId);
-        if (it == m_typeCode.end())
-            return TransmogSlot::Count;
-        return slot_from_type_code(it->second);
+        auto it = m_slotById.find(itemId);
+        return (it != m_slotById.end()) ? it->second : TransmogSlot::Count;
     }
 
-    std::uint16_t ItemNameTable::type_code_of(std::uint16_t itemId) const noexcept
+    TransmogSlot ItemNameTable::catalog_category_of(uint16_t itemId) const noexcept
     {
         std::lock_guard<std::mutex> lk(s_tableMtx);
-        auto it = m_typeCode.find(itemId);
-        if (it == m_typeCode.end())
-            return 0xFFFFu;
-        return it->second;
+        auto it = m_slotById.find(itemId);
+        return (it != m_slotById.end()) ? it->second : TransmogSlot::Count;
     }
 
     void ItemNameTable::record_observed_slot(std::uint16_t itemId, TransmogSlot slot) noexcept
@@ -1011,14 +1149,11 @@ namespace Transmog
             auto dit = m_displayNames.find(lowerName);
             std::string dispName = (dit != m_displayNames.end()) ? dit->second : std::string();
 
-            // The canonical item-type code is authoritative. Unmapped codes (pet and mount armor, WarRobot parts,
-            // 0xFFFF quest items and so on) map to Count, so the item is hidden as non-equipment. An absent type-code
-            // entry also collapses to Count. There is no name-parsing fallback, because the engine itself reads this
-            // field to categorize the item.
-            TransmogSlot slot = TransmogSlot::Count;
-            auto tcit = m_typeCode.find(id);
-            if (tcit != m_typeCode.end())
-                slot = slot_from_type_code(tcit->second);
+            // The item's group membership is authoritative. Anything with no mapped group (pet and mount gear, quest
+            // items, consumables) is absent from the map and collapses to Count, hiding it as non-equipment. There is
+            // no name-parsing fallback: the groups ARE the engine's classification.
+            auto slit = m_slotById.find(id);
+            const TransmogSlot slot = (slit != m_slotById.end()) ? slit->second : TransmogSlot::Count;
 
             m_sortedCache.push_back({
                 id,

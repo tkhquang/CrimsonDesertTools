@@ -1,4 +1,5 @@
 #include "transmog_apply.hpp"
+#include "auth_table.hpp"
 #include "color_override/color_override.hpp"
 #include "color_override/color_reinit.hpp"
 #include "color_override/host_scope.hpp"
@@ -28,7 +29,7 @@ namespace Transmog
 {
     // SlotPopulator maintains a dispatch cache on the component at (basePtr, count, cap). The triple moves as one unit
     // whenever the component gains or loses fields below it. All three constants must move together, and the same
-    // component width also drives k_compEntryTablePtrOffset below. Verify them against the live SlotPopulator body on
+    // component width also drives the auth-table container pointer in auth_table.hpp. Verify them against the live SlotPopulator body on
     // patch day. That body forms one base pointer and reads the other two members off it:
     //   lea  r15, [a1+k_compSlotCacheBasePtrOffset]
     //   mov  r8d, [r15+0x08]     ; count
@@ -44,22 +45,8 @@ namespace Transmog
     constexpr std::ptrdiff_t k_compSlotCacheCountOffset = 0x1E0;
     constexpr std::ptrdiff_t k_compSlotCacheCapOffset = 0x1E4;
 
-    // Pointer to the PartDef/auth-table container on a1. The offset moves whenever the component gains or loses fields
-    // below it, and it can shrink as well as grow. Mirrors k_containerPtrOffset in real_part_tear_down.cpp -- keep the
-    // two in step. A stale value reads a non-container qword. That qword either dereferences to junk or fails the
-    // >0x10000 sanity gate, which skips the real-item restore loop entirely and logs no warning. Verify against live
-    // memory on patch day.
-    constexpr std::ptrdiff_t k_compEntryTablePtrOffset = 0x80;
-
-    // Entry layout within the auth-table array. The stride and the slot-tag offset always move together by 8. The
-    // engine alternates between two known shapes: stride 0xC8 with slotTag @ +0xC0, and stride 0xD0 with slotTag @
-    // +0xC8. Never assume the pair only grows -- a patch can revert it to the narrower shape. The primary item id at
-    // +0x08 does not move, and the slot-tag VALUES are stable. Only the position of the tag within the entry shifts.
-    // Mirrors k_entryStride / k_entrySlotTagOffset in real_part_tear_down.cpp. A stale stride walks the array off-phase
-    // and reads garbage tags without faulting, so verify both constants against live memory on patch day.
-    constexpr std::ptrdiff_t k_compEntryStride = 0xD0;
-    constexpr std::ptrdiff_t k_compEntryItemIdOffset = 0x08;
-    constexpr std::ptrdiff_t k_compEntrySlotTagOffset = 0xC8;
+    // Auth-table geometry (container pointer, entry stride, field offsets) lives in auth_table.hpp -- one copy for the
+    // whole mod, because the whole struct moves as a unit on patch day.
 
     // (TransmogSlot, engine slot tag) pairs the dispatcher iterates for tear-down + the auth-table real-id snapshot.
     // Sourced from slot_metadata.hpp's single per-slot table. The local TearDownSlot alias keeps existing call sites
@@ -87,15 +74,15 @@ namespace Transmog
         uintptr_t entryBase = 0;
         __try
         {
-            const auto entryDesc = *reinterpret_cast<uintptr_t *>(a1 + k_compEntryTablePtrOffset);
+            const auto entryDesc = *reinterpret_cast<uintptr_t *>(a1 + AuthTable::k_containerPtrOffset);
             if (entryDesc < 0x10000)
                 return false;
-            const auto entryArray = *reinterpret_cast<uintptr_t *>(entryDesc + 8);
-            const auto entryCount = *reinterpret_cast<uint32_t *>(entryDesc + 16);
+            const auto entryArray = *reinterpret_cast<uintptr_t *>(entryDesc + AuthTable::k_containerArrayBaseOffset);
+            const auto entryCount = *reinterpret_cast<uint32_t *>(entryDesc + AuthTable::k_containerCountOffset);
             for (uint32_t e = 0; e < entryCount && entryArray > 0x10000; ++e)
             {
-                const auto base = entryArray + e * k_compEntryStride;
-                const auto sl = *reinterpret_cast<int16_t *>(base + k_compEntrySlotTagOffset);
+                const auto base = entryArray + e * AuthTable::k_entryStride;
+                const auto sl = *reinterpret_cast<int16_t *>(base + AuthTable::k_entrySlotTagOffset);
                 if (sl == gameTag)
                 {
                     entryBase = base;
@@ -824,8 +811,10 @@ namespace Transmog
         else
         {
             // Clearing this slot. Two cases:
-            //  - active + none (checkbox ticked, picker = none): user wants to show an EMPTY slot (bare head, etc.). Do
-            //    NOT restore the real item -- Phase B already tore it down.
+            //  - active + none (checkbox ticked, picker = none): user wants to show an EMPTY slot (bare head, etc.).
+            //    Do NOT restore the real item. It is already gone: Phase B of the call that INSTALLED the fake tore
+            //    it down, and nothing has put it back since. This call's Phase B is gated on `targetId != 0` and does
+            //    not run, so nothing here removes it -- leaving it alone is what keeps the slot empty.
             //  - inactive (!m.active): LT controlled the slot before, so restore the real item and it reappears.
             const bool showEmpty = m.active;
             // During a 3-pass reinit cycle, suppress the real-armor restore so the slot goes visibly empty between
@@ -1761,20 +1750,20 @@ namespace Transmog
 
         __try
         {
-            auto entryDesc = *reinterpret_cast<uintptr_t *>(a1 + k_compEntryTablePtrOffset);
+            auto entryDesc = *reinterpret_cast<uintptr_t *>(a1 + AuthTable::k_containerPtrOffset);
             if (entryDesc > 0x10000)
             {
-                auto entryArray = *reinterpret_cast<uintptr_t *>(entryDesc + 8);
-                auto entryCount = *reinterpret_cast<uint32_t *>(entryDesc + 16);
+                auto entryArray = *reinterpret_cast<uintptr_t *>(entryDesc + AuthTable::k_containerArrayBaseOffset);
+                auto entryCount = *reinterpret_cast<uint32_t *>(entryDesc + AuthTable::k_containerCountOffset);
 
                 auto savedCount = *reinterpret_cast<uint32_t *>(a1 + k_compSlotCacheCountOffset);
                 *reinterpret_cast<uint32_t *>(a1 + k_compSlotCacheCountOffset) = 0;
 
                 for (uint32_t e = 0; e < entryCount && entryArray > 0x10000; ++e)
                 {
-                    auto base = entryArray + e * k_compEntryStride;
-                    auto gameSlot = *reinterpret_cast<int16_t *>(base + k_compEntrySlotTagOffset);
-                    auto itemId = *reinterpret_cast<uint16_t *>(base + k_compEntryItemIdOffset);
+                    auto base = entryArray + e * AuthTable::k_entryStride;
+                    auto gameSlot = *reinterpret_cast<int16_t *>(base + AuthTable::k_entrySlotTagOffset);
+                    auto itemId = *reinterpret_cast<uint16_t *>(base + AuthTable::k_entryItemIdOffset);
 
                     if (itemId == 0 || itemId == 0xFFFF)
                         continue;

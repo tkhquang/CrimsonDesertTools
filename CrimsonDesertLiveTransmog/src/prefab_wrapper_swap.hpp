@@ -167,10 +167,6 @@ namespace Transmog::PrefabWrapperSwap
         // AppearanceTableLoader catalog but not yet loaded into StringInfo (no wrapper resident).
         std::vector<std::uintptr_t> wrappers;
         std::uint32_t hash; // entry+0x00 / metadata+0x10
-        // 24-byte metadata pointer returned by the AppearanceTableLoader lookup primitive (see lookup_prefab_metadata).
-        // 0 if either the loader was not captured at startup or the name is absent from the loader's table. Owned by
-        // the engine; never freed by us.
-        std::uintptr_t metadata{0};
         // True iff at least one usable wrapper is currently resident in StringInfo (i.e. the engine can render this
         // prefab right now without an async load). When false, the picker may still show the entry to the user but
         // selecting it is a best-effort operation -- a force-load pass may be required.
@@ -186,17 +182,9 @@ namespace Transmog::PrefabWrapperSwap
     // We expose a read-only lookup against this container so the picker can surface prefabs that exist in the engine's
     // catalog but are not yet StringInfo-resident (i.e. have no live wrapper). No INI keys in this module.
 
-    /**
-     * Returns the 24-byte AppearanceTableLoader metadata pointer for `name` if present in the boot-loaded PartPrefab
-     * container. Returns 0 on miss OR if the loader was not captured at startup. Pure read-only -- safe to call from
-     * the UI thread.
-     */
-    [[nodiscard]] std::uintptr_t lookup_prefab_metadata(const char *name) noexcept;
-
-    /**
-     * True if the AppearanceTableLoader hook fired and we hold valid snapshots of partPrefabContainer.
-     */
-    [[nodiscard]] bool is_loader_ready() noexcept;
+    // A per-name lookup against this container used to live here, backed by an AOB-resolved engine primitive. Both
+    // are gone: the primitive was restructured away by 2.00.00, and the value it produced was written to a field no
+    // code ever read. `for_each_loader_prefab_name` below is the part that has a real consumer.
 
     /**
      * Walk every entry in the AppearanceTableLoader registry singleton (the AOB-resolved partprefab name-to-wrapper
