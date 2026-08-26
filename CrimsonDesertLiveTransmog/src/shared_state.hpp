@@ -181,6 +181,11 @@ namespace Transmog
                                                             char flag);
     SlotTagToHandleFn &slot_tag_to_handle_fn();
 
+    // Item -> slot handle, or 0xFFFF when the engine will not place the item. SlotPopulator calls this first and
+    // bails on 0xFFFF, so it decides whether a carrier can be equipped at all.
+    using ItemToSlotResolveFn = std::int64_t(__fastcall *)(std::int64_t a1, std::int16_t itemId);
+    ItemToSlotResolveFn &item_to_slot_resolve_fn();
+
     // sub_141D451B0: Initializes a swap entry to defaults (all -1/zeros).
     using InitSwapEntryFn = __int64(__fastcall *)(__int64 dest);
     InitSwapEntryFn &init_swap_entry_fn();

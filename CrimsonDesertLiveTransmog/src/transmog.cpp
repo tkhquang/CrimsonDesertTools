@@ -709,6 +709,7 @@ namespace Transmog
             {k_initSwapEntryCandidates, "InitSwapEntry"},
             {k_partSlotRefreshCandidates, "PartSlotRefresh"},
             {k_slotTagToHandleCandidates, "SlotTagToHandle"},
+            {k_itemToSlotResolveCandidates, "ItemToSlotResolve"},
         };
         std::uintptr_t initAddrs[std::size(initBatch)] = {};
         CDCore::Glue::resolve_address_batch(initBatch, initAddrs);
@@ -720,8 +721,18 @@ namespace Transmog
         // which is the same value for both halves of a paired slot -- so an apply to the second half rebuilt the
         // first. Calling it directly with the intended slot is what reaches the other half.
         {
-            const auto refreshAddr = initAddrs[std::size(initBatch) - 2];
-            const auto tagToHandleAddr = initAddrs[std::size(initBatch) - 1];
+            const auto refreshAddr = initAddrs[std::size(initBatch) - 3];
+            const auto tagToHandleAddr = initAddrs[std::size(initBatch) - 2];
+            const auto itemResolveAddr = initAddrs[std::size(initBatch) - 1];
+            if (itemResolveAddr)
+            {
+                item_to_slot_resolve_fn() = reinterpret_cast<ItemToSlotResolveFn>(itemResolveAddr);
+                logger.info("ItemToSlotResolve resolved at {:#x}", itemResolveAddr);
+            }
+            else
+            {
+                logger.warning("ItemToSlotResolve AOB scan failed -- carrier equip-eligibility unavailable");
+            }
             if (tagToHandleAddr)
             {
                 slot_tag_to_handle_fn() = reinterpret_cast<SlotTagToHandleFn>(tagToHandleAddr);

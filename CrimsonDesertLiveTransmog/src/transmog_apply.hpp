@@ -29,6 +29,20 @@ namespace Transmog
      * Earring1/Earring2) share one type, so a derived equip always resolves to the first of the pair and the second
      * can never be filled. Pass the slot tag for those.
      */
+    /**
+     * @brief Rebuild ONE slot's visual in place -- no tear-down, no equip, no SlotPopulator.
+     *
+     * Calls the engine's own per-slot rebuild with both apply windows open, so the prefab swap keeps substituting
+     * (the transmogged mesh survives) and material writes are routed to the chosen colour. The swap entry passed is
+     * empty on purpose: the engine then rebuilds from whatever is already registered for the slot.
+     *
+     * Intended for per-slot visual changes that today cost a full tear-down and re-apply -- a dye or Color Override
+     * edit being the obvious one.
+     *
+     * @return false when an anchor is unresolved, the slot has no live part record, or the call faulted.
+     */
+    bool refresh_slot_visual(TransmogSlot slot);
+
     void apply_transmog_with_carrier(__int64 a1, std::uint16_t carrierId, std::uint16_t targetId,
                                      std::uint16_t slotSel = 0xFFFF);
 

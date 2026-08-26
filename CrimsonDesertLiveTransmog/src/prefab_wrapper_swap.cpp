@@ -117,11 +117,10 @@ namespace Transmog::PrefabWrapperSwap
      * attached-record identities (`rec+0x40`) and the wrappers handed to the struct-copy chokepoint. It is also the
      * same hash the game archive uses for an item's prefab list, so the two namespaces are one.
      *
-     * This is what lets the swap map be keyed by NAME IDENTITY instead of by wrapper pointer. Pointer keying forced a
-     * scan of the entire address space on every apply to discover which instances existed, and it still missed some:
-     * the catalog holds canonical instances while the engine passes pool instances, so a correctly-named binding
-     * could sit in the map and never match. Every instance of a name carries the same hash, so neither problem
-     * survives the change.
+     * Keying the swap map on this instead of on the wrapper pointer removes instance discovery entirely: every
+     * instance of a name carries the same hash, so it no longer matters which one the engine passes. The catalog and
+     * the engine draw from different pools, so pointer keying could hold a correctly-named binding that never
+     * matched.
      */
     static constexpr std::uint32_t prefab_name_hash(std::string_view name) noexcept
     {
@@ -961,12 +960,9 @@ namespace Transmog::PrefabWrapperSwap
     /**
      * The `_l` / `_r` tail of a prefab name, or empty when it has none.
      *
-     * MEASURED: this suffix belongs to the SOCKET, not the item. One earring carrier names
-     * `cd_phm_00_earring_0004_l` in its descriptor and the engine attached `cd_phm_00_earring_0004_r` when it went
-     * into the right-ear slot -- one item, one mesh, placed two ways. Rings and the bracelet wire behave the same.
-     *
-     * So a paired slot has a half the swap never covers: the descriptor yields one side, the engine may install the
-     * other, and a binding made from the descriptor name alone misses it.
+     * The suffix belongs to the SOCKET, not the item: one item's mesh is placed two ways, and the descriptor only
+     * ever names one side. A binding built from the descriptor name alone therefore misses the half the engine
+     * installs under the other suffix.
      */
     static std::string_view side_suffix_of(std::string_view name) noexcept
     {
@@ -2523,6 +2519,9 @@ namespace Transmog::PrefabWrapperSwap
         return result;
     }
 
+    // Defined below; the claim and substitution diagnostics both name wrappers.
+    static std::string wrapper_inline_name(std::uintptr_t wrapper) noexcept;
+
     static std::int64_t __fastcall on_part_list_merge(std::int64_t a1, std::int64_t a2, std::int64_t a3)
     {
         const auto trampoline = s_origPartListMerge;
@@ -2543,9 +2542,6 @@ namespace Transmog::PrefabWrapperSwap
         }
         return result;
     }
-
-    // Defined below; the substitution diagnostic names the wrappers it reports.
-    static std::string wrapper_inline_name(std::uintptr_t wrapper) noexcept;
 
     static std::int64_t __fastcall on_struct_copy(std::int64_t a1, std::int64_t a2)
     {
@@ -2605,33 +2601,6 @@ namespace Transmog::PrefabWrapperSwap
                 // which instance the engine happens to hand us stops mattering.
                 const auto srcHash = wrapper_name_hash(static_cast<std::uintptr_t>(srcWrapper));
 
-                // Probe: name every side-suffixed wrapper the chokepoint is handed, matched or not.
-                //
-                // A passthrough logs nothing, so "bound but never fired" and "never presented" look identical from
-                // the absence of a SWAP line. Deduped on (name, matched) and capped, so it stays quiet.
-                {
-                    auto nm = wrapper_inline_name(static_cast<std::uintptr_t>(srcWrapper));
-                    if (!nm.empty() && !side_suffix_of(nm).empty())
-                    {
-                        bool inMap = false;
-                        {
-                            std::scoped_lock lk(s_mapMtx);
-                            inMap = s_swapMapPerChar[bucket].find(srcHash) != s_swapMapPerChar[bucket].end();
-                        }
-                        static std::mutex s_probeMtx;
-                        static std::unordered_set<std::string> s_probeSeen;
-                        bool fresh = false;
-                        {
-                            std::scoped_lock lk(s_probeMtx);
-                            if (s_probeSeen.size() < 96)
-                                fresh = s_probeSeen.insert(std::format("{}|{}", nm, inMap ? 1 : 0)).second;
-                        }
-                        if (fresh)
-                            DMK::Logger::get_instance().info(
-                                "[prefab-swap] side-probe: chokepoint got \"{}\" hash=0x{:08X} inSwapMap={}", nm,
-                                srcHash, inMap ? "YES" : "no");
-                    }
-                }
                 if (srcHash != 0)
                 {
                     std::scoped_lock lk(s_mapMtx);
@@ -2688,13 +2657,8 @@ namespace Transmog::PrefabWrapperSwap
         const auto sc = s_substCount.fetch_add(1, std::memory_order_relaxed);
         if (sc < 50)
         {
-            // Diagnostic for first N substitutions.
-            //
-            // Reports each wrapper's name and its dword at +0x0C. On attached-record identity wrappers that dword is
-            // `hashlittle(name, 0xC5EDE)` -- verified against 8 live wrappers -- and if it holds for the wrapper the
-            // chokepoint hands us, the swap map can be keyed by that hash instead of by pointer. That would drop the
-            // per-apply address-space walk entirely, since every instance of a name shares the hash and none of them
-            // would need to be discovered.
+            // Diagnostic for the first N substitutions. `+0x0C` is the wrapper's name hash, the key the swap map
+            // is built on.
             const auto srcHash = DMKMemory::seh_read<std::uint32_t>(static_cast<std::uintptr_t>(srcWrapper) + 0x0C)
                                      .value_or(0);
             const auto tgtHash =
@@ -3444,6 +3408,7 @@ namespace Transmog::PrefabWrapperSwap
                 }
             }
         }
+
 
         return true;
     }

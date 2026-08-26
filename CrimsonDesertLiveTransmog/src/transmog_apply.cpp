@@ -138,6 +138,7 @@ namespace Transmog
      */
     static bool k_directSlotRefreshEnabled = true;
 
+
     /**
      * Resolve the slot tag to its handle, then refresh -- under SEH, in a POD-only frame.
      *
@@ -145,6 +146,38 @@ namespace Transmog
      * keys and against `record+200`. The second is a handle, which the function dereferences through a lookup.
      * Passing the tag for both faults, and an unguarded fault aborts the whole apply.
      */
+    /// POD-only SEH wrapper: ask the engine where it would place `itemId`, or 0xFFFF if nowhere.
+    static std::uint16_t item_to_slot_seh(ItemToSlotResolveFn fn, std::int64_t a1, std::uint16_t itemId) noexcept
+    {
+        if (!fn)
+            return 0xFFFF;
+        __try
+        {
+            return static_cast<std::uint16_t>(fn(a1, static_cast<std::int16_t>(itemId)) & 0xFFFF);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return 0xFFFF;
+        }
+    }
+
+    /// True when `slotTag` names a live part record. POD-only frame so the SEH guard is legal.
+    static bool slot_tag_is_live_seh(SlotTagToHandleFn resolve, __int64 a1, std::uint16_t slotTag) noexcept
+    {
+        if (!resolve)
+            return false;
+        __try
+        {
+            std::uint16_t handle = 0xFFFF;
+            resolve(a1, &handle, slotTag, 0);
+            return handle != 0xFFFF;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return false;
+        }
+    }
+
     static bool call_part_slot_refresh_seh(PartSlotRefreshFn fn, SlotTagToHandleFn resolve, __int64 a1,
                                            std::uint16_t slotTag, __int64 swapEntry) noexcept
     {
@@ -182,6 +215,19 @@ namespace Transmog
         //   XX YY 02 00 00 00 00 00 FF FF FF FF FF FF 00 00
         // The engine validates the +4..+11 region as part of its dye/material-instance lookup. If those dwords are
         // reordered, the engine falls back to default colors even when the wrapper-swap mesh is correct.
+        // Settle the destination BEFORE the struct is built -- itemData+12 is written below, and a later change to
+        // this variable would not reach the engine.
+        //
+        // An explicit destination needs the slot to already own a part record: SlotPopulator resolves the tag first
+        // and bails outright when it cannot, equipping nothing. Fall back to derivation rather than refuse.
+        if (slotSel != 0xFFFF && !slot_tag_is_live_seh(slot_tag_to_handle_fn(), a1, slotSel))
+        {
+            DMK::Logger::get_instance().debug(
+                "[dispatch] slot {:#06x} has no live part record -- falling back to engine-derived destination",
+                slotSel);
+            slotSel = 0xFFFF;
+        }
+
         alignas(16) uint8_t itemData[16]{};
         *reinterpret_cast<uint16_t *>(itemData + 0) = id;
         itemData[2] = 2;
@@ -189,6 +235,12 @@ namespace Transmog
         *reinterpret_cast<uint32_t *>(itemData + 8) = 0xFFFFFFFF;
         *reinterpret_cast<uint16_t *>(itemData + 12) = slotSel;
 
+        // A/B switch for the paired-slot work added this session.
+        //
+        // With it off, this function behaves exactly as it did before: no explicit destination, no part-record probe,
+        // no direct refresh -- SlotPopulator gets the same itemData it always got. That makes "does an EMPTY accessory
+        // slot refuse because of something we added, or because the engine refuses it anyway" a one-flag experiment
+        // instead of an argument from memory.
         // Build empty swap entry.
         alignas(16) uint8_t swapEntry[256]{};
         initEntry(reinterpret_cast<__int64>(swapEntry));
@@ -210,7 +262,17 @@ namespace Transmog
         // Capture the return. SlotPopulator answers 0xFFFF when it refuses -- including the case where an explicit
         // slotSel does not resolve, where it bails BEFORE equipping anything. Discarding the return made every such
         // refusal silent and indistinguishable from a successful equip whose visual simply did not change.
+        // `slotPopCompleted` separates a REFUSAL from a FAULT.
+        //
+        // slotPopRc starts at -1, and -1 & 0xFFFF is 0xFFFF -- the same value SlotPopulator returns when it refuses.
+        // So an SEH fault inside the call, which skips the assignment entirely, was being reported as "REFUSED --
+        // nothing was equipped". Identical symptom, completely different cause.
         std::int64_t slotPopRc = -1;
+        bool slotPopCompleted = false;
+        // Same query, sampled INSIDE the apply window. Our earlier sample runs before in_transmog() is raised and
+        // before the ColorOverride windows open; SlotPopulator runs with all of them armed. If the answer differs
+        // between the two, LT's own machinery is what changes the engine's mind -- which would make this our gate
+        // rather than an engine rule.
         bool refreshCalled = false;
         bool refreshFaulted = false;
         const auto refreshFn = part_slot_refresh_fn();
@@ -218,6 +280,7 @@ namespace Transmog
         {
             slotPopRc =
                 slotPop(a1, reinterpret_cast<unsigned __int16 *>(itemData), reinterpret_cast<__int64>(swapEntry));
+            slotPopCompleted = true;
 
             // Refresh the slot we actually targeted -- INSIDE the apply window, exactly where the engine does its
             // own.
@@ -250,18 +313,67 @@ namespace Transmog
         // Logging lives outside the __try: string formatting needs object unwinding, which cannot coexist with SEH
         // in the same frame.
         const auto rcWord = static_cast<std::uint16_t>(slotPopRc & 0xFFFF);
-        if (rcWord == 0xFFFF)
+        if (!slotPopCompleted)
         {
             DMK::Logger::get_instance().warning(
-                "[dispatch] SlotPopulator REFUSED item={:#06x} slotSel={:#06x} (rc={:#x}) -- nothing was equipped",
-                id, slotSel, slotPopRc);
+                "[dispatch] SlotPopulator FAULTED item={:#06x} slotSel={:#06x} -- the call raised, it did not refuse",
+                id, slotSel);
+        }
+        else if (rcWord == 0xFFFF)
+        {
+            DMK::Logger::get_instance().warning(
+                "[dispatch] SlotPopulator REFUSED item={:#06x} slotSel={:#06x} -- nothing was equipped", id, slotSel);
         }
         else
         {
-            DMK::Logger::get_instance().debug(
-                "[dispatch] SlotPopulator ok item={:#06x} slotSel={:#06x} rc={:#x} refresh={}", id, slotSel, slotPopRc,
-                refreshFaulted ? "FAULTED" : (refreshCalled ? "yes" : "no"));
+            DMK::Logger::get_instance().trace("[dispatch] SlotPopulator ok item={:#06x} slotSel={:#06x} refresh={}",
+                                              id, slotSel, refreshFaulted ? "FAULTED" : (refreshCalled ? "yes" : "no"));
         }
+    }
+
+    bool refresh_slot_visual(TransmogSlot slot)
+    {
+        auto &logger = DMK::Logger::get_instance();
+
+        const auto a1 = static_cast<__int64>(player_a1().load(std::memory_order_acquire));
+        if (!a1)
+            return false;
+        const auto tag = game_slot_from_transmog(slot);
+        if (tag < 0)
+            return false;
+
+        const auto refresh = part_slot_refresh_fn();
+        const auto resolve = slot_tag_to_handle_fn();
+        const auto initEntry = init_swap_entry_fn();
+        if (!refresh || !resolve || !initEntry)
+            return false;
+
+        // An EMPTY swap entry on purpose. PartSlotRefresh falls back to the entry already registered for the slot
+        // when its 4th argument is the sentinel or empty, so a rebuild needs no item id and no equip -- it reuses
+        // whatever is installed and just re-runs the build.
+        alignas(16) std::uint8_t swapEntry[256]{};
+        initEntry(reinterpret_cast<__int64>(swapEntry));
+
+        // Both windows open, exactly as an apply does. in_transmog keeps the prefab swap substituting, so the
+        // transmogged mesh survives the rebuild instead of reverting to the carrier; the setter window routes the
+        // engine's material writes to the chosen colour.
+        //
+        // This ordering is the whole point: running a rebuild with these shut is what made armor come up dyed and
+        // then revert a moment later.
+        in_transmog().store(true, std::memory_order_relaxed);
+        ColorOverride::HostScope::begin_apply_window();
+        ColorOverride::SetterSubstitute::set_apply_window(true);
+
+        const bool ok =
+            call_part_slot_refresh_seh(refresh, resolve, a1, static_cast<std::uint16_t>(tag),
+                                       reinterpret_cast<__int64>(swapEntry));
+
+        ColorOverride::SetterSubstitute::set_apply_window(false);
+        in_transmog().store(false, std::memory_order_relaxed);
+
+        logger.debug("[dispatch] refresh_slot_visual slot={} tag={:#06x} -> {}", slot_name(slot),
+                     static_cast<std::uint16_t>(tag), ok ? "ok" : "failed");
+        return ok;
     }
 
     void apply_transmog(__int64 a1, uint16_t targetId)
@@ -634,6 +746,39 @@ namespace Transmog
         suppress_vec().store(false, std::memory_order_release);
     }
 
+    /**
+     * Report where the engine would place each enabled slot's carrier.
+     *
+     * SlotPopulator resolves the item to a slot before doing anything and refuses outright on 0xFFFF, so a carrier
+     * that does not resolve equips nothing and the slot silently stays as it was. Worth surfacing: the failure is
+     * otherwise invisible.
+     *
+     * Both halves of a paired slot resolve to the FIRST slot's tag -- they share one equip type -- which is why the
+     * second half needs its destination named explicitly.
+     */
+    static void log_carrier_resolution(__int64 a1, const std::string &charName)
+    {
+        const auto fn = item_to_slot_resolve_fn();
+        if (!fn)
+            return;
+        std::string line;
+        for (std::size_t i = 0; i < k_slotCount; ++i)
+        {
+            const auto sl = static_cast<TransmogSlot>(i);
+            if (!slot_enabled(sl))
+                continue;
+            const auto carrier = default_carrier_for_slot(sl, charName);
+            if (carrier == 0)
+                continue;
+            const auto placed = item_to_slot_seh(fn, a1, carrier);
+            if (!line.empty())
+                line += ", ";
+            line += std::format("{}:{:#06x}->{}", slot_name(sl), carrier,
+                                placed == 0xFFFF ? std::string{"REFUSED"} : std::format("{:#06x}", placed));
+        }
+        DMK::Logger::get_instance().trace("[dispatch] carrier resolution [{}]", line);
+    }
+
     void apply_all_transmog(__int64 a1)
     {
         auto &logger = DMK::Logger::get_instance();
@@ -704,6 +849,8 @@ namespace Transmog
         suppress_vec().store(true, std::memory_order_release);
 
         logger.trace("[dispatch] apply_all_transmog entry a1={:#018x}", static_cast<uint64_t>(a1));
+
+        log_carrier_resolution(a1, PresetManager::instance().active_character());
 
         // Snapshot lastIds for diagnostic logging.
         const std::array<uint16_t, k_slotCount> prevIds = lastIds;

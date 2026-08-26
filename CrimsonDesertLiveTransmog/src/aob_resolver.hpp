@@ -193,6 +193,46 @@ namespace Transmog
      *   +4:  int32  (-1)
      *   +12: uint16 secondary slot (0xFFFF to skip)
      */
+    // ClaimAssembler -- f(node, a2_source, a3_out, a4) publishes claims into the node's claim vector
+    // (data node+0x58, count node+0x60, capacity node+0x64, stride 16). Appends one claim per part and per sub-part.
+    //
+    // Retained for future claim work. It fires for fresh-node assembly, NOT for player equipment changes, so it is
+    // not a route to a slot the equip path refuses.
+    inline constexpr AddrCandidate k_claimAssemblerCandidates[] = {
+        // P1 -- the call sequence that defines this function: the part-list merge, then the post-merge consumer,
+        // with both rel32 displacements wildcarded. Scan-verified unique. Offset -0x92 backs up to the entry.
+        //
+        // The prologue alone is NOT usable here: the three-spill + seven-push + large-frame shape matches six
+        // functions, and 74 share the push sequence. A bare prologue never survives require_unique in this binary.
+        {"ClaimAssembler_P1_MergeCallSeq",
+         "4C 8D 45 D0 E8 ?? ?? ?? ?? 89 44 24 58 48 8B 45 D0 48 89 45 A8 8B 45 D8 89 45 B0 "
+         "4C 8D 8D E0 1B 00 00 4C 8D 45 A8 48 8D 54 24 58 49 8B CC E8 ?? ?? ?? ?? 4C 8B C3",
+         ResolveMode::Direct, -0x92, 0},
+
+        // P2 -- prologue pinned by the exact frame size (0x5D00) and lea displacement, which is what makes it
+        // unique. More patch-fragile than P1 since a frame-size change breaks it, hence second.
+        {"ClaimAssembler_P2_PrologueFrameSize",
+         "48 89 5C 24 10 4C 89 44 24 18 48 89 4C 24 08 "
+         "55 56 57 41 54 41 55 41 56 41 57 "
+         "48 8D AC 24 00 A4 FF FF B8 00 5D 00 00",
+         ResolveMode::Direct, 0, 0},
+    };
+
+    // ItemToSlotResolve -- f(a1, itemId) -> slot handle, or 0xFFFF when the item cannot be placed.
+    //
+    // This is the FIRST thing SlotPopulator does, and a 0xFFFF here makes it bail before equipping anything. It tries
+    // an actor-side lookup, then falls back to a per-character item -> slot table. Armor carriers survive it with the
+    // slot empty; earring carriers do not, and that difference is the whole reason accessory transmog needs something
+    // already worn. Anchored so LT can ASK the engine which carriers resolve instead of inferring it from failures.
+    inline constexpr AddrCandidate k_itemToSlotResolveCandidates[] = {
+        // P1 -- full prologue: rbx spill, the WORD argument spill (`mov [rsp+10h], dx`), three pushes, the 0x110
+        // frame, then `mov rdi, rcx` and the `mov r8d, 1` that seeds the key builder.
+        {"ItemToSlotResolve_P1_FullPrologue",
+         "48 89 5C 24 08 66 89 54 24 10 55 56 57 48 8D 6C 24 ?? 48 81 EC ?? ?? 00 00 "
+         "48 8B F9 41 B8 01 00 00 00",
+         ResolveMode::Direct, 0, 0},
+    };
+
     // SlotTagToHandle -- f(a1, out_u16, slotTag, flag). Walks the 208-byte part records at a1+128, matches
     // `record+200 == slotTag`, and writes `record+8` (the slot HANDLE) to *out. 0xFFFF when the tag is not present.
     //

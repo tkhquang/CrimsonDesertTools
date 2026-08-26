@@ -40,6 +40,7 @@ namespace Transmog
     static SlotPopulatorFn s_slotPopulator = nullptr;
     static PartSlotRefreshFn s_partSlotRefresh = nullptr;
     static SlotTagToHandleFn s_slotTagToHandle = nullptr;
+    static ItemToSlotResolveFn s_itemToSlotResolve = nullptr;
     static InitSwapEntryFn s_initSwapEntry = nullptr;
 
     static std::atomic<bool> s_inTransmog{false};
@@ -117,6 +118,11 @@ namespace Transmog
     SlotTagToHandleFn &slot_tag_to_handle_fn()
     {
         return s_slotTagToHandle;
+    }
+
+    ItemToSlotResolveFn &item_to_slot_resolve_fn()
+    {
+        return s_itemToSlotResolve;
     }
 
     SlotPopulatorFn &slot_populator_fn()
