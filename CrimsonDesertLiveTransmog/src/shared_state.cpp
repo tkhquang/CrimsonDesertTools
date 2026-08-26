@@ -240,6 +240,12 @@ namespace Transmog
         return 0;
     }
 
+    std::atomic<std::uint32_t> &slot_mappings_owner() noexcept
+    {
+        static std::atomic<std::uint32_t> s_owner{0};
+        return s_owner;
+    }
+
     void reset_all_applied_state() noexcept
     {
         s_lastAppliedIds.fill(0);

@@ -104,6 +104,18 @@ namespace Transmog
      */
     [[nodiscard]] std::uint32_t char_idx_for_equip_slot(std::uintptr_t a1) noexcept;
 
+    /**
+     * @brief Which character `slot_mappings()` currently describes: 1 Kliff, 2 Damiane, 3 Oongka, 0 unbound.
+     *
+     * `slot_mappings()` is ONE global array reused for whichever character is being edited or applied, so on its own
+     * it cannot say whose targets it holds. Anything that writes per-character state derived from it must check this
+     * against the character it is writing FOR -- otherwise one character's preset lands in another's bucket, which is
+     * exactly how Kliff ended up wearing Oongka's armour after a hot reload.
+     *
+     * Set by PresetManager::apply_to_state, which is the only place a different character's preset is loaded in.
+     */
+    std::atomic<std::uint32_t> &slot_mappings_owner() noexcept;
+
     std::array<uint16_t, k_slotCount> &last_applied_ids();
 
     /**

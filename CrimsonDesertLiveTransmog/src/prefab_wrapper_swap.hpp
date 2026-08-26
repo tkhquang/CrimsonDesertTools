@@ -227,7 +227,15 @@ namespace Transmog::PrefabWrapperSwap
      */
     [[nodiscard]] int selection_src_index(Transmog::TransmogSlot slot) noexcept;
     [[nodiscard]] int selection_tgt_index(Transmog::TransmogSlot slot) noexcept;
-    void set_selection(Transmog::TransmogSlot slot, int srcIdx, int tgtIdx) noexcept;
+    /**
+     * @param charIdxFor Bucket to mirror into, 1-based; 0 means "whichever character is bound right now".
+     *
+     * A caller that already knows which character it is writing for MUST pass it. Reading the bound character inside
+     * this function re-samples a global that another thread can change mid-loop, so a per-slot restore loop could
+     * start writing one character's bucket and finish writing another's.
+     */
+    void set_selection(Transmog::TransmogSlot slot, int srcIdx, int tgtIdx, const char *site = "?",
+                       std::uint32_t charIdxFor = 0) noexcept;
 
     /**
      * Bind the writes done by `set_selection` (and the "active editing view" exposed via selection_*_index) to a

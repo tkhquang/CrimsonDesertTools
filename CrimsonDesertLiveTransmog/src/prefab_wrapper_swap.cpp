@@ -1024,7 +1024,8 @@ namespace Transmog::PrefabWrapperSwap
         return s_selTgtIdx[idx];
     }
 
-    void set_selection(Transmog::TransmogSlot slot, int srcIdx, int tgtIdx) noexcept
+    void set_selection(Transmog::TransmogSlot slot, int srcIdx, int tgtIdx, const char *site,
+                       std::uint32_t charIdxFor) noexcept
     {
         const auto idx = static_cast<std::size_t>(slot);
         if (idx >= s_selSrcIdx.size())
@@ -1040,12 +1041,26 @@ namespace Transmog::PrefabWrapperSwap
         // Mirror the write into the active character's per-char row so `apply_selections_to_swap_map` retains it when
         // the user switches the editing character. Idx 0 (no character bound yet) is a no-op -- the globals carry the
         // boot-time defaults until PresetManager::apply_to_state runs and binds a row.
-        const auto charIdx = s_activeCharIdx.load(std::memory_order_acquire);
+        // Prefer the bucket the CALLER named. Re-reading the bound character here re-samples a global that another
+        // thread mutates, so a restore loop that began writing Kliff's row could finish writing Oongka's -- which is
+        // precisely how one character's prefab picks ended up registered as another's targets.
+        const auto charIdx = (charIdxFor != 0) ? charIdxFor : s_activeCharIdx.load(std::memory_order_acquire);
         if (charIdx >= 1 && charIdx <= 3)
         {
             const auto bucket = static_cast<std::size_t>(charIdx - 1);
             s_selSrcIdxPerChar[bucket][idx] = srcIdx;
             s_selTgtIdxPerChar[bucket][idx] = tgtIdx;
+
+            // Record only REAL writes to a per-character target row, at TRACE, with the name the index resolves to
+            // and the caller that asked for it. This pair is what identified a cross-character write that four
+            // rounds of reading the code did not: the row being poisoned, and who poisoned it. The CLEARED case is
+            // deliberately silent -- a restore loop clears all 23 slots every time and would bury the signal.
+            if (tgtIdx >= 0 && tgtIdx < catSize)
+            {
+                DMK::Logger::get_instance().trace("[prefab-swap] sel-write bucket char[{}] slot[{}] tgt={} \"{}\" "
+                                                  "from={}",
+                                                  bucket, idx, tgtIdx, s_slotCatalogs[idx][tgtIdx].name, site);
+            }
         }
     }
 
@@ -1726,6 +1741,54 @@ namespace Transmog::PrefabWrapperSwap
             // intact so the natpipe-hook can still find their substitutions during a later teardown.
             return 0;
         }
+        // The bucket being written and the SELECTIONS being read MUST come from the same character.
+        //
+        // `s_activeCharIdx` picks the bucket. The per-character selection rows it indexes were filled by
+        // PresetManager::apply_to_state from `active_preset()`, which reads the EDITING character. So the invariant
+        // is: activeIdx == idx(editing_character). Nothing enforced it, and when it broke the result was silent --
+        // Kliff's bucket filled with Oongka's prefab picks and the natpipe hook installed them faithfully, because by
+        // then they ARE Kliff's registered targets. No body-ownership check can see that: those verify whose BODY is
+        // being dressed, and this is whose PICKS got written.
+        //
+        // The names are logged because `char[N]` alone never said which character N was, which is what made this take
+        // several passes to localise.
+        {
+            auto &pm = PresetManager::instance();
+            const auto editingIdx = CDCore::character_idx_from_name(pm.editing_character());
+            if (editingIdx != 0 && editingIdx != activeIdx)
+            {
+                logger.warning("[prefab-swap] swap-map build REFUSED: bucket char[{}] but the selections were loaded "
+                               "for editing='{}' (char[{}]); controlled='{}' pinned={}. One character's prefab picks "
+                               "would have been registered as another's targets.",
+                               activeIdx, pm.editing_character(), editingIdx, pm.active_character(),
+                               pm.editing_pinned() ? 1 : 0);
+                return 0;
+            }
+            logger.debug("[prefab-swap] swap-map build: bucket char[{}] editing='{}' controlled='{}' pinned={}",
+                         activeIdx, pm.editing_character(), pm.active_character(), pm.editing_pinned() ? 1 : 0);
+        }
+
+        // The bucket being written and the mappings being read MUST describe the same character.
+        //
+        // This function writes bucket `activeIdx` but sources every target from the ONE global slot_mappings(). Those
+        // are kept in step by PresetManager::apply_to_state, and when they drift the result is silent and severe: the
+        // bucket is filled with another character's targets and the natpipe hook then installs them faithfully,
+        // because as far as every downstream check is concerned these ARE this character's targets. That is why the
+        // body-ownership guards elsewhere cannot catch it -- they verify WHOSE BODY, and this is WHOSE TARGETS.
+        //
+        // Refusing costs a rebuild: the bucket keeps its previous contents and the next apply_to_state retries with a
+        // consistent pair. Proceeding costs the wrong character's armour, which is what happened when a hot reload
+        // bound Kliff while the mappings still held Oongka's slots.
+        const auto mappingsOwner = Transmog::slot_mappings_owner().load(std::memory_order_acquire);
+        if (mappingsOwner != 0 && mappingsOwner != activeIdx)
+        {
+            logger.warning("[prefab-swap] swap-map build REFUSED: building char[{}]'s bucket but slot_mappings() "
+                           "belongs to char[{}]. One character's targets would have been installed on another. "
+                           "Skipping; the next apply_to_state rebuilds with a consistent pair.",
+                           activeIdx, mappingsOwner);
+            return 0;
+        }
+
         const auto ci = static_cast<std::size_t>(activeIdx - 1);
         const auto cc = static_cast<Transmog::CarrierChar>(ci);
 
@@ -1749,6 +1812,7 @@ namespace Transmog::PrefabWrapperSwap
 
                 auto &cat = s_slotCatalogs[i];
                 auto tgtIdx = s_selTgtIdxPerChar[ci][i];
+                const bool fromPickRow = (tgtIdx >= 0);
 
                 // No explicit prefab pick for this slot? Derive one from the slot's target ITEM.
                 //
@@ -1947,9 +2011,9 @@ namespace Transmog::PrefabWrapperSwap
                                  (k == resolvedSrcIdx) ? " (primary rig)" : "");
                 }
                 logger.trace("[prefab-swap]   char[{}] slot[{}] src-register primary=\"{}\" stem=\"{}\" "
-                             "rigSiblings={} tgt=\"{}\" (0x{:X})",
+                             "rigSiblings={} tgt=\"{}\" (0x{:X}) via={}",
                              ci, i, cat[resolvedSrcIdx].name, srcStem, siblingCount, cat[tgtIdx].name,
-                             plans[i].tgtWrapper);
+                             plans[i].tgtWrapper, fromPickRow ? "pick-row" : "item-derived");
 
                 // An item emits exactly ONE mesh -- measured across every slot, carrier and target alike. So a
                 // backpack's strap and holder (cd_phm_00_bag_belt_*, cd_phm_00_bag_*_z) belong to NEITHER item; the

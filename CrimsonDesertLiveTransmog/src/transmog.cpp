@@ -422,7 +422,7 @@ namespace Transmog
                     continue;
                 const auto tslot = static_cast<TransmogSlot>(i);
                 const int curSrc = PWS::selection_src_index(tslot);
-                PWS::set_selection(tslot, curSrc, -1);
+                PWS::set_selection(tslot, curSrc, -1, "capture");
             }
 
             for (std::size_t i = 0; i < k_slotCount; ++i)
@@ -490,7 +490,7 @@ namespace Transmog
                 continue;
             const auto tslot = static_cast<TransmogSlot>(i);
             const int curSrc = PWS::selection_src_index(tslot);
-            PWS::set_selection(tslot, curSrc, -1);
+            PWS::set_selection(tslot, curSrc, -1, "capture");
         }
 
         for (std::size_t i = 0; i < k_slotCount; ++i)

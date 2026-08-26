@@ -291,7 +291,7 @@ namespace Transmog
                             {
                                 // Body-mesh interaction. Selection only -- the swap map is rebuilt on the next apply
                                 // via notify_apply_starting (apply-only lifecycle, mirroring the carrier pattern).
-                                PWS::set_selection(tslot, curSrc, (prefabIdx >= 0) ? prefabIdx : -1);
+                                PWS::set_selection(tslot, curSrc, (prefabIdx >= 0) ? prefabIdx : -1, "ui-picker");
 
                                 // Update the per-slot UI label state. On a prefab pick (>= 0) we pull the name straight
                                 // out of the catalog; on an explicit clear (-2) we drop the label so the row reverts to
@@ -378,7 +378,7 @@ namespace Transmog
                                 // carrier gets re-forced on the next apply, and picking "(none)" appears to do
                                 // nothing. The two states are meant to be mutually exclusive, so clearing is always
                                 // correct here.
-                                PWS::set_selection(tslot, PWS::selection_src_index(tslot), -1);
+                                PWS::set_selection(tslot, PWS::selection_src_index(tslot), -1, "ui-clear");
                                 if (hadPrior)
                                 {
                                     ui.pickedPrefabName.clear();
@@ -469,7 +469,7 @@ namespace Transmog
                             const auto tslot = static_cast<TransmogSlot>(i);
                             const int curSrc = PWS::selection_src_index(tslot);
                             ui.pickedPrefabName.clear();
-                            PWS::set_selection(tslot, curSrc, -1);
+                            PWS::set_selection(tslot, curSrc, -1, "ui-clear2");
                         }
                         if (s_autoApply)
                         {
