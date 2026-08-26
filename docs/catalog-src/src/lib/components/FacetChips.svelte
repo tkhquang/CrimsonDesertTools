@@ -163,10 +163,11 @@
       <span>Body</span>
       <span
         class="cursor-help text-yellow"
-        title={'Wearer body from the display_names data (authoritative, not a\n' +
-          'rig-token guess): Male / Female for items restricted to that body.\n' +
-          'Items with no body restriction are unmarked and only match Any\n' +
-          '(the default, which does not filter).'}
+        title={'Wearer body from the display_names data: which bodies the game\n' +
+          'lets equip the item. Male / Female for items restricted to that body.\n' +
+          'Items with no restriction are unmarked and only match Any (the\n' +
+          'default, which does not filter). Eligibility is not a promise that a\n' +
+          'fitted mesh exists for that body.'}
         aria-label="Body filter note"
       >
         (!)
