@@ -12,7 +12,6 @@
 #include "real_part_tear_down.hpp"
 #include "shared_state.hpp"
 #include "slot_metadata.hpp"
-#include "transmog_hooks.hpp"
 #include "transmog_map.hpp"
 #include "transmog_worker.hpp"
 
@@ -616,7 +615,6 @@ namespace Transmog
             return;
         }
 
-        suppress_vec().store(true, std::memory_order_release);
 
         const uint16_t prevId = lastIds[slotIdx];
         const uint16_t gameTag = static_cast<uint16_t>(k_slotMetadata[slotIdx].gameTag);
@@ -635,7 +633,6 @@ namespace Transmog
         if (targetId == prevId && targetId != 0 && !forceApply)
         {
             logger.trace("apply_single_slot: slot={} id={:#06x} unchanged", slotIdx, targetId);
-            suppress_vec().store(false, std::memory_order_release);
             return;
         }
 
@@ -660,7 +657,6 @@ namespace Transmog
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
             logger.warning("[dispatch] single-slot cache clear fault");
-            suppress_vec().store(false, std::memory_order_release);
             return;
         }
 
@@ -881,7 +877,6 @@ namespace Transmog
 
         logger.trace("apply_single_slot: slot={} done, suppress={:#x}", slotIdx, suppressMask);
 
-        suppress_vec().store(false, std::memory_order_release);
     }
 
     /**
@@ -932,8 +927,9 @@ namespace Transmog
         // The cleanup pass keeps tearing down stale fakes. The apply pass writes nothing, because every slot has
         // active==false.
         //
-        // For the same reason, the BE/VEC hooks (transmog_hooks.cpp) must not gate on flag_enabled -- they must keep
-        // scheduling apply_all so this pass fires on every equip/unequip while LT is disabled.
+        // Nothing schedules this pass on an equip any more: the BatchEquip and VisualEquipChange hooks are gone, so
+        // while LT is disabled it runs only from the UI, a hotkey, or world entry. SocketMeshOverride installs
+        // nothing while disabled either, so no new fakes appear in the meantime.
         if (!flag_enabled().load(std::memory_order_relaxed))
         {
             for (auto &m : mappings)
@@ -984,7 +980,6 @@ namespace Transmog
         }
 
         // Suppress VEC hook for the entire operation.
-        suppress_vec().store(true, std::memory_order_release);
 
         logger.trace("[dispatch] apply_all_transmog entry a1={:#018x}", static_cast<uint64_t>(a1));
 
@@ -1084,7 +1079,6 @@ namespace Transmog
                 logger.trace("apply_all_transmog: no state change "
                              "(prev=[{}] real=[{}]), skipping",
                              prevBuf, realBuf);
-                suppress_vec().store(false, std::memory_order_release);
                 return;
             }
 
@@ -1226,7 +1220,6 @@ namespace Transmog
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
             logger.warning("[dispatch] cache clear fault");
-            suppress_vec().store(false, std::memory_order_release);
             return;
         }
 
@@ -1666,7 +1659,6 @@ namespace Transmog
             }
         }
 
-        suppress_vec().store(false, std::memory_order_release);
 
         // PrefabWrapperSwap stays active across applies. Do NOT schedule an auto-deactivate after each apply. The
         // wrapper-substitution path has no cheap teardown -- a heap walk on deactivate stalls preset switches by about
@@ -1688,7 +1680,6 @@ namespace Transmog
                 a1 = fresh;
         }
 
-        suppress_vec().store(true, std::memory_order_release);
 
         // Snapshot the previously applied fakes BEFORE clearing lastIds. Iteration order across `k_slotMetadata` is
         // irrelevant for correctness: prevFakeId / prevCarrierId are indexed by `k` (the array slot), and the per-slot
@@ -1840,7 +1831,6 @@ namespace Transmog
         // swap map armed only matters during the engine's own cleanup walks, which is exactly when it must fire.
 
         logger.info("Transmog CLEAR: done");
-        suppress_vec().store(false, std::memory_order_release);
     }
 
 } // namespace Transmog

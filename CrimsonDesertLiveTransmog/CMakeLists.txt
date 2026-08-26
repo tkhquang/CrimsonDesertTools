@@ -92,7 +92,6 @@ set(COMMON_SOURCES
     src/input_handler.cpp
     src/transmog.cpp
     src/transmog_apply.cpp
-    src/transmog_hooks.cpp
     src/transmog_worker.cpp
     src/dx_overlay.cpp
     src/imgui_function_table_populator.cpp  # includes external/reshade-sdk/source/imgui_function_table_19250.{hpp,cpp}
@@ -101,6 +100,7 @@ set(COMMON_SOURCES
     src/real_part_tear_down.cpp
     src/prefab_wrapper_swap.cpp
     src/claim_walk_guard.cpp
+    src/socket_mesh_override.cpp
     src/helm_audio_filter.cpp
     src/color_override/host_scope.cpp
     src/dye_record_inject.cpp

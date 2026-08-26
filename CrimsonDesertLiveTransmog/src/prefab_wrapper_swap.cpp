@@ -210,6 +210,25 @@ namespace Transmog::PrefabWrapperSwap
     // buckets.
     static std::unordered_set<std::uintptr_t> s_targetWrappersPerChar[3];
 
+    // Validity stamp for the derived per-slot target table below: the world generation and character it was built
+    // for. Zero means never built.
+    //
+    // The table is DERIVED state (preset -> selections -> targets), and the failure mode that kept recurring was
+    // reading it while it still described a previous world: a reload dressed the new body from the last session's
+    // uncommitted picks. Resetting it at each save-load site does not hold -- there are three such branches, a pinned
+    // character takes a different one than an unpinned character, and a future patch can add another.
+    //
+    // Stamping instead makes staleness impossible to READ. Any path that bumps the world generation is covered,
+    // including paths not yet found, and a table built for one protagonist can never be served to another.
+    static std::mutex s_targetTableStampMtx;
+    static std::uint64_t s_targetTableWorldGen = 0;
+    static std::uint32_t s_targetTableCharIdx = 0;
+
+    // Target wrapper per slot, per character. s_swapMapPerChar is keyed by SOURCE name hash, which answers "what
+    // should this mesh become" but not "what should this SOCKET wear" -- and the socket is what the mesh-override
+    // hook knows. Rebuilt alongside the swap map from the same plans, so the two cannot disagree.
+    static std::uintptr_t s_slotTargetWrapperPerChar[3][Transmog::k_slotCount]{};
+
     // Direct fakes: slots where the equipped item IS the target, so no substitution happens and nothing lands in
     // s_targetWrappersPerChar. Kept in their OWN set because apply_selections_to_swap_map rebuilds the target set from
     // swap plans alone and would otherwise wipe these on the next apply -- including the clearing apply, which is
@@ -1909,8 +1928,20 @@ namespace Transmog::PrefabWrapperSwap
 
         {
             std::scoped_lock lk(s_catalogMtx);
+            // LT disabled registers nothing at all, explicit picks included.
+            //
+            // flag_enabled gates the socket override, but gating only there leaves the swap map armed, and the
+            // struct-copy substitution keeps rewriting any carrier mesh the engine builds. That is invisible until a
+            // carrier coincides with what is actually worn -- then toggling Enabled off restored the real gear
+            // everywhere except that slot, which kept showing its transmog. apply_all_transmog cannot cover this: it
+            // forces mappings inactive in a LOCAL copy, so the real slot_mappings still read active here.
+            const bool ltEnabled = Transmog::flag_enabled().load(std::memory_order_relaxed);
+
             for (std::size_t i = 0; i < k_slotN; ++i)
             {
+                if (!ltEnabled)
+                    continue;
+
                 auto &cat = s_slotCatalogs[i];
                 auto tgtIdx = s_selTgtIdxPerChar[ci][i];
 
@@ -1926,7 +1957,15 @@ namespace Transmog::PrefabWrapperSwap
                 // derived one must never override it.
                 if (tgtIdx < 0)
                 {
-                    const auto targetItemId = Transmog::slot_mappings()[i].targetItemId;
+                    // An UNTICKED slot registers nothing.
+                    //
+                    // Unticking leaves targetItemId set -- it only clears `active` -- so deriving from the id alone
+                    // kept a swap entry alive for a slot LT is no longer dressing. That is invisible while the
+                    // carrier differs from what is worn, and wrong the moment they coincide: with the real gear BEING
+                    // the carrier item, the engine builds exactly the mesh the entry keys on, and the substitution
+                    // put the transmog back on an unticked slot -- undyed, since a bare substitution carries no dye.
+                    const auto &mapping = Transmog::slot_mappings()[i];
+                    const auto targetItemId = mapping.active ? mapping.targetItemId : std::uint16_t{0};
                     if (targetItemId != 0)
                     {
                         // An item can own one mesh PER BODY RIG, so pick the one this character's body wears.
@@ -2131,6 +2170,8 @@ namespace Transmog::PrefabWrapperSwap
             std::scoped_lock lk(s_mapMtx);
             s_swapMapPerChar[ci].clear();
             s_targetWrappersPerChar[ci].clear();
+            for (auto &w : s_slotTargetWrapperPerChar[ci])
+                w = 0;
             for (std::size_t i = 0; i < k_slotN; ++i)
             {
                 auto &p = plans[i];
@@ -2157,6 +2198,8 @@ namespace Transmog::PrefabWrapperSwap
                     s_swapMapPerChar[ci].insert_or_assign(h, SwapEntry{p.tgtWrapper, sn});
                 }
                 s_targetWrappersPerChar[ci].insert(p.tgtWrapper);
+                if (i < Transmog::k_slotCount)
+                    s_slotTargetWrapperPerChar[ci][i] = p.tgtWrapper;
                 ++resolved;
                 logger.debug("[prefab-swap]   char[{}] slot[{}] RESOLVED "
                              "\"{}\" ({} src name(s)) -> \"{}\" (0x{:X})",
@@ -2622,6 +2665,17 @@ namespace Transmog::PrefabWrapperSwap
         // Cheap guards before any indirect read.
         if (!s_active.load(std::memory_order_acquire))
             return trampoline(a1, a2);
+
+        // LT disabled substitutes nothing, whatever the map still holds.
+        //
+        // Gating the map BUILD is not enough: a clear does not rebuild the map, it deactivates and restores. The
+        // restore re-equips the real item, and while that item is also the carrier its mesh is exactly what the
+        // surviving entries key on -- so toggling Enabled off tore the fake down and then substituted it straight
+        // back on during the restore. The map is data; this is its one consumer, so this is where "off" has to mean
+        // off.
+        if (!Transmog::flag_enabled().load(std::memory_order_relaxed))
+            return trampoline(a1, a2);
+
         // Deliberately NOT gated on in_transmog(). The engine's own equip must be substituted too, otherwise a gear
         // change attaches and draws the real mesh before LT's debounced apply can replace it -- the visible flash of
         // real gear. The swap map is the filter: it holds wrappers only for slots LT is actively driving, and
@@ -3773,6 +3827,83 @@ namespace Transmog::PrefabWrapperSwap
         std::scoped_lock lk(s_lastApplyMtx);
         std::memcpy(s_lastApplyItems, itemIds, sizeof(s_lastApplyItems));
         s_lastApplyValid = true;
+    }
+
+    /**
+     * @brief Rebuild the target table from the preset when its stamp no longer matches the world and character.
+     *
+     * Runs on whichever thread reads the table, which includes the engine's part-build thread -- so it is a plain
+     * comparison in the common case and only does work once per world generation per character.
+     *
+     * The rebuild discards uncommitted picks and re-derives everything from the active preset, which is the correct
+     * meaning of entering a new world: the preset on disk is the truth, and edits that were never committed to it
+     * must not dress the new body. Mid-session edits are unaffected because the stamp still matches.
+     */
+    static void ensure_target_table_current() noexcept
+    {
+        const auto worldGen = CDCore::world_generation();
+        const auto activeIdx = s_activeCharIdx.load(std::memory_order_acquire);
+        if (activeIdx < 1 || activeIdx > 3)
+            return;
+
+        {
+            std::scoped_lock lk(s_targetTableStampMtx);
+            if (s_targetTableWorldGen == worldGen && s_targetTableCharIdx == activeIdx)
+                return;
+
+            // Stamp BEFORE rebuilding. The rebuild re-enters PWS and can bind the active character, so a second
+            // reader arriving mid-rebuild must not start its own.
+            s_targetTableWorldGen = worldGen;
+            s_targetTableCharIdx = activeIdx;
+        }
+
+        resync_to_preset();
+        PresetManager::instance().apply_to_state();
+        (void)apply_selections_to_swap_map();
+
+        DMK::Logger::get_instance().info(
+            "[prefab-swap] target table rebuilt for world {} char[{}] (uncommitted picks discarded)", worldGen,
+            activeIdx - 1);
+    }
+
+    std::uintptr_t target_wrapper_for_slot(std::size_t slotIdx) noexcept
+    {
+        if (slotIdx >= Transmog::k_slotCount)
+            return 0;
+
+        // Never serve a table that belongs to a different world or character -- see ensure_target_table_current.
+        ensure_target_table_current();
+
+        const auto activeIdx = s_activeCharIdx.load(std::memory_order_acquire);
+        if (activeIdx < 1 || activeIdx > 3)
+            return 0;
+        std::scoped_lock lk(s_mapMtx);
+        return s_slotTargetWrapperPerChar[activeIdx - 1][slotIdx];
+    }
+
+    void resync_to_preset() noexcept
+    {
+        // Drop every uncommitted prefab pick, then rebuild the per-slot target table from what remains.
+        //
+        // The selection rows deliberately SURVIVE a lot -- they exist so switching editing character does not throw
+        // away work in progress. A save-load is different: the preset on disk is the truth, and a pick that was never
+        // committed to it must not dress the new body. PresetManager::apply_to_state re-mirrors the preset's own
+        // picks immediately after this, so clearing here loses nothing the preset still asks for.
+        {
+            std::scoped_lock lk(s_mapMtx);
+            for (auto &row : s_selSrcIdxPerChar)
+                row.fill(-1);
+            for (auto &row : s_selTgtIdxPerChar)
+                row.fill(-1);
+        }
+    }
+
+    void rebuild_target_table() noexcept
+    {
+        // Unconditional, unlike ensure_armed_for_slot_apply, which bails when no explicit pick exists. The table is
+        // also fed by targets DERIVED from each slot's item, so it has to be rebuilt even with no picks at all --
+        // otherwise it keeps whatever the previous session left in it, which is exactly the stale-helm case.
+        (void)apply_selections_to_swap_map();
     }
 
     void park_slot_target_for_sweep(std::uint16_t prevItemId) noexcept

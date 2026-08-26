@@ -914,6 +914,52 @@ namespace Transmog
     };
 
     /**
+     * @brief PartDescriptorBuild -- builds the part descriptor for ONE socket and appends it to the rebuild request.
+     *
+     * `sub_14081DD40(a1, &partId, slotTag, a4, a5, record, outList)`. It expands the part to mesh ids
+     * (`sub_142074920`), and for each one takes the canonical wrapper (`sub_1403120F0(meshId) + 0x18`) into the
+     * descriptor's FIRST field before appending the 112-byte descriptor to `outList` through `sub_14037EC40`.
+     *
+     * That first field is the mesh that will be attached to the socket, which makes this the override point: the
+     * slot tag is an argument here, whereas the append itself (already hooked as StructCopy) cannot tell which
+     * socket it is serving.
+     */
+    inline constexpr AddrCandidate k_partDescriptorBuildCandidates[] = {
+        // P1 -- full prologue: the `mov rax,rsp` frame plus four argument spills and 8 pushes. One match module-wide.
+        {"PartDescriptorBuild_P1_FullPrologue",
+         "48 8B C4 4C 89 48 20 66 44 89 40 18 48 89 50 10 48 89 48 08 "
+         "55 53 56 57 41 54 41 55 41 56 41 57",
+         ResolveMode::Direct, 0, 0},
+    };
+
+    /**
+     * @brief PartRealizeCommit -- the single point where a part is realized onto an actor.
+     *
+     * `sub_140806160(a1, outStatus, removeList, flags, addList)`. Both lists hold 224-byte descriptors; the remove
+     * list goes through the part-transition path and the add list is committed and expanded to meshes.
+     *
+     * This is the convergence point for EVERY visual equip change. VisualEquipChange covers an item being added or
+     * removed, an item-to-item REPLACE bypasses it entirely through BatchEquip, and six further callers reach it for
+     * their own reasons -- so hooking here catches what hooking those two does not.
+     *
+     * It writes only two timers (`a1+600`, `a1+608`) and a dirty byte. The authoritative equip table at `a1+0x78` is
+     * untouched, which is what makes intervening here appearance-only.
+     */
+    inline constexpr AddrCandidate k_partRealizeCommitCandidates[] = {
+        // P1 -- full prologue: two argument spills, 7 pushes, the alloca probe, and the r9b/r8/rdx shuffle that
+        // follows it. Stack and probe-size immediates wildcarded per section 2. One match module-wide.
+        {"PartRealizeCommit_P1_FullPrologue",
+         "48 89 5C 24 20 48 89 54 24 10 55 56 57 41 54 41 55 41 56 41 57 "
+         "48 8D AC 24 ?? ?? ?? ?? B8 ?? ?? ?? ?? E8 ?? ?? ?? ?? "
+         "48 2B E0 45 0F B6 F1",
+         ResolveMode::Direct, 0, 0},
+
+        // P2 -- post-alloca argument shuffle only, pinned by the `movzx r14d, r9b` that is unusual enough to carry
+        // the match on its own. Survives a prologue reshuffle; walks back 0x27 to function start.
+        {"PartRealizeCommit_P2_PostAlloca", "48 2B E0 45 0F B6 F1 49 8B D8 4C 8B E2", ResolveMode::Direct, -0x27, 0},
+    };
+
+    /**
      * @brief Claim-walk deref site -- the shape ClaimWalkGuard patches. NOT an AddrCandidate cascade.
      *
      * Deliberately outside the cascade: `resolve_address` requires a UNIQUE match, and this pattern is expected to

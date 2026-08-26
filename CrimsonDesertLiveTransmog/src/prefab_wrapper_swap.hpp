@@ -92,6 +92,24 @@ namespace Transmog::PrefabWrapperSwap
     std::size_t ensure_armed_for_slot_apply() noexcept;
 
     /**
+     * Target wrapper bound to @p slotIdx for the character currently being applied, or 0 when the slot has no
+     * target. Answers "what should this SOCKET wear", which the source-hash-keyed swap map cannot.
+     */
+    [[nodiscard]] std::uintptr_t target_wrapper_for_slot(std::size_t slotIdx) noexcept;
+
+    /**
+     * Discard uncommitted prefab picks so a save-load starts from the preset alone. Call before
+     * PresetManager::apply_to_state, which re-mirrors the preset's own picks.
+     */
+    void resync_to_preset() noexcept;
+
+    /**
+     * Rebuild the per-slot target table from current selections and slot targets. Needs no live actor, so it can run
+     * while a new world is still building -- which is when SocketMeshOverride reads it.
+     */
+    void rebuild_target_table() noexcept;
+
+    /**
      * Mark ONE slot's previous target as stale, so the post-apply sweep removes it.
      *
      * The full apply gets this for free: `notify_apply_starting` runs a deactivate cycle that parks every installed

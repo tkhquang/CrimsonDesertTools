@@ -138,10 +138,6 @@ namespace Transmog
     {
         return s_inTransmog;
     }
-    std::atomic<bool> &suppress_vec()
-    {
-        return s_suppressVEC;
-    }
     std::atomic<__int64> &player_a1()
     {
         return s_playerA1;

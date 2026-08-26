@@ -7,6 +7,7 @@
 #include "color_override/setter_substitute.hpp"
 #include "generated/dye_color_table.hpp"
 #include "claim_walk_guard.hpp"
+#include "socket_mesh_override.hpp"
 #include "prefab_wrapper_swap.hpp"
 #include "constants.hpp"
 #include "indexed_string_table.hpp"
@@ -20,7 +21,6 @@
 #include "slot_metadata.hpp"
 #include "overlay.hpp"
 #include "transmog_apply.hpp"
-#include "transmog_hooks.hpp"
 #include "transmog_map.hpp"
 #include "transmog_worker.hpp"
 #include "helm_audio_filter.hpp"
@@ -895,65 +895,20 @@ namespace Transmog
             }
         }
 
-        // BatchEquip: THE equip trigger function.
-        {
-            auto beAddr = resolve_address(k_batchEquipCandidates, std::size(k_batchEquipCandidates), "BatchEquip");
-
-            if (beAddr && !DMK::Scanner::is_likely_function_prologue(beAddr))
-            {
-                logger.warning("BatchEquip resolved to 0x{:X} but prologue byte "
-                               "looks wrong -- rejecting",
-                               beAddr);
-                beAddr = 0;
-            }
-
-            if (beAddr)
-            {
-                BatchEquipFn trampoline = nullptr;
-                auto result = hookMgr.create_inline_hook("BatchEquip", beAddr, reinterpret_cast<void *>(on_batch_equip),
-                                                         reinterpret_cast<void **>(&trampoline));
-
-                if (result.has_value())
-                {
-                    orig_batch_equip() = trampoline;
-                }
-                else
-                {
-                    logger.warning("BatchEquip hook failed: {}", DetourModKit::Hook::error_to_string(result.error()));
-                }
-            }
-            else
-            {
-                logger.warning("BatchEquip AOB scan failed -- transmog equip trigger disabled");
-            }
-        }
-
-        // VEC hook: catches unequip events to re-apply transmog.
-        {
-            auto vecAddr = resolve_address(k_vecCandidates, std::size(k_vecCandidates), "VEC");
-            if (vecAddr && !DMK::Scanner::is_likely_function_prologue(vecAddr))
-            {
-                logger.warning("VEC resolved to 0x{:X} but prologue byte looks "
-                               "wrong -- rejecting",
-                               vecAddr);
-                vecAddr = 0;
-            }
-            if (vecAddr)
-            {
-                VisualEquipChangeFn trampoline = nullptr;
-                auto result = hookMgr.create_inline_hook("VEC", vecAddr, reinterpret_cast<void *>(on_vec),
-                                                         reinterpret_cast<void **>(&trampoline));
-                if (result.has_value())
-                {
-                    orig_vec() = trampoline;
-                }
-                else
-                {
-                    logger.warning("VEC hook failed: {}", DetourModKit::Hook::error_to_string(result.error()));
-                }
-            }
-        }
-
+        // BatchEquip and VisualEquipChange are no longer hooked.
+        //
+        // Both existed to notice a real equip change and schedule an apply that re-dressed the slot afterwards --
+        // which is what made the real item visible in the meantime. SocketMeshOverride now overrides the mesh and its
+        // dye as the part is BUILT, so the slot is already correct before anything is drawn, and it sees changes
+        // neither hook did: an item-to-item replace bypasses VisualEquipChange entirely, and six further callers
+        // reach the same builder.
+        //
+        // What they still did is covered elsewhere. The player component is cached lazily through
+        // resolve_player_component and stored by the load-detect thread each poll; the per-character ledger reset on
+        // an actor change is the load-detect thread's X->Y branch.
+        //
+        // If a slot ever keeps a stale look until the UI is touched, that is the case to re-examine: the override
+        // only fires when the engine BUILDS a part, so a visual change with no rebuild has nothing driving it.
 
         // PartAddShow inline hook -- transition-flash polish.
         //
@@ -1042,6 +997,10 @@ namespace Transmog
         ClaimWalkGuard::install();
 
         PrefabWrapperSwap::init();
+
+        // Override the mesh a socket is about to wear, so a real item is never built for a slot LT is dressing.
+        // Installed after PWS because it reads PWS's per-slot target. See socket_mesh_override.hpp.
+        SocketMeshOverride::install();
 
         // Helm-audio filter. It intervenes at the passive-skill REGISTRATION boundary, BEFORE the muffle tag enters
         // the character's skill registry, so no downstream Wwise / RTPC / Switch path ever observes it. The combined

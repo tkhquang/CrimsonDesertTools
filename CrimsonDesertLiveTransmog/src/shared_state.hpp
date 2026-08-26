@@ -194,13 +194,11 @@ namespace Transmog
     // Atomics and arrays accessed by multiple translation units (hooks, workers, apply logic). Accessor pattern mirrors
     // the flag/fn-ptr accessors above to keep linkage internal to shared_state.cpp.
 
-    /// Recursion guard: prevents infinite loop when SlotPopulator calls VEC.
+    /// Recursion guard: set while LT is driving an apply, so its own engine calls are not treated as the
+    /// player's. Read by SocketMeshOverride and the prefab-swap hooks.
     std::atomic<bool> &in_transmog();
 
-    /// Suppress VEC hook scheduling during clear+apply cycle.
-    std::atomic<bool> &suppress_vec();
-
-    /// Last known player a1 (captured from BatchEquip hook / VEC hook).
+    /// Last known player a1 (resolved lazily, and stored by the load-detect thread each poll).
     std::atomic<__int64> &player_a1();
 
     /**
