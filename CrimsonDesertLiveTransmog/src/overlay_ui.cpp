@@ -469,7 +469,7 @@ namespace Transmog
                             const auto tslot = static_cast<TransmogSlot>(i);
                             const int curSrc = PWS::selection_src_index(tslot);
                             ui.pickedPrefabName.clear();
-                            PWS::set_selection(tslot, curSrc, -1, "ui-clear2");
+                            PWS::set_selection(tslot, curSrc, -1, "ui-clear-all");
                         }
                         if (s_autoApply)
                         {

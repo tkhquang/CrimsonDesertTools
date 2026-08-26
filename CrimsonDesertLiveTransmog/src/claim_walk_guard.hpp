@@ -24,9 +24,11 @@
  * window, which is the smaller and safer intervention. A null owner means "this entry is being erased", and skipping
  * it matches what the walker would have observed a moment later, once the count caught up.
  *
- * Implemented as a hand-written 22-byte stub rather than a mid-hook. Both patch sites sit inside per-entry loops
- * that run during the frame, so a full context save/restore per claim entry would cost real frame time; the stub
- * adds two instructions.
+ * The guard is a managed mid-hook rather than a hand-written stub. A stub would be cheaper per entry -- these sites
+ * sit inside per-entry loops that run during the frame, and a mid-hook pays a full context save and restore where a
+ * stub pays two instructions -- but a stub also owns its own lifetime, and on unload the patched site is left
+ * jumping into freed memory. The mid-hook is torn down with the rest of the hook table, and the callback itself is a
+ * single compare, so the cost stays a fixed prologue rather than anything that scales with the walk.
  */
 
 namespace Transmog::ClaimWalkGuard
@@ -38,6 +40,6 @@ namespace Transmog::ClaimWalkGuard
      */
     [[nodiscard]] bool install() noexcept;
 
-    /// @brief Number of sites patched by @ref install.
+    /// Number of sites patched by @ref install.
     [[nodiscard]] unsigned patched_site_count() noexcept;
-}
+} // namespace Transmog::ClaimWalkGuard

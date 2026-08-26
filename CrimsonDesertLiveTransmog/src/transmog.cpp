@@ -666,44 +666,47 @@ namespace Transmog
 
         // --- Resolve AOB addresses ---
         //
-        // These six targets are independent: each scans a static candidate table and none reads another's resolved
-        // address. They all live in the host EXE, so resolve them in one fork-join batch rather than six serial
-        // host-module scans. Each per-target validation and side-effect block below runs in the batch order, and every
-        // block touches only its own address, so the hoisted scans preserve behavior. The initBatch order defines the
-        // initAddrs order.
+        // These targets are independent: each scans a static candidate table and none reads another's resolved
+        // address. They all live in the host EXE, so resolve them in one fork-join batch rather than one serial
+        // host-module scan each. Each per-target validation and side-effect block below runs in the batch order, and
+        // every block touches only its own address, so the hoisted scans preserve behavior.
+        //
+        // The InitAddr enumerators ARE the initBatch order. Index the results through them and never through a
+        // literal or an offset from the end -- inserting a row otherwise silently re-points every later consumer.
 
         auto &addrs = resolved_addrs();
 
-        const CDCore::Glue::BatchRequest initBatch[] = {
-            {k_slotPopulatorCandidates, "SlotPopulator"}, {k_mapLookupCandidates, "MapLookup"},
-            {k_subTranslatorCandidates, "SubTranslator"}, {k_safeTearDownCandidates, "SafeTearDown"},
-            {k_initSwapEntryCandidates, "InitSwapEntry"},
-            {k_partSlotRefreshCandidates, "PartSlotRefresh"},
-            {k_slotTagToHandleCandidates, "SlotTagToHandle"},
-            {k_itemToSlotResolveCandidates, "ItemToSlotResolve"},
+        enum InitAddr : std::size_t
+        {
+            SlotPopulatorAddr = 0,
+            MapLookupAddr,
+            SubTranslatorAddr,
+            SafeTearDownAddr,
+            InitSwapEntryAddr,
+            PartSlotRefreshAddr,
+            SlotTagToHandleAddr,
+            InitAddrCount,
         };
+
+        const CDCore::Glue::BatchRequest initBatch[] = {
+            {k_slotPopulatorCandidates, "SlotPopulator"},   {k_mapLookupCandidates, "MapLookup"},
+            {k_subTranslatorCandidates, "SubTranslator"},   {k_safeTearDownCandidates, "SafeTearDown"},
+            {k_initSwapEntryCandidates, "InitSwapEntry"},   {k_partSlotRefreshCandidates, "PartSlotRefresh"},
+            {k_slotTagToHandleCandidates, "SlotTagToHandle"},
+        };
+        static_assert(std::size(initBatch) == InitAddrCount, "InitAddr must mirror initBatch one-for-one");
         std::uintptr_t initAddrs[std::size(initBatch)] = {};
         CDCore::Glue::resolve_address_batch(initBatch, initAddrs);
 
         // SlotPopulator: the KEY function for transmog.
-        addrs.slotPopulator = initAddrs[0];
+        addrs.slotPopulator = initAddrs[SlotPopulatorAddr];
 
         // PartSlotRefresh: rebuilds ONE slot's visual. SlotPopulator calls it with the slot derived from the ITEM,
-        // which is the same value for both halves of a paired slot -- so an apply to the second half rebuilt the
+        // which is the same value for both halves of a paired slot, so an apply to the second half rebuilds the
         // first. Calling it directly with the intended slot is what reaches the other half.
         {
-            const auto refreshAddr = initAddrs[std::size(initBatch) - 3];
-            const auto tagToHandleAddr = initAddrs[std::size(initBatch) - 2];
-            const auto itemResolveAddr = initAddrs[std::size(initBatch) - 1];
-            if (itemResolveAddr)
-            {
-                item_to_slot_resolve_fn() = reinterpret_cast<ItemToSlotResolveFn>(itemResolveAddr);
-                logger.info("ItemToSlotResolve resolved at {:#x}", itemResolveAddr);
-            }
-            else
-            {
-                logger.warning("ItemToSlotResolve AOB scan failed -- carrier equip-eligibility unavailable");
-            }
+            const auto refreshAddr = initAddrs[PartSlotRefreshAddr];
+            const auto tagToHandleAddr = initAddrs[SlotTagToHandleAddr];
             if (tagToHandleAddr)
             {
                 slot_tag_to_handle_fn() = reinterpret_cast<SlotTagToHandleFn>(tagToHandleAddr);
@@ -730,7 +733,7 @@ namespace Transmog
 
         // MapLookup: IndexedStringA::lookup. Not hooked -- RIP anchor for scan_indexed_string_table(). Must be resolved
         // before PartShowSuppress::init_slot_hashes.
-        addrs.mapLookup = initAddrs[1];
+        addrs.mapLookup = initAddrs[MapLookupAddr];
 
         if (addrs.mapLookup)
         {
@@ -748,11 +751,15 @@ namespace Transmog
                            "PartShowSuppress will be inert this session");
         }
 
-        // SubTranslator: anchor for the item-name catalog scan.
-        addrs.subTranslator = initAddrs[2];
-
+        // SubTranslator: anchor for the item-name catalog scan, and the item -> slot resolver LT calls to ask whether
+        // a carrier can be placed at all. One function, both roles -- see its cascade doc in aob_resolver.hpp.
+        addrs.subTranslator = initAddrs[SubTranslatorAddr];
         if (addrs.subTranslator)
         {
+            // Wire the resolver BEFORE the catalog build: the build can take the deferred path and hand off to the
+            // worker, and nothing downstream should have to care whether the pointer landed first.
+            item_to_slot_resolve_fn() = reinterpret_cast<ItemToSlotResolveFn>(addrs.subTranslator);
+
             using BR = ItemNameTable::BuildResult;
             const auto result = ItemNameTable::instance().build(addrs.subTranslator);
             if (result == BR::Ok)
@@ -797,12 +804,12 @@ namespace Transmog
         }
         else
         {
-            logger.warning("SubTranslator AOB scan failed -- cannot build item-name table, "
-                           "presets will fall back to raw itemId only");
+            logger.warning("SubTranslator AOB scan failed -- cannot build the item-name table (presets fall back to "
+                           "raw itemIds) and carrier equip-eligibility checks are unavailable");
         }
 
         // SafeTearDown: scene-graph tear-down.
-        addrs.safeTearDown = initAddrs[3];
+        addrs.safeTearDown = initAddrs[SafeTearDownAddr];
         if (!addrs.safeTearDown)
         {
             logger.warning("SafeTearDown AOB scan failed -- real_part_tear_down will "
@@ -811,7 +818,7 @@ namespace Transmog
 
         // InitSwapEntry: zero-init helper for the 0x80-byte swap entry passed to SlotPopulator.
         {
-            auto iseAddr = initAddrs[4];
+            auto iseAddr = initAddrs[InitSwapEntryAddr];
 
             if (iseAddr && !DMK::Scanner::is_likely_function_prologue(iseAddr))
             {
@@ -865,17 +872,17 @@ namespace Transmog
             }
         }
 
-        // BatchEquip and VisualEquipChange are no longer hooked.
+        // Deliberately NO BatchEquip or VisualEquipChange hook.
         //
-        // Both existed to notice a real equip change and schedule an apply that re-dressed the slot afterwards --
-        // which is what made the real item visible in the meantime. SocketMeshOverride now overrides the mesh and its
-        // dye as the part is BUILT, so the slot is already correct before anything is drawn, and it sees changes
-        // neither hook did: an item-to-item replace bypasses VisualEquipChange entirely, and six further callers
-        // reach the same builder.
+        // Both would only notice a real equip change and schedule an apply that re-dresses the slot afterwards, which
+        // is what makes the real item visible in the meantime. SocketMeshOverride overrides the mesh and its dye as
+        // the part is BUILT, so the slot is already correct before anything is drawn, and it covers changes neither
+        // hook sees: an item-to-item replace bypasses VisualEquipChange entirely, and several further callers reach
+        // the same builder.
         //
-        // What they still did is covered elsewhere. The player component is cached lazily through
+        // The other jobs those hooks did are covered elsewhere. The player component is cached lazily through
         // resolve_player_component and stored by the load-detect thread each poll; the per-character ledger reset on
-        // an actor change is the load-detect thread's X->Y branch.
+        // an actor change is the load-detect thread's body-change branch.
         //
         // If a slot ever keeps a stale look until the UI is touched, that is the case to re-examine: the override
         // only fires when the engine BUILDS a part, so a visual change with no rebuild has nothing driving it.
@@ -964,13 +971,14 @@ namespace Transmog
         // Install BEFORE anything can drive an equip or a tear-down. The guard makes the engine's claim-vector
         // walks tolerate the null-owner window its own non-atomic erase opens; until it is in place, any erase that
         // overlaps a walk on a job thread can fault. See claim_walk_guard.hpp.
-        ClaimWalkGuard::install();
+        // Each install() logs its own failure, and neither is fatal, so the result is deliberately discarded.
+        (void)ClaimWalkGuard::install();
 
         PrefabWrapperSwap::init();
 
         // Override the mesh a socket is about to wear, so a real item is never built for a slot LT is dressing.
         // Installed after PWS because it reads PWS's per-slot target. See socket_mesh_override.hpp.
-        SocketMeshOverride::install();
+        (void)SocketMeshOverride::install();
 
         // Helm-audio filter. It intervenes at the passive-skill REGISTRATION boundary, BEFORE the muffle tag enters
         // the character's skill registry, so no downstream Wwise / RTPC / Switch path ever observes it. The combined
@@ -1058,12 +1066,12 @@ namespace Transmog
 
         PrefabWrapperSwap::shutdown();
 
-
-        // Full DMK teardown: it removes every managed hook (BatchEquip, VEC, PartAddShow), stops and clears the
-        // InputManager poller together with its registered bindings, stops the ConfigWatcher, and clears the Config
-        // registered-items list. It is idempotent and safe to re-init from on the next Logic-DLL load. Each detour
-        // body snapshots its trampoline pointer at entry and bails to a benign default if the snapshot is null. That
-        // defends the brief drain window between hook removal and DLL unmap.
+        // Full DMK teardown: it removes every managed hook (PartAddShow, the claim-walk guard, the socket-mesh
+        // override and the rest), stops and clears the InputManager poller together with its registered bindings,
+        // stops the ConfigWatcher, and clears the Config registered-items list. It is idempotent and safe to re-init
+        // from on the next Logic-DLL load. Each detour body snapshots its trampoline pointer at entry and bails to a
+        // benign default if the snapshot is null. That defends the brief drain window between hook removal and DLL
+        // unmap.
         DMK_Shutdown();
 
         clear_hotkey_guards();

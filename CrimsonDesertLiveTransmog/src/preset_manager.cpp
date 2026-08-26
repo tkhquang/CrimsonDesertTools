@@ -731,10 +731,10 @@ namespace Transmog
 
         file << root.dump(2);
         logger.info("Presets saved to '{}'", path);
-        // dump_all_slots() is NOT called here any more. It walks every row of every populated slot and printed ~430
-        // lines on each save -- an automatic full snapshot, which is the shape that makes a log unreadable. The
+        // Deliberately no dump_all_slots() here. It walks every row of every populated slot, so an automatic call on
+        // each save buries the log under hundreds of lines describing state the JSON just written already holds. The
         // function stays available (see color_swatch_table.hpp) for a deliberate, on-demand dump when a colour
-        // problem is actually being chased; the JSON that was just written is the same state anyway.
+        // problem is actually being chased.
         dye_dirty().store(false, std::memory_order_release);
         // The just-saved state IS the new baseline -- subsequent edits become "dirty" relative to this point.
         capture_dye_snapshot();
@@ -1327,20 +1327,18 @@ namespace Transmog
         // bails at its activeIdx < 1 guard, and the picked body mesh renders as the bare carrier instead of the chosen
         // prefab. The bind is independent of the preset, so set_selection can still mirror picks into the correct
         // per-char row and the swap arms.
+        //
         // Snapshot the editing character ONCE and resolve everything from that snapshot.
         //
-        // This function used to read m_editingCharacter twice -- once for the bind here, and again inside
-        // active_preset(), which re-reads the member. The load-detect thread mutates m_editingCharacter through
-        // set_active_character -> rotate_editing_target_to, so it can change BETWEEN those two reads. The result is
-        // that the bind names one character while the preset that follows belongs to another, and the restore loop
-        // below then writes that preset's prefab picks into the bound character's per-character row.
+        // m_editingCharacter must NOT be read twice here -- once for the bind and again inside active_preset(), which
+        // re-reads the member. The load-detect thread mutates it through set_active_character ->
+        // rotate_editing_target_to, so it can change BETWEEN the two reads: the bind then names one character while
+        // the preset that follows belongs to another, and the restore loop below writes that preset's prefab picks
+        // into the bound character's per-character row. Every later identity check passes, because by then the rows
+        // genuinely ARE the bound character's registered selections, so neither the body ownership guards nor the
+        // mappings-owner stamp can catch it.
         //
-        // That is exactly how Kliff's swap-map bucket came to hold Oongka's targets after a hot reload: bind Kliff,
-        // rotate to Oongka, read Oongka's preset, write Oongka's picks into Kliff's row. Every later identity check
-        // passes, because by then the rows genuinely ARE Kliff's registered selections -- which is why the body
-        // ownership guards and the mappings-owner stamp could not see it.
-        //
-        // active_preset_of() is the read-only by-name sibling that already exists for this reason.
+        // active_preset_of() is the read-only by-name sibling that exists for this reason.
         const std::string editing = m_editingCharacter;
         const auto boundIdx = CDCore::character_idx_from_name(editing);
         PWS::set_active_char_idx(boundIdx);
@@ -1353,8 +1351,7 @@ namespace Transmog
             // A character with no saved preset still BINDS above -- see the note there. What must not happen is
             // returning with the bind pointing at this character while `mappings` still holds the PREVIOUS
             // character's slots: apply_selections_to_swap_map writes the bound character's bucket from those
-            // mappings, so the last character's targets end up installed on this one. That is what put Oongka's helm,
-            // cloak and gloves on Kliff after a hot reload.
+            // mappings, so the last character's targets would end up installed on this one.
             //
             // "No preset" means "nothing active", so say that rather than leaving someone else's answer in place.
             for (std::size_t i = 0; i < k_slotCount; ++i)
@@ -1362,10 +1359,9 @@ namespace Transmog
                 mappings[i].active = false;
                 mappings[i].targetItemId = 0;
             }
-                return;
+            slot_mappings_owner().store(boundIdx, std::memory_order_release);
+            return;
         }
-
-        slot_mappings_owner().store(boundIdx, std::memory_order_release);
 
         // NOTE: must NOT touch last_applied_ids() here. lastIds tracks what apply_all_transmog has actively injected
         // into the game -- the diff logic depends on lastIds holding the PREVIOUS applied state so it can compute

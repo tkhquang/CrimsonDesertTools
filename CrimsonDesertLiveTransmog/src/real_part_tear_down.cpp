@@ -24,58 +24,52 @@ namespace Transmog::RealPartTearDown
     // Runs per slot, not per apply -- see tear_down_needed_for_slot. It costs a visible stall, so it fires only where
     // it actually removes something.
     //
-    // PrefabWrapperSwap's synthesised NaturalPipeline detach cannot replace it. That sweep reaches the right node and
-    // matches attached records by name, and swapped meshes do land in the claim list at `+0x58`/`+0x60`, but the call
-    // removes nothing. Two explanations were tested and ruled out: the parent is correct (the actor-manager chain
-    // resolves to the object the sweep already passed), and the call this function makes afterwards is a material
-    // rebind, not a commit. What differs is WHICH wrapper goes in the list -- this function resolves mesh ids from the
-    // equipped ITEM and takes the canonical interner wrapper (+0x18), where the sweep passes the record's own
-    // identity. Untested.
+    // PrefabWrapperSwap's synthesised NaturalPipeline detach does NOT replace it. That sweep reaches the right node
+    // and matches attached records by name, and swapped meshes do land in the claim list, yet the call removes
+    // nothing. Two candidate explanations are ruled out: the parent is correct (the actor-manager chain resolves to
+    // the object the sweep already passed), and the call this function makes afterwards is a material rebind rather
+    // than a commit. What still differs is WHICH wrapper goes into the list -- this function resolves mesh ids from
+    // the equipped ITEM and takes the canonical interner wrapper, where the sweep passes the record's own identity.
     //
-    // A backpack's strap and holder (cd_phm_00_bag_belt_*, cd_phm_00_bag_*_z) belong to neither carrier nor target --
-    // an item emits exactly one mesh -- and the engine attaches them whenever a bag is worn. They are live parts, so
-    // no tear-down removes them and none should.
-    static constexpr bool k_sceneGraphTearDownEnabled = true;
+    // A backpack's strap and holder belong to neither carrier nor target -- an item emits exactly one mesh -- and the
+    // engine attaches them whenever a bag is worn. They are live parts, so no tear-down removes them and none should.
 
     /**
-     * Is scene-graph tear-down needed for this slot on THIS apply?
+     * @brief Is scene-graph tear-down needed for this slot on THIS apply?
      *
-     * Two cases need it, and only those:
+     * @details Two cases need it, and only those:
      *
-     * - The slot ends EMPTY (`!active`, or ticked with no target). There is no new target to redirect to and the
-     *   carrier is unequipped, so the visual has to come off through the engine. It also keeps the engine from going
-     *   on believing the slot is equipped.
-     * - The slot gains its FIRST fake. What is installed is the REAL part, which the post-apply sweep cannot see
-     *   (it only knows wrappers LT installed), and equipping the carrier does not displace it.
+     *          - The slot ends EMPTY (`!active`, or ticked with no target). There is no new target to redirect to and
+     *            the carrier is unequipped, so the visual has to come off through the engine. It also stops the
+     *            engine going on believing the slot is equipped.
+     *          - The slot gains its FIRST fake. What is installed is the REAL part, which the post-apply sweep cannot
+     *            see (it only knows wrappers LT installed), and equipping the carrier does not displace it.
      *
-     * A slot changing from one target to another is left to the sweep. Tearing down here instead would make every
-     * target change pay a stall, which is the exact cost this refactor exists to remove -- so it stays out, and the
-     * sweep failing to detach is fixed as a sweep bug rather than hidden behind a tear-down.
+     *          A slot changing from one target to another is left to the sweep. Tearing down here instead makes every
+     *          target change pay the stall, which is exactly the cost this gate exists to avoid -- so a sweep that
+     *          fails to detach is fixed as a sweep bug rather than hidden behind a tear-down.
      */
     static bool tear_down_needed_for_slot(std::uint16_t gameSlotTag) noexcept
     {
-        if constexpr (!k_sceneGraphTearDownEnabled)
-            return false;
-
-        const auto &mappings = Transmog::slot_mappings();
-        for (std::size_t i = 0; i < static_cast<std::size_t>(Transmog::TransmogSlot::Count); ++i)
+        const auto tmSlot = Transmog::slot_from_game_slot(static_cast<std::int16_t>(gameSlotTag));
+        if (!tmSlot.has_value())
         {
-            const auto tag = Transmog::game_slot_from_transmog(static_cast<Transmog::TransmogSlot>(i));
-            if (tag < 0 || static_cast<std::uint16_t>(tag) != gameSlotTag)
-                continue;
-            if (!mappings[i].active || mappings[i].targetItemId == 0)
-                return true; // slot ends empty -- the visual has to come off
-
-            // A slot that already had a fake needs nothing here: its previous target is LT-installed, so the
-            // post-apply sweep is what detaches it. That is what keeps a target change instant.
-            //
-            // Gaining a FIRST fake is different -- what is installed is the REAL part, which the sweep cannot see,
-            // and equipping the carrier does not displace it.
-            return Transmog::last_applied_ids()[i] == 0;
+            // Unknown tag -- no mapping owns it, so LT is not filling it. Treat as empty and tear down: skipping
+            // would risk leaving a visual with nothing tracking it.
+            return true;
         }
-        // Unknown tag -- no mapping owns it, so LT is not filling it. Treat as empty and tear down: skipping would
-        // risk leaving a visual with nothing tracking it.
-        return true;
+
+        const auto idx = static_cast<std::size_t>(*tmSlot);
+        const auto &mapping = Transmog::slot_mappings()[idx];
+        if (!mapping.active || mapping.targetItemId == 0)
+            return true; // slot ends empty -- the visual has to come off
+
+        // A slot that already had a fake needs nothing here: its previous target is LT-installed, so the post-apply
+        // sweep is what detaches it. That is what keeps a target change instant.
+        //
+        // Gaining a FIRST fake is different -- what is installed is the REAL part, which the sweep cannot see, and
+        // equipping the carrier does not displace it.
+        return Transmog::last_applied_ids()[idx] == 0;
     }
 
     namespace
@@ -84,8 +78,8 @@ namespace Transmog::RealPartTearDown
         // init()):
         //
         // SafeTearDown -- engine scene-graph tear-down. It calls an internal scene-detach primitive. It does NOT
-        //   mutate the authoritative equip table at a1+AuthTable::k_containerPtrOffset. The function is AOB-resolved, so a
-        //   reader who cross-checks against a disassembler database must match the byte pattern in
+        //   mutate the authoritative equip table at a1+AuthTable::k_containerPtrOffset. The function is AOB-resolved,
+        //   so a reader who cross-checks against a disassembler database must match the byte pattern in
         //   k_safeTearDownCandidates, never a name.
         //
         // IndexedStringLookup -- short->hash lookup. It takes the address of a uint16_t slot id. It returns a
@@ -203,7 +197,8 @@ namespace Transmog::RealPartTearDown
             for (std::uint32_t i = 0; i < count; ++i)
             {
                 const auto entry = arrayBase + AuthTable::k_entryStride * i;
-                const auto primary = *reinterpret_cast<volatile std::uint16_t *>(entry + AuthTable::k_entryItemIdOffset);
+                const auto primary =
+                    *reinterpret_cast<volatile std::uint16_t *>(entry + AuthTable::k_entryItemIdOffset);
                 contentHash ^= static_cast<std::uint64_t>(primary);
                 contentHash *= 0x100000001B3ULL;
             }
@@ -233,7 +228,8 @@ namespace Transmog::RealPartTearDown
                          "arrayBase=0x{:X} count={} stride={:#x} slotTag@+{:#x} "
                          "ItemNameTable={}",
                          static_cast<std::uint64_t>(a1), static_cast<std::uint64_t>(arrayBase), count,
-                         static_cast<std::uint64_t>(AuthTable::k_entryStride), static_cast<std::uint64_t>(AuthTable::k_entrySlotTagOffset),
+                         static_cast<std::uint64_t>(AuthTable::k_entryStride),
+                         static_cast<std::uint64_t>(AuthTable::k_entrySlotTagOffset),
                          itemTableReady ? "ready" : "not-ready");
 
             std::uint32_t live = 0;
@@ -242,7 +238,8 @@ namespace Transmog::RealPartTearDown
             for (std::uint32_t i = 0; i < count; ++i)
             {
                 const auto entry = arrayBase + AuthTable::k_entryStride * i;
-                const auto primary = *reinterpret_cast<volatile std::uint16_t *>(entry + AuthTable::k_entryItemIdOffset);
+                const auto primary =
+                    *reinterpret_cast<volatile std::uint16_t *>(entry + AuthTable::k_entryItemIdOffset);
                 const auto gate = *reinterpret_cast<volatile std::uint64_t *>(entry + AuthTable::k_entryGateOffset);
                 const auto tag = *reinterpret_cast<volatile std::uint16_t *>(entry + AuthTable::k_entrySlotTagOffset);
 
@@ -384,7 +381,8 @@ namespace Transmog::RealPartTearDown
             if (container < 0x10000)
                 return false;
 
-            arrayBase = *reinterpret_cast<volatile std::uintptr_t *>(container + AuthTable::k_containerArrayBaseOffset);
+            arrayBase =
+                *reinterpret_cast<volatile std::uintptr_t *>(container + AuthTable::k_containerArrayBaseOffset);
             if (arrayBase < 0x10000)
                 return false;
 
@@ -496,12 +494,6 @@ namespace Transmog::RealPartTearDown
         g_safeTearDown.store(reinterpret_cast<SafeTearDownFn>(safeAddr), std::memory_order_release);
         g_indexedStringLookup.store(reinterpret_cast<IndexedStringLookupFn>(lookupAddr), std::memory_order_release);
 
-        if constexpr (!k_sceneGraphTearDownEnabled)
-        {
-            logger.warning("[dispatch] scene-graph tear-down is DISABLED -- hiding a slot and clearing a "
-                           "direct-applied fake (Mask) will not work. Experiment only.");
-        }
-
         g_ready.store(true, std::memory_order_release);
 
         logger.info("[dispatch] tear_down helpers resolved: safe={:#x} lookup={:#x}",
@@ -544,8 +536,10 @@ namespace Transmog::RealPartTearDown
             if (container < 0x10000)
                 return false;
 
-            const auto arrayBase = *reinterpret_cast<volatile std::uintptr_t *>(container + AuthTable::k_containerArrayBaseOffset);
-            const auto count = *reinterpret_cast<volatile std::uint32_t *>(container + AuthTable::k_containerCountOffset);
+            const auto arrayBase =
+                *reinterpret_cast<volatile std::uintptr_t *>(container + AuthTable::k_containerArrayBaseOffset);
+            const auto count =
+                *reinterpret_cast<volatile std::uint32_t *>(container + AuthTable::k_containerCountOffset);
             if (arrayBase < 0x10000 || count == 0 || count > k_maxPlausibleEntries)
             {
                 logger.warning("[dispatch] tear_down: container sanity failed "
@@ -558,8 +552,10 @@ namespace Transmog::RealPartTearDown
             bool expected = false;
             if (g_loggedFirstEntry.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
             {
-                const auto p0 = *reinterpret_cast<volatile std::uint16_t *>(arrayBase + AuthTable::k_entryItemIdOffset);
-                const auto t0 = *reinterpret_cast<volatile std::uint16_t *>(arrayBase + AuthTable::k_entrySlotTagOffset);
+                const auto p0 =
+                    *reinterpret_cast<volatile std::uint16_t *>(arrayBase + AuthTable::k_entryItemIdOffset);
+                const auto t0 =
+                    *reinterpret_cast<volatile std::uint16_t *>(arrayBase + AuthTable::k_entrySlotTagOffset);
                 const auto g0 = *reinterpret_cast<volatile std::uint64_t *>(arrayBase + AuthTable::k_entryGateOffset);
                 logger.info("[dispatch] tear_down first-entry sanity: "
                             "count={} primary={:#06x} slotTag={:#06x}@+{:#x} "
@@ -579,7 +575,8 @@ namespace Transmog::RealPartTearDown
             {
                 const auto entry = arrayBase + AuthTable::k_entryStride * i;
 
-                const auto primary = *reinterpret_cast<volatile std::uint16_t *>(entry + AuthTable::k_entryItemIdOffset);
+                const auto primary =
+                    *reinterpret_cast<volatile std::uint16_t *>(entry + AuthTable::k_entryItemIdOffset);
                 if (primary == 0xFFFF || primary == 0)
                     continue;
 
@@ -653,8 +650,10 @@ namespace Transmog::RealPartTearDown
             if (container < 0x10000)
                 return 0;
 
-            const auto arrayBase = *reinterpret_cast<volatile std::uintptr_t *>(container + AuthTable::k_containerArrayBaseOffset);
-            const auto count = *reinterpret_cast<volatile std::uint32_t *>(container + AuthTable::k_containerCountOffset);
+            const auto arrayBase =
+                *reinterpret_cast<volatile std::uintptr_t *>(container + AuthTable::k_containerArrayBaseOffset);
+            const auto count =
+                *reinterpret_cast<volatile std::uint32_t *>(container + AuthTable::k_containerCountOffset);
             if (arrayBase < 0x10000 || count == 0 || count > k_maxPlausibleEntries)
                 return 0;
 
@@ -662,7 +661,8 @@ namespace Transmog::RealPartTearDown
             {
                 const auto entry = arrayBase + AuthTable::k_entryStride * i;
 
-                const auto primary = *reinterpret_cast<volatile std::uint16_t *>(entry + AuthTable::k_entryItemIdOffset);
+                const auto primary =
+                    *reinterpret_cast<volatile std::uint16_t *>(entry + AuthTable::k_entryItemIdOffset);
                 if (primary == 0xFFFF || primary == 0)
                     continue;
 

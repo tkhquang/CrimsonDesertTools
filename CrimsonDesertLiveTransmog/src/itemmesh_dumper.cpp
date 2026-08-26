@@ -79,9 +79,9 @@ namespace Transmog
         // wearer body-class token array at entry+0x40 with its count at +0x48. The dump links every entry's mesh
         // regardless of which body selects it, so it does not need those two.
         //
-        // The list offset and its count offset move when the item descriptor is reshaped -- 2.00.00 pushed them from
-        // 0x408/0x410 to 0x418/0x420, while the neighbouring rule list (0x248) and variant-meta pointer (0x3B0) stayed
-        // put, so the growth is local and cannot be extrapolated from any other field. The entry stride 0x58 and the
+        // The list offset and its count offset move when the item descriptor is reshaped, and they move ALONE: a
+        // past reshape pushed them forward while the neighbouring rule list and variant-meta pointer stayed put, so
+        // the growth is local and cannot be extrapolated from any other field. The entry stride 0x58 and the
         // per-entry mesh pointer at +0x10 do stay put across such a reshape.
         //
         // A stale pair fails SILENTLY: the read returns a non-pointer or an absurd count, resolve_variant_meshes

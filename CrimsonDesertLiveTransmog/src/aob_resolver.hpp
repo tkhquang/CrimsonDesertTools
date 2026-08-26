@@ -27,9 +27,6 @@ namespace Transmog
     inline constexpr auto &k_worldSystemCandidates = CDCore::Anchors::k_worldSystemCandidates;
     inline constexpr auto &k_mapLookupCandidates = CDCore::Anchors::k_mapLookupCandidates;
     inline constexpr auto &k_partAddShowCandidates = CDCore::Anchors::k_partAddShowCandidates;
-    inline constexpr auto &k_visualEquipChangeCandidates = CDCore::Anchors::k_visualEquipChangeCandidates;
-    inline constexpr auto &k_vecCandidates = CDCore::Anchors::k_visualEquipChangeCandidates;
-    inline constexpr auto &k_batchEquipCandidates = CDCore::Anchors::k_batchEquipCandidates;
 
     namespace detail
     {
@@ -105,9 +102,19 @@ namespace Transmog
     };
 
     /**
-     * @brief SubTranslator -- SlotPopulator item-id translator. Not hooked. It is the first hop of the chain that
-     *        walks to the iteminfo global, which the mod uses to build the stable item-name table at init. See
-     *        item_name_table.cpp for the full 4-step chain.
+     * @brief SubTranslator -- SlotPopulator's item -> slot resolver, `f(a1, itemId) -> slot handle` (0xFFFF when the
+     *        item cannot be placed). Serves two callers in LT, which is why there is one cascade and not two.
+     *
+     * @details Called, not hooked. It is the FIRST thing SlotPopulator does, and a 0xFFFF makes SlotPopulator bail
+     *          before equipping anything, so LT calls it directly to ask whether a carrier can be placed at all
+     *          rather than inferring that from a failed apply. It tries an actor-side lookup, then falls back to a
+     *          per-character item -> slot table.
+     *
+     *          Its entry block is also the first hop of the chain that walks to the iteminfo global, which the mod
+     *          uses to build the stable item-name table at init. See item_name_table.cpp for the full 4-step chain.
+     *
+     *          Both roles resolve to the same address; do not add a second cascade for the resolver role, because
+     *          two cascades onto one function drift apart and only one of them gets re-anchored on patch day.
      */
     inline constexpr AddrCandidate k_subTranslatorCandidates[] = {
         // The second scratch-buffer lea flips encodings across builds: rsp-relative 5-byte (`48 8D 4C 24 ??`,
@@ -193,46 +200,6 @@ namespace Transmog
      *   +4:  int32  (-1)
      *   +12: uint16 secondary slot (0xFFFF to skip)
      */
-    // ClaimAssembler -- f(node, a2_source, a3_out, a4) publishes claims into the node's claim vector
-    // (data node+0x58, count node+0x60, capacity node+0x64, stride 16). Appends one claim per part and per sub-part.
-    //
-    // Retained for future claim work. It fires for fresh-node assembly, NOT for player equipment changes, so it is
-    // not a route to a slot the equip path refuses.
-    inline constexpr AddrCandidate k_claimAssemblerCandidates[] = {
-        // P1 -- the call sequence that defines this function: the part-list merge, then the post-merge consumer,
-        // with both rel32 displacements wildcarded. Scan-verified unique. Offset -0x92 backs up to the entry.
-        //
-        // The prologue alone is NOT usable here: the three-spill + seven-push + large-frame shape matches six
-        // functions, and 74 share the push sequence. A bare prologue never survives require_unique in this binary.
-        {"ClaimAssembler_P1_MergeCallSeq",
-         "4C 8D 45 D0 E8 ?? ?? ?? ?? 89 44 24 58 48 8B 45 D0 48 89 45 A8 8B 45 D8 89 45 B0 "
-         "4C 8D 8D E0 1B 00 00 4C 8D 45 A8 48 8D 54 24 58 49 8B CC E8 ?? ?? ?? ?? 4C 8B C3",
-         ResolveMode::Direct, -0x92, 0},
-
-        // P2 -- prologue pinned by the exact frame size (0x5D00) and lea displacement, which is what makes it
-        // unique. More patch-fragile than P1 since a frame-size change breaks it, hence second.
-        {"ClaimAssembler_P2_PrologueFrameSize",
-         "48 89 5C 24 10 4C 89 44 24 18 48 89 4C 24 08 "
-         "55 56 57 41 54 41 55 41 56 41 57 "
-         "48 8D AC 24 00 A4 FF FF B8 00 5D 00 00",
-         ResolveMode::Direct, 0, 0},
-    };
-
-    // ItemToSlotResolve -- f(a1, itemId) -> slot handle, or 0xFFFF when the item cannot be placed.
-    //
-    // This is the FIRST thing SlotPopulator does, and a 0xFFFF here makes it bail before equipping anything. It tries
-    // an actor-side lookup, then falls back to a per-character item -> slot table. Armor carriers survive it with the
-    // slot empty; earring carriers do not, and that difference is the whole reason accessory transmog needs something
-    // already worn. Anchored so LT can ASK the engine which carriers resolve instead of inferring it from failures.
-    inline constexpr AddrCandidate k_itemToSlotResolveCandidates[] = {
-        // P1 -- full prologue: rbx spill, the WORD argument spill (`mov [rsp+10h], dx`), three pushes, the 0x110
-        // frame, then `mov rdi, rcx` and the `mov r8d, 1` that seeds the key builder.
-        {"ItemToSlotResolve_P1_FullPrologue",
-         "48 89 5C 24 08 66 89 54 24 10 55 56 57 48 8D 6C 24 ?? 48 81 EC ?? ?? 00 00 "
-         "48 8B F9 41 B8 01 00 00 00",
-         ResolveMode::Direct, 0, 0},
-    };
-
     // SlotTagToHandle -- f(a1, out_u16, slotTag, flag). Walks the 208-byte part records at a1+128, matches
     // `record+200 == slotTag`, and writes `record+8` (the slot HANDLE) to *out. 0xFFFF when the tag is not present.
     //
@@ -268,9 +235,19 @@ namespace Transmog
          "48 8D AC 24 ?? ?? ?? ?? B8 ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 2B E0 49 8B F1",
          ResolveMode::Direct, 0, 0},
 
-        // P2 -- post-alloca shuffle: rsi=r9 (swapEntry), then the two WORD argument extractions and rcx=a1. Offset
-        // backs up to the function start.
-        {"PartSlotRefresh_P2_PostAlloca", "49 8B F1 41 0F B7 D8 0F B7 FA 4C 8B F1", ResolveMode::Direct, -0x2D, 0},
+        // P2 -- post-alloca shuffle: rsi=r9 (swapEntry), the two WORD argument extractions, rcx=a1, then the scratch
+        // lea/call/nop and the part-record count load. The shuffle ALONE is not unique -- it also occurs in an
+        // unrelated function -- so the row deliberately runs on through the call into `mov edx,[r14+<countOff>]`. The
+        // lea and call displacements and the count field offset are wildcarded; only opcodes carry the match.
+        {"PartSlotRefresh_P2_PostAllocaThroughCountLoad",
+         "49 8B F1 41 0F B7 D8 0F B7 FA 4C 8B F1 48 8D 8D ?? ?? ?? ?? E8 ?? ?? ?? ?? 90 41 8B 96 ?? ?? ?? ??",
+         ResolveMode::Direct, -0x2D, 0},
+
+        // P3 -- the part-record search loop, which encodes the structure rather than the frame: index to r8d, the
+        // `lea rax,[rcx+rcx*2]` triple-scale, and the WORD compare of `[r9+rax*8]` against the wanted tag. Survives a
+        // prologue reshuffle that would sink both rows above. Stops before the loop's `jz`/`jb`, because a short Jcc
+        // flips encoding freely (aob-signatures.md section 9).
+        {"PartSlotRefresh_P3_RecordSearchLoop", "41 8B C8 48 8D 04 49 66 41 39 3C C1", ResolveMode::Direct, -0x70, 0},
     };
 
     inline constexpr AddrCandidate k_slotPopulatorCandidates[] = {
@@ -296,8 +273,8 @@ namespace Transmog
     // -----------------------------------------------------------------------
     // PrefabWrapperSwap module data globals.
     //
-    // Each of the six PrefabWrapperSwap data globals resolves through a 3-candidate cascade rather than through a
-    // hardcoded absolute address, so a patch that shifts the image layout self-corrects:
+    // Each PrefabWrapperSwap data global resolves through a 3-candidate cascade rather than through a hardcoded
+    // absolute address, so a patch that shifts the image layout self-corrects:
     //
     //   StringInfoRegistry  : registry struct.
     //   StringInfoVtable    : vtable sentinel filter.
@@ -364,13 +341,18 @@ namespace Transmog
          "48 83 C1 ?? 8B 47 38 89 83 DC 00 00 00",
          ResolveMode::RipRelative, 3, 7},
 
-        // P3 -- conditional load and store shape: load r9d, test, jump, store a dword to [rbp+0x70], then load the
-        // registry. The `8B 4F 74` (mov ecx,[rdi+0x74]) is a stable game-struct field offset. The rel8 jump distance
-        // is wildcarded because it is a compiler-owned value.
-        {"StringInfoRegistry_P3_CondLoadStore",
-         "8B 4F 74 85 C9 74 ?? 89 4D 70 48 8B 0D ?? ?? ?? ?? "
-         "48 83 C1 ?? 48 8D 55 70",
-         ResolveMode::RipRelative, 13, 17},
+        // P3 -- a third call site, in a caller neither P1 nor P2 touches, so a rewrite of one caller cannot take the
+        // whole cascade down. Shape: seed a loop counter with 1, load the key dword through rbx, spill it to the
+        // frame, then load the registry and walk to the sub-object. Both frame displacements and the sub-object
+        // displacement are wildcarded; the `BE 01 00 00 00` / `8B 03` head is what makes the window unique.
+        //
+        // The previous row here anchored on `mov ecx,[rdi+0x74]` followed by a `test`/`jz` pair. That shape no longer
+        // exists: the load moved to r13 (`41 8B 4D 74`) and the frame slot changed with it. A row built on a
+        // register allocation is exactly what drifts, so this replacement holds no register-allocated base at all.
+        {"StringInfoRegistry_P3_CounterSeedCallSite",
+         "BE 01 00 00 00 8B 03 89 44 24 ?? 48 8B 0D ?? ?? ?? ?? "
+         "48 83 C1 ?? 48 8D 54 24 ??",
+         ResolveMode::RipRelative, 14, 18},
     };
 
     /**
@@ -436,15 +418,18 @@ namespace Transmog
      * caller context instead of loosening the operands.
      */
     inline constexpr AddrCandidate k_iteminfoHolderCandidates[] = {
-        // P1 -- caller with a 0x378 frame. The inbound `mov eax,[rbp+0x378]` and the trailing
-        // `mov [rbp+0x350],r12d` store bracket the lookup and pin the row to this one caller. The sub-object
-        // displacement is kept literal here on purpose: see the sibling-manager warning above. The `74 04 44 0F B7 20`
-        // tail (jz rel8 / movzx r12d,[rax]) is the post-call success branch.
-        {"IteminfoHolder_P1_RdiFrame0x378Lookup",
-         "8B 85 78 03 00 00 89 45 C0 48 8B 3D ?? ?? ?? ?? "
-         "48 8D 55 C0 48 8D 4F 68 E8 ?? ?? ?? ?? 48 85 C0 74 04 "
-         "44 0F B7 20 44 89 A5 50 03 00 00",
-         ResolveMode::RipRelative, 12, 16},
+        // P1 -- caller that reloads the item id out of its own frame before the lookup: load the argument struct,
+        // take its `+0x08` id dword, spill that to the frame, then load the registry and walk to the sub-object. All
+        // three frame displacements and the sub-object displacement are wildcarded, so the row survives a frame
+        // resize; the `8B 40 08` / `89 45 ??` pair between the two loads is what keeps it to a single caller.
+        //
+        // The previous row here bracketed the call with a literal 0x378 frame offset on both sides. Frame offsets are
+        // the least stable thing a row can hold: the caller grew and every displacement in the window moved together,
+        // so the row matched nothing while P2 quietly carried the cascade.
+        {"IteminfoHolder_P1_FrameIdReloadLookup",
+         "48 8B 85 ?? ?? 00 00 8B 40 08 89 45 ?? 48 8B 0D ?? ?? ?? ?? "
+         "48 83 C1 ?? 48 8D 55 ??",
+         ResolveMode::RipRelative, 16, 20},
 
         // P2 -- distinctive dword-copy preamble `mov eax,[rbp+0xB0] ; mov [rbp+0xA8],eax` precedes the load. The
         // canonical lookup-call sequence follows, with the same 0xA8 frame displacement echoed in the outbound lea,
@@ -515,8 +500,8 @@ namespace Transmog
     /**
      * @brief LoaderRegistry singleton -- the engine partprefab name->wrapper registry.
      *
-     * The ApptNameLookup primitive (also AOB-resolved) dereferences this singleton and queries [+0x50].
-     * PrefabWrapperSwap reads it on init for heap-walk enumeration of prefab wrappers.
+     * The engine's own name lookup dereferences this singleton and queries [+0x50]. PrefabWrapperSwap reads it on
+     * init to enumerate prefab wrappers, and indexes that walk instead of calling the engine primitive.
      */
     inline constexpr AddrCandidate k_loaderRegistryCandidates[] = {
         // WARNING for P1. The loose add-0xD0 window matches several sites in the module. Two of them are P1 and P1B,
@@ -551,12 +536,16 @@ namespace Transmog
         // P3 -- a STORE (`mov [rip+disp32], rbx`) that initializes the singleton at engine-init time, not a load. The
         // disp32 still resolves to the singleton address. Distinctive context: an inline `EB 03` short jump and the
         // container-field compare.
+        //
+        // The container field displacement is wildcarded to its low two bytes. That field tracks the registry
+        // container's layout and has already moved once (0x40058 -> 0x40060) while every other byte in the window
+        // stayed put, so pinning it is what made this row match nothing. The `04 00` high half stays literal: it is
+        // what keeps the compare distinguishable from an ordinary small-offset one.
         {"LoaderRegistry_P3_InitStoreSite",
          "48 89 03 48 89 1D ?? ?? ?? ?? EB 03 48 8B DF "
-         "48 3B 9E 58 00 04 00",
+         "48 3B 9E ?? ?? 04 00",
          ResolveMode::RipRelative, 6, 10},
     };
-
 
     /**
      * @brief NaturalPipeline -- engine unlink function.
@@ -596,31 +585,25 @@ namespace Transmog
          ResolveMode::Direct, -0x27, 0},
     };
 
-    // ApptNameLookup -- REMOVED, do not re-add.
+    // There is deliberately NO name->wrapper lookup primitive anchored here.
     //
-    // This was the engine's name->wrapper primitive, called directly to back lookup_prefab_metadata. 2.00.00
-    // restructured it out of existence: every reference to the LoaderRegistry singleton now sits inside a larger
-    // three-argument function, and the old two-argument prologue matches nothing that touches the registry.
+    // The engine's own primitive would be the obvious way to turn a prefab name into a wrapper, but LT does not call
+    // it: PrefabWrapperSwap already walks the same loader-registry name table for its catalog, so indexing that walk
+    // in-process answers the same question with no anchor to maintain, no direct call into engine code with a raw
+    // name pointer, and an O(1) hash hit per name instead of a per-name engine query.
     //
-    // It was not re-anchored, because it did not need to exist. The primitive queried the loader registry's name
-    // table, and PrefabWrapperSwap already walks that same table successfully. lookup_prefab_metadata now indexes it
-    // in-process, which removes an anchor that broke on a patch, removes a direct call into engine code with a raw
-    // name pointer, and turns a per-name engine query into an O(1) hash hit.
-
-
-
+    // Do not re-add one. The gain would be nil and the cost is another cascade to re-verify every patch day.
 
     // -----------------------------------------------------------------------
     // PrefabWrapperSwap module function targets.
     //
-    // Four PrefabWrapperSwap function-target cascades, each with a 3-anchor cascade per the ordering rule in
+    // Each carries its own cascade, ordered most-specific-first per
     // CrimsonDesertCore/external/DetourModKit/docs/misc/aob-signatures.md.
     //
-    //   ApptResMgrInit  : one-shot capture hook target. Reads ResMgr/loader/container.
-    //   ApptInnerLookup : partprefab container hashtable lookup primitive. Pure read.
-    //   ApptStringIntern: StringInfo string-intern primitive callable as `handle_t(const char*)`.
-    //   StructCopy      : 0x40-byte struct-copy hot path that PrefabWrapperSwap inline-hooks to swap source
-    //                     wrapper-ptrs.
+    //   PartListMerge    : part-list assembly. Hooked to learn which actor the following struct-copies belong to.
+    //   UnlinkByWrapper  : unlink one wrapper from a body. Called direct.
+    //   PartDescriptorBuild : per-socket descriptor build. Hooked by SocketMeshOverride to rewrite the mesh.
+    //   StructCopy       : 0x40-byte struct-copy hot path, inline-hooked to swap source wrapper-ptrs.
     //
     // Verify every row's hit count against the live module before you ship a change. Where a function has a sibling
     // clone (a linker-emitted duplicate compiled from a templated header) and no global anchor is unique, the cascade
@@ -628,23 +611,6 @@ namespace Transmog
     // unique, to the canonical target.
     // -----------------------------------------------------------------------
 
-
-
-
-    /**
-     * @brief StructCopy -- 0x40-byte struct-copy hotpath.
-     *
-     * Signature: `__int64(*)(dst, src)`. The function copies a partprefab wrapper-related struct field-by-field.
-     * PrefabWrapperSwap installs an inline hook here and (when LT-active) substitutes Kliff source wrappers with target
-     * wrappers for the duration of the copy.
-     *
-     * The function reads the engine's StringInfo vtable sentinel through a `lea rax, [rip+disp32]` early in the body.
-     * That single RIP-rel displacement is wildcarded. All other bytes in the patterns below are stable.
-     *
-     * If these break, note that the function's shape is `dst,src -> mov [dst], 0 ; copy src->dst ; lea rax, [vtable] ;
-     * mov [src], rax ; movzx-byte transfers from [src+8..src+0xA] into [dst+8..]`. Re-anchor on the byte-transfer
-     * block (P3 below). It is the most function-specific shape and the least likely to shuffle.
-     */
     /**
      * @brief Part-list assembly function -- merges an actor's part lists into its render container.
      *
@@ -731,33 +697,15 @@ namespace Transmog
          "48 8B C4 4C 89 48 20 66 44 89 40 18 48 89 50 10 48 89 48 08 "
          "55 53 56 57 41 54 41 55 41 56 41 57",
          ResolveMode::Direct, 0, 0},
-    };
 
-    /**
-     * @brief PartRealizeCommit -- the single point where a part is realized onto an actor.
-     *
-     * `sub_140806160(a1, outStatus, removeList, flags, addList)`. Both lists hold 224-byte descriptors; the remove
-     * list goes through the part-transition path and the add list is committed and expanded to meshes.
-     *
-     * This is the convergence point for EVERY visual equip change. VisualEquipChange covers an item being added or
-     * removed, an item-to-item REPLACE bypasses it entirely through BatchEquip, and six further callers reach it for
-     * their own reasons -- so hooking here catches what hooking those two does not.
-     *
-     * It writes only two timers (`a1+600`, `a1+608`) and a dirty byte. The authoritative equip table at `a1+0x78` is
-     * untouched, which is what makes intervening here appearance-only.
-     */
-    inline constexpr AddrCandidate k_partRealizeCommitCandidates[] = {
-        // P1 -- full prologue: two argument spills, 7 pushes, the alloca probe, and the r9b/r8/rdx shuffle that
-        // follows it. Stack and probe-size immediates wildcarded per section 2. One match module-wide.
-        {"PartRealizeCommit_P1_FullPrologue",
-         "48 89 5C 24 20 48 89 54 24 10 55 56 57 41 54 41 55 41 56 41 57 "
-         "48 8D AC 24 ?? ?? ?? ?? B8 ?? ?? ?? ?? E8 ?? ?? ?? ?? "
-         "48 2B E0 45 0F B6 F1",
-         ResolveMode::Direct, 0, 0},
-
-        // P2 -- post-alloca argument shuffle only, pinned by the `movzx r14d, r9b` that is unusual enough to carry
-        // the match on its own. Survives a prologue reshuffle; walks back 0x27 to function start.
-        {"PartRealizeCommit_P2_PostAlloca", "48 2B E0 45 0F B6 F1 49 8B D8 4C 8B E2", ResolveMode::Direct, -0x27, 0},
+        // P2 -- post-frame argument shuffle plus the item-id sentinel test. Anchors past the prologue entirely, so a
+        // spill reorder or a frame resize that sinks P1 leaves this row standing. Shape: the four argument moves
+        // (r9->rbx, r8w->esi, rdx->r13, rcx->r14), the xor/spill of the loop counter, then `mov eax,0FFFFh` and the
+        // WORD compare against `*partId` that decides whether there is anything to build. The frame displacement is
+        // wildcarded; the 0xFFFF sentinel is semantic and stays literal. Anchors at function start + 0x33.
+        {"PartDescriptorBuild_P2_ArgShuffleSentinelTest",
+         "49 8B D9 41 0F B7 F0 4C 8B EA 4C 8B F1 33 FF 89 7C 24 ?? B8 FF FF 00 00 66 3B 02",
+         ResolveMode::Direct, -0x33, 0},
     };
 
     /**
@@ -773,6 +721,13 @@ namespace Transmog
      *   test rcx, rcx            48 85 C9
      *   jz   <next entry>        74 ??           rel8 to the loop-continue label
      *
+     * The signature stops BEFORE that `jz`, per the short-Jcc rule in aob-signatures.md section 9: a compiler is free
+     * to emit the branch as `0F 84 rel32` instead, which would change the opcode byte and retire the row. The three
+     * instructions that remain are already exactly as selective (verified: same two sites with and without the
+     * branch). The guard still needs the branch, so it VALIDATES the opcode at @ref k_claimWalkJzOffset at install
+     * time and skips any site that does not carry it -- which turns an encoding change into a logged skip instead of
+     * a silent no-match.
+     *
      * The claim erase nulls owner slots while they are still inside the count and only decrements the count once its
      * shift finishes, so a walk overlapping an erase reads a null owner here. Nothing locks: the engine is safe only
      * because its own erases and walks are scheduled as jobs that never overlap. LT drives erases from its apply
@@ -782,7 +737,7 @@ namespace Transmog
      * RBX-based encoding is listed -- a walker allocated to another register would need its site branch-checked by
      * hand before being added.
      */
-    inline constexpr const char *k_claimWalkSiteAob = "48 8B 43 08 48 8B 48 28 48 85 C9 74 ??";
+    inline constexpr const char *k_claimWalkSiteAob = "48 8B 43 08 48 8B 48 28 48 85 C9";
 
     /// Sites @ref k_claimWalkSiteAob is known to occupy. A mismatch means the walk survey needs redoing.
     inline constexpr std::size_t k_claimWalkExpectedSites = 2;
@@ -790,6 +745,23 @@ namespace Transmog
     /// Offset from @ref k_claimWalkSiteAob to `mov rcx,[rax+28h]` -- the instruction the guard precedes.
     inline constexpr std::size_t k_claimWalkDerefOffset = 4;
 
+    /// Offset from @ref k_claimWalkSiteAob to the loop-continue `jz rel8`, whose target the guard decodes.
+    inline constexpr std::size_t k_claimWalkJzOffset = 11;
+
+    /**
+     * @brief StructCopy -- 0x40-byte struct-copy hotpath.
+     *
+     * Signature: `__int64(*)(dst, src)`. The function copies a partprefab wrapper-related struct field-by-field.
+     * PrefabWrapperSwap installs an inline hook here and (when LT-active) substitutes carrier source wrappers with
+     * target wrappers for the duration of the copy.
+     *
+     * The function reads the engine's StringInfo vtable sentinel through a `lea rax, [rip+disp32]` early in the body.
+     * That single RIP-rel displacement is wildcarded. All other bytes in the patterns below are stable.
+     *
+     * If these break, note that the function's shape is `dst,src -> mov [dst], 0 ; copy src->dst ; lea rax, [vtable] ;
+     * mov [src], rax ; movzx-byte transfers from [src+8..src+0xA] into [dst+8..]`. Re-anchor on the byte-transfer
+     * block (P3 below). It is the most function-specific shape and the least likely to shuffle.
+     */
     inline constexpr AddrCandidate k_structCopyCandidates[] = {
         // P1 -- full prologue + first qword copy + vtable load. The single RIP-rel `lea rax, [rip+disp32]` that loads
         // the StringInfo vtable sentinel is wildcarded. One match module-wide.
@@ -1559,20 +1531,21 @@ namespace Transmog
         //   33 F6                         xor  esi, esi
         //   48 8B 1D ?? ?? ?? ??         mov  rbx, cs:_someGlobal ; RIP-rel, disp32 wildcarded
         //   4C 8B 00                      mov  r8, [rax]           ; TLS block base
-        //   B8 F2 01 00 00                mov  eax, 1F2h           ; TLS slot index 498
+        //   B8 ?? ?? 00 00                mov  eax, <slot>         ; TLS slot index
         //   42 38 34 00                   cmp  [rax+r8], sil       ; flag byte == 0?
         //   48 0F 45 DE                   cmovnz rbx, rsi          ; conditionally zero rbx
         //
-        // The combination of a TIB load with the specific TLS slot 0x1F2 and a cmovnz on (rbx, rsi) is a
-        // single-occurrence fingerprint module-wide. The TLS slot index is a build-stable per-binary constant. The
-        // global RIP-disp32 and the SIB byte of the RIP-rel mov are wildcarded. dispOffset = -0x4D walks back to the
-        // entry.
+        // The combination of a TIB load, an indexed TLS flag test and a cmovnz on (rbx, rsi) is a single-occurrence
+        // fingerprint module-wide. The global RIP-disp32 is wildcarded, and so is the TLS SLOT INDEX: the compiler
+        // assigns it per binary, and it has already shifted once while every other byte in the window held, which
+        // silently retired this row. Keep the `00 00` high half literal, since the index stays under 0x10000.
+        // dispOffset = -0x4D walks back to the entry.
         {"HelmAudioRegistrar_P3_TlsGate",
          "65 48 8B 04 25 58 00 00 00 "
          "33 F6 "
          "48 8B 1D ?? ?? ?? ?? "
          "4C 8B 00 "
-         "B8 F2 01 00 00 "
+         "B8 ?? ?? 00 00 "
          "42 38 34 00 "
          "48 0F 45 DE",
          ResolveMode::Direct, -0x4D, 0},

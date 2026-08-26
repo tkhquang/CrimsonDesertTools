@@ -23,14 +23,31 @@
 #include <Windows.h>
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
+#include <format>
+#include <string>
 
 namespace Transmog
 {
+    // Floor for anything treated as a live pointer. Below this is a packed scalar, a small index, or a null.
+    //
+    // Signed, because the engine hands component pointers through `__int64` parameters. Comparing one of those
+    // against an UNSIGNED floor converts the pointer instead, so a negative (garbage) value compares ABOVE the floor
+    // and passes the very guard that exists to reject it.
+    constexpr std::int64_t k_minPlausiblePtr = 0x10000;
+
+    // Candidate-exclusion list on the equip-slot component. The item -> slot resolver walks the character's candidate
+    // slots and returns the first that validates, and the validator rejects any candidate found in the WORD array at
+    // `k_compSlotExcludeListOffset` (count at `k_compSlotExcludeCountOffset`). The pair is empty in normal play, which
+    // is what makes it safe to borrow for one equip. It moves with the same component width as the cache triple below.
+    constexpr std::ptrdiff_t k_compSlotExcludeListOffset = 104;
+    constexpr std::ptrdiff_t k_compSlotExcludeCountOffset = 112;
+
     // SlotPopulator maintains a dispatch cache on the component at (basePtr, count, cap). The triple moves as one unit
     // whenever the component gains or loses fields below it. All three constants must move together, and the same
-    // component width also drives the auth-table container pointer in auth_table.hpp. Verify them against the live SlotPopulator body on
-    // patch day. That body forms one base pointer and reads the other two members off it:
+    // component width also drives the auth-table container pointer in auth_table.hpp. Verify them against the live
+    // SlotPopulator body on patch day. That body forms one base pointer and reads the other two members off it:
     //   lea  r15, [a1+k_compSlotCacheBasePtrOffset]
     //   mov  r8d, [r15+0x08]     ; count
     //   mov  r9,  [r15]          ; basePtr
@@ -54,7 +71,6 @@ namespace Transmog
     using TearDownSlot = SlotMetadata;
     static constexpr auto &k_tearDownSlots = k_slotMetadata;
     static constexpr std::size_t k_tearDownCount = k_slotCount;
-
 
     // Walk the auth-table for the entry whose +0xC8 slotTag matches `gameTag`, snapshot its dye-record vector, and
     // publish through DyeRecordInject so the next apply_transmog -> SlotPopulator -> DyeCopier round-trip emits exactly
@@ -107,74 +123,54 @@ namespace Transmog
         return true;
     }
 
-    // SlotPopulator choke point for every apply. `id` is the descriptor id fed to the engine -- always an item the
-    // wearer can legitimately equip, because the transmog VISUAL no longer comes from the descriptor. It comes from
-    // the prefab-wrapper swap, which redirects the mesh this item would otherwise render. Nothing here has to defeat
-    // an equip gate, so no char-class bypass and no per-body mesh forcing are involved.
-    /**
-     * Call PartSlotRefresh under SEH.
-     *
-     * Kept in its own POD-only function because MSVC forbids __try in a frame that needs object unwinding, and the
-     * apply path formats log strings. Returns false when the call faulted.
-     *
-     * DISABLED by default: the engine passes RESOLVED slot handles for both slot arguments (`sub_14081AA10` for one,
-     * `sub_141D73B90` for the other), not the raw slot tag. Handing it a raw tag faults, and an unguarded fault
-     * aborted the entire apply -- the second half of the pair was never even dispatched. Re-enable only once the
-     * handles are being resolved properly.
-     */
-    static bool k_directSlotRefreshEnabled = true;
+    // The engine calls below live in POD-only wrappers because MSVC forbids `__try` in a frame that needs object
+    // unwinding, and the apply path formats log strings. Each returns a failure value rather than letting a fault
+    // escape: an unguarded fault here aborts the whole apply, so one bad slot would take every other slot with it.
 
-
-    /**
-     * Resolve the slot tag to its handle, then refresh -- under SEH, in a POD-only frame.
-     *
-     * PartSlotRefresh's two slot arguments are NOT the same namespace. The first is a tag, matched against bucket
-     * keys and against `record+200`. The second is a handle, which the function dereferences through a lookup.
-     * Passing the tag for both faults, and an unguarded fault aborts the whole apply.
-     */
-    /// POD-only SEH wrapper: ask the engine where it would place `itemId`, or 0xFFFF if nowhere.
+    /// POD-only SEH wrapper: ask the engine where it would place `itemId`, or `k_noGameTag` if nowhere.
     static std::uint16_t item_to_slot_seh(ItemToSlotResolveFn fn, std::int64_t a1, std::uint16_t itemId) noexcept
     {
         if (!fn)
-            return 0xFFFF;
+            return k_noGameTag;
         __try
         {
             return static_cast<std::uint16_t>(fn(a1, static_cast<std::int16_t>(itemId)) & 0xFFFF);
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
-            return 0xFFFF;
+            return k_noGameTag;
         }
     }
 
     /**
      * Temporarily exclude a slot from the engine's item -> slot resolution.
      *
-     * `sub_141D737E0` walks the character's candidate slots for an item and returns the FIRST that validates. The
-     * validator rejects any candidate found in the WORD array at `a1+104` (count `a1+112`), and that array is empty
-     * in normal play. Excluding the first half of a pair for the duration of one equip therefore makes the resolver
-     * fall through to the second -- which is otherwise unreachable, because both halves share one item type and the
-     * first always wins.
+     * The engine's item -> slot resolver walks the character's candidate slots and returns the FIRST that validates.
+     * The validator rejects any candidate listed in the exclusion array (see k_compSlotExcludeListOffset), and that
+     * array is empty in normal play. Excluding the first half of a pair for the duration of one equip therefore makes
+     * the resolver fall through to the second -- otherwise unreachable, because both halves share one item type and
+     * the first always wins.
      *
      * Touches no equip state: this is a transient resolution filter, not the auth table.
      *
-     * Refuses when the list is already populated, so a live exclusion set is never displaced. POD-only frame for the
-     * SEH guard.
+     * @return false when the list is already populated, so a live exclusion set is never displaced. POD-only frame so
+     *         the SEH guard is legal.
      */
     static bool arm_slot_exclusion_seh(std::int64_t a1, std::uint16_t *buf, std::uint16_t excludeTag,
                                        std::uint64_t &savedPtr, std::uint32_t &savedCount) noexcept
     {
-        if (a1 < 0x10000 || !buf || excludeTag == 0xFFFF)
+        if (a1 < k_minPlausiblePtr || !buf || excludeTag == k_noGameTag)
             return false;
         __try
         {
-            savedPtr = *reinterpret_cast<std::uint64_t *>(a1 + 104);
-            savedCount = *reinterpret_cast<std::uint32_t *>(a1 + 112);
+            savedPtr = *reinterpret_cast<std::uint64_t *>(a1 + k_compSlotExcludeListOffset);
+            savedCount = *reinterpret_cast<std::uint32_t *>(a1 + k_compSlotExcludeCountOffset);
             if (savedCount != 0)
                 return false; // something already uses it -- do not displace
             *buf = excludeTag;
-            *reinterpret_cast<std::uint64_t *>(a1 + 104) = reinterpret_cast<std::uint64_t>(buf);
-            *reinterpret_cast<std::uint32_t *>(a1 + 112) = 1;
+            *reinterpret_cast<std::uint64_t *>(a1 + k_compSlotExcludeListOffset) =
+                reinterpret_cast<std::uint64_t>(buf);
+            *reinterpret_cast<std::uint32_t *>(a1 + k_compSlotExcludeCountOffset) = 1;
             return true;
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
@@ -183,14 +179,15 @@ namespace Transmog
         }
     }
 
+    /// Undo @ref arm_slot_exclusion_seh. Must run on every path out, including an SEH unwind through the equip.
     static void disarm_slot_exclusion_seh(std::int64_t a1, std::uint64_t savedPtr, std::uint32_t savedCount) noexcept
     {
-        if (a1 < 0x10000)
+        if (a1 < k_minPlausiblePtr)
             return;
         __try
         {
-            *reinterpret_cast<std::uint64_t *>(a1 + 104) = savedPtr;
-            *reinterpret_cast<std::uint32_t *>(a1 + 112) = savedCount;
+            *reinterpret_cast<std::uint64_t *>(a1 + k_compSlotExcludeListOffset) = savedPtr;
+            *reinterpret_cast<std::uint32_t *>(a1 + k_compSlotExcludeCountOffset) = savedCount;
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
@@ -204,9 +201,9 @@ namespace Transmog
             return false;
         __try
         {
-            std::uint16_t handle = 0xFFFF;
+            std::uint16_t handle = k_noGameTag;
             resolve(a1, &handle, slotTag, 0);
-            return handle != 0xFFFF;
+            return handle != k_noGameTag;
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
@@ -214,6 +211,14 @@ namespace Transmog
         }
     }
 
+    /**
+     * @brief Resolve the slot tag to its handle, then refresh -- under SEH, in a POD-only frame.
+     *
+     * @details PartSlotRefresh's two slot arguments are NOT the same namespace. The first is a TAG, matched against
+     *          bucket keys and against the part record's own tag field. The second is a HANDLE, which the function
+     *          dereferences through a lookup. Passing the tag for both faults.
+     * @return false when either pointer is null, the tag names no live part record, or the call faulted.
+     */
     static bool call_part_slot_refresh_seh(PartSlotRefreshFn fn, SlotTagToHandleFn resolve, __int64 a1,
                                            std::uint16_t slotTag, __int64 swapEntry) noexcept
     {
@@ -221,9 +226,9 @@ namespace Transmog
             return false;
         __try
         {
-            std::uint16_t handle = 0xFFFF;
+            std::uint16_t handle = k_noGameTag;
             resolve(a1, &handle, slotTag, 0);
-            if (handle == 0xFFFF)
+            if (handle == k_noGameTag)
                 return false; // tag names no live part record -- nothing to refresh
             fn(a1, static_cast<__int16>(slotTag), static_cast<__int16>(handle), swapEntry);
             return true;
@@ -234,14 +239,18 @@ namespace Transmog
         }
     }
 
-    // `slotSel` chooses WHICH engine slot receives the item.
+    // The SlotPopulator choke point for every apply.
     //
-    // SlotPopulator reads the u16 at itemData+12. `0xFFFF` means "derive the slot from the item", and the engine then
-    // resolves it through an item -> slot lookup. For a PAIRED slot that derivation can only ever produce one answer:
-    // both rings carry typeCode 0x000a and both earrings 0x0008, so the second half of every pair was unreachable and
-    // its carrier silently landed in the first. Passing the slot tag explicitly is what addresses the other half.
-    static void apply_transmog_core(__int64 a1, uint16_t id, uint16_t slotSel = 0xFFFF,
-                                    uint16_t excludeTag = 0xFFFF)
+    // `id` is the descriptor id fed to the engine -- always an item the wearer can legitimately equip, because the
+    // transmog VISUAL no longer comes from the descriptor. It comes from the prefab-wrapper swap, which redirects the
+    // mesh this item would otherwise render. Nothing here has to defeat an equip gate.
+    //
+    // `slotSel` chooses WHICH engine slot receives the item. SlotPopulator reads the u16 at itemData+12, and
+    // `k_noGameTag` means "derive the slot from the item", which the engine resolves through an item -> slot lookup.
+    // For a PAIRED slot that derivation can only ever produce one answer -- both halves share one item type -- so the
+    // second half is unreachable and its carrier lands in the first. Naming the slot explicitly reaches the other half.
+    static void apply_transmog_core(__int64 a1, uint16_t id, uint16_t slotSel = k_noGameTag,
+                                    uint16_t excludeTag = k_noGameTag)
     {
         auto slotPop = slot_populator_fn();
         auto initEntry = init_swap_entry_fn();
@@ -258,11 +267,11 @@ namespace Transmog
         // An explicit destination needs the slot to already own a part record: SlotPopulator resolves the tag first
         // and bails outright when it cannot, equipping nothing. Fall back to derivation rather than refuse.
         bool excludeFirstHalf = false;
-        if (slotSel != 0xFFFF && !slot_tag_is_live_seh(slot_tag_to_handle_fn(), a1, slotSel))
+        if (slotSel != k_noGameTag && !slot_tag_is_live_seh(slot_tag_to_handle_fn(), a1, slotSel))
         {
             // Derivation alone would land on the FIRST half of the pair. Excluding that half from resolution makes
             // it land here instead, without naming a destination the engine would refuse.
-            excludeFirstHalf = (excludeTag != 0xFFFF);
+            excludeFirstHalf = (excludeTag != k_noGameTag);
             if (excludeFirstHalf)
                 DMK::Logger::get_instance().debug(
                     "[dispatch] slot {:#06x} has no live part record -- deriving with {:#06x} excluded", slotSel,
@@ -270,7 +279,7 @@ namespace Transmog
             else
                 DMK::Logger::get_instance().debug(
                     "[dispatch] slot {:#06x} has no live part record -- deriving", slotSel);
-            slotSel = 0xFFFF;
+            slotSel = k_noGameTag;
         }
 
         alignas(16) uint8_t itemData[16]{};
@@ -280,12 +289,6 @@ namespace Transmog
         *reinterpret_cast<uint32_t *>(itemData + 8) = 0xFFFFFFFF;
         *reinterpret_cast<uint16_t *>(itemData + 12) = slotSel;
 
-        // A/B switch for the paired-slot work added this session.
-        //
-        // With it off, this function behaves exactly as it did before: no explicit destination, no part-record probe,
-        // no direct refresh -- SlotPopulator gets the same itemData it always got. That makes "does an EMPTY accessory
-        // slot refuse because of something we added, or because the engine refuses it anyway" a one-flag experiment
-        // instead of an argument from memory.
         // Build empty swap entry.
         alignas(16) uint8_t swapEntry[256]{};
         initEntry(reinterpret_cast<__int64>(swapEntry));
@@ -301,18 +304,15 @@ namespace Transmog
         // slotPop faults (structured exception) on early load before game data is ready. __finally restores the apply
         // window and the in_transmog() flag even on an SEH unwind. A stranded apply window tints unrelated render
         // passes; a stranded in_transmog() leaves the wrapper swap armed outside its window.
-        // Capture the return. SlotPopulator answers 0xFFFF when it refuses -- including the case where an explicit
-        // slotSel does not resolve, where it bails BEFORE equipping anything. Discarding the return made every such
-        // refusal silent and indistinguishable from a successful equip whose visual simply did not change.
-        // Capture the return. SlotPopulator answers 0xFFFF when it refuses -- including the case where an explicit
-        // slotSel does not resolve, where it bails BEFORE equipping anything. Discarding the return made every such
-        // refusal silent and indistinguishable from a successful equip whose visual simply did not change.
-        // `slotPopCompleted` separates a REFUSAL from a FAULT.
         //
-        // slotPopRc starts at -1, and -1 & 0xFFFF is 0xFFFF -- the same value SlotPopulator returns when it refuses.
-        // So an SEH fault inside the call, which skips the assignment entirely, was being reported as "REFUSED --
-        // nothing was equipped". Identical symptom, completely different cause.
-        alignas(2) std::uint16_t exclusionBuf = 0xFFFF;
+        // The return is CAPTURED, not discarded: SlotPopulator answers `k_noGameTag` when it refuses -- including the
+        // case where an explicit slotSel does not resolve, where it bails before equipping anything. Discarding it
+        // makes every such refusal silent and indistinguishable from a successful equip whose visual did not change.
+        //
+        // `slotPopCompleted` is what separates a REFUSAL from a FAULT. slotPopRc starts at -1, and the low word of -1
+        // is the same `k_noGameTag` a refusal returns, so without the flag a fault inside the call -- which skips the
+        // assignment entirely -- reports as "REFUSED, nothing was equipped": identical symptom, different cause.
+        alignas(2) std::uint16_t exclusionBuf = k_noGameTag;
         std::uint64_t savedExclPtr = 0;
         std::uint32_t savedExclCount = 0;
         const bool exclusionArmed =
@@ -320,10 +320,6 @@ namespace Transmog
 
         std::int64_t slotPopRc = -1;
         bool slotPopCompleted = false;
-        // Same query, sampled INSIDE the apply window. Our earlier sample runs before in_transmog() is raised and
-        // before the ColorOverride windows open; SlotPopulator runs with all of them armed. If the answer differs
-        // between the two, LT's own machinery is what changes the engine's mind -- which would make this our gate
-        // rather than an engine rule.
         bool refreshCalled = false;
         bool refreshFaulted = false;
         const auto refreshFn = part_slot_refresh_fn();
@@ -346,9 +342,8 @@ namespace Transmog
             // dye writes are not intercepted, so the part flickers to its untransmogged mesh and armor loses its
             // colour a moment after appearing. Both windows have to still be open.
             //
-            // Only for an explicit slotSel -- with 0xFFFF the engine's own derivation is already right.
-            if (k_directSlotRefreshEnabled && slotSel != 0xFFFF &&
-                static_cast<std::uint16_t>(slotPopRc & 0xFFFF) != 0xFFFF && refreshFn)
+            // Only for an explicit slotSel -- with `k_noGameTag` the engine's own derivation is already right.
+            if (slotSel != k_noGameTag && static_cast<std::uint16_t>(slotPopRc & 0xFFFF) != k_noGameTag && refreshFn)
             {
                 refreshCalled = call_part_slot_refresh_seh(refreshFn, slot_tag_to_handle_fn(), a1, slotSel,
                                                            reinterpret_cast<__int64>(swapEntry));
@@ -374,7 +369,7 @@ namespace Transmog
                 "[dispatch] SlotPopulator FAULTED item={:#06x} slotSel={:#06x} -- the call raised, it did not refuse",
                 id, slotSel);
         }
-        else if (rcWord == 0xFFFF)
+        else if (rcWord == k_noGameTag)
         {
             DMK::Logger::get_instance().warning(
                 "[dispatch] SlotPopulator REFUSED item={:#06x} slotSel={:#06x} -- nothing was equipped", id, slotSel);
@@ -386,7 +381,16 @@ namespace Transmog
         }
     }
 
-    bool refresh_slot_visual(TransmogSlot slot)
+    /**
+     * @brief Drive the engine's per-slot rebuild with the prefab-swap and colour windows open.
+     *
+     * @details Internal on purpose. It publishes NO dye of its own, so calling it after the apply path has cleared
+     *          the dye state makes the rebuild's DyeCopier call re-emit the engine's natural records and strip the
+     *          injected colour. Every caller goes through @ref refresh_slot_appearance, which brackets it with the
+     *          dye publish and the ColorOverride slot bind.
+     * @return false when an anchor is unresolved, the slot has no live part record, or the call faulted.
+     */
+    static bool refresh_slot_visual(TransmogSlot slot)
     {
         auto &logger = DMK::Logger::get_instance();
 
@@ -512,15 +516,20 @@ namespace Transmog
         return 0;
     }
 
-
-    // Descriptor size. This must stay at or above the live stride between consecutive descriptors in the catalog.
-    // The stride changes across patches, so re-measure it against live memory on patch day. Undersizing is the
-    // dangerous direction.
-    //
-    // The hybrid buffer is memcpy'd from the target descriptor up to this size. Any byte beyond stays
-    // VirtualAlloc-zero. If SlotPopulator or its callees read past the copied range, they see zeros instead of real
-    // descriptor data, which faults when the zero is treated as an embedded pointer, vtable, or index. Over-copy is
-    // safe, because the pool allocator always gives the source descriptor at least a full stride.
+    /**
+     * @brief Second-pass tear-down for a DIRECT-applied fake -- one whose carrier collapsed onto the target, or that
+     *        had no carrier at all.
+     *
+     * @details Such a fake renders its per-body rig through the engine's own variant resolver, and the engine needs
+     *          the scene-graph tear-down fired TWICE to detach that rig fully. The normal Phase A / Phase B flow only
+     *          supplies the second call when a DISTINCT carrier is torn, or when the live real item equals the fake
+     *          and Phase B re-tears the same hash. A direct fake with no matching real underneath -- a mask transmog
+     *          on a wearer who owns no real mask -- gets a single call, and its rendered rig survives; the symptom is
+     *          a fake accessory that keeps showing after a switch to a none-preset.
+     * @note No-op when a distinct carrier already handled the tear, when Phase B handles it, or when there is no
+     *       fake. SafeTearDown does not mutate the authoritative entry array, so a redundant detach of an
+     *       already-gone rig is a safe no-op.
+     */
     static void tear_down_direct_fake_second_pass(__int64 a1, std::uint16_t fakeId, std::uint16_t gameTag,
                                                   std::uint16_t liveRealId, bool distinctCarrierTorn) noexcept
     {
@@ -530,23 +539,18 @@ namespace Transmog
         RealPartTearDown::tear_down_by_item_id(reinterpret_cast<void *>(a1), fakeId, gameTag);
     }
 
-
     void apply_transmog_with_carrier(__int64 a1, uint16_t carrierId, uint16_t targetId, uint16_t slotSel,
                                      uint16_t excludeTag)
     {
         auto &logger = DMK::Logger::get_instance();
 
-        // The carrier is equipped AS ITSELF. It no longer impersonates the target.
+        // The carrier is equipped AS ITSELF; it does not impersonate the target.
         //
-        // This used to build a hybrid descriptor -- the target's bytes with the carrier's identity fields overlaid --
-        // and swap it into the global item catalog for the duration of the call, so the engine read the target's
-        // meshes while every equip gate saw a valid carrier. That machinery existed only to deliver a VISUAL, and the
-        // prefab-wrapper swap now delivers it: the swap map binds the carrier's own prefab to the target item's
-        // prefab, so the engine renders the target mesh while never being told anything untrue about the item.
-        //
-        // Everything that propped the impersonation up goes with it -- the descriptor copy, the catalog pointer patch,
-        // and the char-class bypass byte. An item the wearer cannot normally equip needs none of them, because the
-        // carrier is always something the wearer CAN equip.
+        // The prefab-wrapper swap is what delivers the visual: the swap map binds the carrier's own prefab to the
+        // target item's prefab, so the engine renders the target mesh while never being told anything untrue about
+        // the item. Nothing here copies a descriptor, patches the catalog pointer array, or defeats an equip gate --
+        // an item the wearer cannot normally equip needs none of that, because the carrier is always something the
+        // wearer CAN equip.
         if (carrierId == 0)
         {
             logger.trace("[carrier] no carrier resolved for target={:#06x}, applying it directly", targetId);
@@ -647,7 +651,6 @@ namespace Transmog
             return;
         }
 
-
         const uint16_t prevId = lastIds[slotIdx];
         const uint16_t gameTag = static_cast<uint16_t>(k_slotMetadata[slotIdx].gameTag);
 
@@ -703,10 +706,6 @@ namespace Transmog
             if (prevId != 0)
             {
                 const auto prevCarrier = last_applied_carrier_ids()[slotIdx];
-                // Only a carrier fake the wearer cannot equip needs the bypass flipped on to be reachable. Forcing the
-                // bypass across a body-eligible fake's tear-down restores its real item on the wrong (default) body.
-                // Matches the gate in apply_all_transmog / clear_all_transmog Phase A.
-
                 if (prevCarrier != 0 && prevCarrier != static_cast<uint16_t>(prevId))
                 {
                     RealPartTearDown::tear_down_by_item_id(reinterpret_cast<void *>(a1), prevCarrier, gameTag);
@@ -714,9 +713,8 @@ namespace Transmog
                 RealPartTearDown::tear_down_by_item_id(reinterpret_cast<void *>(a1), static_cast<uint16_t>(prevId),
                                                        gameTag);
 
-
-                // Direct-applied fake with no matching real underneath: 2nd-pass detach at natural bypass
-                // (restored above). See tear_down_direct_fake_second_pass.
+                // Direct-applied fake with no matching real underneath: it needs a second detach.
+                // See tear_down_direct_fake_second_pass.
                 tear_down_direct_fake_second_pass(a1, static_cast<std::uint16_t>(prevId), gameTag, realId,
                                                   prevCarrier != 0 &&
                                                       prevCarrier != static_cast<std::uint16_t>(prevId));
@@ -813,7 +811,7 @@ namespace Transmog
                 apply_transmog_with_carrier(a1, carrierId, targetId,
                                             slot_needs_explicit_destination(tmSlot)
                                                 ? static_cast<uint16_t>(game_slot_from_transmog(tmSlot))
-                                                : static_cast<uint16_t>(0xFFFF),
+                                                : k_noGameTag,
                                             paired_first_half_tag(tmSlot));
             }
             else
@@ -1285,9 +1283,7 @@ namespace Transmog
                     RealPartTearDown::get_real_item_id(reinterpret_cast<void *>(a1), k_tearDownSlots[k].gameTag);
             }
 
-            // Phase A: previous fakes (from lastIds before this apply). A carrier/NPC fake entered the scene graph
-            // under the char-class bypass, so tear_down_by_item_id must flip that byte back on to reach its auth row.
-
+            // Phase A: previous fakes, taken from lastIds as it stood before this apply.
             for (std::size_t k = 0; k < k_tearDownCount; ++k)
             {
                 const auto &td = k_tearDownSlots[k];
@@ -1303,7 +1299,6 @@ namespace Transmog
                     // where LT never placed a carrier (e.g. Mask/Necklace on the first apply of an all-none preset).
                     // The doubled call here matches the working manual path (transmog-something -> none), which fires
                     // Phase A on the prior carrier plus Phase B on the real entry -- same hash, same slot tag, twice.
-                    // No carrier history means the fake never entered under the bypass, so no toggle is needed.
                     const auto &m = mappings[idx];
                     if (m.active && m.targetItemId == 0 && liveRealIds[idx] != 0)
                     {
@@ -1315,7 +1310,6 @@ namespace Transmog
                     }
                     continue;
                 }
-
 
                 // Phase A runs unconditionally: fake and real get equal treatment, so a previous fake that matches the
                 // live real item is still torn down.
@@ -1329,11 +1323,10 @@ namespace Transmog
                 RealPartTearDown::tear_down_by_item_id(reinterpret_cast<void *>(a1), static_cast<std::uint16_t>(prevId),
                                                        td.gameTag);
 
-
                 // Direct-applied fake (Mask/Necklace, or any carrier==target collapse) with no matching real
-                // underneath: give it the required 2nd/3rd detach at natural bypass (restored above) so its
-                // rendered per-body rig actually comes off. No-op for distinct-carrier items and when Phase B
-                // re-tears the same hash (live real == fake). See tear_down_direct_fake_second_pass.
+                // underneath: give it the extra detach its rendered per-body rig needs to come off. No-op for
+                // distinct-carrier items and when Phase B re-tears the same hash (live real == fake). See
+                // tear_down_direct_fake_second_pass.
                 tear_down_direct_fake_second_pass(a1, static_cast<std::uint16_t>(prevId),
                                                   static_cast<std::uint16_t>(td.gameTag), realItemId[k],
                                                   prevCarrier != 0 &&
@@ -1479,7 +1472,7 @@ namespace Transmog
                 apply_transmog_with_carrier(a1, carrierId, targetId,
                                             slot_needs_explicit_destination(tmSlot)
                                                 ? static_cast<uint16_t>(game_slot_from_transmog(tmSlot))
-                                                : static_cast<uint16_t>(0xFFFF),
+                                                : k_noGameTag,
                                             paired_first_half_tag(tmSlot));
             }
             else
@@ -1668,7 +1661,7 @@ namespace Transmog
             };
             PrefabWrapperSwap::notify_apply_finished(appliedItems);
 
-            // Rebuild the slots whose target changed.
+            // Rebuild the slots that REPLACED an earlier LT target.
             //
             // The sweep above erases the previous target's CLAIM, and the claim count does drop -- but the part is
             // already realized, and dropping a claim does not retract what is on screen. The engine only reconciles
@@ -1676,17 +1669,31 @@ namespace Transmog
             //
             // This is what lets a target change stay instant: the new visual installs, the stale claim is erased,
             // and the slot rebuilds against the claims that remain -- no tear-down anywhere in the path.
+            //
+            // Two conditions, and BOTH matter:
+            //
+            // - `prevIds[i] != 0` -- there has to be an earlier LT target to retract. On the first apply after a
+            //   world load the slot held the REAL item, which Phase A/B already tore down, so there is nothing stale
+            //   and the rebuild would be pure cost.
+            // - `prevIds[i] != targetItemId` -- measured against the entry snapshot, NOT against `lastIds`. That IS
+            //   last_applied_ids(), and the apply loop above has already written this apply's targets into it, so
+            //   every slot would compare equal and nothing would ever rebuild.
+            //
+            // The rebuild goes through refresh_slot_appearance, NEVER the bare refresh_slot_visual. The apply loop
+            // clears the dye state after each slot, so a bare rebuild drives a DyeCopier call with nothing published
+            // and the engine re-emits its natural records -- which silently strips the colour the apply just
+            // injected. refresh_slot_appearance republishes this slot's dye and rebinds its ColorOverride slot around
+            // the rebuild. Same reasoning as the single-slot path; see its call site.
             for (std::size_t i = 0; i < k_slotCount; ++i)
             {
                 const auto sl = static_cast<TransmogSlot>(i);
                 if (!slot_enabled(sl) || !mappings[i].active || mappings[i].targetItemId == 0)
                     continue;
-                if (last_applied_ids()[i] == mappings[i].targetItemId)
-                    continue; // unchanged -- nothing stale to reconcile
-                refresh_slot_visual(sl);
+                if (prevIds[i] == 0 || prevIds[i] == mappings[i].targetItemId)
+                    continue; // no earlier target, or unchanged -- nothing stale to reconcile
+                refresh_slot_appearance(i);
             }
         }
-
 
         // PrefabWrapperSwap stays active across applies. Do NOT schedule an auto-deactivate after each apply. The
         // wrapper-substitution path has no cheap teardown -- a heap walk on deactivate stalls preset switches by about
@@ -1707,7 +1714,6 @@ namespace Transmog
             if (fresh > 0x10000)
                 a1 = fresh;
         }
-
 
         // Snapshot the previously applied fakes BEFORE clearing lastIds. Iteration order across `k_slotMetadata` is
         // irrelevant for correctness: prevFakeId / prevCarrierId are indexed by `k` (the array slot), and the per-slot
@@ -1740,10 +1746,6 @@ namespace Transmog
         // Pass A: tear down orphan fakes.
         if (RealPartTearDown::is_ready())
         {
-            // A carrier/NPC fake entered the scene graph under the char-class bypass, so tear_down_by_item_id must flip
-            // that byte back on to reach its auth row. Otherwise the tear-down fails silently and the carrier visual
-            // persists, which is the failure the user sees on toggle-off or Clear for such a slot. A fake the wearer
-
             for (std::size_t k = 0; k < k_slotCount; ++k)
             {
                 const auto gameTag = static_cast<std::uint16_t>(k_slotMetadata[k].gameTag);
@@ -1760,7 +1762,7 @@ namespace Transmog
                     continue;
                 }
 
-                // Only a carrier fake the wearer cannot equip needs the bypass flipped on to be reachable.
+                // Tear the carrier's own identity down first when it is a distinct item.
                 if (cId != 0 && cId != fakeId)
                 {
                     logger.info("[clear] tearing carrier slot={:#06x} "
@@ -1773,9 +1775,8 @@ namespace Transmog
                             gameTag, fakeId, realId, cId);
                 RealPartTearDown::tear_down_by_item_id(reinterpret_cast<void *>(a1), fakeId, gameTag);
 
-
-                // Direct-applied orphan fake with no matching real underneath: 2nd-pass detach at natural
-                // bypass (restored above). See tear_down_direct_fake_second_pass.
+                // Direct-applied orphan fake with no matching real underneath: it needs a second detach.
+                // See tear_down_direct_fake_second_pass.
                 tear_down_direct_fake_second_pass(a1, fakeId, gameTag, realId, cId != 0 && cId != fakeId);
             }
         }

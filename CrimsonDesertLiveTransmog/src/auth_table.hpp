@@ -8,11 +8,9 @@ namespace Transmog::AuthTable
     /**
      * Memory geometry of the engine's authoritative equip table, hanging off ClientEquipSlotActorComponent.
      *
-     * This is the ONE place these offsets are written down. They used to be duplicated across transmog.cpp,
-     * transmog_apply.cpp and real_part_tear_down.cpp under two different naming schemes, with the array-base and count
-     * offsets left as bare literals at six call sites. Every copy carried a comment pointing at the others, which is
-     * the tell: the geometry moves as a UNIT on patch day, so splitting it across files means a partial edit is one
-     * missed grep away, and a partial edit fails silently.
+     * This is the ONE place these offsets are written down, and they must stay that way. The geometry moves as a
+     * UNIT on patch day, so splitting it across the files that walk it (transmog.cpp, transmog_apply.cpp,
+     * real_part_tear_down.cpp) leaves a partial edit one missed grep away -- and a partial edit fails silently.
      *
      *     component + k_containerPtrOffset        -> container
      *     container + k_containerArrayBaseOffset  -> entry array base

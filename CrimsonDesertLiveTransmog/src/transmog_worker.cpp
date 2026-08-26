@@ -669,9 +669,8 @@ namespace Transmog
                          static_cast<std::uint64_t>(summary.controlled), static_cast<std::uint64_t>(summary.vecData),
                          static_cast<std::uint64_t>(summary.childContainer),
                          static_cast<std::uint64_t>(summary.actorList), summary.rawEntries);
-            // The per-entry actor dump belonged to the actor-array drift investigation and re-printed every entry on
-            // every apply. The summary line above already carries what the retry oracle reads. Raise the level here
-            // only while chasing the actor list again.
+            // Deliberately no per-entry dump: it reprints every actor on every apply, and the summary line above
+            // already carries what the retry oracle reads. Add one back only while chasing the actor list itself.
         }
 
         std::array<CDCore::BodyCacheEntry, 3> entries{};

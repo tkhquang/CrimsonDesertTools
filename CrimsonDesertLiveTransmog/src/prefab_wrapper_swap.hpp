@@ -92,19 +92,21 @@ namespace Transmog::PrefabWrapperSwap
     std::size_t ensure_armed_for_slot_apply() noexcept;
 
     /**
-     * Target wrapper bound to @p slotIdx for the character currently being applied, or 0 when the slot has no
-     * target. Answers "what should this SOCKET wear", which the source-hash-keyed swap map cannot.
-     */
-    /**
-     * Character index (1-based, matching CDCore) the per-slot target table currently holds targets for; 0 when
-     * unbound.
+     * @brief Character index (1-based, matching CDCore) the per-slot target table currently holds targets for; 0 when
+     *        unbound.
      *
-     * The table holds ONE character's targets at a time. Anything that installs those targets onto a body must check
-     * this against the body's own character (Transmog::char_idx_for_equip_slot) -- otherwise it dresses whichever
-     * body it is handed with whichever character's table happens to be current.
+     * @details The table holds ONE character's targets at a time. Anything that installs those targets onto a body
+     *          must check this against the body's own character (Transmog::char_idx_for_equip_slot), or it dresses
+     *          whichever body it is handed with whichever character's table happens to be current.
      */
     [[nodiscard]] std::uint32_t target_table_char_idx() noexcept;
 
+    /**
+     * @brief Target wrapper bound to @p slotIdx for the character currently being applied, or 0 when the slot has no
+     *        target.
+     *
+     * @details Answers "what should this SOCKET wear", which the source-hash-keyed swap map cannot.
+     */
     [[nodiscard]] std::uintptr_t target_wrapper_for_slot(std::size_t slotIdx) noexcept;
 
     /**
@@ -190,14 +192,12 @@ namespace Transmog::PrefabWrapperSwap
     //
     // The PartPrefab table is a 252,480-entry container the engine builds at boot from .pappt parser output. Its loader
     // instance lives at `[[ResMgr+0x40]+0x88]` -- captured by hooking the first call to `sub_1408AF8F0` (game-init).
-    // The container itself is `loader+8`, vtable `0x144D24308`.
+    // The container itself is `loader+8`.
     //
-    // We expose a read-only lookup against this container so the picker can surface prefabs that exist in the engine's
-    // catalog but are not yet StringInfo-resident (i.e. have no live wrapper). No INI keys in this module.
-
-    // A per-name lookup against this container used to live here, backed by an AOB-resolved engine primitive. Both
-    // are gone: the primitive was restructured away by 2.00.00, and the value it produced was written to a field no
-    // code ever read. `for_each_loader_prefab_name` below is the part that has a real consumer.
+    // There is deliberately no per-name lookup against it here. Backing one with the engine's own primitive costs an
+    // AOB cascade to maintain and produces a value nothing consumes; `for_each_loader_prefab_name` below is the part
+    // with a real consumer, and the picker indexes its walk to answer per-name questions in-process. No INI keys in
+    // this module.
 
     /**
      * Walk every entry in the AppearanceTableLoader registry singleton (the AOB-resolved partprefab name-to-wrapper
@@ -218,7 +218,6 @@ namespace Transmog::PrefabWrapperSwap
     /// True after a successful populate_slot_catalogs.
     [[nodiscard]] bool is_catalog_populated() noexcept;
 
-
     /**
      * Per-slot catalog (sorted by name). Returns an empty vector for slots that have not been populated yet (e.g.
      * catalog walk hasn't run, or the slot has no matching prefabs in StringInfo).
@@ -231,13 +230,16 @@ namespace Transmog::PrefabWrapperSwap
     [[nodiscard]] int selection_src_index(Transmog::TransmogSlot slot) noexcept;
     [[nodiscard]] int selection_tgt_index(Transmog::TransmogSlot slot) noexcept;
     /**
-     * @param charIdxFor Bucket to mirror into, 1-based; 0 means "whichever character is bound right now".
+     * @brief Write a slot's source and target selection, mirroring it into a character's per-character row.
      *
-     * A caller that already knows which character it is writing for MUST pass it. Reading the bound character inside
-     * this function re-samples a global that another thread can change mid-loop, so a per-slot restore loop could
-     * start writing one character's bucket and finish writing another's.
+     * @param site Short caller tag, logged with the write at trace level. Diagnostic only: a poisoned per-character
+     *        row is only findable when the log names who wrote it.
+     * @param charIdxFor Bucket to mirror into, 1-based; 0 means "whichever character is bound right now".
+     * @warning A caller that already knows which character it is writing for MUST pass @p charIdxFor. Reading the
+     *          bound character inside this function re-samples a global another thread can change mid-loop, so a
+     *          per-slot restore loop could start writing one character's bucket and finish writing another's.
      */
-    void set_selection(Transmog::TransmogSlot slot, int srcIdx, int tgtIdx, const char *site = "?",
+    void set_selection(Transmog::TransmogSlot slot, int srcIdx, int tgtIdx, std::string_view site = "?",
                        std::uint32_t charIdxFor = 0) noexcept;
 
     /**

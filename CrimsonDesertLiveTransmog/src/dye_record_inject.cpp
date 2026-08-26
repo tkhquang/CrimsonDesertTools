@@ -90,10 +90,9 @@ namespace Transmog::DyeRecordInject
 
     // --- Engine layout constants ------------------------------------
     //
-    // Dye-record vector header, relative to the vector base. Taken from the engine's own record-copy primitive: it
-    // reads capacity at +0x0C, count at +0x08, grows when capacity is not greater than count, writes the record at
-    // data + count * k_dyeRecordSize, then increments count.
-
+    // The dye-record vector geometry (header offsets and record size) is published in dye_record_inject.hpp, because
+    // the socket-mesh override produces the same records and must agree with this file byte for byte. What stays
+    // here is what only this file needs.
 
     // One ARMOR_MOD record is 16 bytes, but the engine primitive only copies the first 13 (+0x00 through +0x0C) and
     // leaves the rest of the stride untouched. An in-place overwrite must write the same span to match its semantics.

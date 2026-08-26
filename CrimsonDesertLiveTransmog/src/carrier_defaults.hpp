@@ -43,10 +43,9 @@ namespace Transmog
         // Kliff (male). Armor slots use the Kairos plate set (`Kliff_PlateArmor_*`); the remaining slots come from the
         // live slot-discovery dump.
         //
-        // The armor carriers must RENDER on their own now. They used to be pure descriptor shells: the carrier's id
-        // was equipped while the item catalog pointed at the target's descriptor, so the carrier's own mesh never
-        // mattered. The prefab-wrapper swap supplies the visual instead, which means a carrier whose prefab never
-        // resolves to a live wrapper produces an empty slot rather than a swapped one.
+        // Every armor carrier must RENDER on its own. The prefab-wrapper swap supplies the visual by redirecting the
+        // carrier's own mesh, so a carrier whose prefab never resolves to a live wrapper produces an EMPTY slot
+        // rather than a swapped one.
         //
         // The Kairos set is chosen for that: every piece is catalog-resident, non-variant, and resolves to a bare
         // prefab name that yields a real wrapper. The previous helm carrier (`Scovi_Fabric_Helm`) is the exact failure

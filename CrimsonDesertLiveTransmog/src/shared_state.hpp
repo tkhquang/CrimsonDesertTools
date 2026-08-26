@@ -68,10 +68,9 @@ namespace Transmog
         // transmog value for the typical case. To re-enable, add an `OongkaRocket, // engine tag 0x15` row here AND
         // extend every per-slot table that indexes by TransmogSlot:
         //   slot_metadata.hpp       (k_slotMetadata -- master row:
-        //                            gameTag, displayName, prefab
-        //                            prefixes, partShowHashKey, enabled)
-        //   carrier_defaults.hpp    (k_carriers -- one carrier item +
-        //                            prefab per character per slot)
+        //                            gameTag, displayName, partShowHashKey, enabled)
+        //   carrier_defaults.hpp    (k_carriers -- one carrier item
+        //                            per character per slot)
         //   prefab_wrapper_swap.cpp (k_slotTagPatterns -- registry
         //                            classifier patterns)
         Count
@@ -88,34 +87,32 @@ namespace Transmog
     std::array<SlotMapping, k_slotCount> &slot_mappings();
 
     /**
-     * Item IDs that were last written to slot_mappings (saved before preset switch). Used by clear_all_transmog to know
-     * what to unequip.
-     */
-    /**
      * @brief Which protagonist owns this equip-slot component (`a1`), 1-based, or 0.
      *
-     * Resolved from the LIVE actor chain -- snapshot_body_cache enumerates the player CCOIAs with their character
-     * index, and equip_slot_for_ccoia maps each to the `a1` LT applies against. Returns 0 for companions, NPCs and
-     * wildlife, and while the chain is mid-teardown.
-     *
-     * Use this, NOT resolve_player_component(), to answer "whose body is this?". resolve_player_component() always
-     * returns KLIFF's component whatever character is controlled, so comparing against it silently accepts every
-     * other character's body.
+     * @details Resolved from the LIVE actor chain -- snapshot_body_cache enumerates the player CCOIAs with their
+     *          character index, and equip_slot_for_ccoia maps each to the `a1` LT applies against. Returns 0 for
+     *          companions, NPCs and wildlife, and while the chain is mid-teardown.
+     * @warning Use this, NOT resolve_player_component(), to answer "whose body is this?". resolve_player_component()
+     *          always returns Kliff's component whatever character is controlled, so comparing against it silently
+     *          accepts every other character's body.
      */
     [[nodiscard]] std::uint32_t char_idx_for_equip_slot(std::uintptr_t a1) noexcept;
 
     /**
      * @brief Which character `slot_mappings()` currently describes: 1 Kliff, 2 Damiane, 3 Oongka, 0 unbound.
      *
-     * `slot_mappings()` is ONE global array reused for whichever character is being edited or applied, so on its own
-     * it cannot say whose targets it holds. Anything that writes per-character state derived from it must check this
-     * against the character it is writing FOR -- otherwise one character's preset lands in another's bucket, which is
-     * exactly how Kliff ended up wearing Oongka's armour after a hot reload.
-     *
-     * Set by PresetManager::apply_to_state, which is the only place a different character's preset is loaded in.
+     * @details `slot_mappings()` is ONE global array reused for whichever character is being edited or applied, so on
+     *          its own it cannot say whose targets it holds. Set by PresetManager::apply_to_state, the only place a
+     *          different character's preset is loaded in.
+     * @warning Anything that writes per-character state derived from `slot_mappings()` must check this against the
+     *          character it is writing FOR, or one character's preset lands in another's bucket.
      */
     std::atomic<std::uint32_t> &slot_mappings_owner() noexcept;
 
+    /**
+     * Item IDs that were last written to slot_mappings (saved before preset switch). Used by clear_all_transmog to know
+     * what to unequip.
+     */
     std::array<uint16_t, k_slotCount> &last_applied_ids();
 
     /**

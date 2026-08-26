@@ -796,8 +796,8 @@ namespace Transmog
             // Wearer-body classification is NOT read here. A game update re-keyed the descriptor rule-classifier body
             // tokens, so the rule list at desc+0x248 no longer yields a usable body class. Body comes from the
             // equip-eligibility ("Male"/"Female") column of the display_names TSV (see load_display_names /
-            // m_bodyByName), applied at query time in sorted_entries and is_player_compatible.
-            // the body-table generator (kept out of tree) fills that column from the packed gamedata.
+            // m_bodyByName), applied at query time in sorted_entries and is_player_compatible. The body-table
+            // generator (kept out of tree) fills that column from the packed gamedata.
             //
             // Transmog slot from the item's own group membership. See the slot-classification block at the top of this
             // file: the item names the ItemGroupInfo rows it belongs to, and those rows carry the engine's equipment
@@ -1139,8 +1139,8 @@ namespace Transmog
             // Wearer-body classification comes from the equip-eligibility column of the display_names TSV
             // (m_bodyByName). Only single-body-restricted items are listed. Anything wearable by both bodies (or
             // unrestricted) is absent -> BodyKind::Generic, shown on every character. This replaces the
-            // rule-classifier token machinery, which a game update re-keyed. See the body-table generator (kept out of tree) for
-            // how the column is filled.
+            // rule-classifier token machinery, which a game update re-keyed. The body-table generator (kept out of
+            // tree) is what fills the column.
             auto brit = m_bodyByName.find(lowerName);
             const BodyKind kind = (brit != m_bodyByName.end()) ? brit->second : BodyKind::Generic;
             // Kliff-centric "PlayerSafe": an item is player-safe unless it is restricted to the female body.
@@ -1257,8 +1257,9 @@ namespace Transmog
                 c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
 
             // Columns: <internal name> \t <display name> [\t <wearer body: "Male"|"Female">]. The optional 3rd column
-            // carries the equip-eligibility body restriction (the body-table generator, kept out of tree, fills it from the packed
-            // gamedata) and is only present for single-body-restricted items, so an older 2-column TSV still loads --
+            // carries the equip-eligibility body restriction (the body-table generator, kept out of tree, fills it
+            // from the packed gamedata) and is only present for single-body-restricted items, so an older 2-column
+            // TSV still loads --
             // absent body just means "unrestricted / shown on every character".
             std::string display, body;
             const auto t2 = line.find('\t', t1 + 1);

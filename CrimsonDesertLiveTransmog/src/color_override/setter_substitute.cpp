@@ -207,8 +207,8 @@ namespace Transmog::ColorOverride::SetterSubstitute
         {
             g_hookFires.fetch_add(1, std::memory_order_relaxed);
 
-            // Periodic counter dump. The cadence is deliberately coarse: these are running totals, so a sample every
-            // ~12k fires produced ~82 near-identical blocks per session while a handful conveys the same trend.
+            // Periodic counter dump. The cadence is deliberately coarse: these are running TOTALS, so a fine
+            // interval only repeats the same trend across many near-identical blocks.
             constexpr std::uint64_t k_counterDumpEveryFires = 98304;
             const auto fires = g_hookFires.load(std::memory_order_relaxed);
             if (fires % k_counterDumpEveryFires == 0)
@@ -270,8 +270,8 @@ namespace Transmog::ColorOverride::SetterSubstitute
                 if (g_seenTokens.insert_unique(tokId))
                 {
                     // Only report a token that CLASSIFIES. layer/channel == -1 means the token table does not know
-                    // it, which was useful while the table was being discovered and is now just noise -- 110 of the
-                    // 144 of these carried -1/-1. [token-discovery] owns that job.
+                    // it, and most tokens seen here are in that state, so reporting them is noise.
+                    // [token-discovery] owns the job of finding unknown tokens.
                     const auto layer = ColorOverride::TokenTable::token_layer(tokId);
                     const auto channel = ColorOverride::TokenTable::channel_kind(tokId);
                     if (layer >= 0 || channel >= 0)

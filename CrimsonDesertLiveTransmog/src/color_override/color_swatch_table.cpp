@@ -552,8 +552,8 @@ namespace Transmog::ColorOverride::SwatchTable
             ++kept;
         }
 
-        // Empty slots say nothing. Reporting all 23 every probe produced 276 identical `total_rows=0 kept=0` lines
-        // per session and buried the handful of slots that actually hold rows.
+        // Empty slots say nothing. Reporting every slot on every probe buries the handful that actually hold rows
+        // under identical `total_rows=0 kept=0` lines.
         if (total != 0)
         {
             logger.trace("[persist-probe] slot={} total_rows={} kept={} "

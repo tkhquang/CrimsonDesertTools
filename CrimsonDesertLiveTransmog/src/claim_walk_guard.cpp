@@ -2,15 +2,13 @@
 
 #include "aob_resolver.hpp"
 
-#include <DetourModKit/hook_manager.hpp>
-#include <DetourModKit/logger.hpp>
-#include <DetourModKit/memory.hpp>
-#include <DetourModKit/scanner.hpp>
+#include <DetourModKit.hpp>
 
 #include <safetyhook/context.hpp>
 
 #include <array>
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -55,7 +53,7 @@ namespace Transmog::ClaimWalkGuard
             &on_claim_walk<2>,
             &on_claim_walk<3>,
         };
-    }
+    } // namespace
 
     bool install() noexcept
     {
@@ -65,14 +63,14 @@ namespace Transmog::ClaimWalkGuard
 
         auto &log = DMK::Logger::get_instance();
 
-        const auto host = DetourModKit::Memory::host_module_range();
+        const auto host = DMK::Memory::host_module_range();
         if (!host.valid())
         {
             log.warning("[claim-guard] host module range unavailable; claim-walk guard NOT installed");
             return false;
         }
 
-        const auto pattern = DetourModKit::Scanner::parse_aob(k_claimWalkSiteAob);
+        const auto pattern = DMK::Scanner::parse_aob(k_claimWalkSiteAob);
         if (!pattern.has_value())
         {
             log.warning("[claim-guard] walk-site AOB failed to parse; guard NOT installed");
@@ -87,7 +85,7 @@ namespace Transmog::ClaimWalkGuard
         while (cursor < hostEnd)
         {
             const auto remaining = static_cast<std::size_t>(hostEnd - cursor);
-            const auto *hit = DetourModKit::Scanner::find_pattern(cursor, remaining, *pattern);
+            const auto *hit = DMK::Scanner::find_pattern(cursor, remaining, *pattern);
             if (hit == nullptr)
                 break;
             sites.push_back(reinterpret_cast<std::uintptr_t>(hit));
@@ -123,29 +121,36 @@ namespace Transmog::ClaimWalkGuard
             // Decode this site's own `jz rel8` to find where the engine continues when it rejects an entry -- exactly
             // where a skipped entry should resume. Reading it out of the instruction stream keeps the guard free of
             // hardcoded continue targets.
-            const auto jzOpcode = DMKMemory::seh_read<std::uint8_t>(sites[i] + 11).value_or(0);
+            //
+            // The branch is NOT part of the signature (short Jcc opcodes flip encoding across builds, so anchoring on
+            // one retires the row silently). It is validated here instead: a site whose branch is not the expected
+            // 2-byte `jz rel8` is skipped with a log line rather than mis-decoded into a bogus continue address.
+            const auto jzAddr = sites[i] + k_claimWalkJzOffset;
+            const auto jzOpcode = DMK::Memory::seh_read<std::uint8_t>(jzAddr).value_or(0);
             if (jzOpcode != 0x74)
             {
-                log.warning("[claim-guard] site {:#x}: expected jz at +11, saw {:#04x} -- skipped", site, jzOpcode);
+                log.warning("[claim-guard] site {:#x}: expected jz at +{}, saw {:#04x} -- skipped", site,
+                            k_claimWalkJzOffset, jzOpcode);
                 continue;
             }
-            const auto rel8 = DMKMemory::seh_read<std::int8_t>(sites[i] + 12);
+            const auto rel8 = DMK::Memory::seh_read<std::int8_t>(jzAddr + 1);
             if (!rel8.has_value())
             {
                 log.warning("[claim-guard] site {:#x}: jz displacement unreadable -- skipped", site);
                 continue;
             }
-            g_continueAddr[i] =
-                static_cast<std::uintptr_t>(static_cast<std::int64_t>(sites[i] + 13) + static_cast<std::int64_t>(*rel8));
+            // rel8 is measured from the byte AFTER the 2-byte branch.
+            g_continueAddr[i] = static_cast<std::uintptr_t>(static_cast<std::int64_t>(jzAddr + 2) +
+                                                            static_cast<std::int64_t>(*rel8));
 
-            // A managed mid-hook, so the DMK teardown removes it on unload. An earlier revision hand-wrote the stub
-            // and its lifetime, which left the site jumping into freed memory across a hot reload.
+            // A managed mid-hook, so the DMK teardown removes it on unload. A hand-written stub would own its own
+            // lifetime and leave the site jumping into freed memory across a hot reload.
             const auto name = std::string("ClaimWalkGuard_") + std::to_string(i);
             auto res = hookMgr.create_mid_hook(name, site, k_callbacks[i]);
             if (!res.has_value())
             {
                 log.warning("[claim-guard] site {:#x}: mid-hook install failed: {} -- skipped", site,
-                            DetourModKit::Hook::error_to_string(res.error()));
+                            DMK::Hook::error_to_string(res.error()));
                 continue;
             }
 
@@ -161,4 +166,4 @@ namespace Transmog::ClaimWalkGuard
     {
         return g_patched.load(std::memory_order_acquire);
     }
-}
+} // namespace Transmog::ClaimWalkGuard

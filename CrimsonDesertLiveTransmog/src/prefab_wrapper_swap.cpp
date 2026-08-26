@@ -78,12 +78,10 @@ namespace Transmog::PrefabWrapperSwap
     static std::atomic<std::uintptr_t> s_stringInfoVtable{0};
     static std::atomic<std::uintptr_t> s_loaderRegistrySingleton{0};
 
-    // The four cascades consumed below are defined in aob_resolver.hpp:
-    //   k_structCopyCandidates        -- wrapper struct-copy hot path
-    // Each is a 3-anchor cascade per the AOB ordering rules in docs/aob-signatures.md (most-specific candidate first).
-
-    // Offset within the container where the boot-loaded hash table struct begins. The boot loader populates
-    // `container + 0x70` through the container insert primitive. The lookup primitive resolved by
+    // The cascades consumed below are defined in aob_resolver.hpp: k_structCopyCandidates (the wrapper struct-copy
+    // hot path), k_naturalPipelineCandidates, k_partListMergeCandidates and k_unlinkByWrapperCandidates. Each is
+    // ordered most-specific-first per the AOB rules in
+    // CrimsonDesertCore/external/DetourModKit/docs/misc/aob-signatures.md.
 
     // Module is "active" when at least one slot has a resolved swap pair installed in any s_swapMapPerChar bucket.
     // Selection is overlay-driven. There are no INI keys for this feature.
@@ -105,33 +103,44 @@ namespace Transmog::PrefabWrapperSwap
     //   bucket = s_activeCharIdx - 1 ([0]=Kliff, [1]=Damiane, [2]=Oongka)
     static std::mutex s_mapMtx;
 
+    /// Seed the engine mixes into its prefab-name hash. Part of the hash's identity, not a tunable.
+    static constexpr std::uint32_t k_prefabHashSeed = 0xC5EDEu;
+    /// lookup3 consumes 12 bytes per mixing round and folds whatever is left in the tail switch.
+    static constexpr std::size_t k_lookup3BlockBytes = 12;
+
     /**
-     * Jenkins lookup3 `hashlittle`, seeded with the engine's `0xC5EDE`.
+     * @brief Jenkins lookup3 `hashlittle`, seeded with @ref k_prefabHashSeed.
      *
-     * MEASURED: a prefab wrapper stores exactly this value at `+0x0C`, over its FULL suffixed name (`_l`, `_r`, `_in`,
-     * `_index01_r` included) and without a trailing NUL. Confirmed on 18 live wrappers across two independent paths --
-     * attached-record identities (`rec+0x40`) and the wrappers handed to the struct-copy chokepoint. It is also the
-     * same hash the game archive uses for an item's prefab list, so the two namespaces are one.
+     * @details MEASURED: a prefab wrapper stores exactly this value at `+0x0C`, over its FULL suffixed name (`_l`,
+     *          `_r`, `_in`, `_index01_r` included) and without a trailing NUL. Confirmed on 18 live wrappers across
+     *          two independent paths -- attached-record identities (`rec+0x40`) and the wrappers handed to the
+     *          struct-copy chokepoint. It is also the same hash the game archive uses for an item's prefab list, so
+     *          the two namespaces are one.
      *
-     * Keying the swap map on this instead of on the wrapper pointer removes instance discovery entirely: every
-     * instance of a name carries the same hash, so it no longer matters which one the engine passes. The catalog and
-     * the engine draw from different pools, so pointer keying could hold a correctly-named binding that never
-     * matched.
+     *          Keying the swap map on this instead of on the wrapper pointer removes instance discovery entirely:
+     *          every instance of a name carries the same hash, so it no longer matters which one the engine passes.
+     *          The catalog and the engine draw from different pools, so pointer keying can hold a correctly-named
+     *          binding that never matches.
+     * @warning The body below is the reference lookup3 mixing schedule transcribed literally. Do not "tidy" the
+     *          rotations or reorder the tail switch: the value has to match the engine's byte for byte.
      */
     static constexpr std::uint32_t prefab_name_hash(std::string_view name) noexcept
     {
         const auto rot = [](std::uint32_t x, int k) constexpr { return (x << k) | (x >> (32 - k)); };
-        std::uint32_t a, b, c;
-        a = b = c = 0xdeadbeefu + static_cast<std::uint32_t>(name.size()) + 0xC5EDEu;
+
+        std::uint32_t a = 0xdeadbeefu + static_cast<std::uint32_t>(name.size()) + k_prefabHashSeed;
+        std::uint32_t b = a;
+        std::uint32_t c = a;
 
         std::size_t i = 0;
         std::size_t len = name.size();
-        const auto u8 = [&](std::size_t idx) constexpr { return static_cast<std::uint32_t>(
-                                                             static_cast<unsigned char>(name[idx])); };
-        const auto word = [&](std::size_t idx) constexpr {
-            return u8(idx) | (u8(idx + 1) << 8) | (u8(idx + 2) << 16) | (u8(idx + 3) << 24);
-        };
-        while (len > 12)
+        const auto u8 = [&](std::size_t idx) constexpr
+        { return static_cast<std::uint32_t>(static_cast<unsigned char>(name[idx])); };
+        const auto word = [&](std::size_t idx) constexpr
+        { return u8(idx) | (u8(idx + 1) << 8) | (u8(idx + 2) << 16) | (u8(idx + 3) << 24); };
+
+        // clang-format off
+        while (len > k_lookup3BlockBytes)
         {
             a += word(i);
             b += word(i + 4);
@@ -142,10 +151,10 @@ namespace Transmog::PrefabWrapperSwap
             a -= c; a ^= rot(c, 16); c += b;
             b -= a; b ^= rot(a, 19); a += c;
             c -= b; c ^= rot(b, 4);  b += a;
-            i += 12;
-            len -= 12;
+            i += k_lookup3BlockBytes;
+            len -= k_lookup3BlockBytes;
         }
-        // Tail: fold the remaining 1..12 bytes, then finalise. A zero-length name never reaches here.
+        // Tail: fold the remaining 1..12 bytes, then finalise. A zero-length name returns the seeded value.
         switch (len)
         {
         case 12: c += u8(i + 11) << 24; [[fallthrough]];
@@ -169,6 +178,7 @@ namespace Transmog::PrefabWrapperSwap
         a ^= c; a -= rot(c, 4);
         b ^= a; b -= rot(a, 14);
         c ^= b; c -= rot(b, 24);
+        // clang-format on
         return c;
     }
 
@@ -263,48 +273,12 @@ namespace Transmog::PrefabWrapperSwap
     static std::atomic<std::uint64_t> s_natpipeSubstCount{0};
     static std::atomic<std::uint64_t> s_natpipeListEntries{0};
 
-    // Name-based prefab lookup primitive, resolved through the k_apptNameLookupCandidates cascade in aob_resolver.hpp.
-    // Signature: `__int64 fn(__int64 unused_a1, const char* name)`. It lowercases the name, interns it, then queries
-    // the engine's name->wrapper registry at loaderRegistrySingleton+0x50. It returns entry+8 on a hit (the value
-    // field of the registry entry, typically a wrapper-ptr or metadata-ptr) or 0 on a miss. Pure read-only.
-    //
-    // This primitive replaces the AppearanceTableLoader container chain, which queries different sub-tables that do
-    // not hold partprefab names. The name->wrapper registry carries character body-mesh prefabs, so it is the correct
-    // table for this use case.
-
     // Auto-deactivate-on-preset-switch state. Once swap activates and the user applies a body-mesh preset, we record
     // those itemIds. The next apply with DIFFERENT itemIds is treated as a switch-away and triggers
     // deactivate_for_clear before its substitutions can re-bind target wrappers to the new gear.
     static std::mutex s_lastApplyMtx;
     static std::uint16_t s_lastApplyItems[5] = {0, 0, 0, 0, 0};
     static bool s_lastApplyValid = false;
-
-    // --- AppearanceTableLoader integration state ---
-    //
-    // Captured by the one-shot hook on the ResMgr init entry. After capture, s_apptContainer is the heap object whose
-    // vtable (read-only check) matches s_apptContainerVtable below.
-    //
-    // Loader chain:
-    //   ResMgrInit(a1)       -- entry, we snapshot a1 (the outer struct)
-    //     ResMgr             -- read out of a1+0x40
-    //     inner allocator    -- allocates the loader and stores it at ResMgr+0x88
-    //
-    // After the trampoline returns, ResMgr is at *(QWORD*)(a1+0x40) and the loader is at *(QWORD*)(ResMgr+0x88). The
-    // PartPrefab container is at *(QWORD*)(loader+0x08).
-    //
-    // The hook installs once, snapshots, and disarms its capture flag. Subsequent calls (which DO occur during world
-    // reload) pass through. We do NOT re-capture, because every PartPrefab consumer uses the original boot singleton.
-    // The PartPrefab container vtable resolves at init() through reverse RTTI, or through k_apptLoaderCtorCandidates
-    // plus an inline walk-forward scan over the ctor body. It is stored in s_apptContainerVtable. The
-    // AppearanceTableLoader constructor allocates two containers and assigns final vtables:
-    //   a1[0] (_appearanceContainer)       -- intermediate vtable
-    //   a1[1] (_partPrefabDataContainer)   -- the one we want.
-    // The walk-forward scan picks the SECOND `lea rax,[rip+disp32] ; mov [rdi],rax` pair inside the ctor.
-
-
-    // Container-chain lookup primitives, resolved by AOB at init. They resolve in init() before the capture hook is
-    // installed, so they are callable as soon as the snapshot lands.
-
 
     // Wrapper +0x40 slot inside the scene-graph struct.
     static constexpr std::size_t k_sceneGraphWrapperOff = 0x40;
@@ -991,7 +965,6 @@ namespace Transmog::PrefabWrapperSwap
 
     // --- Per-slot catalog API ---
 
-
     bool is_catalog_populated() noexcept
     {
         return s_catalogPopulated.load(std::memory_order_acquire);
@@ -1024,7 +997,7 @@ namespace Transmog::PrefabWrapperSwap
         return s_selTgtIdx[idx];
     }
 
-    void set_selection(Transmog::TransmogSlot slot, int srcIdx, int tgtIdx, const char *site,
+    void set_selection(Transmog::TransmogSlot slot, int srcIdx, int tgtIdx, std::string_view site,
                        std::uint32_t charIdxFor) noexcept
     {
         const auto idx = static_cast<std::size_t>(slot);
@@ -1042,8 +1015,8 @@ namespace Transmog::PrefabWrapperSwap
         // the user switches the editing character. Idx 0 (no character bound yet) is a no-op -- the globals carry the
         // boot-time defaults until PresetManager::apply_to_state runs and binds a row.
         // Prefer the bucket the CALLER named. Re-reading the bound character here re-samples a global that another
-        // thread mutates, so a restore loop that began writing Kliff's row could finish writing Oongka's -- which is
-        // precisely how one character's prefab picks ended up registered as another's targets.
+        // thread mutates, so a per-slot restore loop could begin writing one character's row and finish writing
+        // another's -- which registers one character's prefab picks as another's targets.
         const auto charIdx = (charIdxFor != 0) ? charIdxFor : s_activeCharIdx.load(std::memory_order_acquire);
         if (charIdx >= 1 && charIdx <= 3)
         {
@@ -1052,9 +1025,9 @@ namespace Transmog::PrefabWrapperSwap
             s_selTgtIdxPerChar[bucket][idx] = tgtIdx;
 
             // Record only REAL writes to a per-character target row, at TRACE, with the name the index resolves to
-            // and the caller that asked for it. This pair is what identified a cross-character write that four
-            // rounds of reading the code did not: the row being poisoned, and who poisoned it. The CLEARED case is
-            // deliberately silent -- a restore loop clears all 23 slots every time and would bury the signal.
+            // and the caller that asked for it. Those two together are what makes a cross-character write findable:
+            // the row being poisoned, and who poisoned it. The CLEARED case is deliberately silent -- a restore loop
+            // clears every slot each time and would bury the signal.
             if (tgtIdx >= 0 && tgtIdx < catSize)
             {
                 DMK::Logger::get_instance().trace("[prefab-swap] sel-write bucket char[{}] slot[{}] tgt={} \"{}\" "
@@ -1650,7 +1623,6 @@ namespace Transmog::PrefabWrapperSwap
         // (no partial single-wrapper data leaking into the swap map).
         s_catalogPopulated.store(true, std::memory_order_release);
 
-
         // Seed the per-character default SOURCE selections. Deferred to ensure_default_sources_seeded() because it
         // needs ItemNameTable (to resolve carrier itemName -> itemId -> variant meshes), which is NOT ready this early
         // -- it builds on a worker that finishes after this catalog populate. The call here is a best-effort attempt
@@ -1791,8 +1763,6 @@ namespace Transmog::PrefabWrapperSwap
 
         const auto ci = static_cast<std::size_t>(activeIdx - 1);
         const auto cc = static_cast<Transmog::CarrierChar>(ci);
-
-
 
         {
             std::scoped_lock lk(s_catalogMtx);
@@ -2023,11 +1993,11 @@ namespace Transmog::PrefabWrapperSwap
             }
         }
 
-        // Sources need no wrapper discovery at all now: the map is keyed by name hash, and every instance of a name
-        // carries that hash. What used to sit here was a fresh heap walk over the ENTIRE address space (VirtualQuery
-        // across every committed region, 8-byte stride) on every apply, purely to find which wrapper instances
-        // existed. It was both the dominant cost of an apply and incomplete -- the catalog holds canonical instances
-        // while the engine passes pool instances, so a correctly-named binding could sit in the map and never match.
+        // Sources need no wrapper discovery at all: the map is keyed by name hash, and every instance of a name
+        // carries that hash. Discovering instances instead would mean a heap walk over the whole address space on
+        // every apply -- both the dominant cost of an apply and incomplete, because the catalog holds canonical
+        // instances while the engine passes pool instances, so a correctly-named binding could sit in the map and
+        // never match.
 
         // Build s_swapMapPerChar[ci] atomically under s_mapMtx. The bucket covers exactly the active character's body
         // for this apply. The natpipe hook reads from it during install-time wrapper traversal and dispatches via
@@ -2184,7 +2154,6 @@ namespace Transmog::PrefabWrapperSwap
     }
 
     // --- Hook callback ---
-
 
     // --- Per-actor scoping for the substitution hooks ---
     //
@@ -2430,7 +2399,6 @@ namespace Transmog::PrefabWrapperSwap
         }
     }
 
-
     /**
      * SEH-guarded single-wrapper unlink. In its own function because MSVC forbids __try in any function that also
      * needs C++ object unwinding (C2712).
@@ -2544,7 +2512,6 @@ namespace Transmog::PrefabWrapperSwap
         const auto trampoline = s_orig;
         if (!trampoline)
             return 0;
-
 
         // Cheap guards before any indirect read.
         if (!s_active.load(std::memory_order_acquire))
@@ -2763,8 +2730,7 @@ namespace Transmog::PrefabWrapperSwap
         if (!trampoline)
             return 0;
 
-
-        // Passthrough only when the feature has NEVER bound a swap this session. We deliberately do NOT gate on
+        // Passthrough only when the feature has NEVER bound a swap for this world. Deliberately NOT gated on
         // s_active alone: an installed target must still be unlinked when its body is torn down even if the
         // now-active character has no swap (s_active==false) -- the cross-character orphan path. The empty-list fast
         // path below keeps the cost negligible for the common zero-length unlink calls.
@@ -3015,18 +2981,16 @@ namespace Transmog::PrefabWrapperSwap
     // carrier, no tear-down, no bypass. Then the player just plays; any substitution logged with in_transmog=0 is the
     // engine carrying our swap on its own.
 
-
     bool init()
     {
         auto &logger = DMK::Logger::get_instance();
 
         // --- RipRelative singleton cascades ---
         //
-        // Four data-pointer cascades resolve StringInfoRegistry, StringInfoVtable, LoaderRegistry and
-        // ApptContainerVtable. They store into atomic globals consumed by walk_string_info, the AppearanceTableLoader
-        // enumerator, and the container-vtable filter. Cascade misses are non-fatal: each consumer treats a zero
-        // atomic as a soft bypass (the catalog walk returns empty, the vtable filter accepts all entries) so the rest
-        // of init() still completes.
+        // Three data-pointer cascades resolve StringInfoRegistry, StringInfoVtable and LoaderRegistry. They store
+        // into atomic globals consumed by walk_string_info, the loader-registry enumerator and the vtable sentinel
+        // filter. Cascade misses are non-fatal: each consumer treats a zero atomic as a soft bypass (the catalog walk
+        // returns empty, the vtable filter accepts all entries) so the rest of init() still completes.
         {
             const auto siReg = resolve_address(k_stringInfoRegistryCandidates, "StringInfoRegistry");
             if (siReg)
@@ -3155,15 +3119,6 @@ namespace Transmog::PrefabWrapperSwap
             }
         }
 
-        // --- AppearanceTableLoader hooks ---
-        //
-        // Resolve the lookup primitives FIRST so by the time the capture hook fires, lookups are immediately callable.
-        // AOB failure is non-fatal -- lookup_prefab_metadata returns 0 and the picker falls back to StringInfo-only
-        // behavior.
-        //
-        // The AppearanceTableLoader capture hook and its two lookup primitives were removed: the only consumer
-        // was lookup_prefab_metadata, whose result was written to a field no code read. See prefab_wrapper_swap.hpp.
-
         // Boot-time auto-scan: kick off a detached thread that waits for the world to be ready, then walks StringInfo
         // to populate the per-slot catalog. That also triggers the heap-walk merge for parallel-pool wrappers, and it
         // attempts the per-character source seed derived from each carrier's runtime meshes. The catalog is the single
@@ -3211,8 +3166,9 @@ namespace Transmog::PrefabWrapperSwap
             else
             {
                 UnlinkByWrapperFn tramp = nullptr;
-                auto r = hookMgr.create_inline_hook("UnlinkByWrapper", rcAddr, reinterpret_cast<void *>(on_remove_claims),
-                                                    reinterpret_cast<void **>(&tramp));
+                auto r =
+                    hookMgr.create_inline_hook("UnlinkByWrapper", rcAddr, reinterpret_cast<void *>(on_remove_claims),
+                                               reinterpret_cast<void **>(&tramp));
                 if (r.has_value())
                 {
                     s_origUnlinkByWrapper = tramp;
@@ -3262,7 +3218,6 @@ namespace Transmog::PrefabWrapperSwap
                 }
             }
         }
-
 
         return true;
     }
@@ -3454,7 +3409,8 @@ namespace Transmog::PrefabWrapperSwap
         collect_wrappers_for_item(itemId, wrappers);
         if (wrappers.empty())
         {
-            DMK::Logger::get_instance().trace("[prefab-swap] direct-fake 0x{:04x}: no catalog wrapper resolved", itemId);
+            DMK::Logger::get_instance().trace("[prefab-swap] direct-fake 0x{:04x}: no catalog wrapper resolved",
+                                              itemId);
             return;
         }
         {
@@ -3659,7 +3615,7 @@ namespace Transmog::PrefabWrapperSwap
     {
         // Unconditional, unlike ensure_armed_for_slot_apply, which bails when no explicit pick exists. The table is
         // also fed by targets DERIVED from each slot's item, so it has to be rebuilt even with no picks at all --
-        // otherwise it keeps whatever the previous session left in it, which is exactly the stale-helm case.
+        // otherwise it keeps whatever the last world left in it, and the slot comes up wearing the stale target.
         (void)apply_selections_to_swap_map();
     }
 
@@ -3899,11 +3855,11 @@ namespace Transmog::PrefabWrapperSwap
                 // match releases the owner, shifts the tail down and decrements the count. The vector's invariant is
                 // maintained by construction.
                 //
-                // The synthesised NaturalPipeline detach that used to run first is gone. It removed nothing in any
+                // Deliberately NO synthesised NaturalPipeline detach ahead of it. That removed nothing in any
                 // measurement, and it nulled owners in place without touching the count -- leaving holes the engine
-                // walks unguarded, which crashed the game on a preset switch.
+                // walks unguarded, which crashes on a preset switch. The engine function also returns void, so any
+                // "unlink count" taken from it is not a real number.
                 //
-                // Note the engine function returns void, so its "unlink count" was never a real number.
                 // Detach first -- this is what retracts the REALIZED part. Erasing the claim afterwards is
                 // bookkeeping; on its own it drops the claim count and leaves the mesh on screen.
                 //
