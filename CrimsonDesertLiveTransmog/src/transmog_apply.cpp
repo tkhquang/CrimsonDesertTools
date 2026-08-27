@@ -586,7 +586,10 @@ namespace Transmog
      */
     static bool apply_host_matches_owner(std::uintptr_t a1, const char *site) noexcept
     {
-        const auto hostIdx = char_idx_for_equip_slot(a1);
+        // Live walk, not the published table. This guard fails open on 0, so answering "unknown" disarms it
+        // silently, and the table reads unknown for a stretch after every world load. The apply pipeline runs a few
+        // times a second and already paid this walk, so it can afford the certainty; the engine-thread hooks cannot.
+        const auto hostIdx = char_idx_for_equip_slot_uncached(a1);
         if (hostIdx == 0)
             return true; // not a protagonist body, or the chain is mid-teardown -- not a mismatch
 

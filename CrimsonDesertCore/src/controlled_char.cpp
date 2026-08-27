@@ -701,6 +701,11 @@ namespace CDCore
         }
     }
 
+    std::uint32_t character_idx_for_ccoia(std::uintptr_t ccoia) noexcept
+    {
+        return classify_ccoia(ccoia);
+    }
+
     std::uintptr_t equip_slot_for_ccoia(std::uintptr_t ccoia) noexcept
     {
         if (ccoia < k_minValidPtr)

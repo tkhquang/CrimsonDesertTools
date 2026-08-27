@@ -89,14 +89,57 @@ namespace Transmog
     /**
      * @brief Which protagonist owns this equip-slot component (`a1`), 1-based, or 0.
      *
-     * @details Resolved from the LIVE actor chain -- snapshot_body_cache enumerates the player CCOIAs with their
-     *          character index, and equip_slot_for_ccoia maps each to the `a1` LT applies against. Returns 0 for
-     *          companions, NPCs and wildlife, and while the chain is mid-teardown.
+     * @details Answered from the table @ref publish_body_owner_table maintains, so a caller pays three integer
+     *          compares rather than a walk of the engine's actor array. A matching row is re-derived from the actor
+     *          it came from before its index is returned, so an equip-slot address the allocator has reissued cannot
+     *          borrow a protagonist's identity.
+     *
+     *          Returns 0 for NPCs and wildlife, while the chain is mid-teardown, and also before the first table is
+     *          published or while its rows are between refreshes. Callers must treat 0 as "unknown", never as
+     *          "confirmed not a protagonist" -- see @ref char_idx_for_equip_slot_uncached where that distinction
+     *          matters.
      * @warning Use this, NOT resolve_player_component(), to answer "whose body is this?". resolve_player_component()
      *          always returns Kliff's component whatever character is controlled, so comparing against it silently
      *          accepts every other character's body.
      */
     [[nodiscard]] std::uint32_t char_idx_for_equip_slot(std::uintptr_t a1) noexcept;
+
+    /**
+     * @brief Live, uncached form of @ref char_idx_for_equip_slot.
+     * @details Walks the actor array on every call, so it always answers from current state and never reports
+     *          "unknown" merely because the published table is between refreshes. Reserve it for the apply pipeline,
+     *          which runs a handful of times a second and where a blind window would silently disarm an ownership
+     *          guard. It must never be called from an engine-driven hook: the walk is the cost this whole table
+     *          exists to keep off those threads.
+     */
+    [[nodiscard]] std::uint32_t char_idx_for_equip_slot_uncached(std::uintptr_t a1) noexcept;
+
+    /// Upper bound on published protagonist bodies: the game has exactly three playable characters.
+    inline constexpr std::size_t k_bodyOwnerCap = 3;
+
+    /**
+     * @brief Republishes the table of protagonist bodies that @ref char_idx_for_equip_slot answers from.
+     * @details Ownership is derived from a full walk of the engine's actor array. That walk can only stop early once
+     *          every companion has been found, so a party of one sweeps the array end to end -- far too expensive to
+     *          repeat per socket build on an engine thread, which is where the question is asked.
+     *
+     *          Ownership therefore has exactly one producer: the load-detect worker, which already holds a fresh
+     *          snapshot each tick. Engine threads only ever read the published result. Republishing unconditionally
+     *          (rather than on a change signal) is what makes the table self-healing: a snapshot taken while the
+     *          actor list is still filling publishes a short table, and the next tick replaces it. A change-triggered
+     *          scheme cannot recover from that, because the very signal it waits for is the one that already fired.
+     *
+     *          The two parallel arrays exist so this header stays free of a CDCore include. Its consumers pull it
+     *          in for slot mappings and flags alone, and none of them should acquire the actor-chain headers just to
+     *          reach a publish entry point.
+     *
+     * @param ccoias   Protagonist CCOIA pointers, @p n entries.
+     * @param charIdxs Matching 1-based character indices (1 Kliff, 2 Damiane, 3 Oongka), @p n entries.
+     * @param n        Number of entries; anything past @ref k_bodyOwnerCap is ignored.
+     * @note An empty snapshot publishes an empty table. Keeping the previous rows would leave them naming bodies
+     *       the engine has already freed and whose addresses it reissues.
+     */
+    void publish_body_owner_table(const std::uintptr_t *ccoias, const std::uint32_t *charIdxs, std::size_t n) noexcept;
 
     /**
      * @brief Which character `slot_mappings()` currently describes: 1 Kliff, 2 Damiane, 3 Oongka, 0 unbound.

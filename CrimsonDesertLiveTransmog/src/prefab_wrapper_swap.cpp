@@ -3525,6 +3525,16 @@ namespace Transmog::PrefabWrapperSwap
      * The rebuild discards uncommitted picks and re-derives everything from the active preset, which is the correct
      * meaning of entering a new world: the preset on disk is the truth, and edits that were never committed to it
      * must not dress the new body. Mid-session edits are unaffected because the stamp still matches.
+     *
+     * FIXME: the rebuild itself runs on whichever thread asked, and the per-socket descriptor detour asks from an
+     * engine thread -- so the resync, the preset re-mirror and the swap-map rebuild all land on the frame's critical
+     * path. It fires once per distinct (world generation, active character) pair, which is once per load plus once
+     * per character switch. The work is a full preset re-mirror plus a swap-map rebuild, so it scales with the
+     * catalog and the slot count, and it lands during a load or a character swap where the engine is already
+     * stalling harder on its own. That is what keeps it tolerable rather than urgent. It is still the wrong place
+     * for it, because nothing bounds the cost and nothing stops a future caller from reaching it more often. The fix
+     * is to have the load-detect worker own the rebuild the same way it owns the body-ownership table, leaving this
+     * path to read a published result.
      */
     static void ensure_target_table_current() noexcept
     {

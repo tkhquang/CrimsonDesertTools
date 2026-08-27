@@ -188,6 +188,25 @@ namespace CDCore
     [[nodiscard]] std::uintptr_t equip_slot_for_ccoia(std::uintptr_t ccoia) noexcept;
 
     /**
+     * @brief Identifies which protagonist a CCOIA is, 1-based, or 0 for anyone else.
+     * @details Runs the same classifier @ref snapshot_body_cache applies while walking the actor array: the
+     *          appearance-config asset path is matched against the protagonist codenames, falling back to the CCOIA
+     *          identity byte for Kliff when the appearance chain is mid-teardown.
+     *
+     *          Exposed for consumers that cache a CCOIA and must later confirm the pointer still denotes the same
+     *          character. The engine pools these actors, so a freed CCOIA can be handed back to an unrelated actor;
+     *          a structural walk from the pointer cannot detect that, because the successor object occupies the same
+     *          layout. Re-running the classifier can, since it reads identity rather than shape.
+     *
+     *          Costs one appearance-path read plus a codename match, so it suits a per-body confirmation. It is far
+     *          too expensive to run across the whole actor array on a hot path.
+     *
+     * @param ccoia Pointer to a pa::ClientChildOnlyInGameActor instance.
+     * @return 1 Kliff, 2 Damiane, 3 Oongka, or 0 when the pointer is not a protagonist or cannot be read.
+     */
+    [[nodiscard]] std::uint32_t character_idx_for_ccoia(std::uintptr_t ccoia) noexcept;
+
+    /**
      * @brief Classify an appearance-config asset path into a protagonist index using the codename set shared with the
      *        CCOIA classifier.
      * @details Locates the `/cd_` anchor in @p path and substring-matches the suffix against the three configured
