@@ -1,5 +1,3 @@
-## [Title for next release]
+## Stutter and frame drop fix
 
-- New feature
-- Bug fix
-- Improvement
+- Fixed repeated stutters and frame drops, most noticeable when one or both of your companions are not with you

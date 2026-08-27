@@ -6,6 +6,8 @@
 
 #include <Windows.h>
 
+#include <mutex>
+
 namespace Transmog
 {
     std::string runtime_dir_utf8()
@@ -226,7 +228,68 @@ namespace Transmog
         s_lastAppliedCarrierIds.fill(0);
     }
 
-    std::uint32_t char_idx_for_equip_slot(std::uintptr_t a1) noexcept
+    // --- Protagonist body-ownership table ---
+    //
+    // One producer (the load-detect worker) and many readers (engine threads inside the socket-build detour). The
+    // producer owns the expensive part, the actor-array walk, so a reader never pays for it.
+    //
+    // Each row keeps the CCOIA it was derived from alongside the equip-slot address, because the address alone is not
+    // a safe key. The engine pools both objects, so between two publishes a body can be freed and its addresses handed
+    // to an unrelated actor, and a bare address compare would then report a protagonist index for somebody else's
+    // body.
+    //
+    // A hit therefore confirms two independent things before it trusts the row, because either alone leaves a hole:
+    //   - the CCOIA still classifies as the same character, which rules out the pool reissuing the actor. A structural
+    //     walk cannot detect that on its own, since the successor object occupies the identical layout;
+    //   - the CCOIA still resolves to this equip slot, which rules out the slot being reissued on its own.
+    // Both are paid only by the handful of bodies that match an entry, never by the NPCs and creatures that make up
+    // the traffic, and together they turn a silent mis-identification into an ordinary miss.
+    //
+    // A plain mutex rather than a reader/writer lock: the guarded region is a scan of at most three integers, and the
+    // detour reaches it on the order of once per second, so shared-reader parallelism would buy nothing that the
+    // narrower critical section does not already give.
+    namespace
+    {
+        /// One published protagonist body. Plain data, no invariant beyond what publish_body_owner_table enforces.
+        struct BodyOwnerRow
+        {
+            std::uintptr_t ccoia;
+            std::uintptr_t equipSlot;
+            std::uint32_t charIdx;
+        };
+
+        std::array<BodyOwnerRow, k_bodyOwnerCap> s_bodyOwners{};
+        std::size_t s_bodyOwnerCount = 0;
+        std::mutex s_bodyOwnerMutex;
+    } // namespace
+
+    void publish_body_owner_table(const std::uintptr_t *ccoias, const std::uint32_t *charIdxs, std::size_t n) noexcept
+    {
+        if (ccoias == nullptr || charIdxs == nullptr)
+            return;
+
+        // Resolve before taking the lock. equip_slot_for_ccoia walks engine memory under SEH, and holding a lock
+        // across a foreign-memory read would expose every reader to whatever that walk costs on a torn chain.
+        std::array<BodyOwnerRow, k_bodyOwnerCap> built{};
+        std::size_t written = 0;
+        for (std::size_t i = 0; i < n && i < built.size(); ++i)
+        {
+            const auto slot = CDCore::equip_slot_for_ccoia(ccoias[i]);
+            if (slot == 0)
+                continue; // component chain not wired yet; the next publish picks this body up
+            built[written] = BodyOwnerRow{ccoias[i], slot, charIdxs[i]};
+            ++written;
+        }
+
+        // An exhausted snapshot leaves written at 0, which publishes an empty table. That is deliberate: holding the
+        // previous rows through a teardown is the dangerous direction, because their bodies are freed and their
+        // addresses reissued, so a surviving row would name a dead character as the owner.
+        std::scoped_lock lk(s_bodyOwnerMutex);
+        s_bodyOwners = built;
+        s_bodyOwnerCount = written;
+    }
+
+    std::uint32_t char_idx_for_equip_slot_uncached(std::uintptr_t a1) noexcept
     {
         if (a1 < 0x10000)
             return 0;
@@ -238,6 +301,34 @@ namespace Transmog
                 return entries[i].charIdx;
         }
         return 0;
+    }
+
+    std::uint32_t char_idx_for_equip_slot(std::uintptr_t a1) noexcept
+    {
+        if (a1 < 0x10000)
+            return 0;
+
+        std::uintptr_t ccoia = 0;
+        std::uint32_t charIdx = 0;
+        {
+            std::scoped_lock lk(s_bodyOwnerMutex);
+            for (std::size_t i = 0; i < s_bodyOwnerCount; ++i)
+            {
+                if (s_bodyOwners[i].equipSlot == a1)
+                {
+                    ccoia = s_bodyOwners[i].ccoia;
+                    charIdx = s_bodyOwners[i].charIdx;
+                    break;
+                }
+            }
+        }
+        if (ccoia == 0)
+            return 0; // every NPC and creature lands here, having paid at most three integer compares
+
+        // Confirmed outside the lock, for the reasons given on the table above.
+        if (CDCore::character_idx_for_ccoia(ccoia) != charIdx)
+            return 0;
+        return CDCore::equip_slot_for_ccoia(ccoia) == a1 ? charIdx : 0;
     }
 
     std::atomic<std::uint32_t> &slot_mappings_owner() noexcept

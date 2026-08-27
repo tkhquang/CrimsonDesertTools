@@ -234,9 +234,12 @@ namespace Transmog::SocketMeshOverride
             // than "does this body belong to the character these targets came from" -- and a table holding one
             // protagonist's targets would pass while the engine rebuilds another, dressing the wrong character.
             //
-            // char_idx_for_equip_slot resolves the body through the live actor chain, so it cannot be fooled by state
-            // a save-load or hot reload left stale. A zero on either side means "not a protagonist body" or "table
-            // unbound" -- both fall through rather than guess.
+            // char_idx_for_equip_slot answers from a table the load-detect worker republishes once per tick in
+            // steady state and once per retry attempt during a load. A match is confirmed against the recorded actor
+            // before an index comes back, so a recycled address cannot borrow a protagonist's identity. What it can
+            // do is answer 0 for a short window after a body is rebuilt, which costs this pre-substitution pass and
+            // nothing else: the character's own apply still dresses them. A zero on either side means "not a
+            // protagonist body" or "table unbound" -- both fall through rather than guess.
             const auto tableIdx = PrefabWrapperSwap::target_table_char_idx();
             const auto hostIdx = char_idx_for_equip_slot(static_cast<std::uintptr_t>(a1));
             if (tableIdx == 0 || hostIdx == 0 || hostIdx != tableIdx)

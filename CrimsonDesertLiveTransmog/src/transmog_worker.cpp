@@ -713,6 +713,14 @@ namespace Transmog
         else
         {
             // Full chain reached -- reset retry counter so the next world bump (save-load) starts fresh.
+            //
+            // FIXME: this zeroes the counter that the deferred-body branch at the end of this function then reads,
+            // so that branch always computes attempt 1 and its k_multiCharMaxRetries cap never trips. Whenever the
+            // chain is complete but a body is not ready, the re-arm therefore repeats indefinitely at
+            // k_multiCharRetryMs instead of stopping after the intended budget. It currently self-limits because the
+            // body does become ready, but a save where one never does would keep the worker re-arming for the whole
+            // session. The two paths need separate counters: this one bounds "chain never wired", that one bounds
+            // "body never ready", and they are not the same failure.
             s_multiCharRetryCount.store(0, std::memory_order_release);
         }
         if (n == 0)
@@ -1232,6 +1240,34 @@ namespace Transmog
      */
     static constexpr std::uint64_t k_charSwapSettleMs = 1000;
 
+    /**
+     * @brief Walks the live actor chain once and republishes the protagonist body-ownership table from it.
+     * @details This thread is the table's only producer, so wherever this thread parks the table stops being
+     *          refreshed. That matters most during a world load, which is exactly when its rows are shortest and
+     *          likeliest to name bodies the engine has already replaced, so the auto-apply retry loop refreshes
+     *          through here as well as the steady-state tick.
+     *
+     *          The snapshot is split into parallel arrays because shared_state.hpp deliberately carries no CDCore
+     *          include; see @ref publish_body_owner_table.
+     * @return Number of protagonists the snapshot found, which doubles as the roster sample the caller compares
+     *         against to detect a companion arriving.
+     */
+    static std::size_t publish_owner_table_from_live() noexcept
+    {
+        std::array<CDCore::BodyCacheEntry, k_bodyOwnerCap> snap{};
+        const auto found = CDCore::snapshot_body_cache(snap.data(), snap.size());
+
+        std::array<std::uintptr_t, k_bodyOwnerCap> ccoias{};
+        std::array<std::uint32_t, k_bodyOwnerCap> charIdxs{};
+        for (std::size_t i = 0; i < found; ++i)
+        {
+            ccoias[i] = snap[i].body;
+            charIdxs[i] = snap[i].charIdx;
+        }
+        publish_body_owner_table(ccoias.data(), charIdxs.data(), found);
+        return found;
+    }
+
     static DWORD WINAPI load_detect_thread_fn(LPVOID)
     {
         auto &logger = DMK::Logger::get_instance();
@@ -1298,6 +1334,11 @@ namespace Transmog
             static constexpr std::size_t kSnapshotCountUninit = static_cast<std::size_t>(-1);
             static std::size_t s_prevSnapshotCount = kSnapshotCountUninit;
             {
+                // Refresh the ownership table first, so the socket-build detour on the engine threads is answering
+                // from this tick's roster rather than the previous one. The count doubles as the roster sample the
+                // watcher below compares against, so the walk happens once.
+                const auto n = publish_owner_table_from_live();
+
                 const auto curWorldGen = CDCore::world_generation();
                 if (curWorldGen != prevWorldGen)
                 {
@@ -1314,8 +1355,6 @@ namespace Transmog
                 }
                 else
                 {
-                    std::array<CDCore::BodyCacheEntry, 3> snap{};
-                    const auto n = CDCore::snapshot_body_cache(snap.data(), snap.size());
                     if (s_prevSnapshotCount != kSnapshotCountUninit && n > s_prevSnapshotCount)
                     {
                         logger.info("Player roster grew {} -> {}; arming "
@@ -1609,6 +1648,11 @@ namespace Transmog
                     sleep_interruptible(delayMs);
                     if (shutdown_requested().load(std::memory_order_relaxed))
                         break;
+
+                    // The outer tick cannot run while this loop owns the thread, and this loop can hold it for a
+                    // minute or more. Refresh here too, or the engine threads spend the whole load answering from a
+                    // roster captured before it started.
+                    (void)publish_owner_table_from_live();
 
                     // Mid-retry wrapper-change abort. The engine sometimes parks user+0xD8 on a placeholder wrapper for
                     // 60+ seconds before deallocating it and allocating the real character actor at a different
