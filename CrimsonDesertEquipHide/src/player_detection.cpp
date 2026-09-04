@@ -13,8 +13,17 @@
 
 namespace EquipHide
 {
-    static std::atomic<uint32_t> s_resolveCounter{0};
-    static constexpr uint32_t k_resolveInterval = 512;
+    /**
+     * @brief Minimum gap between inline (game-thread) resolves while no protagonist is known (ms).
+     *
+     *  A save-load wipe zeroes the published player count, so without a floor every visibility check in that window
+     *  would start its own actor sweep. 250ms stays responsive against the resolve-poll thread's 1s tick while
+     *  bounding the game thread to four sweeps a second.
+     */
+    static constexpr int64_t k_inlineResolveMinIntervalMs = 250;
+
+    /** @brief Timestamp of the last inline resolve, in @ref steady_ms units. Zero means none has run. */
+    static std::atomic<int64_t> s_lastInlineResolveMs{0};
 
     static uintptr_t s_prevVisCtrls[k_maxProtagonists]{};
     static int s_prevCount = 0;
@@ -520,10 +529,29 @@ namespace EquipHide
             return ps.count.load(std::memory_order_relaxed) > 0 && is_player_vis_ctrl(a1);
         }
 
-        // Global pointer chain mode.
-        auto cnt = s_resolveCounter.fetch_add(1, std::memory_order_relaxed);
-        if (ps.count.load(std::memory_order_relaxed) == 0 || (cnt & (k_resolveInterval - 1)) == 0)
-            resolve_player_vis_ctrls();
+        // Cold start only: resolve inline when no protagonist is published yet, never on a periodic refresh.
+        //
+        // This body runs on a game thread, and resolve_player_vis_ctrls() is not cheap. Its actor sweep runs the
+        // appearance-config classifier over the manager's actor array and only early-outs once BOTH companions have
+        // been found, so solo play, or any moment a companion is not spawned, walks the array end to end. The bound is
+        // the engine's array capacity, which ratchets up with each zone load and never shrinks: cost per call grows
+        // with the number of transitions in a session while the call rate stays flat. A periodic refresh here would
+        // therefore turn into a per-frame stall that only shows up deep into a session.
+        //
+        // The resolve-poll thread covers the steady state instead -- it re-resolves once a second off the game thread
+        // and reacts to actor rotation directly, so nothing is lost by refusing to refresh from the hook. Only the
+        // cold path stays, because until the count is non-zero this filter rejects every part and the mod is inert.
+        if (ps.count.load(std::memory_order_relaxed) == 0)
+        {
+            const auto now = steady_ms();
+            auto last = s_lastInlineResolveMs.load(std::memory_order_relaxed);
+            if ((now - last) >= k_inlineResolveMinIntervalMs &&
+                s_lastInlineResolveMs.compare_exchange_strong(last, now, std::memory_order_relaxed,
+                                                              std::memory_order_relaxed))
+            {
+                resolve_player_vis_ctrls();
+            }
+        }
 
         /* Fail-closed (see fallback branch above for rationale). */
         return ps.count.load(std::memory_order_relaxed) > 0 && is_player_vis_ctrl(a1);
