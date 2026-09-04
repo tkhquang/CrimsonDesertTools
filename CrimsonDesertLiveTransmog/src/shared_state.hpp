@@ -247,7 +247,9 @@ namespace Transmog
     SlotTagToHandleFn &slot_tag_to_handle_fn();
 
     // Item -> slot handle, or 0xFFFF when the engine will not place the item. SlotPopulator calls this first and
-    // bails on 0xFFFF, so it decides whether a carrier can be equipped at all.
+    // bails on 0xFFFF, so it decides whether a carrier can be equipped at all. A carrier the engine refuses makes
+    // SlotPopulator a silent no-op: it equips nothing and still returns a value that looks like success, so the
+    // apply path asks this question itself rather than reading the answer out of SlotPopulator's return.
     using ItemToSlotResolveFn = std::int64_t(__fastcall *)(std::int64_t a1, std::int16_t itemId);
     ItemToSlotResolveFn &item_to_slot_resolve_fn();
 

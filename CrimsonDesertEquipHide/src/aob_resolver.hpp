@@ -125,25 +125,41 @@ namespace EquipHide
     /**
      * @brief IndexedStringA map insert routine -- companion to MapLookup.
      */
+    // Do NOT try to anchor a row on the bucket arithmetic alone. This hash map is heavily templated: the
+    // `div modulus / shl 8 / add [map+0x10]` probe matches hundreds of sites in the image, and so does the
+    // `inc [map+4]` plus `[map+0x18]` write-back pair. What singles out THIS instantiation is its argument shuffle,
+    // four arguments parked in a specific order, which is why P1 and P2 are built around it. P3 is the exception and
+    // pays for it: it reaches the bucket-array lea instead, and needs the mid-function spill and the call ahead of it
+    // to stay unique.
+    //
+    // Map layout every row depends on: bucket modulus at +0, live count at +4, capacity at +8, bucket array at +0x10
+    // (256-byte buckets, index `(key % modulus) << 8`), entry-pointer array at +0x18.
     inline constexpr AddrCandidate k_mapInsertCandidates[] = {
         // P1 -- full prologue through the argument shuffle.
         // The five callee-saved pushes and the shuffle that follows are the most specific window available. The
         // stack-allocation imm8 is wildcarded because the compiler sizes the frame. No branch sits inside the window,
         // so the displacement cannot move when a branch encoding changes. Match lands on the function start.
-        {"MapInsert_P1_FullPrologue", "40 53 56 57 41 54 41 55 48 83 EC ?? 44 8B 11 48 8B D9 4D 8B E1",
+        //
+        // The window opens with the empty-map test folded into the modulus read (`cmp dword [rcx],0`) and closes on
+        // the r9/r8d/rdx/rcx parking. The parking order is the identifier; the map pointer's own register is not.
+        {"MapInsert_P1_FullPrologue",
+         "40 53 56 57 41 54 41 55 48 83 EC ?? 83 39 00 4D 8B E1 41 8B F0 4C 8B EA 48 8B F9",
          ResolveMode::Direct, 0, 0},
 
-        // P2 -- prologue tail plus the argument shuffle.
-        // Drops the leading pushes, which is the part of the prologue that moves most: earlier builds emitted a
-        // register home store and a different push set here. Walk back 4 bytes to the function start.
-        {"MapInsert_P2_PrologueTailArgShuffle",
-         "41 54 41 55 48 83 EC ?? 44 8B 11 48 8B D9 4D 8B E1 41 8B F0 4C 8B EA", ResolveMode::Direct, -4, 0},
+        // P2 -- argument shuffle only, with no prologue head at all.
+        // Independent of the register-save set, which is the part of the prologue that moves most. Walk back 0x0C
+        // bytes to the function start.
+        {"MapInsert_P2_ArgShuffleBody", "83 39 00 4D 8B E1 41 8B F0 4C 8B EA 48 8B F9", ResolveMode::Direct, -0x0C, 0},
 
-        // P3 -- argument shuffle only. The window ends on the first bucket-count test.
-        // Independent of the whole prologue, so it survives a frame reshape that defeats P1 and P2. The window stops
-        // before the first conditional branch, so the walk back to the function start stays fixed at 0x0C.
-        {"MapInsert_P3_ArgShuffleBody",
-         "44 8B 11 48 8B D9 4D 8B E1 41 8B F0 4C 8B EA 41 8B CA 45 85 D2", ResolveMode::Direct, -0x0C, 0},
+        // P3 -- past the shuffle and past the empty-map early-out, opening on the re-read of the modulus and the
+        // bucket-array lea that the probe loop runs on. The mid-function callee-saved spill slot is wildcarded.
+        //
+        // This row shares no PATTERN bytes with P1 or P2, so a rewrite of those bytes cannot take all three down.
+        // It is not independent of the entry block, though: its -0x1D walk-back is measured across that block and
+        // across the empty-map jcc, so an added instruction there, or a widening of that jcc from rel8 to rel32,
+        // leaves the row matching and resolving SHORT. Re-measure it whenever the entry block changes.
+        {"MapInsert_P3_BucketArrayLea",
+         "41 8B D0 E8 ?? ?? ?? ?? 44 8B 17 4C 89 74 24 ?? 4C 8D 77 10 45 85 D2", ResolveMode::Direct, -0x1D, 0},
     };
 
     /**
@@ -153,8 +169,13 @@ namespace EquipHide
      *
      * Register layout at the hook point:
      *   RCX = PartInOutSocket struct. The instruction before the hook loads it from [RBP+0x5F].
-     *   R13 = pointer to the part-hash DWORD. The exclusion-list walk reads it as `mov edx,[r13]`, and the
-     *         transition dispatch passes it as `rdx = r13`.
+     *   R15 = pointer to the part-hash DWORD, read at both comparison sites: the exclusion-list walk loads the key
+     *         as `mov edx,[r15]` and the transition dispatch loads it as `mov r8d,[r15]`. Both are loads THROUGH
+     *         the pointer, which is the test for identifying it -- a register only one of the two sites
+     *         dereferences is the wrong one.
+     *   R13 = the exclusion walk's loop counter (`mov ecx,r13d` ... `inc ecx`), not a pointer. Reading it as the
+     *         hash pointer yields a small integer that `plausible_userspace_ptr` rejects, so the handler returns
+     *         early and the cascade fix goes dead with the hook still reporting installed.
      *   R8B = exclusion-list flag. The engine consumes it at `test r8b,r8b` and `cmp [rcx+3],r8b`.
      *   [RBP+0x4F] = the a1 context pointer. It feeds the exclusion array at a1+0x78 and the count at a1+0x80,
      *         with a 0x10-byte entry stride.
@@ -225,37 +246,37 @@ namespace EquipHide
      * @brief Return-address landmark inside createPrefabFromPartPrefab, the engine-registered profiling label for the
      *        prefab instantiation routine.
      *
-     * That function instantiates a renderable prefab from a PartPrefab, then tail-calls the rule-eval entry point. The
-     * rule-eval pipeline inside that call reaches PostfixEval on the freshly-built instance. The return address on the
-     * byte right after that inner call is the landmark (match+12, the first byte of the post-call mov rbx, [rsp+0x4A0]
-     * epilogue load).
+     * That function instantiates a renderable prefab from a PartPrefab, then calls the rule-eval entry point. The
+     * rule-eval pipeline inside that call reaches PostfixEval on the freshly-built instance. The landmark is the
+     * return address of that call, i.e. the byte immediately after it (see the row's own disp_offset).
      *
      * Player PostfixEval invocations come from the equipment-visibility update loop elsewhere in the binary and never
      * include this return address on their stack. bald_fix uses stack presence of this landmark to reject
      * prefab-instantiation-path calls. It does not cache ctx pointers and it does not depend on frequency heuristics.
      */
+    // This landmark is a MEANING, not just an address: the row has to name the rule-eval call specifically, so
+    // re-verify the bald fix in game after any change here.
+    //
+    // Do NOT identify the call by its position in the function. It is not reliably the last call, and the compiler
+    // schedules local cleanup between it and the epilogue, so a "call followed by the frame reload" row picks up a
+    // destructor's return address instead. That resolves cleanly and silently makes the bald fix reject every NPC.
+    //
+    // Identify it by its ARGUMENT SETUP instead: the world singleton is loaded from a module global, walked to a
+    // large sub-object displacement (in the +0x40000 family that k_loaderRegistryCandidates in LT also walks), and
+    // passed with an outbound `lea r8,[rbp-X]` result slot.
+    //
+    // Longer term this target wants a ResolveMode::StringXref tier on the function's own profiling label,
+    // "createPrefabFromPartPrefab", with XrefReturn::EnclosingFunction: that literal is what actually names this
+    // function, and it survives the code motion that keeps invalidating byte rows here.
     inline constexpr AddrCandidate k_npcPfeReturnAddrCandidates[] = {
-        // P1 -- tight. Both frame offsets retained as literals for the strictest match on the current build. First to
-        // fail if either the lea frame disp or the mov rbx stack disp shifts.
-        {"NpcPfeReturnAddr_P1_PostCallLandmark", "48 8D 8D 10 02 00 00 E8 ?? ?? ?? ?? 48 8B 9C 24 A0 04 00 00",
-         ResolveMode::Direct, 0, 0},
-
-        // P2 -- wildcards the lea frame disp, so a future build that adds or removes locals still matches. Such a
-        // build moves the frame displacement. P2 also extends forward through the stack-teardown add rsp, <imm> whose
-        // immediate is also wildcarded. It keeps the landmark A0 04 00 00 as a literal for uniqueness.
-        {"NpcPfeReturnAddr_P2_LandmarkEpilogue",
-         "48 8D 8D ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 8B 9C 24 A0 04 00 00 "
-         "48 81 C4 ?? ?? ?? ??",
-         ResolveMode::Direct, 0, 0},
-
-        // P3 -- P2 extended through the non-volatile-register pop chain and terminating ret. The
-        // 41 5F 41 5E 41 5D 41 5C 5F 5E 5D C3 suffix ties the pattern to this specific callee-saved-set (r12..r15 +
-        // rdi + rsi + rbp). Most resilient to frame-layout shifts but will break if the compiler changes which
-        // registers the function spills.
-        {"NpcPfeReturnAddr_P3_WiderEpilogueChain",
-         "48 8D 8D ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 8B 9C 24 A0 04 00 00 "
-         "48 81 C4 ?? ?? ?? ?? 41 5F 41 5E 41 5D 41 5C 5F 5E 5D C3",
-         ResolveMode::Direct, 0, 0},
+        // P1 -- the rule-eval call's argument setup, then the call itself. The landmark is the byte after the call,
+        // at match+0x1E. The global's RIP displacement, the sub-object displacement and the outbound frame slot are
+        // wildcarded; the trailing `mov eax,0x1FD` is the profiling-scope id the engine emits right after the call
+        // and is kept literal because it is what makes the window unique.
+        {"NpcPfeReturnAddr_P1_RuleEvalCallLandmark",
+         "48 83 C2 40 48 8B 05 ?? ?? ?? ?? 48 8B 08 4C 8D 45 ?? "
+         "48 8B 89 ?? ?? ?? ?? E8 ?? ?? ?? ?? B8 FD 01 00 00",
+         ResolveMode::Direct, 0x1E, 0},
     };
 
 } // namespace EquipHide

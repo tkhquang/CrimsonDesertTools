@@ -237,16 +237,23 @@ namespace Transmog::ColorOverride::TokenSlotDiscovery
             // whose hit sets overlap (P1 is a superset of
             // P2 and P3) record each unique slot exactly once.
             //
-            // The head pattern can match a large number of false positives early in the binary because the wildcard
-            // bytes give it some slack. Real registrar sites cluster around 0x142749F00 / 0x14274A3C0, so we may need
-            // to walk past several thousand false-positive matches before reaching them. Per-pattern cap is set
-            // generously; the shared wall-clock budget across all patterns is the real safety net.
+            // The head pattern matches a large number of false positives early in the binary, because the wildcard
+            // bytes give it slack and the real registrar sites sit late in the text section. The walk therefore has
+            // to step past tens of thousands of them. The per-pattern cap is set generously; the shared wall-clock
+            // budget across all patterns is the real safety net.
             constexpr std::size_t k_maxItersPerPattern = 50000;
             constexpr auto k_timeBudget = std::chrono::milliseconds(3000);
-            // The anchor we care about is the start of `41 B9 FF FF 02 00` (17 bytes). Advance cursor by the shared
-            // head length each iteration even if the matched pattern is longer (P2/P3 tails are not needed for
-            // overlap-prevention; their hit ranges always extend past the head and never abut another distinct site).
+            // The anchor is the start of the `mov r9d, 0x2FFFF` sentinel. Advance the cursor by the shared head
+            // length each iteration even when the matched pattern is longer (the P2/P3 tails are not needed for
+            // overlap prevention; their hit ranges always extend past the head and never abut another distinct site).
             constexpr std::size_t k_patternHeadLen = Transmog::k_colorTokenRegistrarCallAobHeadLen;
+
+            // Offset of the `lea rdx, [rip+name]` inside a matched head. That lea is always the LAST instruction of
+            // the head and is always 7 bytes (opcode 48 8D 15 + disp32), so DERIVING it from the head length is what
+            // keeps the two in step. Do not restate it as an independent constant: a head length that changes without
+            // this offset following it decodes the name from the wrong address on every hit, every candidate then
+            // fails the allow-list, and discovery reports zero slots with no error anywhere.
+            constexpr std::size_t k_nameLeaOffset = k_patternHeadLen - 7;
 
             std::size_t totalHits = 0;
             std::size_t totalIter = 0;
@@ -281,9 +288,9 @@ namespace Transmog::ColorOverride::TokenSlotDiscovery
 
                     const auto matchAddr = reinterpret_cast<std::uintptr_t>(m);
 
-                    // Decode `lea rdx, [rip+disp32]` target (at offset 10 in the matched run; the disp32 is 3 bytes
-                    // into the lea).
-                    const auto strAddr = decode_lea_rip(m + 10, 0x48, 0x8D, 0x15);
+                    // Decode the `lea rdx, [rip+disp32]` target that closes the matched head; the disp32 sits 3
+                    // bytes into the lea.
+                    const auto strAddr = decode_lea_rip(m + k_nameLeaOffset, 0x48, 0x8D, 0x15);
                     if (strAddr == 0)
                     {
                         cursor = m + 1;

@@ -40,14 +40,19 @@ namespace Transmog
     // Candidate-exclusion list on the equip-slot component. The item -> slot resolver walks the character's candidate
     // slots and returns the first that validates, and the validator rejects any candidate found in the WORD array at
     // `k_compSlotExcludeListOffset` (count at `k_compSlotExcludeCountOffset`). The pair is empty in normal play, which
-    // is what makes it safe to borrow for one equip. It moves with the same component width as the cache triple below.
+    // is what makes it safe to borrow for one equip. It sits at its own depth in the component: re-derive it from the
+    // validator's own live read of the array and count, never by scaling another field's shift.
     constexpr std::ptrdiff_t k_compSlotExcludeListOffset = 104;
     constexpr std::ptrdiff_t k_compSlotExcludeCountOffset = 112;
 
-    // SlotPopulator maintains a dispatch cache on the component at (basePtr, count, cap). The triple moves as one unit
-    // whenever the component gains or loses fields below it. All three constants must move together, and the same
-    // component width also drives the auth-table container pointer in auth_table.hpp. Verify them against the live
-    // SlotPopulator body on patch day. That body forms one base pointer and reads the other two members off it:
+    // SlotPopulator maintains a dispatch cache on the component at (basePtr, count, cap). The three constants are one
+    // field triple and must move TOGETHER: base+0 is the pointer, base+8 the count, base+0xC the capacity.
+    //
+    // Nothing else in the mod moves with them. The exclusion pair above, the auth-table container pointer in
+    // auth_table.hpp and this triple all sit at different depths in the component and drift by different amounts on
+    // the same patch, so each has to be re-derived from its own live instruction. Scaling one from another's delta
+    // lands on a plausible-looking neighbor and fails silently. Verify against the live SlotPopulator body on patch
+    // day. That body forms one base pointer and reads the other two members off it:
     //   lea  r15, [a1+k_compSlotCacheBasePtrOffset]
     //   mov  r8d, [r15+0x08]     ; count
     //   mov  r9,  [r15]          ; basePtr
@@ -58,9 +63,13 @@ namespace Transmog
     // 0, apply looks like a no-op. If it lands on the LOW 32 bits of the basePtr qword, the read yields a wildly
     // inflated count -- the low bits of a heap address. A write at that offset then shreds the dispatch-cache pointer.
     // Writes at stale offsets also scribble into adjacent fields and corrupt the component one slot at a time.
-    constexpr std::ptrdiff_t k_compSlotCacheBasePtrOffset = 0x1D8;
-    constexpr std::ptrdiff_t k_compSlotCacheCountOffset = 0x1E0;
-    constexpr std::ptrdiff_t k_compSlotCacheCapOffset = 0x1E4;
+    //
+    // Check the triple against a live component rather than against the disassembly alone: a correct base reads a
+    // populated (basePtr, count, cap), while a stale one reads 0/0/0 and surfaces as `post-apply liveCount=0` on
+    // every apply.
+    constexpr std::ptrdiff_t k_compSlotCacheBasePtrOffset = 0x1F8;
+    constexpr std::ptrdiff_t k_compSlotCacheCountOffset = 0x200;
+    constexpr std::ptrdiff_t k_compSlotCacheCapOffset = 0x204;
 
     // Auth-table geometry (container pointer, entry stride, field offsets) lives in auth_table.hpp -- one copy for the
     // whole mod, because the whole struct moves as a unit on patch day.
@@ -305,9 +314,10 @@ namespace Transmog
         // window and the in_transmog() flag even on an SEH unwind. A stranded apply window tints unrelated render
         // passes; a stranded in_transmog() leaves the wrapper swap armed outside its window.
         //
-        // The return is CAPTURED, not discarded: SlotPopulator answers `k_noGameTag` when it refuses -- including the
-        // case where an explicit slotSel does not resolve, where it bails before equipping anything. Discarding it
-        // makes every such refusal silent and indistinguishable from a successful equip whose visual did not change.
+        // The return is CAPTURED, not discarded: its low word is the engine's answer, and `k_noGameTag` there means
+        // the call refused and equipped nothing. It is not trusted as the ONLY signal, though. The return also
+        // carries pointer bits on some paths, so a low word that is not `k_noGameTag` does not by itself prove the
+        // carrier was placed. `derivedTag` below is the independent check that closes that gap.
         //
         // `slotPopCompleted` is what separates a REFUSAL from a FAULT. slotPopRc starts at -1, and the low word of -1
         // is the same `k_noGameTag` a refusal returns, so without the flag a fault inside the call -- which skips the
@@ -317,6 +327,18 @@ namespace Transmog
         std::uint32_t savedExclCount = 0;
         const bool exclusionArmed =
             excludeFirstHalf && arm_slot_exclusion_seh(a1, &exclusionBuf, excludeTag, savedExclPtr, savedExclCount);
+
+        // Pre-check the destination the way SlotPopulator will derive it, through the same engine resolver it calls
+        // first. With `slotSel == k_noGameTag` the engine derives the slot from the item, and a derivation that
+        // answers `k_noGameTag` makes the whole call a NO-OP: it equips nothing and leaves the slot EMPTY, which
+        // reads as a broken transmog rather than a carrier the engine will not place. Asking up front is what turns
+        // that into a warning naming the item.
+        //
+        // The function pointer is kept so the warning below can tell a genuine refusal from an unresolved cascade.
+        // item_to_slot_seh answers k_noGameTag for both, and warning on the second would blame the user's carrier
+        // for a resolve failure, on every enabled slot, on every apply.
+        const auto slotResolveFn = item_to_slot_resolve_fn();
+        const auto derivedTag = item_to_slot_seh(slotResolveFn, a1, id);
 
         std::int64_t slotPopRc = -1;
         bool slotPopCompleted = false;
@@ -340,7 +362,7 @@ namespace Transmog
             // The placement matters as much as the call. Run after the __finally below, this rebuilds with the dye
             // substitute window shut and in_transmog() already cleared: the prefab swap does not substitute and the
             // dye writes are not intercepted, so the part flickers to its untransmogged mesh and armor loses its
-            // colour a moment after appearing. Both windows have to still be open.
+            // color a moment after appearing. Both windows have to still be open.
             //
             // Only for an explicit slotSel -- with `k_noGameTag` the engine's own derivation is already right.
             if (slotSel != k_noGameTag && static_cast<std::uint16_t>(slotPopRc & 0xFFFF) != k_noGameTag && refreshFn)
@@ -376,17 +398,29 @@ namespace Transmog
         }
         else
         {
-            DMK::Logger::get_instance().trace("[dispatch] SlotPopulator ok item={:#06x} slotSel={:#06x} refresh={}",
-                                              id, slotSel, refreshFaulted ? "FAULTED" : (refreshCalled ? "yes" : "no"));
+            // `derivedTag` is the slot the engine itself resolved the item to. With slotSel == k_noGameTag that is
+            // ITS choice, not ours, so logging it separates "the carrier was equipped where we wanted" from "it was
+            // equipped somewhere else and the slot we care about stayed empty" -- two outcomes that are otherwise
+            // both just "ok".
+            DMK::Logger::get_instance().trace(
+                "[dispatch] SlotPopulator ok item={:#06x} slotSel={:#06x} derivedTag={:#06x} refresh={}", id, slotSel,
+                derivedTag, refreshFaulted ? "FAULTED" : (refreshCalled ? "yes" : "no"));
+            if (slotResolveFn && slotSel == k_noGameTag && derivedTag == k_noGameTag)
+            {
+                DMK::Logger::get_instance().warning(
+                    "[dispatch] carrier {:#06x} has NO slot mapping -- SlotPopulator placed nothing and the slot "
+                    "stays empty. Pick a carrier the engine can place, or name the slot explicitly.",
+                    id);
+            }
         }
     }
 
     /**
-     * @brief Drive the engine's per-slot rebuild with the prefab-swap and colour windows open.
+     * @brief Drive the engine's per-slot rebuild with the prefab-swap and color windows open.
      *
      * @details Internal on purpose. It publishes NO dye of its own, so calling it after the apply path has cleared
      *          the dye state makes the rebuild's DyeCopier call re-emit the engine's natural records and strip the
-     *          injected colour. Every caller goes through @ref refresh_slot_appearance, which brackets it with the
+     *          injected color. Every caller goes through @ref refresh_slot_appearance, which brackets it with the
      *          dye publish and the ColorOverride slot bind.
      * @return false when an anchor is unresolved, the slot has no live part record, or the call faulted.
      */
@@ -415,7 +449,7 @@ namespace Transmog
 
         // Both windows open, exactly as an apply does. in_transmog keeps the prefab swap substituting, so the
         // transmogged mesh survives the rebuild instead of reverting to the carrier; the setter window routes the
-        // engine's material writes to the chosen colour.
+        // engine's material writes to the chosen color.
         //
         // This ordering is the whole point: running a rebuild with these shut is what made armor come up dyed and
         // then revert a moment later.
@@ -832,7 +866,7 @@ namespace Transmog
             // Rebuild through refresh_slot_appearance, NOT the bare refresh_slot_visual.
             //
             // The rebuild drives a DyeCopier call, and the dye state was cleared just above -- so a bare rebuild
-            // re-emits the slot with the engine's natural records and the transmog loses its colour.
+            // re-emits the slot with the engine's natural records and the transmog loses its color.
             // refresh_slot_appearance republishes this slot's dye (and its ColorOverride slot) around the rebuild,
             // which is what the injector's detour consumes.
             //
@@ -1682,9 +1716,14 @@ namespace Transmog
             //   last_applied_ids(), and the apply loop above has already written this apply's targets into it, so
             //   every slot would compare equal and nothing would ever rebuild.
             //
+            // Do NOT widen either condition to force a rebuild on slots that look unchanged. That was tried while the
+            // component slot-cache offsets were stale, where it masked the real fault by rebuilding everything every
+            // pass; with the offsets correct the engine reaches those slots on its own, and the blanket rebuild only
+            // costs a redundant re-emission per slot per apply.
+            //
             // The rebuild goes through refresh_slot_appearance, NEVER the bare refresh_slot_visual. The apply loop
             // clears the dye state after each slot, so a bare rebuild drives a DyeCopier call with nothing published
-            // and the engine re-emits its natural records -- which silently strips the colour the apply just
+            // and the engine re-emits its natural records -- which silently strips the color the apply just
             // injected. refresh_slot_appearance republishes this slot's dye and rebinds its ColorOverride slot around
             // the rebuild. Same reasoning as the single-slot path; see its call site.
             for (std::size_t i = 0; i < k_slotCount; ++i)

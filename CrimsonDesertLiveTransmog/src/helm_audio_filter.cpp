@@ -3,6 +3,7 @@
 #include "aob_resolver.hpp"
 
 #include <cdcore/controlled_char.hpp>
+#include <cdcore/dmk_glue.hpp>
 
 #include <DetourModKit.hpp>
 
@@ -614,6 +615,17 @@ namespace Transmog::HelmAudioFilter
         if (target == 0)
         {
             log.warning("[helm-audio] registrar AOB resolve failed; "
+                        "feature disabled");
+            return false;
+        }
+
+        // The registrar is inline-hooked, and two of its three rows reach the entry through a negative walk-back. A
+        // prologue that gains bytes resolves them short while the pattern still matches, which places the detour
+        // inside the function: the trampoline path then skips the entry's register spill and the epilogue restores
+        // from stack that was never written. Verify the target is a real function entry first.
+        if (!CDCore::Glue::looks_like_function_entry(target, "HelmAudioFilter_PassiveSkillRegistrar"))
+        {
+            log.warning("[helm-audio] registrar resolved to a non-entry address; "
                         "feature disabled");
             return false;
         }

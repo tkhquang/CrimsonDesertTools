@@ -18,7 +18,7 @@ namespace Transmog::AuthTable
      *     arrayBase + index * k_entryStride       -> entry
      *
      * The engine states the walk itself, with the component in the base register:
-     *     mov rax,[<comp>+0x80] ; mov rdx,[rax+08] ; mov eax,[rax+10]
+     *     mov rax,[<comp>+0x90] ; mov rdx,[rax+08] ; mov eax,[rax+10]
      * and the entry search loop states the stride and the tag offset literally:
      *     imul rcx,rax,0xD0 ; cmp [rdx+0xC8],r8w ; add rdx,0xD0
      *
@@ -36,7 +36,7 @@ namespace Transmog::AuthTable
      * - The item id at +0x08 has not moved across any version this mod has shipped against.
      * - Slot tag VALUES are stable (see slot_metadata.hpp). Only their POSITION within the entry shifts.
      */
-    inline constexpr std::ptrdiff_t k_containerPtrOffset = 0x80;
+    inline constexpr std::ptrdiff_t k_containerPtrOffset = 0x90;
     inline constexpr std::ptrdiff_t k_containerArrayBaseOffset = 0x08;
     inline constexpr std::ptrdiff_t k_containerCountOffset = 0x10;
 

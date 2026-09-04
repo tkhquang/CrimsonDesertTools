@@ -11,6 +11,9 @@
 //     name we know in advance. DMK's `is_target_already_hooked` covers managed-hook collision detection within DMK;
 //     this helper still serves the case where the sibling has not yet installed (load-order races) or hooks via a
 //     non-DMK route.
+//   * looks_like_function_entry: pre-hook sanity check on an address a Direct-mode cascade reached through a
+//     negative walk-back. Both mods share the CDCore anchor tables and both carry such walk-backs, so the guard
+//     lives here rather than in either mod.
 
 #include <DetourModKit.hpp>
 
@@ -102,6 +105,34 @@ namespace CDCore::Glue
      * @details Convenience overload that short-circuits on the first match.
      */
     [[nodiscard]] bool is_sibling_mod_loaded(std::initializer_list<std::string_view> needles) noexcept;
+
+    /**
+     * @brief Rejects an address that is not plausibly the first byte of a function.
+     *
+     * @details Call this before installing an INLINE hook on anything a Direct-mode cascade resolved through a
+     *          negative disp_offset. A walk-back is measured against one build's prologue length and nothing in the
+     *          resolver re-checks it, so when a prologue gains or loses bytes the pattern still matches its
+     *          (unchanged) body while the walk-back lands short. The hook then writes its jump across an instruction
+     *          boundary, or several bytes into a live function, and the process dies somewhere unrelated later. That
+     *          is a silent failure the cascade itself cannot detect, which is what this guard is for.
+     *
+     *          The test is a byte-level heuristic, not a disassembly: MSVC precedes a function entry with `int3`
+     *          alignment padding (0xCC), or the entry follows the previous function's terminator directly, so a
+     *          `ret` (0xC3) or a single-byte `nop` (0x90) also reads as a boundary. A tail `jmp` ends in an
+     *          arbitrary displacement byte and cannot be recognized this way, so a function reached that way is
+     *          rejected. Rejection is the safe direction: the feature disables itself and says so, which is what
+     *          would have happened anyway once the stale hook took the process down.
+     *
+     *          Complements DetourModKit::Scanner::is_likely_function_prologue, which inspects the bytes AT the
+     *          address. This one inspects the byte BEFORE it. Neither subsumes the other.
+     *
+     * @param addr Candidate entry address, as resolved by the cascade.
+     * @param label Cascade label, used only in the rejection log line.
+     * @return true if @p addr is preceded by a function boundary byte, false if it is not or is unreadable.
+     * @note Best-effort, and it never throws. Mid-function hook sites chosen deliberately (MidHook targets such as
+     *       LiveTransmog's claim-walk guards) must NOT be passed through this.
+     */
+    [[nodiscard]] bool looks_like_function_entry(std::uintptr_t addr, std::string_view label) noexcept;
 
 } // namespace CDCore::Glue
 

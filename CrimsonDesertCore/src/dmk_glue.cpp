@@ -160,4 +160,27 @@ namespace CDCore::Glue
         return any_module_matches(lowered);
     }
 
+    bool looks_like_function_entry(std::uintptr_t addr, std::string_view label) noexcept
+    {
+        if (addr == 0)
+            return false;
+
+        const auto prev = DetourModKit::Memory::seh_read<std::uint8_t>(addr - 1);
+        if (!prev.has_value())
+            return false;
+
+        const bool boundary = (*prev == 0xCC) || (*prev == 0xC3) || (*prev == 0x90);
+        if (!boundary)
+        {
+            // try_log, not warning(): this is a noexcept guard on the hook-install path, so a formatting or sink
+            // failure must not escape.
+            (void)DetourModKit::Logger::get_instance().try_log(
+                DetourModKit::LogLevel::Warning,
+                "{} resolved to 0x{:X}, which is not a function entry (preceded by 0x{:02X}, not padding or a "
+                "terminator). Refusing to hook -- the cascade's walk-back offset is stale.",
+                label.empty() ? std::string_view{"<anchor>"} : label, addr, *prev);
+        }
+        return boundary;
+    }
+
 } // namespace CDCore::Glue

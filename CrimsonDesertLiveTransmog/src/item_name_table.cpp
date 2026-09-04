@@ -11,9 +11,11 @@
 #include <cctype>
 #include <chrono>
 #include <fstream>
-#include <string_view>
 #include <mutex>
+#include <string>
+#include <string_view>
 #include <unordered_map>
+#include <vector>
 
 namespace Transmog
 {
@@ -204,8 +206,9 @@ namespace Transmog
     //     ..._Equip_Tool / _Tool_NPC
     //
     // The taxonomy is stated twice, once as `ItemGroup_SubCategory_<tail>` and once as `ItemGroup_<tail>`, so the
-    // rules match on the tail and cover both. Every item has at most ONE sub-category (verified catalog-wide: 5824
-    // with one, 749 with none, none with two), and the family rows agree with it, so the match is unambiguous.
+    // rules match on the tail and cover both. Every item has at most ONE sub-category, but the two statements do NOT
+    // always agree -- a knuckledrill sub-categorizes as Tool while its family row is Weapon_OneHand. Where they
+    // disagree the family row wins, through the priority band below.
     //
     // Keying on the NAME is the point. The previous classifier read a u16 type code out of the descriptor and mapped
     // it through a static switch, but that code is a ROW INDEX into an engine table: inserting one row renumbers
@@ -216,13 +219,22 @@ namespace Transmog
     // Non-player families (pet, horse, riding, vehicle) carry their own sub-categories and simply do not appear in the
     // table, so they classify as Count and stay out of every picker without needing an exclusion list.
     //
-    // Three slots are absent from the taxonomy and are recovered from a more specific group the item also belongs to.
-    // The engine spreads these across per-promotion rows (Equip_Tool_Lantern, Equip_Twitch_Special_Lantern, ...) with
-    // no single covering row, so they match a short suffix instead:
+    // Classification runs in three priority bands, lowest number winning: a short slot-name tail (Specific), a
+    // taxonomy family tail (Taxonomy), and either of those matched on an `ItemGroup_SubCategory_*` row
+    // (SubCategory). A tiered qualifier such as `_Tier3` is stripped before matching, since it sits exactly where a
+    // tail expects the group name to end.
     //
-    //     *_Earring   -- earrings have no taxonomy row at all
-    //     *_Lantern   -- lanterns are filed under Equip_Tool
-    //     *_Band      -- bracelets sub-categorize as Control
+    // Several slots have no single covering taxonomy row and are recovered from a more specific group the item also
+    // belongs to. The engine spreads them across per-promotion rows (Equip_Tool_Lantern,
+    // Equip_Twitch_Special_Lantern, Accessory_Special_Necklace_Tier4, ...), so they match a short suffix instead:
+    //
+    //     *_Earring    -- earrings have no taxonomy row at all
+    //     *_Necklace   -- also reached through an Earring sub-category, which the priority band demotes
+    //     *_Ring       -- same, and it cannot collide with *_Earring (see k_groupSuffixRules)
+    //     *_Glasses    -- tiered and Special variants carry an extra path component
+    //     *_Mask       -- same
+    //     *_Lantern    -- lanterns are filed under Equip_Tool
+    //     *_Band       -- bracelets sub-categorize as Control
     //
     // These outrank the taxonomy rules, which is what keeps lanterns out of the Tool picker.
     //
@@ -236,6 +248,17 @@ namespace Transmog
     {
         k_groupPrioritySpecific = 0,
         k_groupPriorityTaxonomy = 1,
+        // An `ItemGroup_SubCategory_*` row is the engine's COARSE bucket for an item, and it does not always agree
+        // with the item's own family row: a necklace sits in `ItemGroup_SubCategory_Equip_accessory_Earring` while
+        // also sitting in `ItemGroup_equip_accessory_Necklace`, and a knuckledrill sits in
+        // `ItemGroup_SubCategory_Equip_Tool` while also sitting in `ItemGroup_Equip_Weapon_OneHand`. Scoring both
+        // rows in the same band leaves the winner to whichever the walk reaches first, which is not a decision.
+        //
+        // This band applies to BOTH rule tables and to every axis, not only accessories. Wherever a sub-category row
+        // and a family row name different slots, the FAMILY row wins: a necklace stops resolving to Earring1, a
+        // knuckledrill files under MainHand rather than Tool, and a robe whose sub-category says Helm files under
+        // Chest. An item carrying nothing but a sub-category row still classifies, one band lower.
+        k_groupPrioritySubCategory = 2,
         k_groupPriorityNone = 0xFF,
     };
 
@@ -269,10 +292,6 @@ namespace Transmog
         {"_Equip_Armor_Player_Cloak", TransmogSlot::Cloak},
         {"_Equip_Armor_Player_Gloves", TransmogSlot::Gloves},
         {"_Equip_Armor_Player_Boots", TransmogSlot::Boots},
-        {"_Equip_Accessory_Necklace", TransmogSlot::Necklace},
-        {"_Equip_Accessory_Ring", TransmogSlot::Ring1},
-        {"_Equip_Accessory_Glasses", TransmogSlot::Glasses},
-        {"_Equip_Accessory_Mask", TransmogSlot::Mask},
         {"_Equip_BackPack", TransmogSlot::Backpack},
         {"_Equip_Weapon_OneHand", TransmogSlot::MainHand},
         {"_Equip_Weapon_Shield", TransmogSlot::OffHand},
@@ -283,11 +302,25 @@ namespace Transmog
         {"_Equip_Tool_NPC", TransmogSlot::Tool},
     };
 
-    // Suffix matches for the three slots the sub-category layer does not separate. Paired slots resolve to the
-    // lower-indexed half; the picker shares its list across the pair via `slots_share_picker`, and the half actually
-    // written is whichever row the user committed against.
+    // Suffix matches for the slots the sub-category layer does not separate, scanned BEFORE the taxonomy tails and
+    // scored one band higher. Paired slots resolve to the lower-indexed half; the picker shares its list across the
+    // pair via `slots_share_picker`, and the half actually written is whichever row the user committed against.
+    //
+    // The accessory tails are deliberately just the slot name. The engine spreads one accessory slot across several
+    // path shapes (`..._Equip_Accessory_Necklace`, `..._Accessory_Special_Necklace_Tier4`), and a tail long enough
+    // to name the family misses every variant that carries an extra path component. Anything longer than the slot
+    // name belongs in k_taxonomyTailRules, and a tail that appears in both tables makes the taxonomy row dead --
+    // the scan here returns first.
+    //
+    // `_Earring` precedes `_Ring` for clarity only; they cannot collide, since an earring group ends "arring" and
+    // the ring tail requires the leading underscore.
     static constexpr GroupRule k_groupSuffixRules[] = {
+        // Accessory slots, matched after the tier qualifier is stripped (see strip_tier_suffix).
         {"_Earring", TransmogSlot::Earring1},
+        {"_Necklace", TransmogSlot::Necklace},
+        {"_Ring", TransmogSlot::Ring1},
+        {"_Glasses", TransmogSlot::Glasses},
+        {"_Mask", TransmogSlot::Mask},
         {"_Lantern", TransmogSlot::Lantern},
         {"_Band", TransmogSlot::Bracelet},
     };
@@ -311,17 +344,60 @@ namespace Transmog
         return name.size() >= tail.size() && iequals(name.substr(name.size() - tail.size()), tail);
     }
 
+    /// Case-insensitive substring test. Only used for the unmatched-group report, never for classification.
+    static bool icontains(std::string_view hay, std::string_view needle) noexcept
+    {
+        if (needle.size() > hay.size())
+            return false;
+        for (std::size_t i = 0; i + needle.size() <= hay.size(); ++i)
+        {
+            if (iequals(hay.substr(i, needle.size()), needle))
+                return true;
+        }
+        return false;
+    }
+
+    /**
+     * @brief Drop a trailing `_Tier<digits>` qualifier from a group name.
+     *
+     * @details Accessory groups are tiered -- `ItemGroup_Equip_Accessory_Necklace_Tier3`,
+     *          `..._Accessory_Special_Ring_Tier4`. Every rule matches with `iends_with`, so a tiered name matches
+     *          NOTHING: the tier sits exactly where a rule expects the group to end. The failure is silent and total
+     *          for the affected slot -- its bucket classifies zero items, and those items then inherit whatever slot
+     *          their type code was learned as from some other group that did match. That is how necklaces ended up
+     *          filed as earrings.
+     *
+     *          Strips one exact `_Tier` + digits tail and nothing else, so a group that genuinely ends in something
+     *          else is untouched. Returns the name unchanged when there is no such tail.
+     */
+    static std::string_view strip_tier_suffix(std::string_view name) noexcept
+    {
+        auto end = name.size();
+        while (end > 0 && name[end - 1] >= '0' && name[end - 1] <= '9')
+            --end;
+        if (end == name.size())
+            return name; // no trailing digits -- nothing to strip
+        constexpr std::string_view k_tier = "_Tier";
+        if (end < k_tier.size() || !iequals(name.substr(end - k_tier.size(), k_tier.size()), k_tier))
+            return name;
+        return name.substr(0, end - k_tier.size());
+    }
+
     static GroupSlot slot_from_group_name(std::string_view name) noexcept
     {
+        // The raw name is tried first so a rule that deliberately ends in digits still wins on an exact match; the
+        // tier-stripped form is the fallback.
+        const auto base = strip_tier_suffix(name);
+        const bool subCategory = icontains(name, "_SubCategory_");
         for (const auto &rule : k_groupSuffixRules)
         {
-            if (iends_with(name, rule.name))
-                return {rule.slot, k_groupPrioritySpecific};
+            if (iends_with(name, rule.name) || iends_with(base, rule.name))
+                return {rule.slot, subCategory ? k_groupPrioritySubCategory : k_groupPrioritySpecific};
         }
         for (const auto &rule : k_taxonomyTailRules)
         {
-            if (iends_with(name, rule.name))
-                return {rule.slot, k_groupPriorityTaxonomy};
+            if (iends_with(name, rule.name) || iends_with(base, rule.name))
+                return {rule.slot, subCategory ? k_groupPrioritySubCategory : k_groupPriorityTaxonomy};
         }
         return {};
     }
@@ -338,7 +414,7 @@ namespace Transmog
     static constexpr std::size_t k_maxItemGroupsPerItem = 64;
 
     // The registry is a pa::StaticInfoManager2 like iteminfo -- same count and def-array offsets -- and its holder
-    // sits in the same block of globals. The holder is FOUND rather than hardcoded: probe the neighbouring qwords and
+    // sits in the same block of globals. The holder is FOUND rather than hardcoded: probe the neighboring qwords and
     // keep the first whose rows carry "ItemGroup..." names. Exactly one candidate in the window qualifies, so the
     // probe self-heals when a patch reorders that block.
     static constexpr std::ptrdiff_t k_groupHolderProbeLow = -0x80;
@@ -348,7 +424,7 @@ namespace Transmog
     static constexpr std::ptrdiff_t k_groupRowDefOffset = 0x18; // registry row -> group-def object
 
     // The name's {ptr,len} wrapper sits at a VARIABLE offset inside the def object: a name short enough to live in the
-    // object's inline buffer pushes the wrapper past it, and the neighbouring member is a variable-length u16 array of
+    // object's inline buffer pushes the wrapper past it, and the neighboring member is a variable-length u16 array of
     // member item ids. Scan a bounded window for a pair that resolves to a string of exactly the stated length whose
     // prefix is "ItemGroup". A wrong pair fails all three checks, so the scan cannot silently pick up a neighbour.
     static constexpr std::ptrdiff_t k_groupNameScanBegin = 0x18;
@@ -422,6 +498,9 @@ namespace Transmog
         return 0;
     }
 
+    /// Upper bound on the unmatched-accessory-group names named in one report line.
+    static constexpr std::size_t k_unmatchedGroupReportCap = 24;
+
     /**
      * Build `defIndex -> GroupSlot` for the whole registry. An empty result means the registry did not resolve, which
      * the caller treats as "defer and retry" rather than publishing an unclassified catalog.
@@ -442,7 +521,19 @@ namespace Transmog
         if (!ok || !DMKMemory::plausible_userspace_ptr(rows))
             return table;
 
-        table.resize(count);
+        // Accessory groups no rule claimed, collected for the report below. Reserved up front so the loop's
+        // emplace_back cannot allocate: this function is noexcept, and a throw from inside the walk would take the
+        // process down rather than lose a diagnostic.
+        std::vector<std::string> unmatched;
+        try
+        {
+            unmatched.reserve(k_unmatchedGroupReportCap);
+            table.resize(count);
+        }
+        catch (...)
+        {
+            return table;
+        }
         for (uint32_t i = 0; i < count; ++i)
         {
             const uintptr_t row = read_qword_safe(rows + i * 8ull, ok);
@@ -453,9 +544,39 @@ namespace Transmog
                 continue;
             const auto mapped = slot_from_group_name(name);
             if (mapped.priority == k_groupPriorityNone)
+            {
+                // Report the accessory groups no rule claimed. When a patch renames or re-tiers a group, the only
+                // visible symptom is a slot bucket that quietly classifies zero items and whose items then inherit
+                // some other slot's type code -- which is how necklaces end up filed as earrings. Guessing at the new
+                // name from strings found elsewhere in memory does not work; the registry the classifier actually
+                // reads is the only authority, so print what it holds. Accessory groups only, deduped and capped:
+                // the unmapped set is dominated by consumables and quest items that are SUPPOSED to be unmapped.
+                if (unmatched.size() < k_unmatchedGroupReportCap && icontains(name, "Accessor") &&
+                    std::find(unmatched.begin(), unmatched.end(), name) == unmatched.end())
+                    unmatched.emplace_back(name);
                 continue;
+            }
             table[i] = mapped;
             ++mappedOut;
+        }
+        if (!unmatched.empty())
+        {
+            // Fail closed on the report, never on the table: the caller needs the classification far more than it
+            // needs the diagnostic, and this function is noexcept.
+            try
+            {
+                std::string joined;
+                for (const auto &n : unmatched)
+                    joined += (joined.empty() ? "" : ", ") + n;
+                (void)DMK::Logger::get_instance().try_log(
+                    DMK::LogLevel::Warning,
+                    "[catalog-slots] {} accessory group(s) matched NO rule -- items in them fall back to another "
+                    "slot's type code. Add tails to k_taxonomyTailRules/k_groupSuffixRules for: {}",
+                    unmatched.size(), joined);
+            }
+            catch (...)
+            {
+            }
         }
         return table;
     }
@@ -632,6 +753,11 @@ namespace Transmog
     uintptr_t ItemNameTable::indexed_string_lookup_addr() const noexcept
     {
         return cached_chain().itemAccessor;
+    }
+
+    uintptr_t ItemNameTable::iteminfo_holder_addr() const noexcept
+    {
+        return cached_chain().globalHolder;
     }
 
     ItemNameTable::CatalogInfo ItemNameTable::catalog_info() const noexcept

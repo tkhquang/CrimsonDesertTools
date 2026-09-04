@@ -215,10 +215,17 @@ namespace EquipHide
         }
 
         // Part-hash key pointer. The register that carries it moves between builds, so verify it against the
-        // disassembly instead of assuming. On the current build it is R13: the exclusion-list walk reads the key as
-        // `mov edx,[r13]` and the transition dispatch passes it as `rdx = r13`. See the register map on
-        // k_hookSiteCandidates in aob_resolver.hpp.
-        auto hashPtr = ctx.r13;
+        // disassembly instead of assuming. On the current build it is R15, and it is read as a pointer at BOTH
+        // comparison sites: the exclusion-list walk does `mov edx,[r15]` and the transition dispatch does
+        // `mov r8d,[r15]` before comparing against the list. That agreement is the check -- a register that only one
+        // of the two sites dereferences is the wrong one.
+        //
+        // Reading the wrong register here fails SILENTLY. The neighboring registers hold small integers (R15's
+        // neighbor R13 carries the walk's loop counter, `mov ecx,r13d` ... `inc ecx`), so
+        // `plausible_userspace_ptr` rejects the value, this handler returns before reaching any of the logic below,
+        // and the cascade fix goes dead with the hook still reporting installed.
+        // See the register map on k_hookSiteCandidates in aob_resolver.hpp.
+        auto hashPtr = ctx.r15;
         if (!DMK::Memory::plausible_userspace_ptr(hashPtr))
             return;
 
@@ -523,12 +530,12 @@ namespace EquipHide
             auto postfixEvalAddr =
                 resolve_address(k_postfixEvalCandidates, std::size(k_postfixEvalCandidates), "PostfixEval");
 
-            auto npcPfeLandmark = resolve_address(k_npcPfeReturnAddrCandidates, std::size(k_npcPfeReturnAddrCandidates),
-                                                  "NpcPfeReturnAddr");
-            // Landmark sits 12 bytes past the match start (first byte of the `mov rbx, [rsp+4A0]` right after the
-            // call), which is the real return address on an NPC stack frame.
-            if (npcPfeLandmark)
-                addrs.npcPfeReturnAddr = npcPfeLandmark + 12;
+            // The cascade's disp_offset already walks from the match start to the byte after the rule-eval call, so
+            // the resolved value IS the return address an NPC stack frame carries. Do NOT add a fixup here: the
+            // offset belongs in the candidate row, and applying it twice yields an address no call ever pushes,
+            // which makes is_npc_call_stack() reject every call while the install still logs "bald fix active".
+            addrs.npcPfeReturnAddr = resolve_address(k_npcPfeReturnAddrCandidates,
+                                                     std::size(k_npcPfeReturnAddrCandidates), "NpcPfeReturnAddr");
 
             if (postfixEvalAddr && addrs.npcPfeReturnAddr)
             {

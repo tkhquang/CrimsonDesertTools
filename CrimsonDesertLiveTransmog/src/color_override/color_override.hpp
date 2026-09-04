@@ -13,11 +13,22 @@
 namespace Transmog::ColorOverride
 {
     /**
-     * Cap on per-slot SwatchEntry rows. The engine emits dye-color writes against 90+ distinct token IDs per item
-     * across all matInst variants in a single slot; 256 holds the working set without growth pressure. Storage cost: 5
-     * slots * 256 rows * ~16 B = ~20 KB.
+     * Cap on per-slot SwatchEntry rows.
+     *
+     * A slot holds TWO populations that share this table: the rows the engine captures live, and the rows a saved
+     * palette seeds on load. They ADD UP rather than overlap, so the cap has to cover both at once. Overflow is not
+     * an error the user sees -- the seed drops the rows that do not fit, each one a color the picker then cannot
+     * drive, and the only signal is a wall of "[swatch-seed] slot N full" warnings.
+     *
+     * Palette size scales with COLOR TOKENS, not with mesh count: a single submesh occupies one row per token it
+     * exposes, which can run to a couple of dozen rows on its own. A fully dyed chest slot is the worst case and can
+     * need several hundred rows. Size this for that slot plus live-capture headroom, never for the average.
+     *
+     * Storage cost is real and worth knowing before raising it again: the cap multiplies TWO static tables, the
+     * SwatchTable rows and the picker-side DyeSlot rows, across every one of k_slotCount slots. At 512 that is
+     * roughly 1.2 MB of static data. Still cheap next to silently losing colors, but it is not free.
      */
-    inline constexpr std::size_t k_dyeSwatchesPerSlot = 256;
+    inline constexpr std::size_t k_dyeSwatchesPerSlot = 512;
 
     /**
      * Install all sub-hooks. Returns true when ALL hooks installed cleanly. Failures are logged and individual hooks
