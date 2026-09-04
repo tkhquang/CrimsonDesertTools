@@ -233,18 +233,27 @@ namespace EquipHide
             // Seeded with size_t-max so the first non-empty scan always wins.
             std::size_t bestUnresolved = std::numeric_limits<std::size_t>::max();
 
+            // Signal value consumed by the previous tick.
+            //
+            // The signal doubles as the interval throttle: it carries the timestamp it was armed at, and the mid-hook
+            // re-arms only when it reads 0 or a value older than k_lazyProbeIntervalMs. Consuming it by comparison
+            // keeps that throttle intact. Clearing it instead would present the producer with the "never armed"
+            // sentinel, which it re-arms on immediately, collapsing the real interval to this loop's sleep period.
+            int64_t lastSignal = 0;
+
             logger.info("Lazy probe started for demand-loaded parts "
                         "(interval: {}s)",
                         k_lazyProbeIntervalMs / 1000);
 
             while (lazy_probe_pending().load(std::memory_order_relaxed))
             {
-                if (!sleep_responsive_ms(st, 5000))
+                if (!sleep_responsive_ms(st, static_cast<int>(k_lazyProbeTickMs)))
                     return;
 
                 const auto signal = lazy_probe_signal().load(std::memory_order_relaxed);
-                if (signal == 0)
+                if (signal == 0 || signal == lastSignal)
                     continue;
+                lastSignal = signal;
 
                 ++probeCount;
                 logger.trace("Lazy probe #{}: scanning IndexedStringA table", probeCount);
@@ -266,7 +275,6 @@ namespace EquipHide
                     logger.trace("Lazy probe #{}: {} parts unresolved "
                                  "(no progress since last commit)",
                                  probeCount, unresolvedCount);
-                    lazy_probe_signal().store(0, std::memory_order_relaxed);
                     continue;
                 }
 
@@ -300,8 +308,6 @@ namespace EquipHide
                             "{} INI parts still unresolved (will keep "
                             "polling for late registrations)",
                             probeCount, newHashCount, unresolvedCount);
-
-                lazy_probe_signal().store(0, std::memory_order_relaxed);
             }
         }
 
@@ -373,21 +379,25 @@ namespace EquipHide
                 const auto curActor = read_controlled_actor_ptr_seh();
                 const bool actorRotated = (curActor != prevActor);
 
+                // Any change in roster size re-resolves, in both directions. A shrink matters as much as a growth: a
+                // despawned companion leaves its vis ctrl published, and the direct-write path would keep writing
+                // through that stale pointer. Nothing else observes a despawn -- the controlled actor does not rotate
+                // for it -- so this is the only trigger that catches one.
                 std::array<CDCore::BodyCacheEntry, k_maxProtagonists> snap{};
                 const auto curSnapshotCount = CDCore::snapshot_body_cache(snap.data(), snap.size());
-                const bool rosterGrew =
-                    (prevSnapshotCount != kSnapshotCountUninit && curSnapshotCount > prevSnapshotCount);
+                const bool rosterChanged =
+                    (prevSnapshotCount != kSnapshotCountUninit && curSnapshotCount != prevSnapshotCount);
 
                 const auto prevSnapshotCountForLog = prevSnapshotCount;
                 if (actorRotated)
                     prevActor = curActor;
                 prevSnapshotCount = curSnapshotCount;
 
-                if (!actorRotated && !rosterGrew)
+                if (!actorRotated && !rosterChanged)
                     continue;
 
-                if (rosterGrew)
-                    logger.info("Player roster grew {} -> {}; re-resolving "
+                if (rosterChanged)
+                    logger.info("Player roster changed {} -> {}; re-resolving "
                                 "vis-ctrls",
                                 prevSnapshotCountForLog, curSnapshotCount);
 

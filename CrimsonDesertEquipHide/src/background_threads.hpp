@@ -4,8 +4,23 @@
 
 namespace EquipHide
 {
-    /** @brief Minimum interval between lazy probe signals (ms). */
+    /**
+     * @brief Minimum interval between lazy probe signals (ms).
+     *
+     *  Enforced on the producer side, by the EquipVisCheck mid-hook that arms the signal. The probe worker must consume
+     *  the signal by value and never reset it: the producer treats a zeroed signal as "never armed" and re-arms
+     *  immediately, which drops the real interval to k_lazyProbeTickMs.
+     */
     inline constexpr int64_t k_lazyProbeIntervalMs = 60'000;
+
+    /**
+     * @brief Lazy probe worker wake period (ms).
+     *
+     *  Not the probe interval -- that is k_lazyProbeIntervalMs above, enforced by how often the signal advances. This
+     *  is only how promptly the worker notices a freshly armed signal; a tick that finds the signal unchanged costs one
+     *  relaxed atomic load and goes back to sleep.
+     */
+    inline constexpr int64_t k_lazyProbeTickMs = 5'000;
 
     /**
      * @brief Controlled-actor watcher poll interval (ms).
