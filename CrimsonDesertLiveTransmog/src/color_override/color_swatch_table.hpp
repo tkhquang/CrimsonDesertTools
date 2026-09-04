@@ -155,7 +155,7 @@ namespace Transmog::ColorOverride::SwatchTable
      * user actually saved the placeholder in.
      *
      * Empty submesh_name bails, token_id 0 bails. Lowest-index slot wins on duplicates (deterministic). Linear scan,
-     * `k_slotCount * 256` rows worst case -- cheap enough for the hot path.
+     * `k_slotCount * k_dyeSwatchesPerSlot` rows worst case -- cheap enough for the hot path.
      */
     int find_placeholder_slot(const char *submesh_name, std::uint16_t token_id) noexcept;
 

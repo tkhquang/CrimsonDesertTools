@@ -319,6 +319,135 @@ namespace Transmog::PrefabWrapperSwap
 
     static std::atomic<std::uint64_t> s_guardRejects{0};
 
+    // Per-apply census of this chokepoint. Several of the gate's exits are deliberately silent in normal play: a
+    // non-protagonist assembly is refused without a word, and a wrapper that is simply not in the swap map is the
+    // overwhelmingly common case, far too frequent to log. That silence leaves one question unanswerable from the
+    // log alone -- when a slot renders untransmogged, did the engine never emit the part through here at all, or did
+    // it emit and the gate refuse? These counters, plus the list of wrapper hashes actually seen while the window is
+    // open, separate the two.
+    //
+    // The window is armed by notify_apply_starting and stays armed until the NEXT one, because the substitutions
+    // that matter arrive on the engine's async rebuild after notify_apply_finished has already returned. So the
+    // steady-state cost is paid on every call, not only during an apply, and everything on that path is bounded
+    // deliberately: the counters are relaxed atomics, and both list recorders test their cap BEFORE hashing or
+    // locking, so once a list is full the detour is back to plain increments.
+    static std::atomic<bool> s_censusArmed{false};
+    // Detour entries, counted BEFORE any filter.
+    static std::atomic<std::uint32_t> s_censusRaw{0};
+    static std::atomic<std::uint32_t> s_censusCalls{0};
+    static std::atomic<std::uint32_t> s_censusScopeReject{0};
+    static std::atomic<std::uint32_t> s_censusHashFail{0};
+    static std::atomic<std::uint32_t> s_censusMiss{0};
+    static std::atomic<std::uint32_t> s_censusHit{0};
+    static std::mutex s_censusMtx;
+    // Cap on the emitted-wrapper list. A single body emits far fewer than this many distinct parts, so the cap is
+    // only ever reached by a wrong actor scope, which is itself the answer the census is looking for.
+    static constexpr std::size_t k_censusSeenCap = 64;
+    // Cap on the scope-rejected list. Sized for a crowd of NPCs assembling around the player.
+    static constexpr std::size_t k_censusRejCap = 128;
+    // Deduped and capped at k_censusSeenCap.
+    static std::vector<std::uint32_t> s_censusSeen;
+    // Map keys that actually substituted in the window. Bounded by the swap map, which holds one key per bound slot.
+    static std::vector<std::uint32_t> s_censusHitKeys;
+    // Wrapper hashes that reached the detour but were scope-rejected. Deduped and capped at k_censusRejCap.
+    static std::vector<std::uint32_t> s_censusRejSeen;
+    // Lock-free mirrors of "the matching list is full". Read on the detour path so a saturated list costs neither a
+    // name hash nor a mutex acquisition; written only under s_censusMtx alongside the push that fills the list.
+    static std::atomic<bool> s_censusSeenFull{false};
+    static std::atomic<bool> s_censusRejFull{false};
+    // 1..3: the character this window is applying, 0 when unknown.
+    static std::atomic<std::uint32_t> s_censusBucket{0};
+
+    /**
+     * @brief Print one census line: what the struct-copy chokepoint saw since the window was armed.
+     *
+     * `mapKeys` is what substitution is waiting for, `seenHashes` is what the engine actually emitted for a
+     * protagonist. Non-protagonist assemblies never reach the seen list -- they are refused upstream and counted in
+     * scopeReject -- so the list stays short and on-topic. The two together answer the only question that matters
+     * when a slot renders untransmogged: an empty seen list means the engine never emitted the part at all, while a
+     * seen list that misses every map key means it emitted something the map was not built for.
+     */
+    static void log_census(const char *phase)
+    {
+        // Name every bound slot whose substitution did NOT happen in this window. A slot that fails to substitute
+        // renders the real gear, and that failure is otherwise invisible in the log -- the swap is silent about a
+        // wrapper it never saw, which is exactly how a visual-only regression stays hidden until someone looks at
+        // the character. Reported as the source PREFAB name, so the line points straight at the slot.
+        //
+        // Restricted to the bucket this window actually applied. The other characters' buckets stay bound while they
+        // idle offscreen, and the engine emits nothing for a body it is not assembling, so reporting them would mark
+        // every idle companion as failed on every apply -- noise that would bury the one line that means something.
+        //
+        // Loaded outside the lock: it is an atomic, and the report branches below need it after the lock is
+        // released.
+        const auto bucket = s_censusBucket.load(std::memory_order_relaxed);
+        std::string keys;
+        std::string seen;
+        std::string missed;
+        {
+            // ONE scoped_lock over both, never two nested ones. The detour holds s_mapMtx and takes s_censusMtx
+            // inside it to record a hit; acquiring them here in the opposite order would invert the lock order.
+            // The two-mutex form locks them as a unit and cannot deadlock against that nesting.
+            std::scoped_lock lk(s_mapMtx, s_censusMtx);
+            for (std::size_t ci = 0; ci < 3; ++ci)
+            {
+                for (const auto &kv : s_swapMapPerChar[ci])
+                {
+                    if (bucket != ci + 1 ||
+                        std::find(s_censusHitKeys.begin(), s_censusHitKeys.end(), kv.first) != s_censusHitKeys.end())
+                        continue;
+                    // Flag the ones that DID reach the chokepoint and were refused for scope. That is the signature
+                    // of an install arriving outside the apply window rather than not arriving at all.
+                    const bool outOfScope =
+                        std::find(s_censusRejSeen.begin(), s_censusRejSeen.end(), kv.first) != s_censusRejSeen.end();
+                    missed += std::format("{}c{}:{}{}", missed.empty() ? "" : " ", ci + 1, kv.second.srcName,
+                                          outOfScope ? "(OUT-OF-SCOPE)" : "");
+                }
+            }
+            // The key and hash dumps are only worth their size -- and their formatting cost -- when something
+            // failed. On a clean pass the counters alone say everything, and printing every bound key plus every
+            // wrapper the body emitted, twice per apply, drowns the log.
+            if (!missed.empty())
+            {
+                for (std::size_t ci = 0; ci < 3; ++ci)
+                    for (const auto &kv : s_swapMapPerChar[ci])
+                        keys += std::format("{}c{}:0x{:08X}", keys.empty() ? "" : " ", ci + 1, kv.first);
+                for (const auto h : s_censusSeen)
+                    seen += std::format("{}0x{:08X}", seen.empty() ? "" : " ", h);
+            }
+        }
+        const auto raw = s_censusRaw.load(std::memory_order_relaxed);
+        const auto calls = s_censusCalls.load(std::memory_order_relaxed);
+        const auto scopeReject = s_censusScopeReject.load(std::memory_order_relaxed);
+        const auto hashFail = s_censusHashFail.load(std::memory_order_relaxed);
+        const auto miss = s_censusMiss.load(std::memory_order_relaxed);
+        const auto hit = s_censusHit.load(std::memory_order_relaxed);
+        // Debug, not warning, on every branch. The "apply" line is emitted before the engine's async rebuild has
+        // run, so an incomplete substitution list is the NORMAL state there rather than a fault, and a warning would
+        // fire on every healthy apply. The "tail" line is the one worth reading, and even it lists slots the engine
+        // simply had no reason to rebuild this pass.
+        auto &logger = DMK::Logger::get_instance();
+        if (bucket < 1 || bucket > 3)
+        {
+            // No bound character means no bucket was checked. Say so rather than falling through to the clean line:
+            // a diagnostic that reports success without having looked is worse than one that says nothing.
+            logger.debug("[prefab-swap] census({}): raw={} calls={} scopeReject={} hashFail={} miss={} hit={} | "
+                         "bucket=unknown, substitution not checked",
+                         phase, raw, calls, scopeReject, hashFail, miss, hit);
+            return;
+        }
+        if (missed.empty())
+        {
+            logger.debug("[prefab-swap] census({}): raw={} calls={} scopeReject={} hashFail={} miss={} hit={} | all "
+                         "bound slots substituted",
+                         phase, raw, calls, scopeReject, hashFail, miss, hit);
+            return;
+        }
+        logger.debug("[prefab-swap] census({}): raw={} calls={} scopeReject={} hashFail={} miss={} hit={} | "
+                     "NOT-SUBSTITUTED=[{}] | mapKeys=[{}] seenHashes=[{}]",
+                     phase, raw, calls, scopeReject, hashFail, miss, hit, missed, keys, seen);
+    }
+
     // --- SEH-isolated read/write helpers ---
 
     static bool write_qword_seh(void *p, std::uint64_t value) noexcept
@@ -2167,7 +2296,7 @@ namespace Transmog::PrefabWrapperSwap
     // wildlife. CDCore already maps such a path to a protagonist index, so the scope is derived, not learned -- correct
     // from the first call, with no cold-start window and no per-node cache to keep coherent.
     //
-    // Zero means "not a protagonist, or unreadable"; consumers fall back to the previous behaviour in that case, so a
+    // Zero means "not a protagonist, or unreadable"; consumers fall back to the previous behavior in that case, so a
     // failed resolve degrades to exactly what LT did before rather than dropping the substitution.
     static thread_local std::uint32_t t_scopeCharIdx = 0;
 
@@ -2531,10 +2660,18 @@ namespace Transmog::PrefabWrapperSwap
         // change attaches and draws the real mesh before LT's debounced apply can replace it -- the visible flash of
         // real gear. The swap map is the filter: it holds wrappers only for slots LT is actively driving, and
         // per-actor scoping keeps it to the right body.
+        // Counted before the filters below, so "the installer never ran" can be told apart from "it ran and the
+        // filters rejected everything". Those are different faults with the same downstream symptom.
+        const bool census = s_censusArmed.load(std::memory_order_relaxed);
+        if (census)
+            s_censusRaw.fetch_add(1, std::memory_order_relaxed);
+
         if (a2 < 0x10000)
             return trampoline(a1, a2);
 
         s_callCount.fetch_add(1, std::memory_order_relaxed);
+        if (census)
+            s_censusCalls.fetch_add(1, std::memory_order_relaxed);
 
         const auto srcWrapper = DMKMemory::seh_read<std::uint64_t>(a2).value_or(0);
         // Filter the StringInfo vtable sentinel: a2 sometimes points at the entry's +0x08 vtable slot rather than its
@@ -2546,6 +2683,10 @@ namespace Transmog::PrefabWrapperSwap
             return trampoline(a1, a2);
 
         std::uintptr_t tgtWrapper = 0;
+        // Swap-map key of the entry this call matched, recorded into the census only once the write has actually
+        // landed. Recording it at match time would report a slot as substituted even when the stack-temporary guard
+        // or the guarded write refused it, which is exactly the failure the census exists to surface.
+        std::uint32_t matchedKey = 0;
         if (s_active.load(std::memory_order_acquire))
         {
             // Bucket selection, and the guard against cross-actor bleed.
@@ -2567,7 +2708,36 @@ namespace Transmog::PrefabWrapperSwap
             else if (Transmog::in_transmog().load(std::memory_order_relaxed))
                 activeIdx = s_activeCharIdx.load(std::memory_order_acquire);
             else
+            {
+                if (census)
+                {
+                    s_censusScopeReject.fetch_add(1, std::memory_order_relaxed);
+                    // Record WHAT was refused, not just how many. A refusal is expected for NPCs, but it is also what
+                    // a protagonist part looks like when its assembly runs after the apply window has closed -- the
+                    // scope is thread-local and in_transmog is already down by then. Those two are indistinguishable
+                    // by count alone, and only the second one means a slot silently fails to install.
+                    //
+                    // This is the detour's most-travelled exit, so the saturation flag is tested before the name
+                    // hash: once the list is full there is nothing left to learn and the branch costs one load.
+                    if (!s_censusRejFull.load(std::memory_order_relaxed))
+                    {
+                        const auto rejHash = wrapper_name_hash(static_cast<std::uintptr_t>(srcWrapper));
+                        if (rejHash != 0)
+                        {
+                            std::scoped_lock ck(s_censusMtx);
+                            if (s_censusRejSeen.size() < k_censusRejCap &&
+                                std::find(s_censusRejSeen.begin(), s_censusRejSeen.end(), rejHash) ==
+                                    s_censusRejSeen.end())
+                            {
+                                s_censusRejSeen.push_back(rejHash);
+                                if (s_censusRejSeen.size() >= k_censusRejCap)
+                                    s_censusRejFull.store(true, std::memory_order_relaxed);
+                            }
+                        }
+                    }
+                }
                 return trampoline(a1, a2); // non-protagonist assembly -- never substitute
+            }
             if (activeIdx >= 1 && activeIdx <= 3)
             {
                 const auto bucket = static_cast<std::size_t>(activeIdx - 1);
@@ -2575,18 +2745,39 @@ namespace Transmog::PrefabWrapperSwap
                 // which instance the engine happens to hand us stops mattering.
                 const auto srcHash = wrapper_name_hash(static_cast<std::uintptr_t>(srcWrapper));
 
+                if (census)
+                {
+                    if (srcHash == 0)
+                        s_censusHashFail.fetch_add(1, std::memory_order_relaxed);
+                    else if (!s_censusSeenFull.load(std::memory_order_relaxed))
+                    {
+                        std::scoped_lock ck(s_censusMtx);
+                        if (s_censusSeen.size() < k_censusSeenCap &&
+                            std::find(s_censusSeen.begin(), s_censusSeen.end(), srcHash) == s_censusSeen.end())
+                        {
+                            s_censusSeen.push_back(srcHash);
+                            if (s_censusSeen.size() >= k_censusSeenCap)
+                                s_censusSeenFull.store(true, std::memory_order_relaxed);
+                        }
+                    }
+                }
                 if (srcHash != 0)
                 {
                     std::scoped_lock lk(s_mapMtx);
                     auto &m = s_swapMapPerChar[bucket];
                     const auto it = m.find(srcHash);
+                    if (census)
+                        (it != m.end() ? s_censusHit : s_censusMiss).fetch_add(1, std::memory_order_relaxed);
                     if (it != m.end())
                     {
                         // Confirm the name on a hit. 32 bits over the whole prefab corpus is not collision-proof, and
                         // a collision here would render some unrelated mesh. Only hits pay for this.
                         const auto nm = wrapper_inline_name(static_cast<std::uintptr_t>(srcWrapper));
                         if (nm == it->second.srcName)
+                        {
                             tgtWrapper = it->second.tgtWrapper;
+                            matchedKey = srcHash;
+                        }
                         else
                             DMK::Logger::get_instance().warning(
                                 "[prefab-swap] hash collision ignored: wrapper \"{}\" hashes to the same value as "
@@ -2626,6 +2817,13 @@ namespace Transmog::PrefabWrapperSwap
         {
             // Substitute failed -- pass through. This leaks a refcount bump on tgtWrapper. Rare path, accept it.
             return trampoline(a1, a2);
+        }
+
+        if (census && matchedKey != 0)
+        {
+            std::scoped_lock ck(s_censusMtx);
+            if (std::find(s_censusHitKeys.begin(), s_censusHitKeys.end(), matchedKey) == s_censusHitKeys.end())
+                s_censusHitKeys.push_back(matchedKey);
         }
 
         const auto sc = s_substCount.fetch_add(1, std::memory_order_relaxed);
@@ -3149,7 +3347,7 @@ namespace Transmog::PrefabWrapperSwap
             })
             .detach();
 
-        // Claim-removal observation hook. See on_remove_claims -- observational only, no behaviour change.
+        // Claim-removal observation hook. See on_remove_claims -- observational only, no behavior change.
         {
             const auto rcAddr =
                 resolve_address(k_unlinkByWrapperCandidates, std::size(k_unlinkByWrapperCandidates), "UnlinkByWrapper");
@@ -3276,6 +3474,31 @@ namespace Transmog::PrefabWrapperSwap
 
     void notify_apply_starting(const std::uint16_t (&itemIds)[5])
     {
+        // Arm the chokepoint census. Dump whatever the PREVIOUS window accumulated first: the substitutions that
+        // matter arrive on the engine's async rebuild, milliseconds AFTER notify_apply_finished returns, so the
+        // window deliberately stays open past the end of an apply and is only closed here, by the next one. The
+        // line finished() prints is the apply itself; this one is the apply plus its rebuild tail.
+        if (s_censusArmed.load(std::memory_order_relaxed))
+            log_census("tail");
+        {
+            std::scoped_lock ck(s_censusMtx);
+            s_censusSeen.clear();
+            s_censusHitKeys.clear();
+            s_censusRejSeen.clear();
+            // Clear the saturation mirrors under the same lock that empties the lists, so the detour can never see
+            // "full" against a list that has already been reset.
+            s_censusSeenFull.store(false, std::memory_order_relaxed);
+            s_censusRejFull.store(false, std::memory_order_relaxed);
+        }
+        s_censusRaw.store(0, std::memory_order_relaxed);
+        s_censusCalls.store(0, std::memory_order_relaxed);
+        s_censusScopeReject.store(0, std::memory_order_relaxed);
+        s_censusHashFail.store(0, std::memory_order_relaxed);
+        s_censusMiss.store(0, std::memory_order_relaxed);
+        s_censusHit.store(0, std::memory_order_relaxed);
+        s_censusArmed.store(true, std::memory_order_relaxed);
+        // Which character this window is for. set_active_char_idx runs ahead of the apply, so this is already bound.
+        s_censusBucket.store(s_activeCharIdx.load(std::memory_order_acquire), std::memory_order_relaxed);
         // Apply-only activation lifecycle. Mirrors the carrier hybrid pattern: picker mutations only update
         // s_selSrcIdx/s_selTgtIdx (pending state). The actual swap-map rebuild and activation happen here, at the
         // start of each apply pass. If the user cleared all selections, this deactivates cleanly.
@@ -3501,6 +3724,10 @@ namespace Transmog::PrefabWrapperSwap
 
     void notify_apply_finished(const std::uint16_t (&itemIds)[5])
     {
+        // Report the census, but leave it ARMED -- see notify_apply_starting. Emitted before the `!s_active`
+        // early-out below, because the most interesting case -- a slot that renders untransmogged -- can be one
+        // where the swap never activated at all.
+        log_census("apply");
         // Sweep BEFORE the s_active gate: a cleanup-only pass (every slot cleared) deactivates, and its parked
         // wrappers still have to be removed.
         //

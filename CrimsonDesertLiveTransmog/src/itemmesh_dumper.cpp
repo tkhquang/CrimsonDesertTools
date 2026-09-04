@@ -28,9 +28,11 @@ namespace Transmog
 {
     namespace
     {
-        // Registry-holder absolute addresses are resolved on first call via the AOB cascade defined in
-        // `aob_resolver.hpp` (k_iteminfoHolderCandidates / k_stringinfoHolderCandidates) and cached for the lifetime of
-        // the process. Both holders dereference to a registry struct with the standard `+0x08 = u32 count`,
+        // Registry-holder absolute addresses are resolved on first call and cached for the lifetime of the
+        // process. Neither has an AOB cascade of its own: the iteminfo holder comes from ItemNameTable's bounded
+        // call-graph walk, and the stringinfo holder IS the StringInfoRegistry slot, so it resolves through
+        // k_stringInfoRegistryCandidates. See the note in `aob_resolver.hpp` for why a global pattern cannot work
+        // for either. Both holders dereference to a registry struct with the standard `+0x08 = u32 count`,
         // `+0x58 = QWORD entry-array` layout.
         //
         // The entry-array offset moves whenever the pa::StaticInfoManager2<> base changes width. The count sits ahead
@@ -889,9 +891,9 @@ namespace Transmog
             std::scoped_lock lk(s_registryMtx);
             if (!s_ready)
             {
-                const uintptr_t iteminfoHolderAddr = resolve_address(k_iteminfoHolderCandidates, "IteminfoHolder");
+                const uintptr_t iteminfoHolderAddr = ItemNameTable::instance().iteminfo_holder_addr();
                 const uintptr_t stringinfoHolderAddr =
-                    resolve_address(k_stringinfoHolderCandidates, "StringinfoHolder");
+                    resolve_address(k_stringInfoRegistryCandidates, "StringInfoRegistry");
                 bool ok = false;
                 const uintptr_t iteminfoMgr = iteminfoHolderAddr ? read_qword_safe(iteminfoHolderAddr, ok) : 0;
                 const uintptr_t stringinfoMgr = stringinfoHolderAddr ? read_qword_safe(stringinfoHolderAddr, ok) : 0;
@@ -954,12 +956,15 @@ namespace Transmog
                 Sleep(k_catalogPollMs);
         }
 
-        // Resolve both registry-holder absolute addresses via the AOB cascade. The patterns target the `mov reg,
-        // [rip+disp32]` load of each holder in a stable lookup primitive (see aob_resolver.hpp). The cascade returns
-        // the absolute address of the holder slot. One indirection yields the registry struct (header, then the count
-        // at kOffRegistryCount, then the entry array at kOffRegistryArray).
-        const uintptr_t iteminfoHolderAddr = resolve_address(k_iteminfoHolderCandidates, "IteminfoHolder");
-        const uintptr_t stringinfoHolderAddr = resolve_address(k_stringinfoHolderCandidates, "StringinfoHolder");
+        // Resolve both registry-holder absolute addresses. Neither has an AOB cascade any more: the engine's
+        // per-manager accessors are byte-identical template clones that differ only in their RIP displacement, so a
+        // global pattern cut from one matches every manager at once (see the note in aob_resolver.hpp where the two
+        // cascades used to live). The iteminfo holder comes from ItemNameTable's bounded call-graph walk, and the
+        // stringinfo holder IS the StringInfoRegistry slot -- the same global under two names. One indirection yields
+        // the registry struct (header, then the count at kOffRegistryCount, then the entry array at
+        // kOffRegistryArray).
+        const uintptr_t iteminfoHolderAddr = ItemNameTable::instance().iteminfo_holder_addr();
+        const uintptr_t stringinfoHolderAddr = resolve_address(k_stringInfoRegistryCandidates, "StringInfoRegistry");
         if (!iteminfoHolderAddr || !stringinfoHolderAddr)
         {
             logger.warning("[itemprefab] holder AOB resolve failed: "

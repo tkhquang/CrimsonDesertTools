@@ -151,6 +151,20 @@ namespace Transmog
         uintptr_t indexed_string_lookup_addr() const noexcept;
 
         /**
+         * @brief Address of the iteminfo global holder slot, cached during the same build() chain walk.
+         *
+         * This is the ONLY way to reach that slot. The engine's per-manager accessors are byte-identical template
+         * clones that differ only in their RIP displacement, so a global AOB cut from one of them matches every
+         * manager at once and can never be unique -- and the slot itself has exactly one referencing instruction in
+         * the whole image, which lives inside such a clone. The bounded chain walk sidesteps both problems by
+         * reaching the right clone through the call graph first and only then reading its displacement.
+         *
+         * Returns 0 before the first successful resolve_chain call. Like indexed_string_lookup_addr(), it becomes
+         * valid even on a BuildResult::Deferred return, because the walk reads static exe bytes only.
+         */
+        uintptr_t iteminfo_holder_addr() const noexcept;
+
+        /**
          * @brief Flat, alphabetically-sorted entry list for UI iteration.
          *
          * Rebuilt lazily on first access after build(). It is stable thereafter. Returned by const reference so the

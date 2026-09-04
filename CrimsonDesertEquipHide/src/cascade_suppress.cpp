@@ -17,38 +17,45 @@ namespace EquipHide
     // BatchEquip dispatch-entry layout, used to read the per-entry slot id.
     //
     // The engine walks two nested containers here, and the mod must read from the outer one. The outer loop iterates
-    // the swap entries handed to on_visual_equip_swap: it loads the base from [rcx] and the count from [rcx+8], then
-    // forms the end pointer with `imul rsi, rax, <stride>`. The inner loop searches one actor's authority table with a
-    // different stride and a different slot field. A read of the inner values mis-indexes every entry, so the mod
-    // decodes both constants below from the outer loop.
+    // the swap entries handed to on_visual_equip_swap: it loads the list head, takes the count from the head's `+8`,
+    // and forms the end pointer with an `imul <reg>, rax, <stride>`. The inner loop searches one actor's authority
+    // table with a different stride and a different slot field. A read of the inner values mis-indexes every entry,
+    // so the mod decodes both constants below from the outer loop.
     //
     // The mod decodes both values live and does not hardcode them. The entry width changes across builds, so a fixed
     // size mis-reads the slot id silently instead of failing. The nominal is the last verified layout, and the code
     // uses it only when the decode fails. Verify it against live memory on patch day.
     //
-    // Stride: the imm32 of the outer `imul rsi, rax, <stride>`. No candidate pins that imm32. P1 and P2 stop before
-    // it, and P3 wildcards it. The pattern therefore stays value-agnostic and self-heals when the entry width changes.
+    // Stride: the imm32 of the outer `imul <reg>, rax, <stride>`. No candidate pins that imm32. P1 and P2 stop
+    // before it, and P3 wildcards it. The pattern therefore stays value-agnostic and self-heals when the entry width
+    // changes.
     //
     // A short branch sits between the outer loop head and the imul, and the same three-instruction shape appears at an
     // unrelated container-iteration site. No branch-free window tells the two sites apart, so each candidate below
     // includes one short jump with a wildcarded target. If a future build changes that jump encoding, the candidate
     // stops matching. That result is intended: the decode falls back to the nominal instead of resolving to the wrong
     // site.
+    //
+    // Every disp_offset below is the byte offset of the IMUL ITSELF within the matched window, which is what
+    // read_code_constant decodes the operand from. It has to be re-measured whenever the instructions ahead of the
+    // imul change length -- folding two loads into one is enough to shift it. A stale value decodes a neighboring
+    // instruction's bytes as the stride, and the range check is the only thing standing between that and a silently
+    // wrong entry width.
     static constexpr DMK::Scanner::AddrCandidate k_equipSwapStrideSite[] = {
         // P1 -- outer loop head through the imul. Widest context, anchored before the null check.
         {"BatchEquipStride_P1_LoopHeadToImul",
-         "C7 85 ?? ?? ?? ?? ?? ?? ?? ?? 49 8B 09 48 85 C9 74 ?? 48 8B 19 8B 41 08 48 69 F0",
-         DMK::Scanner::ResolveMode::Direct, 0x18, 0, true},
+         "C7 85 ?? ?? ?? ?? ?? ?? ?? ?? 49 8B 19 48 85 DB 74 ?? 8B 43 08 48 69 F8",
+         DMK::Scanner::ResolveMode::Direct, 0x15, 0, true},
 
         // P2 -- null check through the imul. Drops the preceding frame initialization.
-        {"BatchEquipStride_P2_NullCheckToImul", "49 8B 09 48 85 C9 74 ?? 48 8B 19 8B 41 08 48 69 F0",
-         DMK::Scanner::ResolveMode::Direct, 14, 0, true},
+        {"BatchEquipStride_P2_NullCheckToImul", "49 8B 19 48 85 DB 74 ?? 8B 43 08 48 69 F8",
+         DMK::Scanner::ResolveMode::Direct, 11, 0, true},
 
         // P3 -- imul forward into the branch that follows it. Independent of everything before the imul, so it
         // survives a rewrite of the loop head that defeats P1 and P2.
         {"BatchEquipStride_P3_ImulToJoin",
-         "48 8B 19 8B 41 08 48 69 F0 ?? ?? ?? ?? 48 03 F3 EB ?? 49 8B 41 08 48 8B 18",
-         DMK::Scanner::ResolveMode::Direct, 6, 0, true},
+         "8B 43 08 48 69 F8 ?? ?? ?? ?? 48 03 3B 48 8B 1B EB ?? 49 8B 49 08",
+         DMK::Scanner::ResolveMode::Direct, 3, 0, true},
     };
 
     // Slot: the disp32 of `movzx eax, word ptr [rbx+<slot>]`, where rbx is the current outer entry. The instruction

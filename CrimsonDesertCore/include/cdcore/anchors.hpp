@@ -47,8 +47,8 @@ namespace CDCore::Anchors
     // -----------------------------------------------------------------------
     // WorldSystem -- static pointer for the root world-system global.
     //
-    // Resolved via a small `48 83 EC 28 ... mov rcx, [rip+disp32]` getter that the mod chases to obtain the player
-    // actor component. RipRelative mode reads the disp32 at match+7 and adds it to (match + 11).
+    // Every row anchors on a `mov reg, [rip+disp32]` that loads this global, inside code the mod chases to obtain the
+    // player actor component. The disp32 offset and the instruction end differ per row and are stated on each.
     //
     // Walk (runtime-data). The +0x30 / +0x58 / +0xD8 manager-chain offsets are owned by CDCore::ActorChainOffsets
     // (controlled_char.hpp), the single authority shared with the LT/EH controlled-actor polls:
@@ -59,11 +59,21 @@ namespace CDCore::Anchors
     // different prologue shape.
     // -----------------------------------------------------------------------
     inline constexpr AddrCandidate k_worldSystemCandidates[] = {
-        // P1 -- whole-function anchor for the small getter. This is the tightest available signature. It pins every
-        // byte of the function prologue AND body.
-        {"WorldSystem_P1_SmallFunc",
-         "48 83 EC 28 48 8B 0D ?? ?? ?? ?? 48 8B 49 ?? E8 ?? ?? ?? ?? 84 C0 0F 94 C0 48 83 C4 28 C3",
-         ResolveMode::RipRelative, 7, 11},
+        // P1 -- the accessor body, at the site where it is inlined into its caller. There is no standalone getter
+        // function to anchor on: a whole-function row is not available for this global, so do not go looking for
+        // one. Per aob-signatures.md section 2.3, an anchor whose function is inlined has to move to the code that
+        // survived, and this is that code.
+        //
+        // Shape: load the global, walk `+0xD8` to the container, take `[+0x20]`, and branch on whether its count at
+        // `+0x28` is zero -- empty yields a null, otherwise the element at `[+0x20][+0x10]` -- then virtual-call
+        // `[rax+0x40]` on the result. The load plus the container walk alone is a common idiom with dozens of
+        // matches, so the window has to run through the empty-check branch and the vcall to be unique. Both rel8
+        // targets are wildcarded. A compiler that widens either short jump to `0F 8x rel32` breaks this row -- that
+        // is what P2 is for, since it crosses no branch of its own.
+        {"WorldSystem_P1_InlinedGetterThroughVCall",
+         "48 8B 05 ?? ?? ?? ?? 48 8B 88 D8 00 00 00 48 8B 41 20 83 78 28 00 "
+         "77 ?? 33 C9 EB ?? 48 8B 40 20 48 8B 48 10 48 8B 01 FF 50 40",
+         ResolveMode::RipRelative, 3, 7},
 
         // P2 -- alternative sibling site:
         //   cmp byte [rax+disp32], 0
@@ -74,14 +84,19 @@ namespace CDCore::Anchors
         // The 2-byte branch slot is wildcarded rather than hard-coded as `75 ??`. Per aob-signatures.md section 9 the
         // compiler can flip a short Jcc to the 6-byte `0F 85 rel32` form, and that flip changes the opcode byte. Two
         // wildcard bytes tolerate the 2-byte shape for any opcode, but the pattern still fails on a 6-byte flip. In
-        // that case P1 / P3 take over, because neither one crosses a branch. The trailing `48 8B 88 D8 00 00 00` pins
+        // that case P3 takes over, since it crosses no branch at all. The trailing `48 8B 88 D8 00 00 00` pins
         // the specific WorldSystem follow-on (`mov rcx, [rax+0xD8]`). 0xD8 is a game-struct ABI offset that is stable
         // within a build.
         {"WorldSystem_P2_StructField", "80 B8 ?? ?? ?? ?? 00 ?? ?? 48 8B 05 ?? ?? ?? ?? 48 8B 88 D8 00 00 00",
          ResolveMode::RipRelative, 12, 16},
 
-        // P3 -- shortest anchor: the `mov rcx, [rip+disp32] ; mov rcx,[rcx+X] ; call ; ...` tail of the small getter,
-        // without the prologue. Used when a compiler shuffle trims the `sub rsp, 28` from P1.
+        // P3 -- shortest anchor: a `mov rcx, [rip+disp32] ; mov rcx,[rcx+X] ; call ; test al,al ; sete al` site. It
+        // shares no bytes with P1 or P2 and crosses no branch, so it survives both the branch-widening that sinks P1
+        // and the entry-block rewrite that sinks P2.
+        //
+        // This is the shape of the standalone getter that P1's site inlines, so it only resolves on a build that
+        // still emits one somewhere. Treat it as an opportunistic tier, not a guaranteed fallback, and re-verify it
+        // in the disassembler rather than assuming the cascade has three live rows.
         {"WorldSystem_P3_InnerLoad", "48 8B 0D ?? ?? ?? ?? 48 8B 49 ?? E8 ?? ?? ?? ?? 84 C0 0F 94 C0",
          ResolveMode::RipRelative, 3, 7},
     };
@@ -125,9 +140,9 @@ namespace CDCore::Anchors
     //       float   blend,        // XMM3 animation blend
     //       __int64 a5..a9)       // stack params
     //
-    // P1 is tightened past the bare prologue. A scan of the 14-byte prologue alone also hits a Windows module
-    // (kernel DLL) function with a different body, so P1 appends the P2 discriminator
-    // (`4D 8B E8 44 8B 89 ?? ?? ?? ??`) and selects the game function uniquely.
+    // P1 is tightened past the bare prologue. A scan of the register-save run alone also hits a Windows module
+    // (kernel DLL) function with a different body, so P1 runs on through the same array/count setup P2 anchors on,
+    // which is what selects the game function uniquely.
     //
     // The show-list array and count displacements move inside the descriptor between builds. When they move, the
     // count load `mov r9d,[rcx+disp]` can also grow from a disp8 form to a disp32 form. That growth changes the
@@ -141,24 +156,32 @@ namespace CDCore::Anchors
     // breakpoint armed and trigger a state transition first.
     // -----------------------------------------------------------------------
     inline constexpr AddrCandidate k_partAddShowCandidates[] = {
-        // P1 -- full prologue through the r13/r9d setup, including the post-alloca moves. The bare 14-byte prologue
-        // also matches a Windows DLL function with a different body, so those moves are what make the row unique.
-        {"PartAddShow_P1_FullPrologue", "40 55 56 57 41 55 48 83 EC ?? 48 8B 79 ?? 4D 8B E8 44 8B 89 ?? ?? ?? ??",
+        // P1 -- full prologue through the array/count setup, including the post-alloca moves. The bare prologue also
+        // matches a Windows DLL function with a different body, so those moves are what make the row unique.
+        //
+        // The register-save set (`push rbx / rdi / r15`, five bytes) and the register the show-list array base lands
+        // in are both compiler-owned and move together. P2's walk-back is measured against that push run, so it has
+        // to be re-measured whenever the run changes length.
+        {"PartAddShow_P1_FullPrologue", "40 53 57 41 57 48 83 EC ?? 48 8B 59 ?? 4D 8B F8 44 8B 89 ?? ?? ?? ?? 48 8B F9",
          ResolveMode::Direct, 0, 0},
 
-        // P2 -- post-prologue anchor (sub rsp / mov rdi,[rcx+X] / mov r13,r8 / mov r9d,[rcx+disp32]). Offset -6 backs
+        // P2 -- post-prologue anchor (sub rsp / mov rbx,[rcx+X] / mov r15,r8 / mov r9d,[rcx+disp32]). Offset -5 backs
         // up to function start.
-        {"PartAddShow_P2_PostPrologue", "48 83 EC ?? 48 8B 79 ?? 4D 8B E8 44 8B 89 ?? ?? ?? ??", ResolveMode::Direct,
-         -6, 0},
+        {"PartAddShow_P2_PostPrologue", "48 83 EC ?? 48 8B 59 ?? 4D 8B F8 44 8B 89 ?? ?? ?? ??", ResolveMode::Direct,
+         -5, 0},
 
         // P3 -- show-list walk setup, entirely past the prologue and past the count load that both other rows depend
-        // on. Shape: capture the this-pointer, take the count into eax, spill xmm6, scale the count by the 0x10 entry
-        // stride, add the array base, park the blend argument in xmm6, then compare base against end for the
-        // empty-list guard. The 0x10 stride and the register roles carry the uniqueness budget, and the only
-        // wildcarded byte is the xmm6 spill slot. This row survives a further shift of the array and count
-        // displacements, which is the known failure mode of the other two rows. Anchors at function start + 0x18.
+        // on. Shape: capture the this-pointer, take the count into eax, scale it by the 0x10 entry stride, add the
+        // array base, spill xmm6, park the blend argument in xmm6, then compare base against end for the empty-list
+        // guard. The 0x10 stride and the register roles carry the uniqueness budget, and the only wildcarded byte is
+        // the xmm6 spill slot. This row survives a further shift of the array and count displacements, which is the
+        // known failure mode of the other two rows. Anchors at function start + 0x17.
+        //
+        // The scale/add pair and the xmm6 spill can be scheduled in either order. A row that stretches to pin more
+        // of that ordering is pinning a compiler scheduling choice, so keep the window tight around the two halves
+        // that actually carry meaning: the strided walk setup and the blend argument being parked.
         {"PartAddShow_P3_ShowListWalkSetup",
-         "48 8B F1 41 8B C1 C5 F8 29 74 24 ?? 48 C1 E0 04 48 03 C7 C5 F8 28 F3 48 3B F8", ResolveMode::Direct, -0x18,
+         "48 8B F9 41 8B C1 48 C1 E0 04 48 03 C3 C5 F8 29 74 24 ?? C5 F8 28 F3 48 3B D8", ResolveMode::Direct, -0x17,
          0},
     };
 
@@ -229,15 +252,17 @@ namespace CDCore::Anchors
     // 3-tier cascade: P1 = full prologue, P2 = arg shuffle plus scratch prep, P3 = deepest body anchor, past every
     // argument-carrying instruction.
     //
-    // The arg shuffle right after __chkstk is four moves in a fixed order: a3 into a callee-saved register, a2 into a
-    // callee-saved register, a1 into r14, and [a1+8] into a callee-saved register.
-    // The compiler rotates WHICH extended register each one lands in, and that rotation rewrites only the ModRM byte
-    // of each mov. P1 and P2 therefore wildcard those ModRM bytes and keep what the rotation cannot touch: the REX
-    // prefixes, the `8B` opcodes, and the `08` displacement of the [a1+8] load. Instruction lengths are unchanged by a
-    // rotation, so the -0x22 and -0x32 walk-backs still land on function start. If a later build moves one of these
-    // args into a non-extended register (rsi, rdi, rbx), the REX prefix changes as well and both rows stop matching.
-    // P3 exists for that case: it sits past the arg shuffle and pins no argument register at all. Frame and
-    // function-size immediates stay wildcarded per section 2.
+    // The arg shuffle right after __chkstk is four moves in a fixed ORDER, though not into fixed registers: a3,
+    // then a2, then a1, then [a1+8], each parked in whichever register allocation picked. The order and the `08`
+    // displacement of the last load are the stable part; the destinations are not.
+    // The compiler rotates WHICH register each one lands in. That rewrites the ModRM byte, and -- when the target is
+    // a non-extended register (rsi, rdi, rbx) rather than r8-r15 -- the REX prefix as well: `4C 8B E2` becomes
+    // `48 8B F1`. A row that pins the REX byte therefore dies on a rotation that crosses the extended/legacy line,
+    // taking P1 and P2 down together and leaving the cascade on P3 alone. Both rows take the REX byte as a
+    // per-nibble token (`4?`) instead, which keeps the one nibble the rotation cannot touch and wildcards the bit
+    // that encodes extended-vs-legacy. The `8B` opcodes, the four-move shape and the `08` displacement of the [a1+8]
+    // load carry the uniqueness. A rotation never changes instruction length, so the -0x22 and -0x32 walk-backs
+    // stay valid across one. Frame and function-size immediates stay wildcarded per section 2.
     // -----------------------------------------------------------------------
     inline constexpr AddrCandidate k_batchEquipCandidates[] = {
         // P1 -- full prologue: save rbx, push 7 callee-saves, lea rbp, mov eax=__chkstk size, call __chkstk, sub
@@ -247,7 +272,7 @@ namespace CDCore::Anchors
         {"BatchEquip_P1_FullPrologue",
          "48 89 5C 24 10 55 56 57 41 54 41 55 41 56 41 57 "
          "48 8D AC 24 ?? ?? ?? ?? B8 ?? ?? ?? ?? "
-         "E8 ?? ?? ?? ?? 48 2B E0 4D 8B ?? 4C 8B ?? 4C 8B ?? 4C 8B ?? 08",
+         "E8 ?? ?? ?? ?? 48 2B E0 4? 8B ?? 4? 8B ?? 4? 8B ?? 4? 8B ?? 08",
          ResolveMode::Direct, 0, 0},
 
         // P2 -- arg shuffle (sub rsp,rax; mov r?,r8; mov r?,rdx; mov r?,rcx; mov r?,[rcx+8]) plus the first on-stack
@@ -257,7 +282,7 @@ namespace CDCore::Anchors
         // A push-frame-only candidate here is non-unique once its stack disp32 is wildcarded. P1 already covers the
         // push-frame region.
         {"BatchEquip_P2_PostAlloca",
-         "48 2B E0 4D 8B ?? 4C 8B ?? 4C 8B ?? 4C 8B ?? 08 "
+         "48 2B E0 4? 8B ?? 4? 8B ?? 4? 8B ?? 4? 8B ?? 08 "
          "48 8D 45 ?? 48 89 45 ?? 33 C9",
          ResolveMode::Direct, -0x22, 0},
 
@@ -291,66 +316,74 @@ namespace CDCore::Anchors
     // The module-relative offset of the slot drifts between game patches, so a hardcoded offset reads unrelated
     // `.data` on the wrong build. That failure is SILENT: a stale offset can land inside a packed string table, and
     // the dereference then yields ASCII content instead of a heap pointer. Always resolve the slot through the
-    // cascade below. All three candidates anchor on distinct instructions inside the same lazy-init function that
-    // publishes the singleton, and all three resolve to the same global slot.
+    // cascade below. There are exactly TWO candidates, because the global has exactly two referencing instructions
+    // in the image (see the note under P2). Both sit in the same lazy-init function and both resolve to the same
+    // global slot, so this cascade is thinner than the usual three tiers and cannot be widened.
     //
-    // All candidates use RipRelative mode. Each yields the absolute address of the slot whose qword is the manager
+    // Note that P2 crosses a short conditional jump, so a branch-encoding flip leaves only P1 standing.
+    //
+    // Both candidates use RipRelative mode. Each yields the absolute address of the slot whose qword is the manager
     // pointer.
     // -----------------------------------------------------------------------
     inline constexpr AddrCandidate k_clientActorManagerGlobalCandidates[] = {
         // P1 -- publish-store + sibling sub-pointer assignments:
-        //   mov [rip+disp32], rdi         ; <-- publishes the manager
-        //   lea rax, [rdi+0x130]
-        //   mov [rip+disp32], rax         ; sibling slot +8
-        //   lea rax, [rdi+0x1B0]
-        //   mov [rip+disp32], rax         ; sibling slot +16
-        // The two `lea` immediates are sub-object offsets inside the manager, so they move whenever the manager is
-        // re-laid-out. They are wildcarded for that reason, per section 2: an operand the engine is free to renumber
-        // does not belong in the signature body. Pinning them cost nothing in uniqueness and everything in lifetime,
-        // because a re-layout silently demoted this row and let the cascade fall through to P2. Note the two offsets
-        // do not even move with the actor-array descriptor, and have moved in the opposite direction from it, so
-        // there is no single delta to re-derive them from.
+        //   mov [rip+disp32], reg         ; <-- publishes the manager, slot +0
+        //   lea reg2, [reg+subobj]
+        //   mov [rip+disp32], reg2        ; sibling slot +8
+        //   lea reg2, [reg+subobj]
+        //   mov [rip+disp32], reg2        ; sibling slot +16
+        //   movzx eax, byte [rbp+X]
+        //   mov [rip+disp32], al          ; state flag, sibling slot +24
         //
-        // What carries the match instead is the instruction skeleton: a publish store of the incoming pointer followed
-        // by two `lea`+store pairs that publish sub-pointers into consecutive global slots. That shape resolves to a
-        // single site across all executable pages, and require_unique keeps it honest if a future build duplicates it.
-        // The disp32 of `mov [rip+disp32], rdi` is at match+3. The instruction is 7 bytes long.
+        // Nothing here pins a destination register or a sub-object offset. The REX byte of each of those three
+        // instructions is kept as a per-nibble `4?` token: the high nibble is what makes the store and the leas
+        // 64-bit operations at all, and dropping it would let the row match a 32-bit or non-REX encoding whose
+        // operand layout puts the "disp32" bytes somewhere else entirely.
+        //
+        // The `lea` immediates are offsets inside the manager
+        // and move whenever it is re-laid-out; per section 2 an operand the engine is free to renumber does not
+        // belong in a signature body, and these do not even move with the actor-array descriptor -- they have moved
+        // in the OPPOSITE direction from it, so there is no single delta to re-derive them from. The publish
+        // register is likewise compiler-owned, which is why the store's REX and ModRM and the leas' base register
+        // are wildcards too.
+        //
+        // What carries the match is the instruction skeleton: a publish store of the incoming pointer, two
+        // `lea`+store pairs publishing sub-pointers into consecutive global slots, then a byte-sized state flag into
+        // the fourth. No other publish block in the image emits that tail. Every wildcarded instruction keeps a
+        // fixed length, so the disp32 of the publish store stays at match+3 and the instruction ends at match+7.
+        // require_unique keeps the row honest if a future build duplicates the shape.
         {"ClientActorManagerGlobal_P1_PublishStore",
-         "48 89 3D ?? ?? ?? ?? 48 8D 87 ?? ?? ?? ?? "
-         "48 89 05 ?? ?? ?? ?? 48 8D 87 ?? ?? ?? ?? "
-         "48 89 05",
+         "4? 89 ?? ?? ?? ?? ?? 4? 8D ?? ?? ?? ?? ?? "
+         "48 89 05 ?? ?? ?? ?? 4? 8D ?? ?? ?? ?? ?? "
+         "48 89 05 ?? ?? ?? ?? "
+         "0F B6 85 ?? ?? ?? ?? 88 05",
          ResolveMode::RipRelative, 3, 7},
 
-        // P2 -- zero-init prologue that precedes the publish store:
-        //   vpxor   xmm0,xmm0,xmm0                ; C5 F9 EF C0
-        //   vmovdqu xmmword [rip+disp32], xmm0    ; C5 FA 7F 05 + disp32
-        //   mov     [rip+disp32], r12             ; 4C 89 25 + disp32
-        //   mov     byte [rip+disp32], 0          ; C6 05 + disp32 + 00
-        // The r12 register choice and the byte-store of 0 distinguish this from ordinary AVX zero-init blocks. The
-        // vmovdqu resolves to the same global slot as P1. The disp32 lives at match+8. The vmovdqu instruction ends
-        // at match+12.
-        {"ClientActorManagerGlobal_P2_ZeroInitPrologue",
-         "C5 F9 EF C0 C5 FA 7F 05 ?? ?? ?? ?? "
-         "4C 89 25 ?? ?? ?? ?? "
-         "C6 05 ?? ?? ?? ?? 00",
-         ResolveMode::RipRelative, 8, 12},
-
-        // P3 -- mid-body address-of-global use:
-        //   lea rdx, cs:[rip+disp32]              ; 48 8D 15 + disp32
-        //   lea rcx, [rbp+disp32]                 ; 48 8D 8D + disp32
-        //   call helper                           ; E8 + rel32
-        //   nop
-        //   mov byte [rsp+disp8], 0               ; C6 44 24 + disp8 + 00
-        //   vpxor xmm0,xmm0,xmm0                  ; C5 F9 EF C0
-        // The `lea rdx, [rip+disp32]` is the only address-of-global use in this function (the publish store uses mov,
-        // not lea). The post-call tail (`90 C6 44 24 ?? 00 C5 F9 EF C0`) is necessary to disambiguate. Without it the
-        // leading `lea rdx; lea rcx,[rbp+]; call; nop` shape matches many unrelated sites. The disp32 of the
-        // `lea rdx` lives at match+3. The instruction is 7 bytes long.
-        {"ClientActorManagerGlobal_P3_LeaCallBody",
-         "48 8D 15 ?? ?? ?? ?? 48 8D 8D ?? ?? ?? ?? "
+        // P2 -- the only READ of the slot: the same lazy-init function later leas it as an outbound argument.
+        //   <loop tail: add rsi,0x10 ; sub r14,1 ; jne>
+        //   lea rdx, cs:[rip+slot]        ; 48 8D 15 + disp32
+        //   lea rcx, [rbp+disp8]          ; 48 8D 4D + disp8
+        //   call helper ; nop
+        //   mov byte [rsp+disp8], 0
+        //   vpxor xmm0,xmm0,xmm0
+        // Both halves of the window earn their length. The post-call tail is needed because the leading
+        // lea/lea/call shape alone matches many unrelated sites, and the leading loop tail is needed because the
+        // lea/lea/call/nop/vpxor block itself occurs TWICE in this function. The disp32 of the `lea rdx` lives at
+        // match+13 and that instruction ends at match+17.
+        {"ClientActorManagerGlobal_P2_LeaCallBodyDisp8",
+         "48 83 C6 10 49 83 EE 01 75 ?? "
+         "48 8D 15 ?? ?? ?? ?? 48 8D 4D ?? "
          "E8 ?? ?? ?? ?? 90 C6 44 24 ?? 00 "
          "C5 F9 EF C0",
-         ResolveMode::RipRelative, 3, 7},
+         ResolveMode::RipRelative, 13, 17},
+
+        // There is deliberately NO third row.
+        //
+        // This global has exactly two referencing instructions in the whole image: the publish store P1 anchors on,
+        // and the single `lea rdx` P2 anchors on. The second, byte-identical lea/lea/call/nop/vpxor block noted
+        // above is tempting as a third row, but it loads a NEIGHBORING global rather than this one. A row cut from
+        // it resolves cleanly, passes every plausibility check, and yields the wrong pointer. Verify the resolved
+        // TARGET, not just the match count, before adding anything here.
     };
 
 } // namespace CDCore::Anchors

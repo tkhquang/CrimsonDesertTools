@@ -19,6 +19,8 @@
 #include "aob_resolver.hpp"
 #include "shared_state.hpp"
 
+#include <cdcore/dmk_glue.hpp>
+
 #include <DetourModKit.hpp>
 
 #include <Windows.h>
@@ -291,6 +293,17 @@ namespace Transmog::DyeRecordInject
         if (copier_target == 0)
         {
             logger.warning("[dye-inject] AOB resolve failed for DyeCopier; "
+                           "dye injection disabled");
+            return false;
+        }
+
+        // Both DyeCopier rows below P1 reach the entry through a negative walk-back, so a prologue that changes
+        // length resolves them short WITHOUT failing the pattern match. This hook is an inline detour, so a short
+        // resolve writes its jump into the middle of a live instruction. Verify the target is a real function entry
+        // before hooking rather than trusting the offset.
+        if (!CDCore::Glue::looks_like_function_entry(copier_target, "DyeRecordInject_DyeCopier"))
+        {
+            logger.warning("[dye-inject] DyeCopier resolved to a non-entry address; "
                            "dye injection disabled");
             return false;
         }
