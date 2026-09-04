@@ -2,6 +2,13 @@
 
 All notable changes to the CrimsonDesertLiveTransmog mod will be documented in this file.
 
+## [0.15.0] - Crimson Desert 2.01.00 support and accessory fixes
+
+- Updated the mod to work with Crimson Desert version 2.01.00
+- Refreshed the item name list for game version 2.01.00
+- Fixed large saved color palettes losing colors when they were loaded back
+- Sped up the equipment name lookup the mod runs while loading
+
 ## [0.14.1] - Stutter and frame drop fix
 
 - Fixed repeated stutters and frame drops, most noticeable when one or both of your companions are not with you
@@ -294,6 +301,7 @@ All notable changes to the CrimsonDesertLiveTransmog mod will be documented in t
 - Modular code split: `transmog_apply` (apply/clear logic), `transmog_hooks` (VEC/BatchEquip callbacks), `transmog_worker` (debounce/load-detect/nametable threads), `shared_state` (cross-TU atomics)
 - Docs clarify ReShade is required for GUI; without it, users edit JSON manually via Capture hotkey
 
+[0.15.0]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.15.0
 [0.14.1]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.14.1
 [0.14.0]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.14.0
 [0.13.2]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.13.2
