@@ -2,6 +2,13 @@
 
 All notable changes to the CrimsonDesertEquipHide mod will be documented in this file.
 
+## [0.9.0] - Crimson Desert 2.01.00 support and performance fixes
+
+- Updated the mod to work with Crimson Desert version 2.01.00
+- Fixed a performance drop that built up across loading screens, fast travel and zone changes
+- Sped up the equipment name lookup the mod runs while loading
+- Cut background scanning while the mod waits for late-loading equipment parts
+
 ## [0.8.7] - Crimson Desert 1.18.00 support
 
 - Updated the mod to work with Crimson Desert version 1.18.00
@@ -287,6 +294,7 @@ All notable changes to the CrimsonDesertEquipHide mod will be documented in this
 - Customizable part lists per category via INI configuration
 - Configurable init delay and log level
 
+[0.9.0]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/equip-hide/v0.9.0
 [0.8.7]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/equip-hide/v0.8.7
 [0.8.6]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/equip-hide/v0.8.6
 [0.8.5]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/equip-hide/v0.8.5
