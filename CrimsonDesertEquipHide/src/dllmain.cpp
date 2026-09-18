@@ -44,27 +44,25 @@ namespace
     }
 } // namespace
 
-BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved)
+// The module handle stays unnamed: bootstrap_attach captures the calling module itself, because DetourModKit links
+// statically into this DLL and its code address resolves to this HMODULE.
+BOOL APIENTRY DllMain(HMODULE, DWORD ul_reason_for_call, LPVOID lpReserved)
 {
-    // bootstrap_attach captures the calling module itself, because DetourModKit links statically into this DLL and
-    // its code address resolves to this HMODULE.
-    (void)hModule;
-
     switch (ul_reason_for_call)
     {
     case DLL_PROCESS_ATTACH:
     {
-        DMK::AsyncLoggerConfig asyncCfg;
+        DMK::AsyncLoggerConfig async_config;
         // Fall back to synchronous logging if the async queue overflows, so no diagnostic line is lost during a burst
         // (startup or teardown).
-        asyncCfg.overflow_policy = DMK::OverflowPolicy::SyncFallback;
+        async_config.overflow_policy = DMK::OverflowPolicy::SyncFallback;
 
         const DMK::ModInfo info{
             .name = EquipHide::MOD_NAME,
             .log_file = EquipHide::LOG_FILE,
             .game_process_name = EquipHide::GAME_PROCESS_NAME,
             .instance_mutex_prefix = EquipHide::INSTANCE_MUTEX_PREFIX,
-            .log = asyncCfg,
+            .log = async_config,
             // Single DLL, one Session per run, so the default Truncate gives one log per game launch. The dev loader
             // needs Append instead, because it keeps every generation's teardown records in one file.
             .log_open_mode = DMK::LogOpenMode::Truncate,
@@ -79,16 +77,15 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
     }
 
     case DLL_PROCESS_DETACH:
-        // lpReserved == NULL is an explicit FreeLibrary. Run the mod teardown so the patched prologues are restored;
-        // this is best-effort, because a ~Hook under the loader lock pins the backend rather than leaving a
-        // half-restored target. lpReserved != NULL is process exit: the OS has already killed every other thread, so
-        // touching patched pages there would be a UAF and the abandon path inside bootstrap_detach is the correct
-        // no-op.
+        // lpReserved == NULL is an explicit FreeLibrary. Run the mod teardown so the patched prologues are restored.
+        // The attempt is best-effort, because a ~Hook under the loader lock pins the backend rather than leaving a
+        // half-restored target. lpReserved != NULL is process exit: the OS has already killed every other thread, so a
+        // touch of patched pages there is a UAF and the abandon path inside bootstrap_detach is the correct no-op.
         if (lpReserved == nullptr)
         {
             // The verdict is discarded on purpose. DllMain cannot refuse a FreeLibrary already in progress, and this
-            // ASI is loaded once for the process, so there is no later load that a pinned backend could hand a stale
-            // image to. shutdown() logs the failure itself.
+            // ASI is loaded once for the process, so no later load exists for a pinned backend to hand a stale image
+            // to. shutdown() logs the failure itself.
             (void)EquipHide::shutdown();
         }
         DMK::bootstrap_detach(lpReserved);

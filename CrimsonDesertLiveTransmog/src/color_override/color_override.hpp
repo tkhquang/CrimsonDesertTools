@@ -1,4 +1,5 @@
-#pragma once
+#ifndef TRANSMOG_COLOR_OVERRIDE_COLOR_OVERRIDE_HPP
+#define TRANSMOG_COLOR_OVERRIDE_COLOR_OVERRIDE_HPP
 
 #include <DetourModKit/hook.hpp>
 
@@ -19,7 +20,7 @@ namespace Transmog::ColorOverride
      *
      * A slot holds TWO populations that share this table: the rows the engine captures live, and the rows a saved
      * palette seeds on load. They ADD UP rather than overlap, so the cap has to cover both at once. Overflow is not
-     * an error the user sees -- the seed drops the rows that do not fit, each one a color the picker then cannot
+     * an error the user sees - the seed drops the rows that do not fit, each one a color the picker then cannot
      * drive, and the only signal is a wall of "[swatch-seed] slot N full" warnings.
      *
      * Palette size scales with COLOR TOKENS, not with mesh count: a single submesh occupies one row per token it
@@ -48,7 +49,7 @@ namespace Transmog::ColorOverride
 
     /**
      * Wipe ALL captured state for `slot`: carrier set, hash set, swatch rows, owner-map slot entries, freeze flags,
-     * apply-window timers. Call from `apply_single_slot` when the target item changes so the new captures aren't mixed
+     * apply-window timers. Call from `apply_single_slot` when the target item changes so the new captures are not mixed
      * with stale rows.
      */
     void wipe_slot(int slot) noexcept;
@@ -61,3 +62,5 @@ namespace Transmog::ColorOverride
     /// Diagnostic dump.
     void log_counters() noexcept;
 } // namespace Transmog::ColorOverride
+
+#endif // TRANSMOG_COLOR_OVERRIDE_COLOR_OVERRIDE_HPP

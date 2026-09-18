@@ -1,4 +1,8 @@
 #include "setter_substitute.hpp"
+
+#include "../aob_resolver.hpp"
+#include "../dye_record_inject.hpp"
+#include "../shared_state.hpp"
 #include "color_carrier_set.hpp"
 #include "color_matinst_owner.hpp"
 #include "color_pending_overrides.hpp"
@@ -7,31 +11,28 @@
 #include "color_token_discovery.hpp"
 #include "color_token_interner_hook.hpp"
 #include "color_token_table.hpp"
+#include "host_scope.hpp"
 #include "matinst_probe.hpp"
 #include "one_shot_log_set.hpp"
-#include "host_scope.hpp"
-#include "../aob_resolver.hpp"
-#include "../dye_record_inject.hpp"
-#include "../shared_state.hpp"
 
 #include <DetourModKit.hpp>
-
 #include <DetourModKit/hook.hpp>
-
-#include <Windows.h>
+#include <DetourModKit/logger.hpp>
+#include <DetourModKit/memory.hpp>
 
 #include <array>
 #include <atomic>
-#include <chrono>
+#include <cstddef>
 #include <cstdint>
+#include <span>
 
 namespace Transmog::ColorOverride::SetterSubstitute
 {
     namespace
     {
-        // The setter target is the BYTE-variant of the engine's 4-byte property write path. Resolved live via the AOB
-        // cascade in `aob_resolver.hpp` (`setter_byte()`); see that file for the byte-vs-dword discriminator
-        // that keeps the candidate unique against its sibling at sub_14091CC90.
+        // The setter target is the BYTE-variant of the engine 4-byte property write path. The SetterByte anchor
+        // resolves it live through the AOB cascade in `aob_resolver.hpp`. That file carries the byte-versus-dword
+        // discriminator that keeps the candidate unique against its sibling write path.
 
         // Property descriptor field offsets (read from rcx).
         constexpr std::ptrdiff_t k_descSize = 0x70;     // u32 byte-size
@@ -53,12 +54,6 @@ namespace Transmog::ColorOverride::SetterSubstitute
         // writes are also captured.
         constexpr std::int64_t k_applyTailMs = 300;
         std::atomic<std::int64_t> g_windowEndMs{0};
-
-        std::int64_t now_ms() noexcept
-        {
-            using namespace std::chrono;
-            return duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
-        }
 
         // Counters
         std::atomic<std::uint64_t> g_hookFires{0};
@@ -84,7 +79,7 @@ namespace Transmog::ColorOverride::SetterSubstitute
         std::array<OneShotLogSet<std::uint32_t, 32>, ::Transmog::k_slotCount> g_seenSlotHashes;
 
         // SEH-guarded read of one u32 with fault-tolerance. Returns 0 on fault. Used by the descriptor dump below so a
-        // bad address in one slot doesn't abort the whole row.
+        // bad address in one slot does not abort the whole row.
         std::uint32_t seh_read_u32(std::uintptr_t addr) noexcept
         {
             return DMK::memory::read<std::uint32_t>(DMK::Address{addr}).value_or(0);
@@ -93,7 +88,7 @@ namespace Transmog::ColorOverride::SetterSubstitute
         // Diagnostic: print the descriptor at `dst_prop` as a row of u32 at +0x00..+0x3C. Used on the first 8 distinct
         // descriptor addresses to locate per-class fields.
         //
-        // Field-offset map. Offsets are STRUCT-RELATIVE so they're patch-stable, unlike the RVAs of the functions that
+        // Field-offset map. Offsets are STRUCT-RELATIVE so they are patch-stable, unlike the RVAs of the functions that
         // touch them:
         //   +0x00 = vtbl (qword). The "Color permutations" descriptor
         //           class is identified via its constructor's call
@@ -131,12 +126,14 @@ namespace Transmog::ColorOverride::SetterSubstitute
             std::uint32_t w[16]{};
             for (int i = 0; i < 16; ++i)
                 w[i] = seh_read_u32(dst_prop + std::uintptr_t(i) * 4);
-            DetourModKit::log().trace(
+            // try_log, not trace(): this runs on the setter detour, which is noexcept, so a formatting or sink
+            // failure must not escape into the engine frame.
+            (void)DMK::log().try_log(
+                DMK::LogLevel::Trace,
                 "[color-setter-sub] desc@{:#x}  "
                 "+00={:08X} +04={:08X} +08={:08X} +0C={:08X} "
                 "+10={:08X} +14={:08X} +18={:08X} +1C={:08X} "
-                "+20=hashKey{:08X} +24={:08X} +28=tok16{:08X} +2C={:08X} "
-                "+30={:08X} +34={:08X} +38={:08X} +3C={:08X}",
+                "+20=hashKey{:08X} +24={:08X} +28=tok16{:08X} +2C={:08X} +30={:08X} +34={:08X} +38={:08X} +3C={:08X}",
                 dst_prop,
                 w[0],
                 w[1],
@@ -174,7 +171,7 @@ namespace Transmog::ColorOverride::SetterSubstitute
             return true;
         }
 
-        // Per-thread BGRA override buffer. Engine reads 4 bytes from DMK::hook::gpr(ctx, DMK::hook::Gpr::R8) -- we
+        // Per-thread BGRA override buffer. Engine reads 4 bytes from DMK::hook::gpr(ctx, DMK::hook::Gpr::R8) - we
         // point it here. The buffer's lifetime spans only a single midhook callback: the engine's setter consumes
         // DMK::hook::gpr(ctx, DMK::hook::Gpr::R8) synchronously inside the trampoline that runs after we return, and no
         // reentrant path enters the setter, so thread-local storage is sufficient.
@@ -206,7 +203,7 @@ namespace Transmog::ColorOverride::SetterSubstitute
 
         // Resolve which LT slot owns this matInst. Tries the MatInstOwner map first (populated by the publisher hook on
         // dst matInsts), falls back to the carrier set's content-hash ownership, and finally to the active apply
-        // window. Returns -1 if ownership can't be established.
+        // window. Returns -1 if ownership cannot be established.
         int resolve_slot(std::uintptr_t mi, std::uint32_t content_hash) noexcept
         {
             // Primary: the slot the apply path explicitly told us is active. Always set while transmog_apply.cpp is
@@ -242,13 +239,12 @@ namespace Transmog::ColorOverride::SetterSubstitute
                 // increment (so a sudden fires-count gap correlates with windowOpen=0 at the time). tailMs is the
                 // post-close grace period (see k_applyTailMs).
                 const bool winOpen = g_applyWindowActive.load(std::memory_order_relaxed);
-                const auto winAge = now_ms() - g_windowEndMs.load(std::memory_order_relaxed);
-                DetourModKit::log().trace(
+                const auto winAge = State::now_ms() - g_windowEndMs.load(std::memory_order_relaxed);
+                (void)DMK::log().try_log(
+                    DMK::LogLevel::Trace,
                     "[color-setter-sub] fires={} subs={} defs={} miss={} "
                     "noSlot={} hostRej={} windowOpen={} winAge_ms={} "
-                    "tailMs={} "
-                    "active={} rgb=({:02X},{:02X},{:02X}) "
-                    "hs[player={} npc={} freed={}]",
+                    "tailMs={} active={} rgb=({:02X},{:02X},{:02X}) hs[player={} npc={} freed={}]",
                     fires,
                     g_substitutions.load(std::memory_order_relaxed),
                     g_defaultsCaptured.load(std::memory_order_relaxed),
@@ -270,11 +266,11 @@ namespace Transmog::ColorOverride::SetterSubstitute
 
             // Gate 1: only inside the LT-apply window or short tail.
             const bool inWindow = g_applyWindowActive.load(std::memory_order_relaxed) ||
-                                  (now_ms() - g_windowEndMs.load(std::memory_order_relaxed) < k_applyTailMs);
+                                  (State::now_ms() - g_windowEndMs.load(std::memory_order_relaxed) < k_applyTailMs);
             if (!inWindow)
                 return;
 
-            // Gate 2: host-scope. The setter detour fires from MANY actors -- player, NPCs in render range, mounts,
+            // Gate 2: host-scope. The setter detour fires from MANY actors - player, NPCs in render range, mounts,
             // scenery. Each NPC wearing the same shader template contributes its own matInst (unique stable_id) to the
             // capture set, padding the row cap with non-player rows. Filter to player-owned hosts only.
             if (!ColorOverride::HostScope::is_current_host_player_owned(DMK::hook::stack_pointer(ctx)))
@@ -285,8 +281,8 @@ namespace Transmog::ColorOverride::SetterSubstitute
 
             // No descriptor-class gate by design: comparing `DMK::hook::gpr(ctx, DMK::hook::Gpr::Rcx)` against a
             // hardcoded engine-global is patch-fragile and only filters by class identity, not by property name. The
-            // downstream gates -- apply window, host scope, matInst probe success, slot resolution, name capture,
-            // override_active row -- already keep unrelated property writes from substituting, so the extra heuristic
+            // downstream gates - apply window, host scope, matInst probe success, slot resolution, name capture,
+            // override_active row - already keep unrelated property writes from substituting, so the extra heuristic
             // earns nothing.
 
             // Token id (for grouping + UI display). NOT a gate.
@@ -294,8 +290,8 @@ namespace Transmog::ColorOverride::SetterSubstitute
             if (read_token_id(DMK::hook::gpr(ctx, DMK::hook::Gpr::Rdx), tokId))
             {
                 // Lazy warm-up: cold-start can leave the discovery table underpopulated (Windows lazy-commit means some
-                // registrar code pages weren't faulted in at module-init scan time) and the interner table can grow
-                // after our initial walk. Retry both when we see a token we can't classify; throttled internally so
+                // registrar code pages were not faulted in at module-init scan time) and the interner table can grow
+                // after our initial walk. Retry both when we see a token we cannot classify; throttled internally so
                 // this is a cheap no-op once warmed.
                 if (ColorOverride::TokenTable::token_layer(tokId) < 0)
                 {
@@ -311,7 +307,8 @@ namespace Transmog::ColorOverride::SetterSubstitute
                     const auto channel = ColorOverride::TokenTable::channel_kind(tokId);
                     if (layer >= 0 || channel >= 0)
                     {
-                        DetourModKit::log().trace(
+                        (void)DMK::log().try_log(
+                            DMK::LogLevel::Trace,
                             "[color-setter-sub] token seen: 0x{:08X} layer={} channel={}",
                             tokId,
                             layer,
@@ -322,10 +319,10 @@ namespace Transmog::ColorOverride::SetterSubstitute
             }
             if (tokId == 0)
                 return;
-            // No token-allowlist gate. Every dye-class property write that reaches here is a candidate swatch -- tokens
+            // No token-allowlist gate. Every dye-class property write that reaches here is a candidate swatch - tokens
             // we can't classify get bucketed under "misc" in the UI but still substitute via the user's Recolor picks.
             // Substitution itself only fires when the user has an `override_active` row, so unrelated writes that slip
-            // through resolve_slot still don't get substituted.
+            // through resolve_slot still do not get substituted.
             const std::uint16_t tok16 = static_cast<std::uint16_t>(tokId);
 
             // matInst identity probe.
@@ -340,8 +337,8 @@ namespace Transmog::ColorOverride::SetterSubstitute
             // Before resolving slot ownership, consult PendingOverrides by (submesh_name, token_id) alone. If the
             // active preset has a saved override whose submesh+token matches what the engine is writing, substitute the
             // user's RGB and skip the slot-routing pipeline. Name-based match is sufficient because submesh names are
-            // globally unique within an outfit's dyeable surface set. The pending entry stays in the map after a hit so
-            // repeated engine writes to the same property keep substituting.
+            // globally unique inside the dyeable surface set of one outfit. The pending entry stays in the map after
+            // a hit, so repeated engine writes to the same property keep substituting.
             if (ColorOverride::PendingOverrides::has_any())
             {
                 char pend_sm[40] = {0};
@@ -353,7 +350,7 @@ namespace Transmog::ColorOverride::SetterSubstitute
                     if (pend_hit)
                     {
                         // Snapshot the engine's source bytes BEFORE redirecting DMK::hook::gpr(ctx, DMK::hook::Gpr::R8)
-                        // -- they are the row's natural default and feed the picker's "engine natural" reference dot
+                        // - they are the row's natural default and feed the picker's "engine natural" reference dot
                         // via the placeholder-promote call below.
                         std::uint8_t src_bgra[4] = {0, 0, 0, 0xFF};
                         if (!read_source_bgra(DMK::hook::gpr(ctx, DMK::hook::Gpr::R8), src_bgra))
@@ -395,9 +392,9 @@ namespace Transmog::ColorOverride::SetterSubstitute
             // verify which C++ classes the active carrier emits and whether they ever shift after a carrier swap.
             if (g_seenVtables.insert_unique(mf.vtable))
             {
-                DetourModKit::log().debug(
-                    "[color-setter-sub] vtable observed: 0x{:X} "
-                    "(slot={} hash=0x{:08X} template=0x{:04X})",
+                (void)DMK::log().try_log(
+                    DMK::LogLevel::Debug,
+                    "[color-setter-sub] vtable observed: 0x{:X} (slot={} hash=0x{:08X} template=0x{:04X})",
                     mf.vtable,
                     slot,
                     mf.content_hash,
@@ -405,7 +402,7 @@ namespace Transmog::ColorOverride::SetterSubstitute
                 );
             }
 
-            // Capture submesh name early -- needed by the placeholder-first slot router below AND by lookup_or_insert
+            // Capture submesh name early - needed by the placeholder-first slot router below AND by lookup_or_insert
             // plus the one-shot log later. SEH-protected; empty on bail.
             char sm_name[40] = {0};
             const bool nameOk = Probe::read_submesh_name(mf.mi, sm_name, sizeof(sm_name));
@@ -424,12 +421,13 @@ namespace Transmog::ColorOverride::SetterSubstitute
                     slot = placeholderSlot;
             }
             // First-fire log per (slot, content_hash). A per-slot SET (not last-hash dedup) is required so hair/eye
-            // re-fires can't mask a chest matInst between its own fires.
+            // re-fires cannot mask a chest matInst between its own fires.
             // Name-less regions are skipped immediately below, so reporting them says only "here is another one I
             // ignored". Report the ones that carry a usable submesh name.
             if (nameOk && g_seenSlotHashes[slot].insert_unique(mf.content_hash))
             {
-                DetourModKit::log().trace(
+                (void)DMK::log().try_log(
+                    DMK::LogLevel::Trace,
                     "[color-setter-sub] slot={} hash={:#x} submesh='{}'",
                     slot,
                     mf.content_hash,
@@ -476,7 +474,7 @@ namespace Transmog::ColorOverride::SetterSubstitute
             }
             const auto rowIdx = static_cast<std::size_t>(row);
 
-            // Read the engine's natural BGRA value -- the bytes the setter is about to copy from `DMK::hook::gpr(ctx,
+            // Read the engine's natural BGRA value - the bytes the setter is about to copy from `DMK::hook::gpr(ctx,
             // DMK::hook::Gpr::R8)`. The master dye toggle lives in SwatchTable's per-slot storage rather than
             // PickerState because the UI's `ImGui::Checkbox("Dye##dye_on")` writes through that storage; gating on the
             // same value avoids a stale-read race.
@@ -489,8 +487,8 @@ namespace Transmog::ColorOverride::SetterSubstitute
 
             if (readOk)
             {
-                // Always capture the engine value here -- `DMK::hook::gpr(ctx, DMK::hook::Gpr::R8)` still holds the
-                // natural source bytes (we haven't redirected it yet). Running capture regardless of override state
+                // Always capture the engine value here - `DMK::hook::gpr(ctx, DMK::hook::Gpr::R8)` still holds the
+                // natural source bytes (we have not redirected it yet). Running capture regardless of override state
                 // means `ovr.def_r/g/b` stays populated for already-overridden rows, so the picker's "engine default"
                 // reference dot keeps working after a preset switch + re-apply. `capture_default_if_unset` is
                 // idempotent via its own `def_seen_mask & 1` gate; only the first fire per row actually writes.
@@ -536,36 +534,48 @@ namespace Transmog::ColorOverride::SetterSubstitute
 
     bool init(DMK::hook::HookStack &hooks) noexcept
     {
-        auto &log = DMK::log();
-        const auto target = anchor_address(AnchorId::SetterByte);
-        if (target == 0)
-            return false;
+        // The declaration is noexcept, and the body throws: MidRequest holds a std::string name, mid_at is not
+        // noexcept, and the logger verbs are not noexcept. Contain all of it here rather than terminate the process.
+        try
+        {
+            auto &log = DMK::log();
+            const auto target = anchor_address(AnchorId::SetterByte);
+            if (target == 0)
+                return false;
 
-        auto hook = DMK::hook::mid_at(
-            DMK::hook::MidRequest{.name = "ColorOverride::SetterSubstitute", .target = DMK::Address{target}},
-            &on_setter_mid
-        );
-        if (!hook)
+            auto hook = DMK::hook::mid_at(
+                DMK::hook::MidRequest{
+                    .name = "ColorOverride::SetterSubstitute",
+                    .target = DMK::Address{target},
+                },
+                &on_setter_mid
+            );
+            if (!hook)
+            {
+                log.warning("[color-setter-sub] mid-hook FAILED at {:#x}: {}", target, hook.error().message());
+                return false;
+            }
+            if (auto armed = hook->enable(); !armed)
+            {
+                log.warning(
+                    "[color-setter-sub] mid-hook could not be armed at {:#x}: {}",
+                    target,
+                    armed.error().message()
+                );
+                return false;
+            }
+            hooks.push(std::move(*hook));
+            // The hooked function is the per-channel property setter, called as descriptor vtbl[89] from the 4-arg
+            // dispatch wrapper, itself reached as vtbl[66] from the publish iterator. It writes 4 bytes at
+            // `target + desc[+0x70]` then fires the publish-notify helper. See `log_descriptor_shape` above for the
+            // full publish-chain map.
+            log.info("[color-setter-sub] mid-hook installed at {:#x} (per-row swatch table active)", target);
+            return true;
+        }
+        catch (...)
         {
-            log.warning("[color-setter-sub] mid-hook FAILED at {:#x}: {}", target, hook.error().message());
             return false;
         }
-        if (auto armed = hook->enable(); !armed)
-        {
-            log.warning("[color-setter-sub] mid-hook could not be armed at {:#x}: {}", target, armed.error().message());
-            return false;
-        }
-        hooks.push(std::move(*hook));
-        // The hooked function is the per-channel property setter:
-        // called as descriptor vtbl[89] from the 4-arg dispatch wrapper -- itself reached as vtbl[66] from the publish
-        // iterator. Writes 4 bytes at `target + desc[+0x70]` then fires the publish-notify helper. See
-        // `log_descriptor_shape` above for the full publish-chain map.
-        log.info(
-            "[color-setter-sub] mid-hook installed at {:#x} "
-            "(per-row swatch table active)",
-            target
-        );
-        return true;
     }
 
     void set_active_slot(int slot) noexcept
@@ -573,9 +583,9 @@ namespace Transmog::ColorOverride::SetterSubstitute
         if (!::Transmog::flag_color_override().load(std::memory_order_acquire))
             return;
         g_activeSlot.store(slot, std::memory_order_release);
-        // Mirror into ColorOverride::State so the publisher hook resolves the right slot when its TLS-stack fallback is
-        // empty (orch hooks aren't installed on v1.06). Also sets the apply-window deadline so the publisher's window
-        // check doesn't bail.
+        // Mirror into ColorOverride::State so the publisher hook resolves the right slot when its TLS-stack fallback
+        // is empty, which happens whenever the orchestrator hooks are absent. This also sets the apply-window deadline
+        // so the publisher window check does not bail.
         if (slot >= 0)
             ColorOverride::mark_apply_begin(slot);
     }
@@ -588,13 +598,13 @@ namespace Transmog::ColorOverride::SetterSubstitute
         if (active)
         {
             // Wipe first-sighting log so the next session re-logs each distinct token. Concurrent setter fires during
-            // the clear see size=0 (count is zeroed before entries) -- worst case the post-clear fire logs a duplicate,
+            // the clear see size=0 (count is zeroed before entries) - worst case the post-clear fire logs a duplicate,
             // benign.
             g_seenTokens.clear();
         }
         else
         {
-            g_windowEndMs.store(now_ms(), std::memory_order_release);
+            g_windowEndMs.store(State::now_ms(), std::memory_order_release);
         }
     }
 

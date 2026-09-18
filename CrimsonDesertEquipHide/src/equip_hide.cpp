@@ -41,12 +41,12 @@
 
 namespace EquipHide
 {
-    // Indexed by truncated part hash. The gate-skip lock (the In/Out selector forced to Out) prevents PartInOut
-    // from re-running the transition dispatch after the first vis=2 frame.
+    // Indexed by truncated part hash. The gate-skip lock (the In/Out selector forced to Out) stops PartInOut from a
+    // re-run of the transition dispatch after the first vis=2 frame.
     static uint8_t s_hideLocked[0x10000]{};
 
-    // Brief guard window after any hotkey toggle. Prevents cascade from other armor slots (shield/helm) from briefly
-    // hiding legs.
+    // Brief guard window after any hotkey toggle. It stops a cascade from another armor slot (shield or helm) from a
+    // brief hide of the legs.
     static std::atomic<int> s_flushGuard{0};
 
     static constexpr CategoryMask k_cascadeBodyMask =
@@ -77,14 +77,14 @@ namespace EquipHide
     static constexpr std::size_t k_mapLookupPrologueBytes = 0x40;
 
     // Every hook the mod installs. A HookStack restores newest first, the only safe order for layered hooks on
-    // one target: an older layer's restore would otherwise clobber a prologue a newer layer's live trampoline still
-    // chains through. shutdown() clears it while the code pages are still mapped.
+    // one target. In any other order an older layer's restore clobbers a prologue that a newer layer's live
+    // trampoline still chains through. shutdown() clears it while the code pages are still mapped.
     static DMK::hook::HookStack s_hooks;
 
-    /// Latched when a hooked prologue could not be proved restored; the dev loader refuses the unmap on it.
+    /// Latched when a hooked prologue fails the restore proof. The dev loader refuses the unmap on it.
     static std::atomic<bool> s_hookRestoreFailed{false};
 
-    // Config
+    // Binds every INI item and hotkey, loads the file, then arms the auto-reload watcher.
     static void load_config(DMK::Session &session)
     {
         // Section-scoped binders, so each INI section name is written once here instead of heading every call.
@@ -176,10 +176,10 @@ namespace EquipHide
         static std::atomic<bool> s_autoReload{true};
         general.bind<bool>("AutoReloadConfig", "Auto-Reload Config", s_autoReload, true);
 
-        // Hotkey bindings (Toggle/Show/Hide per category + ShowAll/HideAll) are registered through
-        // DMK::config::press_combo, which fuses the INI key binding with the input press registration. Must precede
-        // the INI load so the press_combo keys land in the same load pass as the config items above. The returned
-        // guards go into the Session's input scope, which ~Session clears first and in reverse insertion order.
+        // config::press_combo registers every hotkey binding (Toggle/Show/Hide per category plus ShowAll/HideAll)
+        // and fuses the INI key binding with the input press registration. It must precede the INI load so the
+        // press_combo keys land in the same load pass as the config items above. The returned guards go into the
+        // Session's input scope, which ~Session clears first and in reverse insertion order.
         register_hotkeys(session.scope());
 
         session.ini().load(INI_FILE);
@@ -230,12 +230,24 @@ namespace EquipHide
         }
     }
 
-    // Mid-hook callback
+    // Store the PartInOut visibility byte through the strict per-frame write. It never changes page protection, so a
+    // stale or read-only target fails closed with no byte changed instead of faulting into the wrapper below.
+    static void write_vis_byte(uintptr_t partInOut, uint8_t value) noexcept
+    {
+        (void)DMK::memory::write_in_place<std::uint8_t>(
+            DMK::Address{partInOut}.offset(static_cast<std::ptrdiff_t>(vis_byte_offset())),
+            value
+        );
+    }
 
     static void on_vis_check_impl(DMK::hook::MidContext &ctx)
     {
+        // The relaxed load is a cheap filter. The exchange that claims the work is the synchronizing edge: it must
+        // acquire against the arming store, or this thread can claim the flag and still read the previous
+        // part-lookup buffer and hidden-state masks. Every site that arms the flag therefore stores it with
+        // release, including the worker tails that publish a rebuilt part map and a rebuilt visCtrl set.
         if (needs_direct_write().load(std::memory_order_relaxed) &&
-            needs_direct_write().exchange(false, std::memory_order_relaxed))
+            needs_direct_write().exchange(false, std::memory_order_acquire))
         {
             // Clear stale locks on vis ctrl change (save load, zone transition) so chest gets a fresh first-frame
             // transition.
@@ -285,10 +297,10 @@ namespace EquipHide
         // Part-hash key pointer, the decision function's second argument. The register that carries it moves
         // between builds, so verify it against the disassembly instead of assuming. On the current build it is RDX,
         // and the exclusion walk dereferences it as `mov ecx,[rdx]` before comparing against each entry's first
-        // DWORD. That dereference is the check -- a register the walk does not read THROUGH is the wrong one.
+        // DWORD. That dereference is the check - a register the walk does not read THROUGH is the wrong one.
         //
         // Reading the wrong register here fails SILENTLY. The neighboring registers hold small integers (R11 carries
-        // the visibility byte the hooked movzx just loaded, R10 the exclusion count), so `memory::is_plausible_ptr`
+        // the visibility byte the hooked movzx loaded, R10 the exclusion count), so `memory::is_plausible_ptr`
         // rejects the value, this handler returns before reaching any of the logic below, and the cascade fix goes
         // dead with the hook still reporting installed.
         // See the register map on equip_vis_check() in aob_resolver.hpp.
@@ -296,7 +308,12 @@ namespace EquipHide
         if (!DMK::memory::is_plausible_ptr(DMK::Address{hashPtr}))
             return;
 
-        auto partHash = *reinterpret_cast<const uint32_t *>(hashPtr);
+        // Guarded read of the engine's key word. A plausible but unmapped pointer fails closed here instead of
+        // faulting into the wrapper below.
+        const auto hashRead = DMK::memory::read<std::uint32_t>(DMK::Address{hashPtr});
+        if (!hashRead)
+            return;
+        const auto partHash = *hashRead;
 
         if (!needs_classification(partHash))
             return;
@@ -309,7 +326,7 @@ namespace EquipHide
         // reads the visibility byte through it and the branch after the exclusion walk reads its transition byte at
         // `cmp byte [r8+3],0`. Take it from R8, not from RCX: RCX carries the a1 context here, which is also a live
         // heap pointer, so it passes memory::is_plausible_ptr() and a read of the wrong register does not fail
-        // loudly. The mid-hook would then write the visibility byte inside the context struct instead.
+        // loudly. The mid-hook then writes the visibility byte inside the context struct instead.
         // See the register map on equip_vis_check() in aob_resolver.hpp.
         const auto partInOut = DMK::hook::gpr(ctx, DMK::hook::Gpr::R8);
         if (!DMK::memory::is_plausible_ptr(DMK::Address{partInOut}))
@@ -335,26 +352,24 @@ namespace EquipHide
             }
         }
 
-        // Chest lock state machine (BEFORE player filter):
-        //   0 = unlocked -- first frame, let gate pass
-        //   1 = locked   -- force the skip-gate selector, decision not published
-        //   2 = re-equip -- force vis=0 (In, recreate scene nodes)
+        // Chest lock state machine, evaluated before the player filter. 0 = unlocked, the first frame lets the gate
+        // pass. 1 = locked, the handler forces the skip-gate selector and the engine publishes no decision.
+        // 2 = re-equip, the handler forces vis=0 so the In pass recreates the scene nodes.
         if (cascadeOn && isChest && s_hideLocked[hashIdx] && is_any_category_hidden(mask))
         {
-            auto *visPtr = reinterpret_cast<uint8_t *>(partInOut + vis_byte_offset());
             if (s_hideLocked[hashIdx] == 2)
             {
-                *visPtr = 0;
+                write_vis_byte(partInOut, 0);
                 s_hideLocked[hashIdx] = 0;
                 return;
             }
-            *visPtr = 2;
+            write_vis_byte(partInOut, 2);
             DMK::hook::gpr(ctx, DMK::hook::Gpr::R9) = k_selectorSkipGate;
             return;
         }
 
         // a1 visibility-control context, the decision function's first argument. check_player_filter() gates the
-        // pointer itself, so no separate plausibility check is needed here.
+        // pointer itself, so this site needs no separate plausibility check.
         const auto a1 = DMK::hook::gpr(ctx, DMK::hook::Gpr::Rcx);
         if (!check_player_filter(a1))
             return;
@@ -394,12 +409,12 @@ namespace EquipHide
 
         if (is_any_category_hidden_for(charMask, charIdx))
         {
-            auto *visPtr = reinterpret_cast<uint8_t *>(partInOut + vis_byte_offset());
-            *visPtr = 2;
+            write_vis_byte(partInOut, 2);
             if (cascadeOn && isChest)
             {
+                // A locked frame must not publish a second transition, so close the gate instead of re-arming it.
                 if (s_hideLocked[hashIdx])
-                    DMK::hook::gpr(ctx, DMK::hook::Gpr::R9) = k_selectorSkipGate; // gate skip on locked frames
+                    DMK::hook::gpr(ctx, DMK::hook::Gpr::R9) = k_selectorSkipGate;
                 else
                     s_hideLocked[hashIdx] = 1;
             }
@@ -411,8 +426,10 @@ namespace EquipHide
         }
     }
 
-    /* SEH wrapper: separate function because MSVC SEH cannot coexist with C++ destructors in the same frame. It
-       swallows faults when the mod is outdated and the register layout changed -- do not crash the game. */
+    // SEH wrapper, a separate function because MSVC SEH cannot coexist with C++ destructors in the same frame. It is
+    // the last-resort guard for a register layout that moved under an outdated mod: the game must not crash. Every
+    // foreign access in the body is already a guarded memory:: call, so a fault here means a wrong register, which is
+    // exactly the silent-death case the register map above warns about. Log it once.
     static void on_vis_check(DMK::hook::MidContext &ctx)
     {
         __try
@@ -421,10 +438,14 @@ namespace EquipHide
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
+            static std::atomic<bool> s_crashLogged{false};
+            if (!s_crashLogged.exchange(true, std::memory_order_relaxed))
+                (void)DMK::log().try_log(
+                    DMK::LogLevel::Warning,
+                    "EquipVisCheck: SEH caught crash in the mid-hook. Verify the register map against this build."
+                );
         }
     }
-
-    // Public interface
 
     DMK::Result<void> init(DMK::Session &session, const WheelHostTable *wheel_host)
     {
@@ -436,7 +457,7 @@ namespace EquipHide
         load_config(session);
 
         if (!DMK::memory::init_cache())
-            logger.warning("Memory cache init failed -- pointer reads may be slower");
+            logger.warning("Memory cache init failed - pointer reads may be slower");
 
         auto &addrs = resolved_addrs();
 
@@ -493,10 +514,9 @@ namespace EquipHide
 
         original_vis_map().reserve(get_part_map().size());
 
-        // Initial IndexedStringA scan + deferred-launch decision. Mirrors LiveTransmog's transmog_worker pattern:
-        // commit the sync attempt so the mod is immediately functional, then launch the deferred worker unless the
-        // table is already fully resolved on the first try. Convergence in the worker is stability-based (LT's
-        // structural-ready analog), not a coverage percentage.
+        // Initial IndexedStringA scan plus the deferred-launch decision. Commit the sync attempt so the mod is
+        // immediately functional, then launch the deferred worker unless the table resolves fully on the first try.
+        // The worker converges on scan stability, not on a coverage percentage.
         if (addrs.mapLookup)
         {
             auto runtimeHashes = scan_indexed_string_table(addrs.mapLookup);
@@ -532,12 +552,12 @@ namespace EquipHide
                 rebuild_part_lookup();
         }
 
-        // Mid-body scan through the shared code-target policy. The host-EXE scope bounds this safety-critical match --
-        // its callback writes engine structs (visPtr, the In/Out selector) -- to CrimsonDesert.exe, where the real
+        // Mid-body scan through the shared code-target policy. The host-EXE scope bounds this safety-critical match -
+        // its callback writes engine structs (visPtr, the In/Out selector) - to CrimsonDesert.exe, where the real
         // target lives, so a generic-shaped candidate cannot first-match elsewhere in the process image. The
         // prologue-recovery fallback survives dev hot-reload: when a prior Logic-DLL generation left a detour jump at
         // this site, every original-bytes candidate fails on rescan and the resolver retries each Direct candidate
-        // with its prologue rebuilt as a near JMP. The candidate's walk-back is preserved, so the returned address
+        // with its prologue rebuilt as a near JMP. The retry keeps the candidate's walk-back, so the returned address
         // still lands on the original instruction.
         const auto hookAddr = anchor_address(AnchorId::EquipVisCheck);
         if (!hookAddr)
@@ -546,12 +566,15 @@ namespace EquipHide
             return std::unexpected(DMK::Error{DMK::ErrorCode::NoMatch, "EquipHide::init"});
         }
 
-        // Warm the self-healing vis-byte offset BEFORE the mid-hook install: the decode re-resolves the EquipVisCheck
-        // instruction by AOB, and the install that follows overwrites those bytes with a jmp.
+        // Warm the self-healing vis-byte offset BEFORE the mid-hook install. The decode re-resolves the
+        // EquipVisCheck instruction by AOB, and it must run before enable() patches that site.
         (void)vis_byte_offset();
 
         auto visCheck = DMK::hook::mid_at(
-            DMK::hook::MidRequest{.name = "EquipVisCheck", .target = DMK::Address{hookAddr}},
+            DMK::hook::MidRequest{
+                .name = "EquipVisCheck",
+                .target = DMK::Address{hookAddr},
+            },
             &on_vis_check
         );
         if (!visCheck)
@@ -575,12 +598,15 @@ namespace EquipHide
             if (partAddShowAddr)
             {
                 auto hook = DMK::hook::inline_at(
-                    DMK::hook::InlineRequest{.name = "PartAddShow", .target = DMK::Address{partAddShowAddr}},
+                    DMK::hook::InlineRequest{
+                        .name = "PartAddShow",
+                        .target = DMK::Address{partAddShowAddr},
+                    },
                     &on_part_add_show
                 );
                 if (!hook)
                 {
-                    logger.warning("PartAddShow hook failed: {} -- gliding flash fix disabled", hook.error().message());
+                    logger.warning("PartAddShow hook failed: {} - gliding flash fix disabled", hook.error().message());
                 }
                 else
                 {
@@ -588,7 +614,7 @@ namespace EquipHide
                     set_part_add_show_trampoline(hook->original<PartAddShowFn>());
                     if (auto armed = hook->enable(); !armed)
                         logger.warning(
-                            "PartAddShow hook could not be armed: {} -- gliding flash fix disabled",
+                            "PartAddShow hook could not be armed: {} - gliding flash fix disabled",
                             armed.error().message()
                         );
                     else
@@ -597,34 +623,37 @@ namespace EquipHide
             }
             else
             {
-                logger.warning("PartAddShow AOB scan failed -- gliding flash fix disabled");
+                logger.warning("PartAddShow AOB scan failed - gliding flash fix disabled");
             }
         }
 
-        // Prevents baldness when hiding helmets/cloaks. The hook temporarily sets bit 19 in item+0x70 bitmasks
-        // per-call, so PostfixEval sees inactive priority and hair-hiding rules do not match. A call-graph landmark
-        // separates player invocations from NPC invocations: NPC PostfixEval calls always traverse one specific
-        // caller, and an AOB resolves that caller's return address (npcPfeReturnAddr). The hook scans its own stack
-        // window for that landmark and rejects NPC calls.
+        // Keeps the hair when a helmet or cloak is hidden. The hook temporarily sets bit 19 in item+0x70 bitmasks
+        // per-call, so PostfixEval sees inactive priority and no hair rule matches. A call-graph landmark separates
+        // player invocations from NPC invocations: NPC PostfixEval calls always traverse one specific caller, and an
+        // AOB resolves that caller's return address (npcPfeReturnAddr). The hook scans its own stack window for that
+        // landmark and rejects NPC calls.
         if (flag_bald_fix().load(std::memory_order_relaxed))
         {
             const auto postfixEvalAddr = anchor_address(AnchorId::PostfixEval);
 
             // The row's own walk-back already reaches the byte after the rule-eval call, so the resolved value IS the
-            // return address an NPC stack frame carries. Do NOT add a fixup here: the offset belongs in the candidate
-            // row, and applying it twice yields an address no call ever pushes, which makes is_npc_call_stack() reject
-            // every call while the install still logs "bald fix active".
+            // return address an NPC stack frame carries. Do NOT add a fixup here. The offset belongs in the
+            // candidate row, and a second application yields an address no call ever pushes, which makes
+            // is_npc_call_stack() reject every call while the install still logs "bald fix active".
             addrs.npcPfeReturnAddr = anchor_address(AnchorId::NpcPfeReturnAddr);
 
             if (postfixEvalAddr && addrs.npcPfeReturnAddr)
             {
                 auto hook = DMK::hook::inline_at(
-                    DMK::hook::InlineRequest{.name = "PostfixEval", .target = DMK::Address{postfixEvalAddr}},
+                    DMK::hook::InlineRequest{
+                        .name = "PostfixEval",
+                        .target = DMK::Address{postfixEvalAddr},
+                    },
                     &on_postfix_eval
                 );
                 if (!hook)
                 {
-                    logger.warning("PostfixEval hook failed: {} -- bald fix disabled", hook.error().message());
+                    logger.warning("PostfixEval hook failed: {} - bald fix disabled", hook.error().message());
                 }
                 else
                 {
@@ -632,7 +661,7 @@ namespace EquipHide
                     if (auto armed = hook->enable(); !armed)
                     {
                         logger.warning(
-                            "PostfixEval hook could not be armed: {} -- bald fix disabled",
+                            "PostfixEval hook could not be armed: {} - bald fix disabled",
                             armed.error().message()
                         );
                     }
@@ -640,8 +669,7 @@ namespace EquipHide
                     {
                         s_hooks.push(std::move(*hook));
                         logger.info(
-                            "PostfixEval inline hook installed at 0x{:X}, npc-caller landmark 0x{:X} -- "
-                            "bald fix active",
+                            "PostfixEval inline hook installed at 0x{:X}, npc-caller landmark 0x{:X} - bald fix active",
                             postfixEvalAddr,
                             addrs.npcPfeReturnAddr
                         );
@@ -650,19 +678,19 @@ namespace EquipHide
             }
             else if (!postfixEvalAddr)
             {
-                logger.warning("PostfixEval AOB scan failed -- bald fix disabled");
+                logger.warning("PostfixEval AOB scan failed - bald fix disabled");
             }
             else
             {
                 logger.warning(
-                    "NpcPfeReturnAddr AOB scan failed -- bald fix disabled "
+                    "NpcPfeReturnAddr AOB scan failed - bald fix disabled "
                     "(refusing to run without the call-graph filter)"
                 );
             }
         }
         else
         {
-            logger.info("BaldFix disabled in config -- hair-hiding rules will apply normally");
+            logger.info("BaldFix disabled in config - the engine hair rules apply normally");
         }
 
         // Equipment change detection for CascadeFix re-sync. Clears the gate-skip locks when chest armor changes, so
@@ -673,7 +701,10 @@ namespace EquipHide
             if (vecAddr)
             {
                 auto hook = DMK::hook::inline_at(
-                    DMK::hook::InlineRequest{.name = "VisualEquipChange", .target = DMK::Address{vecAddr}},
+                    DMK::hook::InlineRequest{
+                        .name = "VisualEquipChange",
+                        .target = DMK::Address{vecAddr},
+                    },
                     &on_visual_equip_change
                 );
                 if (!hook)
@@ -694,7 +725,10 @@ namespace EquipHide
             if (vesAddr)
             {
                 auto hook = DMK::hook::inline_at(
-                    DMK::hook::InlineRequest{.name = "VisualEquipSwap", .target = DMK::Address{vesAddr}},
+                    DMK::hook::InlineRequest{
+                        .name = "VisualEquipSwap",
+                        .target = DMK::Address{vesAddr},
+                    },
                     &on_visual_equip_swap
                 );
                 if (!hook)
@@ -726,11 +760,12 @@ namespace EquipHide
         }
         if (auto started = session.input().start(inputSettings); !started)
         {
-            logger.warning("Input engine did not start: {} -- hotkeys are inactive", started.error().message());
+            logger.warning("Input engine did not start: {} - hotkeys are inactive", started.error().message());
         }
 
-        // Drives resolve_player_vis_ctrls on a fixed cadence so cold load and in-session character swaps are detected
-        // without depending on the EquipVisCheck hook's event stream. See background_threads.cpp for the thread body.
+        // Drives resolve_player_vis_ctrls on a fixed cadence so the mod detects a cold load and an in-session
+        // character swap without the EquipVisCheck hook's event stream. See background_threads.cpp for the thread
+        // body.
         launch_resolve_poll();
 
         if (deferred_scan_pending().load(std::memory_order_relaxed))
@@ -739,14 +774,18 @@ namespace EquipHide
             logger.info("Equip hide fully initialized ({} parts resolved)", total_part_count());
 
         // One-shot DMK health snapshot for at-a-glance per-launch diagnostics: hook population plus any intentional
-        // loader-lock leak/detach events.
+        // loader-lock leak/detach events. The build token stamps the game image the anchors resolved against, so a
+        // log from an unknown patch identifies itself. It is LAYOUT identity: an in-place code patch that leaves the
+        // PE timestamp, SizeOfImage and section table intact produces the same token.
         const auto health = DMK::diagnostics::collect({}, anchor_report());
+        const auto image = DMK::scan::image_identity();
         logger.info(
-            "DMK health: hooks total={} active={} disabled={}, intentional-leaks={}",
+            "DMK health: hooks total={} active={} disabled={}, intentional-leaks={}, build-token=0x{:016X}",
             health.hooks_total,
             health.hooks_active,
             health.hooks_disabled,
-            health.total_intentional_leaks
+            health.total_intentional_leaks,
+            image.token()
         );
 
         return {};
@@ -763,19 +802,19 @@ namespace EquipHide
         auto &logger = DMK::log();
         logger.info("{} shutting down...", MOD_NAME);
 
-        // Module pins, by reason, sampled HERE rather than at the end of init(). The input engine mounts its
-        // wheel route and installs its XInput interception from the poll thread's cycle loop, which only starts
-        // after session.input().start() returns, so an init-time sample reads a state where neither has happened
-        // yet and reports zeros that mean nothing. This runs before any teardown, so the hooks and pins are both
-        // still in place.
+        // Module pins, by reason, sampled HERE rather than at the end of init(). The input engine mounts its wheel
+        // route and installs its XInput interception from the poll thread's cycle loop, which starts only after
+        // session.input().start() returns. An init-time sample therefore reads a state where neither step ran yet
+        // and reports zeros that mean nothing. This runs before any teardown, so the hooks and pins are both still
+        // in place.
         //
-        // XInputKeepalive is taken before XInput hook creation: nonzero means a binding asked to consume and the
-        // interception pair went in. That set is retained and inert after teardown, so it keeps this image mapped
-        // and costs one generation against the dev loader's reload budget.
+        // The engine takes XInputKeepalive before XInput hook creation. A nonzero count means a binding asked to
+        // consume and the interception pair went in. That set stays and goes inert after teardown, so it keeps this
+        // image mapped and costs one generation against the dev loader's reload budget.
         //
-        // MessageHookKeepalive is the wheel-capture keepalive. In the dev build it should be ZERO: the resident
-        // loader owns wheel capture, so the pin lands on the loader and this generation can still unmap. Nonzero
-        // means the external host was refused and the engine fell back to a local message hook.
+        // MessageHookKeepalive is the wheel-capture keepalive. In the dev build this reads zero: the resident loader
+        // owns wheel capture, so the pin lands on the loader and this generation can still unmap. A nonzero count
+        // means the engine refused the external host and fell back to a local message hook.
         {
             const auto pins = DMK::diagnostics::collect();
             const auto pin = [&pins](DMK::diagnostics::ModulePinReason reason)
@@ -820,13 +859,12 @@ namespace EquipHide
         logger.flush();
 
         logger.info("{} shutdown: step 5 restore hooked prologues", MOD_NAME);
-        // Newest-first teardown of every hook this mod owns. A teardown that cannot prove the restore pins the backend
-        // instead and books the leak against LeakSubsystem::HookManager, so the delta across the clear IS the unmap
-        // verdict the dev loader needs. Each detour body snapshots its trampoline pointer at entry and bails to a
-        // benign default when the snapshot is null, which defends the drain window between restore and DLL unmap.
-        // A hook that cannot prove it restored its target pins its backend, and that pin books one leak against
-        // LeakSubsystem::HookManager, so the delta across the clear IS the unmap verdict. Comparing a delta rather
-        // than an absolute is required, because the counter also carries caller-requested leaks from elsewhere.
+        // Newest-first teardown of every hook this mod owns. A teardown that cannot prove the restore pins the
+        // backend instead and books one leak against LeakSubsystem::HookManager, so the delta across the clear IS
+        // the unmap verdict the dev loader needs. Compare the delta and never the absolute: the same counter also
+        // carries caller-requested leaks from elsewhere. Each detour body snapshots its trampoline pointer at entry
+        // and falls back to a benign default when the snapshot is null, which defends the drain window between the
+        // restore and the DLL unmap.
         const auto pinsBefore = DMK::diagnostics::intentional_leak_count(DMK::diagnostics::LeakSubsystem::HookManager);
         s_hooks.clear();
         const bool restored =

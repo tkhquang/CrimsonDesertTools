@@ -2,18 +2,18 @@
  * @file mod_logic.cpp
  * @brief The hot-reloaded half of the dev build: one generation of mod logic behind a C ABI.
  *
- * @details The resident loader owns the process; this DLL owns one generation. The loader calls Init() after
+ * @details The resident loader owns the process and this DLL owns one generation. The loader calls Init() after
  *          LoadLibrary and Shutdown() before FreeLibrary. There is no DllMain bootstrap on this path, so Init() owns
  *          the Session directly and Shutdown() drops it.
  *
- *          Shutdown()'s return value is an UNMAP AUTHORIZATION, not a status. Returning success while a detour body
- *          in this image is still reachable is what turns a reload into a stale image and then a crash. The verdict
- *          follows DetourModKit's hot-reload guide: drain, clear hooks newest-first, drop the Session, then read
- *          module pins AS STATE.
+ *          Shutdown()'s return value is an UNMAP AUTHORIZATION, not a status. A success returned while a detour body
+ *          in this image is still reachable turns a reload into a stale image and then a crash. The verdict follows
+ *          DetourModKit's hot-reload guide: drain, clear hooks newest-first, drop the Session, then read module pins
+ *          AS STATE.
  *
  *          "As state" is the part that matters. A DELTA of diagnostics::total_intentional_leaks() across teardown
- *          reads zero for a wheel keepalive, because that pin is booked at install time, so it would authorize
- *          unmapping an image that can never unmap. diagnostics::module_pin_count() reports the open reference itself
+ *          reads zero for a wheel keepalive, because that pin is booked at install time, so the delta authorizes the
+ *          unmap of an image that can never unmap. diagnostics::module_pin_count() reports the open reference itself
  *          and stays readable after ~Session.
  *
  *          Only compiled when EQUIPHIDE_DEV_BUILD is set by the dev preset. Includes use explicit `../` relative paths
@@ -35,8 +35,8 @@
 
 #include <cstddef>
 #include <cstdio>
-#include <cstring>
 #include <optional>
+#include <string>
 #include <utility>
 
 namespace
@@ -44,69 +44,50 @@ namespace
     /// The live Session for this generation. Empty between Shutdown() and the next Init().
     std::optional<DMK::Session> s_session;
 
-    /// Set when EquipHide::shutdown() could not prove every hooked prologue was restored.
+    /// Set when EquipHide::shutdown() did not prove every hooked prologue was restored.
     bool s_hook_restore_failed = false;
 
     /**
+     * @brief Returns the LOADER's log sink, a dedicated logger that outlives every generation.
+     * @details A relative file name resolves against this module's own directory, which is where the loader keeps its
+     *          log. The sink appends, so it joins the loader's records instead of replacing them. A function-local
+     *          static outlives ~Session and closes at static teardown, one generation at a time.
+     */
+    DMK::Logger &loader_log_sink()
+    {
+        // The timestamp format matches the loader's own "[HH:MM:SS.mmm]" stamp, so the two writers sort together in
+        // the shared file. A generation line carries an extra "[INFO   ] ::" column that the loader's own raw appends
+        // do not, which is how a reader tells the two apart.
+        static DMK::Logger sink{
+            EquipHide::MOD_NAME,
+            std::string{EquipHide::MOD_NAME} + "_Loader.log",
+            "%H:%M:%S",
+            DMK::LogOpenMode::Append,
+            DMK::LogSourceStampMode::never()
+        };
+        return sink;
+    }
+
+    /**
      * @brief Appends one line to the LOADER's log, which outlives every generation.
-     * @details The unload verdict is computed after ~Session, so DMK::log() is gone by then. Sending it only to
-     *          OutputDebugStringA hides it from anyone without a debugger attached, which is exactly how a refusal
-     *          loop goes unexplained.
+     * @details The unload verdict is computed after ~Session, so DMK::log() is gone by then. A line sent only to
+     *          OutputDebugStringA hides from anyone without a debugger attached, which is exactly how a refusal loop
+     *          goes unexplained.
      */
     void append_loader_log(const char *line) noexcept
     {
-        char module_path[MAX_PATH]{};
-        HMODULE self = nullptr;
-        if (GetModuleHandleExW(
-                GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                reinterpret_cast<LPCWSTR>(&append_loader_log),
-                &self
-            ) == 0 ||
-            GetModuleFileNameA(self, module_path, MAX_PATH) == 0)
+        try
         {
-            OutputDebugStringA(line);
-            return;
-        }
-        char *const slash = std::strrchr(module_path, '\\');
-        if (slash == nullptr)
-        {
-            OutputDebugStringA(line);
-            return;
-        }
-        slash[1] = '\0';
+            auto &sink = loader_log_sink();
+            (void)sink.log_noexcept(DMK::LogLevel::Info, line);
 
-        char log_path[MAX_PATH]{};
-        (void)std::snprintf(log_path, sizeof(log_path), "%s%s_Loader.log", module_path, EquipHide::MOD_NAME);
-        const HANDLE file = CreateFileA(
-            log_path,
-            FILE_APPEND_DATA,
-            FILE_SHARE_READ | FILE_SHARE_WRITE,
-            nullptr,
-            OPEN_ALWAYS,
-            FILE_ATTRIBUTE_NORMAL,
-            nullptr
-        );
-        if (file != INVALID_HANDLE_VALUE)
+            // The sink buffers everything below Warning, and the loader appends to the same file from its own module.
+            // Flush each record so the two writers stay in order.
+            sink.flush();
+        }
+        catch (...)
         {
-            SYSTEMTIME now{};
-            GetLocalTime(&now);
-            char stamped[640];
-            const int len = std::snprintf(
-                stamped,
-                sizeof(stamped),
-                "[%02u:%02u:%02u.%03u] %s\n",
-                now.wHour,
-                now.wMinute,
-                now.wSecond,
-                now.wMilliseconds,
-                line
-            );
-            if (len > 0)
-            {
-                DWORD wrote = 0;
-                (void)WriteFile(file, stamped, static_cast<DWORD>(len), &wrote, nullptr);
-            }
-            CloseHandle(file);
+            // A sink that fails to open leaves the debugger channel below as the only report.
         }
         OutputDebugStringA(line);
     }
@@ -119,9 +100,9 @@ extern "C"
      * @details Exported so the LOADER can log it even when Init() fails, which is exactly when knowing the version
      *          matters most.
      * @warning This is NOT a witness of which bytes were mapped. The embedded build stamp comes from __DATE__ /
-     *          __TIME__ in THIS translation unit, so it only advances when this file recompiles; a build that
-     *          changed any other source relinks the DLL and leaves the stamp behind. The loader logs the mapped
-     *          file's own size and write time alongside this string, and that pair is the authoritative identity.
+     *          __TIME__ in THIS translation unit, so it advances only when this file recompiles. A build that changed
+     *          any other source relinks the DLL and leaves the stamp behind. The loader logs the mapped file's own
+     *          size and write time alongside this string, and that pair is the authoritative identity.
      */
     __declspec(dllexport) const char *Revision() noexcept
     {
@@ -139,7 +120,7 @@ extern "C"
         // fail loudly rather than read through a shifted layout.
         //
         // A NULL wheel host is a deliberate, supported choice, not an error. The loader decides whether a generation
-        // leases its resident host; when it does not, this generation uses the local message-hook backend and books
+        // leases its resident host. Without that lease, this generation uses the local message-hook backend and books
         // its own permanent wheel keepalive, so its image is retained after teardown. The loader charges that against
         // its reload budget. A NON-null table must still match the expected identity, so a foreign table is never
         // accepted.
@@ -160,8 +141,8 @@ extern "C"
         // Guard the whole body and return zero on any failure.
         try
         {
-            DMK::AsyncLoggerConfig asyncCfg;
-            asyncCfg.overflow_policy = DMK::OverflowPolicy::SyncFallback;
+            DMK::AsyncLoggerConfig async_config;
+            async_config.overflow_policy = DMK::OverflowPolicy::SyncFallback;
 
             // LogOpenMode::Append is what keeps a reload diagnosable. Under the default Truncate, this generation's
             // first sink open erases the PREVIOUS generation's teardown records, which are the only lines that
@@ -172,7 +153,7 @@ extern "C"
                     .log_file = EquipHide::LOG_FILE,
                     .game_process_name = EquipHide::GAME_PROCESS_NAME,
                     .instance_mutex_prefix = EquipHide::INSTANCE_MUTEX_PREFIX,
-                    .log = asyncCfg,
+                    .log = async_config,
                     .log_open_mode = DMK::LogOpenMode::Append,
                     .log_source_stamp_mode = DMK::LogSourceStampMode::at_or_below(DMK::LogLevel::Trace),
                 }
@@ -185,7 +166,7 @@ extern "C"
             s_session.emplace(std::move(*opened));
             s_hook_restore_failed = false;
 
-            DMK::log().info("[DEV] Init generation {} -- {}", request->generation_id, Revision());
+            DMK::log().info("[DEV] Init generation {} - {}", request->generation_id, Revision());
             EquipHide::Version::log_version_info();
 
             if (auto ready = EquipHide::init(*s_session, request->wheel_host); !ready)

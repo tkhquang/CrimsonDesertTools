@@ -1,4 +1,5 @@
-#pragma once
+#ifndef TRANSMOG_COLOR_OVERRIDE_COLOR_REINIT_HPP
+#define TRANSMOG_COLOR_OVERRIDE_COLOR_REINIT_HPP
 
 // Per-slot single-pass swatch reinit + color-commit retick.
 //
@@ -9,10 +10,10 @@
 // mode; the setter substitute path still bails on any frozen_hidden row.
 //
 // schedule_color_commit_retick() reuses the same machine in commit-retick mode (mode=ModeCommitRetick): no capture, no
-// pruning, no lock -- just a tear-down + reapply so the engine re-instantiates the carrier matInsts and the substitute
-// path picks up freshly-committed user colours from SwatchOverride.
+// pruning, no lock - just a tear-down + reapply so the engine re-instantiates the carrier matInsts and the substitute
+// path picks up freshly-committed user colors from SwatchOverride.
 //
-// `tick()` MUST be called once per UI frame from the overlay render path. It's cheap when every slot is Idle (no
+// `tick()` MUST be called once per UI frame from the overlay render path. It is cheap when every slot is Idle (no
 // syscalls, just atomic loads). The state machine relies on Transmog::manual_apply_slot for the per-slot apply trigger.
 
 #include "shared_state.hpp"
@@ -31,14 +32,14 @@ namespace Transmog::ColorOverride::Reinit
     /**
      * Begin a single-pass reinit on `slot`. Runs one teardown + capture cycle, then Finalize keeps the captured rows
      * as-is (no ghost intersection). Returns false if the slot has no active transmog target or is already mid-reinit.
-     * Used as the auto-trigger when the user first switches to the Color Override tab on an empty slot -- one pass is
+     * Used as the auto-trigger when the user first switches to the Color Override tab on an empty slot - one pass is
      * enough to populate the swatch grid.
      */
     bool start_slot_reinit_once(int slot) noexcept;
 
     /**
      * Schedule a single-pass tear-down + reapply on `slot` so the engine re-instantiates the carrier and the setter
-     * picks up freshly-committed user colours. Coalesced if already in flight.
+     * picks up freshly-committed user colors. Coalesced if already in flight.
      */
     bool schedule_color_commit_retick(int slot) noexcept;
 
@@ -62,8 +63,10 @@ namespace Transmog::ColorOverride::Reinit
     /**
      * Zero the cached "last applied target item id" tracking for every slot. Called from `ColorOverride::reset_all()`
      * so that the next `notify_transmog_target` after a preset/character switch sees `last==0` and skips the stale-row
-     * wipe -- which would otherwise destroy placeholders seeded by `SwatchTable::populate_from_persisted` immediately
+     * wipe - which would otherwise destroy placeholders seeded by `SwatchTable::populate_from_persisted` immediately
      * before `transmog_apply` runs.
      */
     void reset_target_tracking() noexcept;
 } // namespace Transmog::ColorOverride::Reinit
+
+#endif // TRANSMOG_COLOR_OVERRIDE_COLOR_REINIT_HPP

@@ -1,17 +1,17 @@
-// overlay_ui.cpp -- Transmog overlay UI top-level glue.
+// overlay_ui.cpp - Transmog overlay UI top-level glue.
 //
 // This TU + the overlay_ui/ section files are compiled against the ReShade SDK's <imgui.h> (a copy of the upstream
 // v1.92.5 header) plus reshade_overlay.hpp's function-table wrappers. Every `ImGui::Foo(...)` call routes through
-// `imgui_function_table_instance()` -- a pointer set either by ReShade (when our addon registers) or by us in
+// `imgui_function_table_instance()` - a pointer set either by ReShade (when our addon registers) or by us in
 // standalone init via `lt_get_imgui_function_table()` from the populator TU.
 //
 // The CMake `overlay_ui_obj` OBJECT lib is the boundary: it gets ONLY the ReShade SDK include path so the
-// function-table ImGui:: thunks are the only `ImGui::` symbols visible. Adding imgui_lib's include path here would let
+// function-table ImGui:: thunks are the only `ImGui::` symbols visible. imgui_lib's include path here lets
 // the real, non-thunk ImGui:: symbols leak in and produce LNK2005 against imgui_widgets.obj (variadic format thunks
 // cannot be COMDAT-folded under MSVC).
 //
 // Variadic ImGui helpers (Text / TextDisabled / TextColored) live in overlay_ui/helpers.{hpp,cpp} as plain extern
-// functions for the same reason: a per-TU inline-variadic emission would re-trigger LNK2005. Non-variadic ImGui::
+// functions for the same reason: a per-TU inline-variadic emission re-triggers LNK2005. Non-variadic ImGui::
 // thunks are safe to call directly.
 //
 // Public entry points (`draw_overlay`, `init_reshade_overlay`, `shutdown_reshade_overlay`, `is_reshade_overlay_active`)
@@ -42,7 +42,8 @@
 #include "transmog_apply.hpp"
 #include "transmog_map.hpp"
 
-#include <DetourModKit.hpp>
+#include <DetourModKit/defines.hpp>
+#include <DetourModKit/logger.hpp>
 
 // <imgui.h> here is the ReShade SDK stub (upstream v1.92.5). <reshade.hpp> pulls in reshade_overlay.hpp, which exposes
 // the function-table ImGui:: thunks plus register_addon / register_overlay. Do NOT include reshade_overlay.hpp
@@ -54,8 +55,10 @@
 
 #include <cstdint>
 #include <cstdio>
-#include <cstdlib>
+#include <charconv>
+#include <cstring>
 #include <string>
+#include <system_error>
 
 namespace Transmog
 {
@@ -84,7 +87,7 @@ namespace Transmog
             // load time (token names not yet interned by the engine). No-op once every slot has resolved; see
             // PresetManager::reseed_unresolved_persisted_swatches.
             pm.reseed_unresolved_persisted_swatches();
-            // When auto-apply is on, picks are applied immediately so there's never a meaningful "pending" state.
+            // When auto-apply is on, picks are applied immediately so there is never a meaningful "pending" state.
             // Suppress the badge and yellow button tint to reduce visual noise.
             const bool pending = !s_autoApply && has_pending_changes();
             const bool pendingSave = has_pending_save();
@@ -102,35 +105,35 @@ namespace Transmog
             {
                 auto &mappings = slot_mappings();
                 const auto &table = ItemNameTable::instance();
-                const bool tableReady = table.ready();
+                const bool table_ready = table.ready();
 
-                if (!tableReady)
-                    ui_text_disabled("Item catalog not ready -- hex entry only.");
+                if (!table_ready)
+                    ui_text_disabled("Item catalog not ready - hex entry only.");
 
                 ui_text_disabled("Toggle which slots the next Apply All will touch.");
 
                 {
-                    // "All" tracks ENABLED slots only -- disabled slots (multi-prefab non-armor, duplicate-tag; see
+                    // "All" tracks ENABLED slots only - disabled slots (multi-prefab non-armor, duplicate-tag; see
                     // slot_metadata.hpp `enabled` doc) are forced off in the dispatcher, so including them in the "All"
-                    // check would make the box stay unticked forever.
-                    bool allActive = true;
+                    // check keeps the box unticked forever.
+                    bool all_active = true;
                     for (std::size_t i = 0; i < k_slotCount; ++i)
                     {
                         if (!Transmog::slot_enabled(i))
                             continue;
                         if (!mappings[i].active)
                         {
-                            allActive = false;
+                            all_active = false;
                             break;
                         }
                     }
-                    if (ImGui::Checkbox("All", &allActive))
+                    if (ImGui::Checkbox("All", &all_active))
                     {
                         for (std::size_t i = 0; i < k_slotCount; ++i)
                         {
                             if (!Transmog::slot_enabled(i))
                                 continue;
-                            mappings[i].active = allActive;
+                            mappings[i].active = all_active;
                         }
                         if (s_autoApply)
                         {
@@ -141,13 +144,13 @@ namespace Transmog
                     if (!s_autoApply)
                     {
                         ImGui::SameLine();
-                        ui_text_disabled("(pending -- Apply All to commit)");
+                        ui_text_disabled("(pending - Apply All to commit)");
                     }
                 }
 
                 for (std::size_t i = 0; i < k_slotCount; ++i)
                 {
-                    // Skip disabled slots entirely -- the row, picker popup, and label-sync logic below would all be
+                    // Skip disabled slots entirely, because the row, picker popup, and label-sync logic below are
                     // misleading for a slot that never reaches the dispatcher. The slot's mapping is left as-is on disk
                     // so re-enabling later restores prior selections without preset migration.
                     if (!Transmog::slot_enabled(i))
@@ -155,7 +158,7 @@ namespace Transmog
 
                     auto &m = mappings[i];
                     auto &ui = s_slotUI[i];
-                    const char *slotLabel = slot_name(static_cast<TransmogSlot>(i));
+                    const char *slot_label = slot_name(static_cast<TransmogSlot>(i));
 
                     // Lazy sync: when the PWS module has a target selection for this slot but the UI label is empty,
                     // derive the label from the catalog. Covers boot-time auto-apply (preset's stored prefabName
@@ -179,14 +182,14 @@ namespace Transmog
 
                     ImGui::PushID(static_cast<int>(i) + 100);
 
-                    if (ImGui::Checkbox(slotLabel, &m.active))
+                    if (ImGui::Checkbox(slot_label, &m.active))
                     {
-                        // Toggling active alone may not change the staged id -- e.g. an active-none slot (active=true,
-                        // targetId=0) unticked back to inactive both yield staged=0, so has_pending_changes would miss
-                        // the toggle and the
-                        // Apply All button would stay grayed out. Set the force-apply flag so the UI sees a pending
-                        // change and the dispatcher's slotNeedsWork picks the slot up (its hasActiveNone path already
-                        // handles the apply semantics; the flag just guarantees the slot is considered).
+                        // Toggling active alone may not change the staged id - e.g. an active-none slot (active=true,
+                        // targetId=0) unticked back to inactive both yield staged=0, so has_pending_changes misses
+                        // the toggle and the Apply All button stays grayed out. Set the force-apply flag so the UI
+                        // sees a pending change and the dispatcher's slotNeedsWork picks the slot up. Its
+                        // hasActiveNone path already handles the apply semantics, and the flag only guarantees that
+                        // the dispatcher considers the slot.
                         force_apply_pending()[i] = true;
                         if (s_autoApply)
                         {
@@ -199,58 +202,58 @@ namespace Transmog
                     // measure it with the live font. Content-derived rather than DPI-linear so the column stays tight
                     // at 4K instead of opening a 500px gap. Reshade mode keeps a fixed 170px because its host UI
                     // applies its own scaling.
-                    const float slotColW =
+                    const float slot_col_w =
                         s_standaloneMode
                             ? (ImGui::CalcTextSize("TwoHandWeapon  ").x + ImGui::GetStyle().FramePadding.x * 2.0f)
                             : 170.0f;
-                    ImGui::SameLine(slotColW);
+                    ImGui::SameLine(slot_col_w);
 
                     // Picker button
                     {
-                        std::string pickerLabel;
+                        std::string picker_label;
                         // When the user has picked a body-mesh prefab on this slot, surface the prefab name on the
-                        // button instead of the carrier item's display name -- the carrier is now an implementation
+                        // button instead of the carrier item's display name - the carrier is now an implementation
                         // detail (Kairos's gear forced behind the scenes to feed the source wrapper).
-                        const bool showPrefabLabel = !ui.pickedPrefabName.empty();
-                        if (showPrefabLabel)
+                        const bool show_prefab_label = !ui.pickedPrefabName.empty();
+                        if (show_prefab_label)
                         {
-                            pickerLabel = ui.pickedPrefabName + " [prefab]";
+                            picker_label = ui.pickedPrefabName + " [prefab]";
                         }
                         else if (m.targetItemId == 0)
                         {
-                            pickerLabel = "(none)";
+                            picker_label = "(none)";
                         }
-                        else if (tableReady)
+                        else if (table_ready)
                         {
                             auto internalName = table.name_of(m.targetItemId);
                             auto dispName = table.display_name_of(internalName);
                             if (!dispName.empty())
-                                pickerLabel = dispName;
+                                picker_label = dispName;
                             else if (!internalName.empty())
-                                pickerLabel = internalName;
+                                picker_label = internalName;
                             else
-                                pickerLabel = "(unknown)";
+                                picker_label = "(unknown)";
                         }
                         else
                         {
-                            pickerLabel = "(catalog N/A)";
+                            picker_label = "(catalog N/A)";
                         }
 
-                        char btnLabel[192];
-                        if (showPrefabLabel)
-                            std::snprintf(btnLabel, sizeof(btnLabel), "%s##pick", pickerLabel.c_str());
+                        char btn_label[192];
+                        if (show_prefab_label)
+                            std::snprintf(btn_label, sizeof(btn_label), "%s##pick", picker_label.c_str());
                         else
                             std::snprintf(
-                                btnLabel,
-                                sizeof(btnLabel),
+                                btn_label,
+                                sizeof(btn_label),
                                 "%s  [0x%04X]##pick",
-                                pickerLabel.c_str(),
+                                picker_label.c_str(),
                                 m.targetItemId
                             );
 
-                        // Picker button width: ~32 glyphs at the live font plus padding. Display names that exceed it
-                        // are truncated by ImGui's button text rendering. The previous DPI-linear value (520 * scale)
-                        // ballooned to ~1360px at 4K.
+                        // Picker button width: ~32 glyphs at the live font plus padding, so the width is content
+                        // derived and stays tight at 4K. ImGui's button text rendering truncates a display name that
+                        // exceeds it.
                         const float bw =
                             s_standaloneMode
                                 ? (ImGui::CalcTextSize("M").x * 32.0f + ImGui::GetStyle().FramePadding.x * 2.0f)
@@ -259,39 +262,39 @@ namespace Transmog
                         ImGui::PushStyleVar(ImGuiStyleVar_ButtonTextAlign, ImVec2(0.02f, 0.5f));
                         // Tint the button cyan when a body-mesh prefab is picked so the override is visually distinct
                         // from an ordinary carrier slot.
-                        if (showPrefabLabel)
+                        if (show_prefab_label)
                         {
                             ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.30f, 0.85f, 1.00f, 1.0f));
                         }
-                        if (ImGui::Button(btnLabel, ImVec2(bw, 0.0f)))
+                        if (ImGui::Button(btn_label, ImVec2(bw, 0.0f)))
                         {
-                            if (tableReady)
+                            if (table_ready)
                             {
                                 if (!s_keepSearchText)
                                     ui.searchBuf[0] = '\0';
                                 ImGui::OpenPopup("##slot_picker");
                             }
                         }
-                        if (showPrefabLabel)
+                        if (show_prefab_label)
                             ImGui::PopStyleColor(); // Text
                         ImGui::PopStyleVar();       // ButtonTextAlign
 
                         // outPrefabIdx contract from the popup:
                         //   -1: popup did NOT touch the body-mesh (real item
-                        //       or "(none) item" was picked) -- leave any
+                        //       or "(none) item" was picked) - leave any
                         //       prior body-mesh selection alone.
                         //   -2: explicit "clear body-mesh override" pick.
                         //   >=0: prefab N picked.
-                        int prefabIdx = -1;
-                        if (tableReady && draw_item_picker_popup(
-                                              "##slot_picker",
-                                              ui,
-                                              static_cast<TransmogSlot>(i),
-                                              m.targetItemId,
-                                              s_autoApply,
-                                              i,
-                                              &prefabIdx
-                                          ))
+                        int prefab_idx = -1;
+                        if (table_ready && draw_item_picker_popup(
+                                               "##slot_picker",
+                                               ui,
+                                               static_cast<TransmogSlot>(i),
+                                               m.targetItemId,
+                                               s_autoApply,
+                                               i,
+                                               &prefab_idx
+                                           ))
                         {
                             std::snprintf(ui.hexBuf, sizeof(ui.hexBuf), "%04X", m.targetItemId);
 
@@ -299,21 +302,21 @@ namespace Transmog
                             const auto tslot = static_cast<TransmogSlot>(i);
                             const int curSrc = PWS::selection_src_index(tslot);
 
-                            if (prefabIdx >= 0 || prefabIdx == -2)
+                            if (prefab_idx >= 0 || prefab_idx == -2)
                             {
-                                // Body-mesh interaction. Selection only -- the swap map is rebuilt on the next apply
+                                // Body-mesh interaction. Selection only - the swap map is rebuilt on the next apply
                                 // via notify_apply_starting (apply-only lifecycle, mirroring the carrier pattern).
-                                PWS::set_selection(tslot, curSrc, (prefabIdx >= 0) ? prefabIdx : -1, "ui-picker");
+                                PWS::set_selection(tslot, curSrc, (prefab_idx >= 0) ? prefab_idx : -1, "ui-picker");
 
                                 // Update the per-slot UI label state. On a prefab pick (>= 0) we pull the name straight
                                 // out of the catalog; on an explicit clear (-2) we drop the label so the row reverts to
                                 // showing the carrier item.
-                                if (prefabIdx >= 0)
+                                if (prefab_idx >= 0)
                                 {
                                     const auto &cat = PWS::slot_catalog(tslot);
-                                    if (static_cast<std::size_t>(prefabIdx) < cat.size())
+                                    if (static_cast<std::size_t>(prefab_idx) < cat.size())
                                     {
-                                        ui.pickedPrefabName = cat[static_cast<std::size_t>(prefabIdx)].name;
+                                        ui.pickedPrefabName = cat[static_cast<std::size_t>(prefab_idx)].name;
                                     }
                                     // Force the carrier into the ACTIVE CHARACTER's carrier so the source wrapper (e.g.
                                     // cd_phw_00_ub_00_0163_index01 for
@@ -344,14 +347,14 @@ namespace Transmog
                                 // Set the force-apply flag UNCONDITIONALLY (regardless of s_autoApply). When the new
                                 // carrier id equals the prior one (e.g. re-picking a body-mesh prefab on the same
                                 // Kliff carrier 0x1521), staged/lastIds match, so without this flag has_pending_changes
-                                // returns false -- the Apply All button would stay grayed out and a manual apply would
-                                // hit the dispatcher's `targetId == prevId` early-out anyway. Setting the flag ensures
+                                // returns false, the Apply All button stays grayed out, and a manual apply hits the
+                                // dispatcher's `targetId == prevId` early-out anyway. Setting the flag ensures
                                 // (a) the Apply All button activates and (b) the dispatcher bypasses the early-out
                                 // while leaving lastIds[i] intact, so Phase A `tear_down_fake` runs against 0x1521 and
                                 // the engine's natural-pipeline hook substitutes src->tgt to clean up the prior
                                 // body-mesh target wrapper. When ids differ (e.g. body-mesh clear that restored
                                 // Wellsknight 0x1520 over the prior Kliff 0x1521), the dispatcher's own change
-                                // detection covers it -- the flag is harmless.
+                                // detection covers it - the flag is harmless.
                                 if (last_applied_ids()[i] == m.targetItemId)
                                     force_apply_pending()[i] = true;
                                 if (s_autoApply)
@@ -361,7 +364,7 @@ namespace Transmog
                                     // editing character's body. That hook reads s_swapMapPerChar[s_activeCharIdx-1] at
                                     // entry, and only the full multi-actor apply path drives s_activeCharIdx per CCOIA
                                     // (PresetManager::apply_to_state binds it for each character in the sweep). The
-                                    // single-slot path runs against the controlled actor only -- when the user edits
+                                    // single-slot path runs against the controlled actor only - when the user edits
                                     // Damiane/Oongka while controlling
                                     // Kliff, the slot path byte-patches Kliff and never triggers a body re-bind for the
                                     // editing character, so the substitution never fires and the carrier renders
@@ -369,12 +372,10 @@ namespace Transmog
                                     manual_apply();
                                 }
                                 DMK::log().info(
-                                    "[picker] slot={} BODY-MESH "
-                                    "{}={} (srcSeeded={}) -- carrier=0x{:04X} "
-                                    "auto-applied",
-                                    slotLabel,
-                                    (prefabIdx >= 0) ? "prefabIdx" : "cleared",
-                                    (prefabIdx >= 0) ? prefabIdx : 0,
+                                    "[picker] slot={} BODY-MESH {}={} (srcSeeded={}) - carrier=0x{:04X} auto-applied",
+                                    slot_label,
+                                    (prefab_idx >= 0) ? "prefab_idx" : "cleared",
+                                    (prefab_idx >= 0) ? prefab_idx : 0,
                                     curSrc >= 0,
                                     m.targetItemId
                                 );
@@ -382,10 +383,10 @@ namespace Transmog
                             else
                             {
                                 // Real item or "(none) item" pick. The carrier itemId was already updated by the popup.
-                                // We also drop any prior body-mesh prefab label for this slot -- picking a real item is
+                                // We also drop any prior body-mesh prefab label for this slot - picking a real item is
                                 // the user's signal to revert to plain carrier mode. The existing body-mesh swap
                                 // selection is also cleared via reactivate so the two states stay mutually exclusive.
-                                const bool hadPrior = !ui.pickedPrefabName.empty();
+                                const bool had_prior = !ui.pickedPrefabName.empty();
 
                                 // Drop the body-mesh selection UNCONDITIONALLY, not only when the UI label happens to
                                 // be populated. The label and the PWS target index can disagree: a preset load
@@ -395,21 +396,20 @@ namespace Transmog
                                 // nothing. The two states are meant to be mutually exclusive, so clearing is always
                                 // correct here.
                                 PWS::set_selection(tslot, PWS::selection_src_index(tslot), -1, "ui-clear");
-                                if (hadPrior)
+                                if (had_prior)
                                 {
                                     ui.pickedPrefabName.clear();
                                     // Drop the saved prior-carrier snapshot. The user explicitly picked a new real
-                                    // item, so the popup-set m.targetItemId is authoritative -- restoring the prior
-                                    // carrier here would clobber the fresh pick.
+                                    // item, so the popup-set m.targetItemId is authoritative - restoring the prior
+                                    // carrier here clobbers the fresh pick.
                                     ui.priorCarrierSaved = false;
                                 }
                                 // Set the force-apply flag UNCONDITIONALLY so has_pending_changes also returns true
                                 // when the user clears a prefab pick onto a real item that happens to share the prior
-                                // auto-borrowed Kliff carrier id (e.g. helm
-                                // 0x1521 -> 0x1521). Without it the Apply All
-                                // button would stay grayed out. Different-id case is covered by the dispatcher's normal
-                                // change detection -- flag is harmless.
-                                if (hadPrior && last_applied_ids()[i] == m.targetItemId)
+                                // auto-borrowed Kliff carrier id (e.g. helm 0x1521 -> 0x1521). Without it the Apply
+                                // All button stays grayed out. The dispatcher's normal change detection covers the
+                                // different-id case, so the flag is harmless there.
+                                if (had_prior && last_applied_ids()[i] == m.targetItemId)
                                     force_apply_pending()[i] = true;
                                 if (s_autoApply)
                                 {
@@ -421,17 +421,16 @@ namespace Transmog
                                     (m.targetItemId == 0) ? std::string("(none)") : table.name_of(m.targetItemId);
                                 const auto cat =
                                     (m.targetItemId == 0) ? TransmogSlot::Count : table.category_of(m.targetItemId);
-                                const char *catName = (m.targetItemId == 0)                   ? "clear"
-                                                      : (cat == static_cast<TransmogSlot>(i)) ? "slot-match"
-                                                                                              : "slot-MISMATCH";
+                                const char *cat_name = (m.targetItemId == 0)                   ? "clear"
+                                                       : (cat == static_cast<TransmogSlot>(i)) ? "slot-match"
+                                                                                               : "slot-MISMATCH";
                                 DMK::log().info(
-                                    "[picker] slot={} id=0x{:04X} name='{}' "
-                                    "category={} ({}) -- pending Apply All",
-                                    slotLabel,
+                                    "[picker] slot={} id=0x{:04X} name='{}' category={} ({}) - pending Apply All",
+                                    slot_label,
                                     m.targetItemId,
                                     name.empty() ? "<unknown>" : name,
                                     static_cast<int>(cat),
-                                    catName
+                                    cat_name
                                 );
                             }
                         }
@@ -444,18 +443,17 @@ namespace Transmog
                         std::snprintf(ui.hexBuf, sizeof(ui.hexBuf), "%04X", m.targetItemId);
 
                     // When a body-mesh prefab is active on this slot the carrier itemId is auto-borrowed (Kairos plate)
-                    // and the user shouldn't be editing it directly -- show the hex disabled+dim with an explanatory
-                    // tooltip so it's clear the body-mesh prefab is the source of truth, and the hex is a peek at the
+                    // and the user shouldn't be editing it directly - show the hex disabled+dim with an explanatory
+                    // tooltip so it is clear the body-mesh prefab is the source of truth, and the hex is a peek at the
                     // underlying carrier.
-                    const bool prefabActive = !ui.pickedPrefabName.empty();
-                    ImGui::BeginDisabled(prefabActive);
-                    // Tight fit for 4-hex-digit ids ("FFFF"): measure the glyph run + frame padding + a small cursor
-                    // margin. Auto-adapts to font / DPI / style changes; the prior fixed 64px was either clipping (at
-                    // higher UI scale) or wasting space (at default).
+                    const bool prefab_active = !ui.pickedPrefabName.empty();
+                    ImGui::BeginDisabled(prefab_active);
+                    // Tight fit for 4-hex-digit ids ("FFFF"): measure the glyph run plus frame padding plus a small
+                    // cursor margin. The measured width adapts to every font, DPI, and style change.
                     {
-                        const float hexW =
+                        const float hex_w =
                             ImGui::CalcTextSize("FFFF").x + ImGui::GetStyle().FramePadding.x * 2.0f + 4.0f;
-                        ImGui::SetNextItemWidth(hexW);
+                        ImGui::SetNextItemWidth(hex_w);
                     }
                     if (ImGui::InputText(
                             "##hex",
@@ -466,19 +464,33 @@ namespace Transmog
                             nullptr
                         ))
                     {
-                        unsigned long val = std::strtoul(ui.hexBuf, nullptr, 16);
-                        m.targetItemId = static_cast<uint16_t>(val);
+                        // Reject an edit the field cannot represent instead of writing a silent 0. The flag keeps
+                        // the buffer hex-only, so the only failure left is a value wider than 16 bits, which is out
+                        // of range for an item id and keeps the current one. An empty box still means (none), which
+                        // is how the field has always cleared a slot.
+                        const char *const hex_begin = ui.hexBuf;
+                        const char *const hex_end = hex_begin + std::strlen(hex_begin);
+                        if (hex_begin == hex_end)
+                        {
+                            m.targetItemId = 0;
+                        }
+                        else
+                        {
+                            std::uint16_t parsed = 0;
+                            const auto parse = std::from_chars(hex_begin, hex_end, parsed, 16);
+                            if (parse.ec == std::errc{} && parse.ptr == hex_end)
+                                m.targetItemId = parsed;
+                        }
                     }
-                    ui.editing = !prefabActive && ImGui::IsItemActive();
+                    ui.editing = !prefab_active && ImGui::IsItemActive();
                     ImGui::EndDisabled();
-                    if (prefabActive && ImGui::IsItemHovered())
+                    if (prefab_active && ImGui::IsItemHovered())
                     {
                         ui_tooltip(
                             "Auto-borrowed carrier id (Kairos plate). The "
                             "body-mesh prefab is the visual override; this "
                             "hex is just the engine plumbing. Clear the "
-                            "prefab via the picker's '(none) prefab' to "
-                            "edit the carrier directly."
+                            "prefab via the picker's '(none) prefab' to edit the carrier directly."
                         );
                     }
 
@@ -488,7 +500,7 @@ namespace Transmog
                     {
                         m.targetItemId = 0;
                         std::snprintf(ui.hexBuf, sizeof(ui.hexBuf), "0000");
-                        // X clears both carrier and any body-mesh override on this slot -- the user's intent is "remove
+                        // X clears both carrier and any body-mesh override on this slot - the user's intent is "remove
                         // everything visible from this slot". Mirrors the (none) pick.
                         if (!ui.pickedPrefabName.empty())
                         {
@@ -507,98 +519,98 @@ namespace Transmog
 
                     // Cross-class limitation marker for weapon slots. Each weapon prefab carries its own bone-binding +
                     // attachment-socket data (which skeleton bone it parents to, which socket transform it uses, hand
-                    // offsets, sheath pose). The engine resolves those bindings from the REAL equipped item's class --
-                    // not from the LT swap target -- so a mismatched-class transmog renders into the wrong socket (or
+                    // offsets, sheath pose). The engine resolves those bindings from the REAL equipped item's class -
+                    // not from the LT swap target - so a mismatched-class transmog renders into the wrong socket (or
                     // no socket) and goes invisible. Tooltip emphasises the practical rule: match the prefab's class to
                     // whatever weapon family the player has equipped right now.
                     {
-                        const auto tslotMarker = static_cast<TransmogSlot>(i);
-                        const bool isWeaponSlot =
-                            tslotMarker == TransmogSlot::MainHand || tslotMarker == TransmogSlot::OffHand ||
-                            tslotMarker == TransmogSlot::Ranged || tslotMarker == TransmogSlot::SubWeapon ||
-                            tslotMarker == TransmogSlot::TwoHandWeapon;
-                        if (isWeaponSlot)
+                        const auto tslot_marker = static_cast<TransmogSlot>(i);
+                        const bool is_weapon_slot =
+                            tslot_marker == TransmogSlot::MainHand || tslot_marker == TransmogSlot::OffHand ||
+                            tslot_marker == TransmogSlot::Ranged || tslot_marker == TransmogSlot::SubWeapon ||
+                            tslot_marker == TransmogSlot::TwoHandWeapon;
+                        if (is_weapon_slot)
                         {
                             ImGui::SameLine();
                             ui_text_disabled("(?)");
                             if (ImGui::IsItemHovered())
                             {
-                                const bool isTwoHand = tslotMarker == TransmogSlot::TwoHandWeapon;
+                                const bool is_two_hand = tslot_marker == TransmogSlot::TwoHandWeapon;
                                 ui_tooltip(
-                                    isTwoHand ? "EXPERIMENTAL.\n"
-                                                "\n"
-                                                "Heads-up: in this game, tools (pickaxe,\n"
-                                                "mallet, etc.) share the same engine slot\n"
-                                                "as 2H weapons. Setting a transmog here\n"
-                                                "may also affect the tool you have\n"
-                                                "equipped. Investigation ongoing.\n"
-                                                "\n"
-                                                "Best practice: pick a transmog from the\n"
-                                                "SAME weapon family you have equipped.\n"
-                                                "Sword on a sword, spear on a spear, 1H\n"
-                                                "on a 1H, 2H on a 2H -- always renders\n"
-                                                "correctly, drawn or sheathed.\n"
-                                                "\n"
-                                                "Why the limit exists:\n"
-                                                "Each weapon prefab carries its own\n"
-                                                "bone-binding and attachment-socket data\n"
-                                                "(which bone it parents to, which socket\n"
-                                                "transform it uses, hand offsets, sheath\n"
-                                                "pose). The engine looks those bindings\n"
-                                                "up from the REAL equipped item's class --\n"
-                                                "not from this transmog target -- so a\n"
-                                                "mismatched-class swap lands in the wrong\n"
-                                                "socket and goes invisible.\n"
-                                                "\n"
-                                                "Examples:\n"
-                                                " - 2H prefab while a 1H is equipped:\n"
-                                                "   mesh shows on the back; the real 1H\n"
-                                                "   goes invisible when drawn.\n"
-                                                " - Spear/hammer prefab while a sword is\n"
-                                                "   equipped: invisible when drawn\n"
-                                                "   (sheathed on back still renders).\n"
-                                                " - Same family (sword<->sword, etc.):\n"
-                                                "   renders correctly in every pose."
-                                              : "EXPERIMENTAL.\n"
-                                                "\n"
-                                                "Best practice: pick a transmog from the\n"
-                                                "SAME weapon family you have equipped.\n"
-                                                "Sword on a sword, spear on a spear, 1H\n"
-                                                "on a 1H, 2H on a 2H -- always renders\n"
-                                                "correctly, drawn or sheathed.\n"
-                                                "\n"
-                                                "Why the limit exists:\n"
-                                                "Each weapon prefab carries its own\n"
-                                                "bone-binding and attachment-socket data\n"
-                                                "(which bone it parents to, which socket\n"
-                                                "transform it uses, hand offsets, sheath\n"
-                                                "pose). The engine looks those bindings\n"
-                                                "up from the REAL equipped item's class --\n"
-                                                "not from this transmog target -- so a\n"
-                                                "mismatched-class swap lands in the wrong\n"
-                                                "socket and goes invisible.\n"
-                                                "\n"
-                                                "Examples:\n"
-                                                " - 2H prefab while a 1H is equipped:\n"
-                                                "   mesh shows on the back; the real 1H\n"
-                                                "   goes invisible when drawn.\n"
-                                                " - Spear/hammer prefab while a sword is\n"
-                                                "   equipped: invisible when drawn\n"
-                                                "   (sheathed on back still renders).\n"
-                                                " - Same family (sword<->sword, etc.):\n"
-                                                "   renders correctly in every pose."
+                                    is_two_hand ? "EXPERIMENTAL.\n"
+                                                  "\n"
+                                                  "Heads-up: in this game, tools (pickaxe,\n"
+                                                  "mallet, etc.) share the same engine slot\n"
+                                                  "as 2H weapons. Setting a transmog here\n"
+                                                  "may also affect the tool you have\n"
+                                                  "equipped. Investigation ongoing.\n"
+                                                  "\n"
+                                                  "Best practice: pick a transmog from the\n"
+                                                  "SAME weapon family you have equipped.\n"
+                                                  "Sword on a sword, spear on a spear, 1H\n"
+                                                  "on a 1H, 2H on a 2H - always renders\n"
+                                                  "correctly, drawn or sheathed.\n"
+                                                  "\n"
+                                                  "Why the limit exists:\n"
+                                                  "Each weapon prefab carries its own\n"
+                                                  "bone-binding and attachment-socket data\n"
+                                                  "(which bone it parents to, which socket\n"
+                                                  "transform it uses, hand offsets, sheath\n"
+                                                  "pose). The engine looks those bindings\n"
+                                                  "up from the REAL equipped item's class -\n"
+                                                  "not from this transmog target - so a\n"
+                                                  "mismatched-class swap lands in the wrong\n"
+                                                  "socket and goes invisible.\n"
+                                                  "\n"
+                                                  "Examples:\n"
+                                                  " - 2H prefab while a 1H is equipped:\n"
+                                                  "   mesh shows on the back; the real 1H\n"
+                                                  "   goes invisible when drawn.\n"
+                                                  " - Spear/hammer prefab while a sword is\n"
+                                                  "   equipped: invisible when drawn\n"
+                                                  "   (sheathed on back still renders).\n"
+                                                  " - Same family (sword<->sword, etc.):\n"
+                                                  "   renders correctly in every pose."
+                                                : "EXPERIMENTAL.\n"
+                                                  "\n"
+                                                  "Best practice: pick a transmog from the\n"
+                                                  "SAME weapon family you have equipped.\n"
+                                                  "Sword on a sword, spear on a spear, 1H\n"
+                                                  "on a 1H, 2H on a 2H - always renders\n"
+                                                  "correctly, drawn or sheathed.\n"
+                                                  "\n"
+                                                  "Why the limit exists:\n"
+                                                  "Each weapon prefab carries its own\n"
+                                                  "bone-binding and attachment-socket data\n"
+                                                  "(which bone it parents to, which socket\n"
+                                                  "transform it uses, hand offsets, sheath\n"
+                                                  "pose). The engine looks those bindings\n"
+                                                  "up from the REAL equipped item's class -\n"
+                                                  "not from this transmog target - so a\n"
+                                                  "mismatched-class swap lands in the wrong\n"
+                                                  "socket and goes invisible.\n"
+                                                  "\n"
+                                                  "Examples:\n"
+                                                  " - 2H prefab while a 1H is equipped:\n"
+                                                  "   mesh shows on the back; the real 1H\n"
+                                                  "   goes invisible when drawn.\n"
+                                                  " - Spear/hammer prefab while a sword is\n"
+                                                  "   equipped: invisible when drawn\n"
+                                                  "   (sheathed on back still renders).\n"
+                                                  " - Same family (sword<->sword, etc.):\n"
+                                                  "   renders correctly in every pose."
                                 );
                             }
                         }
                     }
 
                     // Lantern "(none)" gotcha. Unlike armor, the Lantern slot controls a light source on the engine
-                    // side, not just a visual. Clearing it to (none) doesn't merely hide the mesh -- the equipped
+                    // side, not just a visual. Clearing it to (none) does not merely hide the mesh - the equipped
                     // item's light emission goes with it, leaving the player without any handheld light. Mirrors the
                     // weapon-slot (?) marker pattern.
                     {
-                        const auto tslotL = static_cast<TransmogSlot>(i);
-                        if (tslotL == TransmogSlot::Lantern && m.targetItemId == 0)
+                        const auto tslot_l = static_cast<TransmogSlot>(i);
+                        if (tslot_l == TransmogSlot::Lantern && m.targetItemId == 0)
                         {
                             ImGui::SameLine();
                             ui_text_colored(ImVec4(0.95f, 0.65f, 0.20f, 1.0f), "(!)");
@@ -606,15 +618,14 @@ namespace Transmog
                             {
                                 ui_tooltip(
                                     "Heads-up: Lantern set to (none) does\n"
-                                    "MORE than hide the mesh -- the engine\n"
+                                    "MORE than hide the mesh - the engine\n"
                                     "removes the light source too. Your\n"
                                     "character will emit NO light, even at\n"
                                     "night or in dungeons.\n"
                                     "\n"
                                     "If you wanted to hide the lantern\n"
                                     "visually but keep the light, pick a\n"
-                                    "different lantern prefab here instead\n"
-                                    "of clearing the slot."
+                                    "different lantern prefab here instead\nof clearing the slot."
                                 );
                             }
                         }
@@ -628,7 +639,7 @@ namespace Transmog
                     // preset's PresetSlot::dye[idx]; the dispatch loop reads the 16-element array each apply.
                     //
                     // Only shown for armor slots (Helm/Chest/Cloak/Gloves/
-                    // Boots). Weapons + accessories don't go through the ARMOR_MOD pipeline so the picker has nothing
+                    // Boots). Weapons + accessories do not go through the ARMOR_MOD pipeline so the picker has nothing
                     // to drive.
                     draw_dye_popup(i);
 
@@ -648,7 +659,7 @@ namespace Transmog
 
     void draw_overlay()
     {
-        // Auto-fit window so 4K screens don't crop content on first open.
+        // Auto-fit window so 4K screens do not crop content on first open.
         ImGui::SetNextWindowSize(ImVec2(0.0f, 0.0f), ImGuiCond_FirstUseEver);
         if (!ImGui::Begin(k_windowTitle))
         {
@@ -662,38 +673,41 @@ namespace Transmog
 
     // ReShade addon path
 
-    static HMODULE s_reshadeModule = nullptr;
-    static bool s_reshadeActive = false;
-
-    static void draw_reshade_overlay(reshade::api::effect_runtime *)
+    namespace
     {
-        // Drawn directly inside the ReShade addon tab; no Begin/End wrapper.
-        draw_overlay_content();
-    }
+        HMODULE s_reshade_module = nullptr;
+        bool s_reshade_active = false;
+
+        void draw_reshade_overlay(reshade::api::effect_runtime *)
+        {
+            // This draws directly inside the ReShade addon tab, so it needs no Begin/End wrapper.
+            draw_overlay_content();
+        }
+    } // namespace
 
     bool init_reshade_overlay(HMODULE hModule)
     {
         if (!reshade::register_addon(hModule))
             return false;
         reshade::register_overlay("Transmog", &draw_reshade_overlay);
-        s_reshadeModule = hModule;
-        s_reshadeActive = true;
+        s_reshade_module = hModule;
+        s_reshade_active = true;
         return true;
     }
 
     void shutdown_reshade_overlay()
     {
-        if (!s_reshadeActive)
+        if (!s_reshade_active)
             return;
         reshade::unregister_overlay("Transmog", &draw_reshade_overlay);
-        reshade::unregister_addon(s_reshadeModule);
-        s_reshadeActive = false;
-        s_reshadeModule = nullptr;
+        reshade::unregister_addon(s_reshade_module);
+        s_reshade_active = false;
+        s_reshade_module = nullptr;
     }
 
     bool is_reshade_overlay_active()
     {
-        return s_reshadeActive;
+        return s_reshade_active;
     }
 
 } // namespace Transmog

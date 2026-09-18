@@ -1,4 +1,4 @@
-// Auto-generated (dye colour table generator, kept out of tree) -- DO NOT EDIT.
+// Auto-generated (dye colour table generator, kept out of tree) - DO NOT EDIT.
 // Source: 00_idea/dyecolorgroupinfo_fields.json (entries=10)
 // Game data: Crimson Desert build 1.0.0.2258
 //
@@ -13,20 +13,25 @@
 // shades [9..108] arranged as 10 rows x 10 shades (R fixed per row, G/B
 // ramp toward saturated end). Engine reads RGB at +7/+8/+9 of the dye
 // record verbatim; shade index is NOT what gets stored.
-#pragma once
+#ifndef TRANSMOG_GENERATED_DYE_COLOR_TABLE_HPP
+#define TRANSMOG_GENERATED_DYE_COLOR_TABLE_HPP
 
 #include <cstddef>
 #include <cstdint>
 
 namespace Transmog::DyeColorTable
 {
-    struct Shade  { std::uint32_t bgra; std::uint32_t condition; };
+    struct Shade
+    {
+        std::uint32_t bgra;
+        std::uint32_t condition;
+    };
     struct Group
     {
-        std::uint32_t key;          // matches dye record bytes +0..+3
+        std::uint32_t key; // matches dye record bytes +0..+3
         std::uint32_t shade_count;
-        const Shade  *shades;
-        const char   *string_key;   // stable name for cross-patch fallback
+        const Shade *shades;
+        const char *string_key; // stable name for cross-patch fallback
     };
 
     inline constexpr std::size_t kGroupCount = 10;
@@ -35,12 +40,18 @@ namespace Transmog::DyeColorTable
     /// Find a group by its key (the u32 at dye record +0..+3). nullptr if not found.
     const Group *find_group(std::uint32_t group_hash) noexcept;
 
-    /// Find a group by its string_key (e.g. "Her_Color_Group_I"). Used to
-    /// recover when a stored hash no longer matches but the name does.
-    /// Returns nullptr if no group has that name.
+    /**
+     * @brief Finds a group by its string_key, for example "Her_Color_Group_I".
+     * @details Recovers a group when a stored hash no longer matches but the name does.
+     * @return The group, or nullptr when no group carries that name.
+     */
     const Group *find_group_by_name(const char *string_key) noexcept;
 
-    /// Resolve (group_hash, shade_index) -> BGRA u32. Returns 0 if the
-    /// group is unknown OR the shade index is out of range.
+    /**
+     * @brief Resolves a (group_hash, shade_index) pair to a BGRA u32.
+     * @return The colour, or 0 when the group is unknown or the shade index is out of range.
+     */
     std::uint32_t resolve_bgra(std::uint32_t group_hash, std::uint8_t shade_index) noexcept;
-}
+} // namespace Transmog::DyeColorTable
+
+#endif // TRANSMOG_GENERATED_DYE_COLOR_TABLE_HPP

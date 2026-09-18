@@ -1,4 +1,5 @@
-#pragma once
+#ifndef TRANSMOG_CARRIER_DEFAULTS_HPP
+#define TRANSMOG_CARRIER_DEFAULTS_HPP
 
 #include "shared_state.hpp"
 
@@ -9,22 +10,27 @@
 
 namespace Transmog
 {
-    // Per-(character, slot) default carrier ITEM used by LT's transmog apply path AND by the prefab-wrapper-swap
-    // picker.
-    //
-    //   itemName -- resolved through ItemNameTable::id_of() at runtime to a uint16_t carrier itemId. Drives
-    //               SlotPopulator(itemId) for the carrier-equip path, and is the SOLE input the prefab-wrapper-swap
-    //               source needs: PWS derives the carrier's body-mesh source prefab(s) from this item's runtime
-    //               variant list (itemmesh_dumper::variant_meshes_for_item) through
-    //               PrefabWrapperSwap::carrier_source_seed. A hardcoded prefab column drifts from the itemName each
-    //               patch. The runtime variant list is always exact.
+    /**
+     * @brief Per-(character, slot) default carrier ITEM used by LT's transmog apply path and by the
+     *        prefab-wrapper-swap picker.
+     *
+     * @details `itemName` resolves through ItemNameTable::id_of() at runtime to a uint16_t carrier itemId. It drives
+     *          SlotPopulator(itemId) for the carrier-equip path, and it is the SOLE input the prefab-wrapper-swap
+     *          source needs. PWS derives the carrier's body-mesh source prefab(s) from this item's runtime variant
+     *          list (itemmesh_dumper::variant_meshes_for_item) through PrefabWrapperSwap::carrier_source_seed.
+     * @note A hardcoded prefab column drifts from the itemName each patch. The runtime variant list is always exact.
+     */
     struct CarrierDefault
     {
-        const char *itemName;
+        const char *itemName{nullptr};
     };
 
-    // Character axis. The order is fixed, because CarrierChar(i) maps to k_carriers[i]. New characters append at the
-    // end, before Count.
+    /**
+     * @brief Character axis of @ref k_carriers.
+     *
+     * @warning The order is fixed, because CarrierChar(i) maps to k_carriers[i]. A new character appends at the end,
+     *          before Count.
+     */
     enum class CarrierChar : std::size_t
     {
         Kliff = 0,
@@ -33,24 +39,25 @@ namespace Transmog
         Count
     };
 
+    /// Number of character rows in @ref k_carriers.
     inline constexpr std::size_t k_carrierCharCount = static_cast<std::size_t>(CarrierChar::Count);
 
-    // 2D table indexed [character][slot]. Adding a slot = one column in each character row. Adding a character = one
-    // new row.
+    /**
+     * @brief Default carrier item per character and slot, indexed [character][slot].
+     *
+     * @details Adding a slot costs one column in each character row. Adding a character costs one new row.
+     */
     // clang-format off
     inline constexpr CarrierDefault k_carriers[k_carrierCharCount][k_slotCount] = {
-        // ============================================================
-        // Kliff (male). Armor slots use the Kairos plate set (`Kliff_PlateArmor_*`); the remaining slots come from the
+        // Kliff (male). Armor slots use the Kairos plate set (`Kliff_PlateArmor_*`). The remaining slots come from the
         // live slot-discovery dump.
         //
         // Every armor carrier must RENDER on its own. The prefab-wrapper swap supplies the visual by redirecting the
         // carrier's own mesh, so a carrier whose prefab never resolves to a live wrapper produces an EMPTY slot
-        // rather than a swapped one.
+        // rather than a swapped one. A bare helm name is the classic case. See the `_dd` note on the Oongka row.
         //
         // The Kairos set is chosen for that: every piece is catalog-resident, non-variant, and resolves to a bare
-        // prefab name that yields a real wrapper. The previous helm carrier (`Scovi_Fabric_Helm`) is the exact failure
-        // this guards against -- the same bare-helm-name no-op already documented for Oongka's Lardein helm below.
-        // ============================================================
+        // prefab name that yields a real wrapper.
         {
             { "Kliff_PlateArmor_Helm"                        }, // Helm
             { "Kliff_PlateArmor_Armor"                       }, // Chest
@@ -76,19 +83,18 @@ namespace Transmog
             //
             // The blocker is carrier COLLISION, not the disabled flag. A name in this table is seeded as that slot's
             // prefab-swap source, and the seeding pass walks every row without consulting `SlotMetadata::enabled`, so
-            // ten already-disabled slots carry names here safely. What none of them do is name the same item in two
-            // slots that `slots_share_prefab_family` does not pair: every duplicate in this table (the MainHand and
-            // OffHand mirrors, Ring1 and Ring2) sits inside a declared pair, so the swap layer knows the two records
-            // reach one wrapper. OffHand2 and Ranged2 have no such pairing, and their natural carriers are exactly the
-            // items OffHand and Ranged already use, so filling them in publishes one wrapper through two unrelated
-            // records. An empty name is skipped by the seeding pass, which keeps the slot inert instead.
+            // ten already-disabled slots carry names here safely. Two slots that `slots_share_prefab_family` does not
+            // pair must never name the same item. Every duplicate in this table (the MainHand and OffHand mirrors,
+            // Ring1 and Ring2) sits inside a declared pair, so the swap layer knows the two records reach one wrapper.
+            // OffHand2 and Ranged2 have no such pairing, and their natural carriers are exactly the items OffHand and
+            // Ranged already use. The seeding pass skips an empty name, which keeps the slot inert.
             //
-            // Carriers observed in live auth-table dumps, recorded here so the values are not lost:
-            //   Tool      Kliff `Equip_Felling_Axe`, Damiane `Equip_Shovel`. The tool family is character-agnostic, so
-            //             one item can serve all three rows. Collides with nothing.
-            //   OffHand2  Kliff `Legendary_MarniTank_OneHandShield`. Unique, would not collide.
-            //   Ranged2   Kliff `GreyWolf_OneHandBow`. Collides with his Ranged carrier.
-            // Damiane and Oongka have no observed OffHand2 or Ranged2 item; anything put there today is a guess.
+            // Carriers seen in live auth-table dumps: Tool is `Equip_Felling_Axe` for Kliff and `Equip_Shovel` for
+            // Damiane, OffHand2 is `Legendary_MarniTank_OneHandShield` for Kliff, and Ranged2 is `GreyWolf_OneHandBow`
+            // for Kliff, which collides with his Ranged carrier. The tool family is character-agnostic, so one item
+            // serves all three rows and collides with nothing. OffHand2's observed item is unique and would not
+            // collide. Damiane and Oongka have no observed OffHand2 or Ranged2 item, so anything put there today is
+            // a guess.
             //
             // To enable a slot: fill its cell, and either choose a carrier no other slot in the same character row
             // uses, or add the slot pairing to `slots_share_prefab_family` so the shared wrapper is modelled.
@@ -97,11 +103,9 @@ namespace Transmog
             { ""                                             }, // Ranged2  (see note above)
         },
 
-        // ============================================================
         // Damiane (female). Demeniss Elite/Uniform Leather armor set + Pattern jewelry set + Damian_OneHandPistol
         // Ranged. The engine uses cd_phw_* for female-specific assets and cd_phm_* for shared accessories. PWS derives
         // the source rig meshes from each carrier itemId at runtime.
-        // ============================================================
         {
             { "Demian_PlateArmor_Helm_VII"                   }, // Helm
             { "Damian_Demeniss_Elite_Uniform_Leather_Armor"  }, // Chest
@@ -130,24 +134,22 @@ namespace Transmog
             { ""                                             }, // Ranged2
         },
 
-        // ============================================================
         // Oongka (male orc). Orc assets share the cd_phm_* family (the orc model is male-tier). PWS derives the source
         // rig meshes from each carrier itemId at runtime. The `_dd` runtime-wrapper suffix note below still applies to
         // how the picker matches source wrappers.
         //
-        // NOTE (helm `_dd` suffix): the prefab-swap resolver (heap_walk_partprefab_for_names) matches src by EXACT
+        // Helm `_dd` suffix: the prefab-swap resolver (heap_walk_partprefab_for_names) matches src by EXACT
         // strcmp against LIVE partprefab wrapper names. The helm slot is special (see prefab_wrapper_swap.cpp
-        // k_helmSlotId comment) -- the engine instantiates the default helm variant's runtime wrapper with a `_dd`
+        // k_helmSlotId comment) - the engine instantiates the default helm variant's runtime wrapper with a `_dd`
         // suffix. So for hel_0122's index01 the ONLY live wrapper is `cd_phm_00_hel_0122_01_index01_dd`. The bare
         // `..._index01` exists only in string/data tables, never as a wrapper, so a bare helm name never resolves and
         // the helm mesh-swap turns into a silent no-op. Other slots use bare names and resolve correctly, because the
         // `_dd` quirk is helm-specific. On patch day, verify the exact live wrapper name against the live partprefab
         // pool: the bare name must yield no wrapper, and the `_dd` name must yield one.
-        // ============================================================
         {
-            // Oongka's plate set exists only in tiered form (_II Valortread, _III Belkandor); there is no bare
-            // `Oongka_PlateArmor_Helm`. Both tiers are complete five-piece sets, so unlike Kliff this row needs no
-            // odd boots exception.
+            // Oongka's plate set exists only in tiered form (_II Valortread, _III Belkandor). No bare
+            // `Oongka_PlateArmor_Helm` exists. Both tiers are complete five-piece sets, so unlike Kliff this row
+            // needs no odd boots exception.
             { "Oongka_PlateArmor_Helm_III"                   }, // Helm
             { "Oongka_PlateArmor_Armor_III"                  }, // Chest
             { "Oongka_PlateArmor_Cloak_III"                  }, // Cloak
@@ -159,7 +161,7 @@ namespace Transmog
             { "Pailune_Nobility_Degree_I"                    }, // Ring1
             { "Bilibili_Ring"                                }, // Ring2
             { "Lantern"                                      }, // Lantern (cd_t0000_* family, not in cd_ph[mw]_ map)
-            { "Kliff_Glasses"                                }, // Glasses (Kliff fallback -- shared accessory)
+            { "Kliff_Glasses"                                }, // Glasses (Kliff fallback - shared accessory)
             { "Kliff_Mask"                                   }, // Mask    (cross-char)
             { "Oongka_Rocket_BackPack"                       }, // Backpack (orc rocket pack)
             { "OOngka_Daeil_Band"                            }, // Bracelet (pom, orc rig)
@@ -178,7 +180,12 @@ namespace Transmog
 
     // Lookup helpers
 
-    inline std::optional<CarrierChar> carrier_char_from_name(std::string_view name) noexcept
+    /**
+     * @brief CarrierChar for a character name. Inverse of @ref carrier_char_name.
+     *
+     * @details Returns std::nullopt for a name outside the three carrier characters.
+     */
+    [[nodiscard]] inline constexpr std::optional<CarrierChar> carrier_char_from_name(std::string_view name) noexcept
     {
         if (name == "Kliff")
             return CarrierChar::Kliff;
@@ -190,10 +197,11 @@ namespace Transmog
     }
 
     /**
-     * @brief Character name for a CarrierChar. Inverse of @ref carrier_char_from_name; the names are the same keys
-     * PresetManager stores per-character state under.
+     * @brief Character name for a CarrierChar. Inverse of @ref carrier_char_from_name.
+     *
+     * @details The names are the same keys PresetManager stores per-character state under.
      */
-    inline constexpr std::string_view carrier_char_name(CarrierChar c) noexcept
+    [[nodiscard]] inline constexpr std::string_view carrier_char_name(CarrierChar c) noexcept
     {
         switch (c)
         {
@@ -208,8 +216,11 @@ namespace Transmog
         }
     }
 
-    inline constexpr const CarrierDefault &carrier_for(CarrierChar c, TransmogSlot s) noexcept
+    /** @brief The carrier row for one character and slot. */
+    [[nodiscard]] inline constexpr const CarrierDefault &carrier_for(CarrierChar c, TransmogSlot s) noexcept
     {
         return k_carriers[static_cast<std::size_t>(c)][static_cast<std::size_t>(s)];
     }
 } // namespace Transmog
+
+#endif // TRANSMOG_CARRIER_DEFAULTS_HPP

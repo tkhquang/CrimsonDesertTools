@@ -4,7 +4,7 @@
  *
  * The candidate ladders in aob_resolver.hpp and cdcore/anchors.hpp enter a DetourModKit anchor registry as
  * RipGlobal entries. resolve_all_anchors() grades the signatures offline, resolves the whole table in a single
- * parallel pass at startup, and records each address; anchor_address() hands the resolved address, or 0 on a ladder
+ * parallel pass at startup, and records each address. anchor_address() hands the resolved address, or 0 on a ladder
  * miss, to the call sites.
  */
 
@@ -62,7 +62,7 @@ namespace Transmog
          *          alignment pad or mid-instruction. A hook installed there writes its jump across an instruction
          *          boundary and the process dies somewhere unrelated later. The probe still returns true for the
          *          0xE9 / 0xEB / 0xFF 0x25 shapes an existing inline hook leaves behind, so a target another mod
-         *          already hooked passes; only scan poison is rejected. Rejecting here turns a silent failure into a
+         *          already hooked passes. Only scan poison is rejected. Rejecting here turns a silent failure into a
          *          logged miss and a disabled feature.
          */
         [[nodiscard]] bool code_site(std::int64_t value, const void *context) noexcept
@@ -80,7 +80,7 @@ namespace Transmog
         // data slot: the match site is the referencing instruction, and only the decoded disp32 leaves code.
         // Every row sets require_validator: an anchor that reaches a backend without a post-resolve predicate then
         // fails CLOSED instead of publishing an unchecked address. It is a no-op for the rows below, which all carry
-        // one; it is there so a row ADDED later cannot quietly skip verification.
+        // one. It is there so a row ADDED later cannot quietly skip verification.
         const Anchor k_anchors[] = {
             {
                 .label = "SlotPopulator",
@@ -168,7 +168,6 @@ namespace Transmog
                 .label = "StringInfoRegistry",
                 .kind = AnchorKind::RipGlobal,
                 .site = k_stringInfoRegistryCandidates,
-                // A data slot, not code.
                 .validator = in_host_image,
                 .validator_context = &s_hostImage,
                 .require_validator = true,
@@ -188,7 +187,6 @@ namespace Transmog
                 .label = "LoaderRegistry",
                 .kind = AnchorKind::RipGlobal,
                 .site = k_loaderRegistryCandidates,
-                // A data slot, not code.
                 .validator = in_host_image,
                 .validator_context = &s_hostImage,
                 .require_validator = true,
@@ -316,7 +314,6 @@ namespace Transmog
                 .label = "PlayerStatic",
                 .kind = AnchorKind::RipGlobal,
                 .site = k_playerStaticCandidates,
-                // A data slot, not code.
                 .validator = in_host_image,
                 .validator_context = &s_hostImage,
                 .require_validator = true,
@@ -334,12 +331,10 @@ namespace Transmog
         };
         static_assert(std::size(k_anchors) == k_anchorCount, "k_anchors must hold one entry per AnchorId.");
 
-        // Resolved absolute addresses, indexed by AnchorId; 0 means unresolved. Written once by resolve_all_anchors()
-        // on the init thread before any consumer reads, then read-only, so no synchronization is required.
-        std::array<std::uintptr_t, k_anchorCount> s_resolved{};
-
-        // The per-anchor report, kept under the same write-once discipline so the startup summary and the shutdown
-        // diagnostics snapshot can roll it up instead of recomputing it.
+        // The per-anchor report and the ONLY store of a resolved address. anchor_address() serves out of it, and the
+        // startup summary and the shutdown diagnostics snapshot roll it up instead of recomputing it. Written once by
+        // resolve_all_anchors() on the init thread before any consumer reads, then read-only, so no synchronization
+        // is required. An index past s_reportCount stays default-constructed, so its status reads Unresolved.
         std::array<DMK::anchor::ResolvedAnchor, k_anchorCount> s_report{};
         std::size_t s_reportCount = 0;
 
@@ -383,7 +378,7 @@ namespace Transmog
                     }
                     (health.grade == DMK::sighealth::Grade::Unusable ? ++unusable : ++fragile);
                     logger.debug(
-                        "Signature health: {}/{} {} -- {}",
+                        "Signature health: {}/{} {} - {}",
                         entry.label,
                         candidate.name(),
                         DMK::sighealth::to_string(health.grade),
@@ -423,18 +418,38 @@ namespace Transmog
 
         s_reportCount = DMK::anchor::resolve_all_parallel(k_anchors, s_report, s_hostImage);
 
+        // The LAYOUT witness for the whole sweep. It folds the PE timestamp, SizeOfImage, and section table, so it
+        // moves on a game patch and stays put under ASLR. It is what makes the per-anchor trust keys below comparable
+        // between two launches.
+        const DMK::scan::ImageIdentity hostIdentity = DMK::scan::image_identity(s_hostImage);
+        logger.info(
+            "Host image identity: timestamp {:#010x}, size {:#x}, sections {:#x}, token {:#x}",
+            hostIdentity.timestamp,
+            hostIdentity.size_of_image,
+            hostIdentity.section_digest,
+            hostIdentity.token()
+        );
+
         // resolve_all_parallel writes s_report[i] for k_anchors[i], so the report index IS the AnchorId.
         for (std::size_t i = 0; i < s_reportCount; ++i)
         {
             const DMK::anchor::ResolvedAnchor &entry = s_report[i];
             if (entry.status == DMK::anchor::AnchorStatus::Resolved)
             {
-                s_resolved[i] = static_cast<std::uintptr_t>(entry.value);
-                logger.debug("Anchor {} -> {}", entry.label, DMK::format::format_address(s_resolved[i]));
+                // The witness source names the ladder rung that actually WON, which the anchor kind does not say. The
+                // trust key folds the anchor's own declaration together with the live image identity, so it shifts on
+                // a patch even when the address holds. A moved address under an unchanged key is self-healed drift.
+                logger.debug(
+                    "Anchor {} -> {} [{} via {}, trust {:#x}]",
+                    entry.label,
+                    DMK::format::format_address(static_cast<std::uintptr_t>(entry.value)),
+                    DMK::anchor::result_domain_to_string(entry.domain),
+                    DMK::anchor::physical_source_to_string(entry.witness.source),
+                    DMK::anchor::anchor_trust_fingerprint(k_anchors[i], hostIdentity)
+                );
             }
             else
             {
-                s_resolved[i] = 0;
                 logger.warning(
                     "Anchor {} unresolved ({})",
                     entry.label,
@@ -460,7 +475,12 @@ namespace Transmog
         {
             return 0;
         }
-        return s_resolved[index];
+        const DMK::anchor::ResolvedAnchor &entry = s_report[index];
+        if (entry.status != DMK::anchor::AnchorStatus::Resolved)
+        {
+            return 0;
+        }
+        return static_cast<std::uintptr_t>(entry.value);
     }
 
     std::span<const DMK::anchor::ResolvedAnchor> anchor_report() noexcept
@@ -470,10 +490,6 @@ namespace Transmog
 
     DMK::scan::Pattern claim_walk_site_pattern()
     {
-        //   mov  rax, [rbx+8]        48 8B 43 08     entry's owning pointer (claim vector, `node+0x58`)
-        //   mov  rcx, [rax+28h]      48 8B 48 28     faults when the owner is null
-        //   test rcx, rcx            48 85 C9
-        //   jz   <next entry>        74 ??           rel8 to the loop-continue label, validated at install time
         return Pattern::literal("48 8B 43 08 48 8B 48 28 48 85 C9");
     }
 

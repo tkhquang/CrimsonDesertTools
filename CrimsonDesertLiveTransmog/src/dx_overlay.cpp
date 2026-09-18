@@ -3,7 +3,9 @@
 #include "shared_state.hpp"
 #include "transmog.hpp"
 
-#include <DetourModKit.hpp>
+#include <DetourModKit/defines.hpp>
+#include <DetourModKit/detail/worker.hpp>
+#include <DetourModKit/logger.hpp>
 
 #pragma warning(push, 0)
 #include <imgui.h>
@@ -15,7 +17,6 @@
 
 #include <Windows.h>
 #include <timeapi.h>
-#pragma comment(lib, "winmm.lib")
 
 #include <algorithm>
 #include <atomic>
@@ -26,43 +27,39 @@
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
-// Swap-chain-free transparent overlay.
-//
-// OptiScaler hooks all DXGI swap chain creation and asserts on its ImGui re-init. This approach creates no swap chain
-// at all:
-//   1. D3D11 WARP device (CreateDevice only, no swap chain)
-//   2. Offscreen Texture2D render target
-//   3. ImGui renders to the texture via ImGui_ImplDX11
-//   4. Texture pixels copied to a DIB section
-//   5. UpdateLayeredWindow composites the DIB onto the screen
-// Zero DXGI swap chain means zero OptiScaler interference.
+// Swap-chain-free transparent overlay: a D3D11 WARP device draws ImGui into an offscreen texture, whose pixels reach
+// the screen through a DIB section and UpdateLayeredWindow. OptiScaler hooks every DXGI swap-chain creation and
+// asserts on its ImGui re-init, so a path that creates no swap chain leaves it nothing to interfere with.
 
 namespace Transmog
 {
-    static std::atomic<bool> s_overlayVisible{false};
-    static std::atomic<bool> s_shutdownRequested{false};
-    static bool s_initialised = false;
+    namespace
+    {
+        std::atomic<bool> s_overlay_visible{false};
+        std::atomic<bool> s_shutdown_requested{false};
+        bool s_initialized = false;
 
-    static HWND s_overlayHwnd = nullptr;
-    static HWND s_gameHwnd = nullptr;
+        HWND s_overlay_hwnd = nullptr;
+        HWND s_game_hwnd = nullptr;
 
-    // D3D11 WARP device, no swap chain.
-    static ID3D11Device *s_device = nullptr;
-    static ID3D11DeviceContext *s_context = nullptr;
+        // D3D11 WARP device, no swap chain.
+        ID3D11Device *s_device = nullptr;
+        ID3D11DeviceContext *s_context = nullptr;
 
-    // Offscreen render target.
-    static ID3D11Texture2D *s_rtTex = nullptr;
-    static ID3D11RenderTargetView *s_rtv = nullptr;
-    static ID3D11Texture2D *s_stagingTex = nullptr;
-    static UINT s_width = 0;
-    static UINT s_height = 0;
+        // Offscreen render target.
+        ID3D11Texture2D *s_rt_tex = nullptr;
+        ID3D11RenderTargetView *s_rtv = nullptr;
+        ID3D11Texture2D *s_staging_tex = nullptr;
+        UINT s_width = 0;
+        UINT s_height = 0;
 
-    // GDI blitting.
-    static HDC s_memDC = nullptr;
-    static HBITMAP s_dib = nullptr;
-    static void *s_dibPixels = nullptr;
+        // GDI blit surface.
+        HDC s_mem_dc = nullptr;
+        HBITMAP s_dib = nullptr;
+        void *s_dib_pixels = nullptr;
 
-    static std::optional<DMK::StoppableWorker> s_renderWorker;
+        std::optional<DMK::StoppableWorker> s_render_worker;
+    } // namespace
 
     // Render target + staging + DIB management
 
@@ -73,27 +70,27 @@ namespace Transmog
             s_rtv->Release();
             s_rtv = nullptr;
         }
-        if (s_rtTex)
+        if (s_rt_tex)
         {
-            s_rtTex->Release();
-            s_rtTex = nullptr;
+            s_rt_tex->Release();
+            s_rt_tex = nullptr;
         }
-        if (s_stagingTex)
+        if (s_staging_tex)
         {
-            s_stagingTex->Release();
-            s_stagingTex = nullptr;
+            s_staging_tex->Release();
+            s_staging_tex = nullptr;
         }
         if (s_dib)
         {
             DeleteObject(s_dib);
             s_dib = nullptr;
         }
-        if (s_memDC)
+        if (s_mem_dc)
         {
-            DeleteDC(s_memDC);
-            s_memDC = nullptr;
+            DeleteDC(s_mem_dc);
+            s_mem_dc = nullptr;
         }
-        s_dibPixels = nullptr;
+        s_dib_pixels = nullptr;
     }
 
     [[nodiscard]] static bool create_targets(UINT w, UINT h)
@@ -112,17 +109,17 @@ namespace Transmog
         td.SampleDesc.Count = 1;
         td.Usage = D3D11_USAGE_DEFAULT;
         td.BindFlags = D3D11_BIND_RENDER_TARGET;
-        if (FAILED(s_device->CreateTexture2D(&td, nullptr, &s_rtTex)))
+        if (FAILED(s_device->CreateTexture2D(&td, nullptr, &s_rt_tex)))
             return false;
 
-        if (FAILED(s_device->CreateRenderTargetView(s_rtTex, nullptr, &s_rtv)))
+        if (FAILED(s_device->CreateRenderTargetView(s_rt_tex, nullptr, &s_rtv)))
             return false;
 
         // Staging texture (CPU-readable copy).
         td.Usage = D3D11_USAGE_STAGING;
         td.BindFlags = 0;
         td.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
-        if (FAILED(s_device->CreateTexture2D(&td, nullptr, &s_stagingTex)))
+        if (FAILED(s_device->CreateTexture2D(&td, nullptr, &s_staging_tex)))
             return false;
 
         // DIB section for UpdateLayeredWindow.
@@ -135,14 +132,14 @@ namespace Transmog
         bmi.bmiHeader.biCompression = BI_RGB;
 
         HDC screenDC = GetDC(nullptr);
-        s_memDC = CreateCompatibleDC(screenDC);
-        s_dib = CreateDIBSection(screenDC, &bmi, DIB_RGB_COLORS, &s_dibPixels, nullptr, 0);
+        s_mem_dc = CreateCompatibleDC(screenDC);
+        s_dib = CreateDIBSection(screenDC, &bmi, DIB_RGB_COLORS, &s_dib_pixels, nullptr, 0);
         ReleaseDC(nullptr, screenDC);
 
-        if (!s_dib || !s_dibPixels)
+        if (!s_dib || !s_dib_pixels)
             return false;
 
-        SelectObject(s_memDC, s_dib);
+        SelectObject(s_mem_dc, s_dib);
         return true;
     }
 
@@ -209,8 +206,7 @@ namespace Transmog
         if (x1 <= x0 || y1 <= y0)
             return;
 
-        // GPU -> staging: only the dirty box. CopySubresourceRegion is
-        // free where CopyResource would have read the whole texture.
+        // GPU -> staging: only the dirty box, which is what makes CopySubresourceRegion cheap here.
         D3D11_BOX box{};
         box.left = static_cast<UINT>(x0);
         box.top = static_cast<UINT>(y0);
@@ -218,24 +214,32 @@ namespace Transmog
         box.right = static_cast<UINT>(x1);
         box.bottom = static_cast<UINT>(y1);
         box.back = 1;
-        s_context
-            ->CopySubresourceRegion(s_stagingTex, 0, static_cast<UINT>(x0), static_cast<UINT>(y0), 0, s_rtTex, 0, &box);
+        s_context->CopySubresourceRegion(
+            s_staging_tex,
+            0,
+            static_cast<UINT>(x0),
+            static_cast<UINT>(y0),
+            0,
+            s_rt_tex,
+            0,
+            &box
+        );
 
         D3D11_MAPPED_SUBRESOURCE mapped{};
-        if (FAILED(s_context->Map(s_stagingTex, 0, D3D11_MAP_READ, 0, &mapped)))
+        if (FAILED(s_context->Map(s_staging_tex, 0, D3D11_MAP_READ, 0, &mapped)))
             return;
 
-        const UINT rowBytes = s_width * 4;
-        const UINT spanBytes = static_cast<UINT>(x1 - x0) * 4;
-        auto *srcBase = static_cast<const uint8_t *>(mapped.pData);
-        auto *dstBase = static_cast<uint8_t *>(s_dibPixels);
+        const UINT row_bytes = s_width * 4;
+        const UINT span_bytes = static_cast<UINT>(x1 - x0) * 4;
+        auto *src_base = static_cast<const uint8_t *>(mapped.pData);
+        auto *dst_base = static_cast<uint8_t *>(s_dib_pixels);
         // memcpy + premultiply each dirty row in one pass. Outside the dirty rect the DIB retains last frame's bytes;
         // ULWI's prcDirty ignores them.
         for (LONG y = y0; y < y1; ++y)
         {
-            auto *src = srcBase + static_cast<size_t>(y) * mapped.RowPitch + static_cast<size_t>(x0) * 4;
-            auto *dst = dstBase + static_cast<size_t>(y) * rowBytes + static_cast<size_t>(x0) * 4;
-            memcpy(dst, src, spanBytes);
+            auto *src = src_base + static_cast<size_t>(y) * mapped.RowPitch + static_cast<size_t>(x0) * 4;
+            auto *dst = dst_base + static_cast<size_t>(y) * row_bytes + static_cast<size_t>(x0) * 4;
+            memcpy(dst, src, span_bytes);
             for (LONG xi = 0; xi < x1 - x0; ++xi)
             {
                 uint8_t *px = dst + xi * 4;
@@ -252,11 +256,11 @@ namespace Transmog
                 }
             }
         }
-        s_context->Unmap(s_stagingTex, 0);
+        s_context->Unmap(s_staging_tex, 0);
 
         // Composite onto screen with a dirty-rect hint so GDI only touches the changed region of the layered surface.
         RECT gr{};
-        GetWindowRect(s_gameHwnd, &gr);
+        GetWindowRect(s_game_hwnd, &gr);
         POINT ptPos = {gr.left, gr.top};
         SIZE sz = {W, H};
         POINT ptSrc = {0, 0};
@@ -269,12 +273,12 @@ namespace Transmog
         ulwi.cbSize = sizeof(ulwi);
         ulwi.pptDst = &ptPos;
         ulwi.psize = &sz;
-        ulwi.hdcSrc = s_memDC;
+        ulwi.hdcSrc = s_mem_dc;
         ulwi.pptSrc = &ptSrc;
         ulwi.pblend = &blend;
         ulwi.dwFlags = ULW_ALPHA;
         ulwi.prcDirty = &dirtyClamped;
-        UpdateLayeredWindowIndirect(s_overlayHwnd, &ulwi);
+        UpdateLayeredWindowIndirect(s_overlay_hwnd, &ulwi);
     }
 
     // Helpers
@@ -312,7 +316,7 @@ namespace Transmog
 
     static LRESULT CALLBACK overlay_wndproc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
     {
-        if (s_initialised && s_overlayVisible.load(std::memory_order_relaxed))
+        if (s_initialized && s_overlay_visible.load(std::memory_order_relaxed))
         {
             // Esc closes the overlay and returns focus to the game.
             if (msg == WM_KEYDOWN && wParam == VK_ESCAPE)
@@ -333,14 +337,13 @@ namespace Transmog
     {
         auto &logger = DMK::log();
 
-        // Wait for game world. Slow boots, intro cinematics, OS-level game updates and similar can all push this past
-        // the old 5-minute cap; with no upper bound the overlay simply waits until the world resolves OR the mod is
-        // shutting down. Heart-beat log every 60s so the wait is visible to the user, with no warning noise from a hard
-        // timeout that never made sense.
+        // Wait for the game world, with no upper bound: slow boots, intro cinematics and OS-level game updates all
+        // stretch this arbitrarily. The wait ends when the world resolves or the mod shuts down. A heartbeat log
+        // every 60s keeps the wait visible to the user.
         logger.info("[dx_overlay] Waiting for game world...");
         for (int tick = 0;; ++tick)
         {
-            if (stop.stop_requested() || s_shutdownRequested.load(std::memory_order_relaxed))
+            if (stop.stop_requested() || s_shutdown_requested.load(std::memory_order_acquire))
                 return;
             if (Transmog::is_world_ready())
                 break;
@@ -352,15 +355,15 @@ namespace Transmog
         }
 
         Sleep(2000);
-        s_gameHwnd = find_game_hwnd();
-        if (!s_gameHwnd)
+        s_game_hwnd = find_game_hwnd();
+        if (!s_game_hwnd)
         {
             logger.error("[dx_overlay] Game window not found");
             return;
         }
 
         RECT gr{};
-        GetClientRect(s_gameHwnd, &gr);
+        GetClientRect(s_game_hwnd, &gr);
         const UINT gw = static_cast<UINT>(gr.right);
         const UINT gh = static_cast<UINT>(gr.bottom);
         logger.info("[dx_overlay] Game {}x{}", gw, gh);
@@ -373,10 +376,10 @@ namespace Transmog
         wc.lpszClassName = L"TransmogOverlay";
         RegisterClassExW(&wc);
 
-        GetWindowRect(s_gameHwnd, &gr);
-        // No WS_EX_TOPMOST: we position relative to the game window each frame so the overlay doesn't cover the taskbar
-        // or appear above other apps when the game isn't focused.
-        s_overlayHwnd = CreateWindowExW(
+        GetWindowRect(s_game_hwnd, &gr);
+        // No WS_EX_TOPMOST: the overlay repositions relative to the game window each frame, so it never covers
+        // the taskbar and never sits above other apps while the game is not focused.
+        s_overlay_hwnd = CreateWindowExW(
             WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
             wc.lpszClassName,
             L"",
@@ -390,13 +393,13 @@ namespace Transmog
             wc.hInstance,
             nullptr
         );
-        if (!s_overlayHwnd)
+        if (!s_overlay_hwnd)
         {
             logger.error("[dx_overlay] Window creation failed");
             return;
         }
 
-        ShowWindow(s_overlayHwnd, SW_SHOWNOACTIVATE);
+        ShowWindow(s_overlay_hwnd, SW_SHOWNOACTIVATE);
 
         // D3D11 WARP device (NO swap chain)
         const D3D_FEATURE_LEVEL fl = D3D_FEATURE_LEVEL_11_0;
@@ -414,7 +417,7 @@ namespace Transmog
             )))
         {
             logger.error("[dx_overlay] WARP device failed");
-            DestroyWindow(s_overlayHwnd);
+            DestroyWindow(s_overlay_hwnd);
             return;
         }
 
@@ -423,7 +426,7 @@ namespace Transmog
             logger.error("[dx_overlay] Render targets failed");
             s_context->Release();
             s_device->Release();
-            DestroyWindow(s_overlayHwnd);
+            DestroyWindow(s_overlay_hwnd);
             return;
         }
 
@@ -437,69 +440,68 @@ namespace Transmog
 
         // DPI-aware scaling: base size targets 1080p, scale up for higher resolutions so the UI stays readable at 1440p
         // / 4K.
-        const float dpiScale = static_cast<float>(gh) / 1080.0f;
+        const float dpi_scale = static_cast<float>(gh) / 1080.0f;
         ImGui::StyleColorsDark();
 
-        // Build the default font at the target pixel size instead of stretching ImGui's 13px built-in bitmap via
-        // FontGlobalScale. The stretch path leaves glyphs blurry and breaks the row-vs-glyph ratio: rows scale via
-        // ScaleAllSizes but the bitmap font does not, which is what made the standalone overlay look thin and cramped.
+        // Build the default font at the target pixel size rather than stretch ImGui's 13px built-in bitmap through
+        // FontGlobalScale. The stretch path leaves glyphs blurry and breaks the row-to-glyph ratio, because
+        // ScaleAllSizes scales the rows while the bitmap font stays put.
         //
-        // 14px base reads better than ImGui's default at 1080p; dpiScale lifts it linearly for 1440p / 4K.
+        // 14px base reads better than ImGui's default at 1080p; dpi_scale lifts it linearly for 1440p / 4K.
         // ScaleAllSizes is then driven by the font/13px ratio so padding, frame heights, and column widths stay
         // proportional to the glyph size.
-        ImFontConfig fontCfg;
-        fontCfg.SizePixels = 14.0f * dpiScale;
-        io.Fonts->AddFontDefault(&fontCfg);
+        ImFontConfig font_cfg;
+        font_cfg.SizePixels = 14.0f * dpi_scale;
+        io.Fonts->AddFontDefault(&font_cfg);
         io.FontGlobalScale = 1.0f;
-        ImGui::GetStyle().ScaleAllSizes(fontCfg.SizePixels / 13.0f);
+        ImGui::GetStyle().ScaleAllSizes(font_cfg.SizePixels / 13.0f);
 
-        ImGui_ImplWin32_Init(s_overlayHwnd);
+        ImGui_ImplWin32_Init(s_overlay_hwnd);
         ImGui_ImplDX11_Init(s_device, s_context);
 
-        s_initialised = true;
+        s_initialized = true;
         logger.info("[dx_overlay] Overlay ready (WARP + GDI blit, no swap chain)");
 
-        // Raise the system timer resolution to 1ms so the adaptive
-        // Sleep() at the bottom of the render loop is actually honored. Without this, Sleep(4) rounds up to the default
-        // ~15.6 ms scheduler tick and the overlay caps at ~60 Hz no matter what we ask for, which is what made
-        // hover/click feel sluggish on the standalone path. Paired timeEndPeriod() runs before the thread exits below.
+        // Raise the system timer resolution to 1 ms so the render loop's adaptive Sleep() is honored. Without it
+        // Sleep(4) rounds up to the default ~15.6 ms scheduler tick and the overlay caps at ~60 Hz whatever the loop
+        // asks for. The paired timeEndPeriod() runs before the thread exits below.
         timeBeginPeriod(1);
 
         // Previous frame's drawn rect, so we can union it with this frame's rect and clear pixels that ImGui vacated
-        // (popup closed, tooltip dismissed, etc.) -- ULWI's prcDirty only refreshes inside the supplied rect.
-        RECT prevDirty{0, 0, 0, 0};
+        // (popup closed, tooltip dismissed, etc.) - ULWI's prcDirty only refreshes inside the supplied rect.
+        RECT prev_dirty{0, 0, 0, 0};
 
         // Render loop
-        while (!stop.stop_requested() && !s_shutdownRequested.load(std::memory_order_relaxed))
+        while (!stop.stop_requested() && !s_shutdown_requested.load(std::memory_order_acquire))
         {
             MSG msg;
-            while (PeekMessageW(&msg, s_overlayHwnd, 0, 0, PM_REMOVE))
+            while (PeekMessageW(&msg, s_overlay_hwnd, 0, 0, PM_REMOVE))
             {
                 TranslateMessage(&msg);
                 DispatchMessageW(&msg);
             }
 
-            if (!IsWindow(s_gameHwnd))
+            if (!IsWindow(s_game_hwnd))
                 break;
 
             // Only show the overlay when the game is the foreground window (or our overlay itself is focused). Hide
-            // otherwise so the overlay doesn't linger over other apps when alt-tabbed.
+            // otherwise so the overlay does not linger over other apps when alt-tabbed.
             const HWND fg = GetForegroundWindow();
-            const bool gameActive = (fg == s_gameHwnd || fg == s_overlayHwnd);
+            const bool game_active = (fg == s_game_hwnd || fg == s_overlay_hwnd);
 
-            const bool wantVisible = gameActive && s_overlayVisible.load(std::memory_order_relaxed);
+            const bool want_visible = game_active && s_overlay_visible.load(std::memory_order_relaxed);
 
-            if (gameActive && wantVisible)
+            if (game_active && want_visible)
             {
                 // Only reposition when the game window actually moved.
-                static RECT s_lastGR{};
+                static RECT s_last_game_rect{};
                 RECT ngr{};
-                GetWindowRect(s_gameHwnd, &ngr);
-                if (ngr.left != s_lastGR.left || ngr.top != s_lastGR.top || ngr.right != s_lastGR.right ||
-                    ngr.bottom != s_lastGR.bottom)
+                GetWindowRect(s_game_hwnd, &ngr);
+                if (ngr.left != s_last_game_rect.left || ngr.top != s_last_game_rect.top ||
+                    ngr.right != s_last_game_rect.right || ngr.bottom != s_last_game_rect.bottom)
                 {
                     SetWindowPos(
-                        s_overlayHwnd,
+                        s_overlay_hwnd,
                         HWND_TOP,
                         ngr.left,
                         ngr.top,
@@ -507,36 +509,36 @@ namespace Transmog
                         ngr.bottom - ngr.top,
                         SWP_NOACTIVATE
                     );
-                    s_lastGR = ngr;
+                    s_last_game_rect = ngr;
                 }
 
-                if (!IsWindowVisible(s_overlayHwnd))
-                    ShowWindow(s_overlayHwnd, SW_SHOWNOACTIVATE);
+                if (!IsWindowVisible(s_overlay_hwnd))
+                    ShowWindow(s_overlay_hwnd, SW_SHOWNOACTIVATE);
             }
             else
             {
-                if (IsWindowVisible(s_overlayHwnd))
-                    ShowWindow(s_overlayHwnd, SW_HIDE);
+                if (IsWindowVisible(s_overlay_hwnd))
+                    ShowWindow(s_overlay_hwnd, SW_HIDE);
             }
 
-            const bool visible = wantVisible;
+            const bool visible = want_visible;
 
             // Toggle click-through.
             {
-                static bool wasVisible = false;
-                if (visible && !wasVisible)
+                static bool was_visible = false;
+                if (visible && !was_visible)
                 {
-                    LONG_PTR ex = GetWindowLongPtrW(s_overlayHwnd, GWL_EXSTYLE);
-                    SetWindowLongPtrW(s_overlayHwnd, GWL_EXSTYLE, ex & ~WS_EX_TRANSPARENT);
-                    SetForegroundWindow(s_overlayHwnd);
+                    LONG_PTR ex = GetWindowLongPtrW(s_overlay_hwnd, GWL_EXSTYLE);
+                    SetWindowLongPtrW(s_overlay_hwnd, GWL_EXSTYLE, ex & ~WS_EX_TRANSPARENT);
+                    SetForegroundWindow(s_overlay_hwnd);
                 }
-                else if (!visible && wasVisible)
+                else if (!visible && was_visible)
                 {
-                    LONG_PTR ex = GetWindowLongPtrW(s_overlayHwnd, GWL_EXSTYLE);
-                    SetWindowLongPtrW(s_overlayHwnd, GWL_EXSTYLE, ex | WS_EX_TRANSPARENT);
-                    SetForegroundWindow(s_gameHwnd);
+                    LONG_PTR ex = GetWindowLongPtrW(s_overlay_hwnd, GWL_EXSTYLE);
+                    SetWindowLongPtrW(s_overlay_hwnd, GWL_EXSTYLE, ex | WS_EX_TRANSPARENT);
+                    SetForegroundWindow(s_game_hwnd);
                 }
-                wasVisible = visible;
+                was_visible = visible;
             }
 
             if (!visible)
@@ -561,7 +563,7 @@ namespace Transmog
             //
             // The game uses SetCapture / RawInput, so WM_LBUTTONDOWN and WM_LBUTTONUP both route to the game window
             // even when the cursor is over our overlay. ImGui_ImplWin32 polls cursor position via GetCursorPos as a
-            // fallback (so hover and tooltips keep working without messages) but does NOT poll button state -- buttons
+            // fallback (so hover and tooltips keep working without messages) but does NOT poll button state - buttons
             // rely on wndproc messages we never see. Without this bridge, io.MouseDown is stuck at false and every
             // click on the overlay is ignored.
             //
@@ -572,16 +574,16 @@ namespace Transmog
             //   2. The user clicks on the overlay, drags out, then releases. The latch stays "down" while dragged out
             //      (so widget drag keeps working); release anywhere clears the latch so ImGui sees the up event.
             //
-            // `overOverlay` is hoisted out of the polling block so the adaptive-sleep code below can use it as one of
+            // `over_overlay` is hoisted out of the polling block so the adaptive-sleep code below can use it as one of
             // the "user is interacting" signals (cursor over the overlay means we want fast frames even before they
             // click).
-            bool overOverlay = false;
+            bool over_overlay = false;
             {
                 POINT pt;
                 GetCursorPos(&pt);
                 RECT wr;
-                GetWindowRect(s_overlayHwnd, &wr);
-                overOverlay = pt.x >= wr.left && pt.x < wr.right && pt.y >= wr.top && pt.y < wr.bottom;
+                GetWindowRect(s_overlay_hwnd, &wr);
+                over_overlay = pt.x >= wr.left && pt.x < wr.right && pt.y >= wr.top && pt.y < wr.bottom;
 
                 // Per-button latches survive across render frames. The "was" pair is the previous-frame raw state and
                 // is the basis for rising-edge detection; the "latch" pair is the cooked value forwarded to ImGui (see
@@ -594,7 +596,7 @@ namespace Transmog
                     const bool now = (GetAsyncKeyState(vk) & 0x8000) != 0;
                     if (!now)
                         latch = false;
-                    else if (!was && overOverlay)
+                    else if (!was && over_overlay)
                         latch = true;
                     was = now;
                     io.AddMouseButtonEvent(idx, latch);
@@ -610,9 +612,9 @@ namespace Transmog
 
             draw_overlay();
 
-            // Snapshot interactivity inside the frame -- IsAnyItem* is only defined between NewFrame and EndFrame, and
+            // Snapshot interactivity inside the frame - IsAnyItem* is only defined between NewFrame and EndFrame, and
             // ImGui::Render() below calls EndFrame internally.
-            const bool uiActive = ImGui::IsAnyItemActive() || ImGui::IsAnyItemHovered() || io.WantTextInput;
+            const bool ui_active = ImGui::IsAnyItemActive() || ImGui::IsAnyItemHovered() || io.WantTextInput;
 
             ImGui::Render();
             ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
@@ -622,8 +624,8 @@ namespace Transmog
             // staging readback + premultiply + ULWI down to that area is the bulk of the standalone responsiveness win
             // on high-res displays.
             RECT cur{};
-            const bool gotBounds = compute_draw_bounds(ImGui::GetDrawData(), cur);
-            if (!gotBounds)
+            const bool got_bounds = compute_draw_bounds(ImGui::GetDrawData(), cur);
+            if (!got_bounds)
             {
                 cur.left = 0;
                 cur.top = 0;
@@ -631,34 +633,33 @@ namespace Transmog
                 cur.bottom = static_cast<LONG>(s_height);
             }
             RECT dirty = cur;
-            if (prevDirty.right > prevDirty.left && prevDirty.bottom > prevDirty.top)
+            if (prev_dirty.right > prev_dirty.left && prev_dirty.bottom > prev_dirty.top)
             {
-                UnionRect(&dirty, &cur, &prevDirty);
+                UnionRect(&dirty, &cur, &prev_dirty);
             }
-            constexpr LONG kEdgePad = 4;
-            dirty.left = (std::max<LONG>)(0, dirty.left - kEdgePad);
-            dirty.top = (std::max<LONG>)(0, dirty.top - kEdgePad);
-            dirty.right = (std::min<LONG>)(static_cast<LONG>(s_width), dirty.right + kEdgePad);
-            dirty.bottom = (std::min<LONG>)(static_cast<LONG>(s_height), dirty.bottom + kEdgePad);
+            constexpr LONG edge_pad = 4;
+            dirty.left = (std::max<LONG>)(0, dirty.left - edge_pad);
+            dirty.top = (std::max<LONG>)(0, dirty.top - edge_pad);
+            dirty.right = (std::min<LONG>)(static_cast<LONG>(s_width), dirty.right + edge_pad);
+            dirty.bottom = (std::min<LONG>)(static_cast<LONG>(s_height), dirty.bottom + edge_pad);
             blit_to_screen(dirty);
-            prevDirty = cur;
+            prev_dirty = cur;
 
             // Adaptive sleep.
             //   - Interactive (cursor over overlay, active item, hover, text input, or cursor moved this frame): 4 ms
             //     -> ~200 Hz cap so clicks and hovers feel native.
-            //   - Idle (overlay visible but user looking elsewhere):
-            //     33 ms -> ~30 Hz, plenty for the static UI while
-            //     keeping CPU/GDI use low.
+            //   - Idle (overlay visible but the user looks elsewhere): 33 ms -> ~30 Hz, which is plenty for the
+            //     static UI and keeps CPU and GDI use low.
             // timeBeginPeriod(1) above is what lets Sleep(4) actually be 4 ms instead of rounding to a scheduler tick.
-            const bool mouseMoved = io.MouseDelta.x != 0.0f || io.MouseDelta.y != 0.0f;
-            const bool interactive = overOverlay || uiActive || mouseMoved;
+            const bool mouse_moved = io.MouseDelta.x != 0.0f || io.MouseDelta.y != 0.0f;
+            const bool interactive = over_overlay || ui_active || mouse_moved;
             Sleep(interactive ? 4 : 33);
         }
 
         timeEndPeriod(1);
 
         // Cleanup.
-        s_initialised = false;
+        s_initialized = false;
         ImGui_ImplDX11_Shutdown();
         ImGui_ImplWin32_Shutdown();
         ImGui::DestroyContext();
@@ -673,9 +674,9 @@ namespace Transmog
             s_device->Release();
             s_device = nullptr;
         }
-        DestroyWindow(s_overlayHwnd);
+        DestroyWindow(s_overlay_hwnd);
         UnregisterClassW(L"TransmogOverlay", GetModuleHandleW(nullptr));
-        s_overlayHwnd = nullptr;
+        s_overlay_hwnd = nullptr;
         return;
     }
 
@@ -685,7 +686,7 @@ namespace Transmog
     {
         try
         {
-            s_renderWorker.emplace("LtOverlayRender", &render_thread);
+            s_render_worker.emplace("LtOverlayRender", &render_thread);
         }
         catch (const std::exception &e)
         {
@@ -697,24 +698,26 @@ namespace Transmog
 
     void shutdown_dx_overlay() noexcept
     {
-        s_shutdownRequested.store(true, std::memory_order_release);
-        // ~StoppableWorker requests stop and joins. Unlike the WaitForSingleObject timeout this replaced, there is
-        // no path where the wait expires and leaves a render thread running inside a module about to unmap.
-        s_renderWorker.reset();
+        // Release pairs with the acquire loads in the render thread's two wait loops, so the flag and everything
+        // written before it are visible to the thread that observes it.
+        s_shutdown_requested.store(true, std::memory_order_release);
+        // ~StoppableWorker requests stop and joins, so no path lets a wait expire and leave a render thread running
+        // inside a module about to unmap.
+        s_render_worker.reset();
     }
 
     void toggle_overlay_visible() noexcept
     {
         // Debounce: ignore toggles within 300ms of the last one. Prevents key-repeat and polling overlap from rapidly
         // flipping the overlay on/off/on.
-        static std::atomic<int64_t> s_lastToggleMs{0};
+        static std::atomic<int64_t> s_last_toggle_ms{0};
         const int64_t now = steady_ms();
-        const int64_t last = s_lastToggleMs.load(std::memory_order_relaxed);
+        const int64_t last = s_last_toggle_ms.load(std::memory_order_relaxed);
         if (now - last < 300)
             return;
-        s_lastToggleMs.store(now, std::memory_order_relaxed);
+        s_last_toggle_ms.store(now, std::memory_order_relaxed);
 
-        s_overlayVisible.store(!s_overlayVisible.load(std::memory_order_relaxed), std::memory_order_relaxed);
+        s_overlay_visible.store(!s_overlay_visible.load(std::memory_order_relaxed), std::memory_order_relaxed);
     }
 
 } // namespace Transmog

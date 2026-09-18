@@ -90,7 +90,7 @@ namespace Transmog::ColorOverride::SwatchTable
         for (std::size_t i = 0; i < upper; ++i)
         {
             auto &row = table[i];
-            // Match the stable-identity tuple (stable_id, template_id, token_id) before validating content_hash -- the
+            // Match the stable-identity tuple (stable_id, template_id, token_id) before validating content_hash - the
             // stable triple is the strict identity, so most mismatches bail without touching the volatile hash.
             if (row.stable_id.load(std::memory_order_relaxed) != stable_id ||
                 row.template_id.load(std::memory_order_relaxed) != template_id ||
@@ -111,7 +111,7 @@ namespace Transmog::ColorOverride::SwatchTable
         //
         // `populate_from_persisted` creates rows with the saved (submesh_name, token_id) but content_hash=0 to mark
         // them as "awaiting promotion". The first engine write whose (submesh_name, token_id) matches a placeholder
-        // gets that row's hash/stable/tpl filled in -- subsequent writes hit the fast hash-based loop above. This is
+        // gets that row's hash/stable/tpl filled in - subsequent writes hit the fast hash-based loop above. This is
         // how saved presets re-bind to live engine identities without running the 3-pass Reinit capture.
         if (submesh_name != nullptr && submesh_name[0] != '\0')
         {
@@ -172,8 +172,8 @@ namespace Transmog::ColorOverride::SwatchTable
             ovr.token_id = token_id;
             ovr.submesh_stable_id = stable_id;
             ovr.template_id = template_id;
-            // Seed submesh_name once on insert. Re-fires for the same identity tuple don't re-write (see lookup branch
-            // above) so a transient null capture doesn't clobber a good earlier read.
+            // Seed submesh_name once on insert. Re-fires for the same identity tuple do not re-write (see lookup branch
+            // above) so a transient null capture does not clobber a good earlier read.
             if (submesh_name && submesh_name[0] != '\0')
             {
                 std::size_t n = 0;
@@ -234,10 +234,10 @@ namespace Transmog::ColorOverride::SwatchTable
             ovr.def_r = r;
             ovr.def_g = g;
             ovr.def_b = b;
-            // Seed the user override with the engine default ONLY when the row isn't already user-overridden, otherwise
-            // the setter's first capture on a saved or loaded row would clobber the user's picked colour. Capture
-            // itself ALWAYS runs so the picker's "default colour reference dot" has live def_r/g/b for every row,
-            // including ones the user has already coloured.
+            // Seed the user override with the engine default ONLY when the row is not already user-overridden.
+            // Without that guard the first setter capture on a saved or loaded row would clobber the color the
+            // user picked. Capture itself ALWAYS runs so the picker "default color reference dot" has live
+            // def_r/g/b for every row, including the ones the user already colored.
             if (!ovr.override_active)
             {
                 ovr.r = r;
@@ -346,7 +346,7 @@ namespace Transmog::ColorOverride::SwatchTable
                 o.b = 0;
             }
         }
-        // Strict-init policy: default to LOCKED so unrelated engine writes can't add rows outside an explicit Reinit
+        // Strict-init policy: default to LOCKED so unrelated engine writes cannot add rows outside an explicit Reinit
         // cycle. Reinit::start_slot_reinit_once re-opens the gate when needed.
         for (auto &b : g_postReinitLock)
             b.store(true, std::memory_order_relaxed);
@@ -478,7 +478,7 @@ namespace Transmog::ColorOverride::SwatchTable
     void clear_dye_state_for_slot(int slot) noexcept
     {
         // Reset the carrier set, hash-set burst-lock timestamp and freeze flag so the next apply has a clean capture
-        // state. Does NOT wipe the swatch table rows or user override RGB / override_active choices -- those survive
+        // state. Does NOT wipe the swatch table rows or user override RGB / override_active choices - those survive
         // untick/retick of the same item.
         if (!valid_slot(slot))
             return;
@@ -509,7 +509,7 @@ namespace Transmog::ColorOverride::SwatchTable
         const auto cnt = g_count[s].load(std::memory_order_acquire);
         const auto upper = (cnt < k_dyeSwatchesPerSlot) ? cnt : k_dyeSwatchesPerSlot;
 
-        // Diagnostic: count + categorise every drop so we can see exactly why some rows aren't persisting.
+        // Diagnostic: count + categorize every drop so we can see exactly why some rows are not persisting.
         std::size_t total = upper;
         std::size_t kept = 0;
         std::size_t drop_inactive = 0;       // override_active==false
@@ -533,9 +533,7 @@ namespace Transmog::ColorOverride::SwatchTable
             {
                 ++drop_no_submesh;
                 logger.trace(
-                    "[persist-probe] slot={} row={} DROP (empty "
-                    "submesh) tok=0x{:04X} rgb=({:02X},{:02X},"
-                    "{:02X})",
+                    "[persist-probe] slot={} row={} DROP (empty submesh) tok=0x{:04X} rgb=({:02X},{:02X},{:02X})",
                     slot,
                     i,
                     e.token_id.load(std::memory_order_relaxed),
@@ -550,9 +548,7 @@ namespace Transmog::ColorOverride::SwatchTable
             {
                 ++drop_no_token_id;
                 logger.trace(
-                    "[persist-probe] slot={} row={} DROP "
-                    "(token_id=0) submesh='{}' rgb=({:02X},"
-                    "{:02X},{:02X})",
+                    "[persist-probe] slot={} row={} DROP (token_id=0) submesh='{}' rgb=({:02X},{:02X},{:02X})",
                     slot,
                     i,
                     ovr.submesh_name,
@@ -569,8 +565,7 @@ namespace Transmog::ColorOverride::SwatchTable
                 logger.trace(
                     "[persist-probe] slot={} row={} DROP "
                     "(unresolved token 0x{:04X}) submesh='{}' "
-                    "hash={:#x} stable={:#x} tpl={:#x} rgb=({:02X},"
-                    "{:02X},{:02X})",
+                    "hash={:#x} stable={:#x} tpl={:#x} rgb=({:02X},{:02X},{:02X})",
                     slot,
                     i,
                     tokenId,
@@ -600,8 +595,7 @@ namespace Transmog::ColorOverride::SwatchTable
         {
             logger.trace(
                 "[persist-probe] slot={} total_rows={} kept={} "
-                "drop_inactive={} drop_no_submesh={} drop_no_token_id={} "
-                "drop_no_token_label={}",
+                "drop_inactive={} drop_no_submesh={} drop_no_token_id={} drop_no_token_label={}",
                 slot,
                 total,
                 kept,
@@ -630,7 +624,7 @@ namespace Transmog::ColorOverride::SwatchTable
             const auto &e = g_table[s][i];
             const auto &ovr = dye_state()[s].swatches[i];
             // Identity-only filter: any row whose submesh+token is resolvable gets recorded in the palette, regardless
-            // of whether it's user-overridden or has a captured default. r/g/b is left zero -- callers shouldn't read
+            // of whether it is user-overridden or has a captured default. r/g/b is left zero - callers should not read
             // them; the palette JSON serializer writes just the token names.
             const char *tokenName = resolve_persist_token_name(e, ovr);
             if (tokenName == nullptr)
@@ -667,7 +661,7 @@ namespace Transmog::ColorOverride::SwatchTable
             ++queued;
 
             // Plus an opportunistic immediate-apply pass: if a row matching this (submesh, token) is ALREADY in the
-            // live swatch table (e.g. we're restoring after a preset switch where the same outfit is already applied),
+            // live swatch table (e.g. we are restoring after a preset switch where the same outfit is already applied),
             // set its override RGB right now so the picker reflects the new color without waiting for the next engine
             // write.
             const auto tok = TokenTable::token_id_for_name(pe.token_name.c_str());
@@ -692,8 +686,7 @@ namespace Transmog::ColorOverride::SwatchTable
         if (queued != 0 || immediate != 0)
         {
             log.debug(
-                "[swatch-persist] slot {} queued {} ({} also "
-                "applied immediately to live rows)",
+                "[swatch-persist] slot {} queued {} ({} also applied immediately to live rows)",
                 slot,
                 queued,
                 immediate
@@ -763,13 +756,13 @@ namespace Transmog::ColorOverride::SwatchTable
                 row.content_hash.store(content_hash, std::memory_order_release);
                 // Mirror template_id into the picker-facing SwatchOverride too. The UI reads `sw.template_id` from
                 // SwatchOverride (not SwatchEntry) when building
-                // the region-header label "submesh  (tpl 0x%04X)" --
+                // the region-header label "submesh  (tpl 0x%04X)" -
                 // without this mirror the label stays at 0x0000 even though SwatchEntry's template_id is correct.
                 // submesh_stable_id is already populated by populate_from_persisted at JSON load (FNV of submesh_name)
                 // so the UI's region grouping works before promotion; we leave it as-is.
                 ovr.template_id = template_id;
                 // Capture the engine's intended source RGB (passed in by the setter from ctx.r8 BEFORE the substitute
-                // redirected the pointer) as this row's default. Without this the picker never shows a default-colour
+                // redirected the pointer) as this row's default. Without this the picker never shows a default-color
                 // reference dot for placeholder rows, because the slot-agnostic pending-match path returns before the
                 // setter's normal capture path runs. capture_default_if_unset is a no-op once a default is captured, so
                 // this is idempotent across repeated engine writes.
@@ -793,7 +786,7 @@ namespace Transmog::ColorOverride::SwatchTable
         auto &log = DetourModKit::log();
         const auto s = static_cast<std::size_t>(slot);
         // Repopulating from saved JSON replaces any prior wipe state, so the snapshot guard should treat this slot as
-        // "has saved content" again. Reached on preset load, preset switch, and restore_swatches_from -- all paths that
+        // "has saved content" again. Reached on preset load, preset switch, and restore_swatches_from - all paths that
         // re-seed placeholders from a non-empty palette/overrides set.
         if (!palette.empty() || !overrides.empty())
             g_explicitlyWiped[s].store(false, std::memory_order_release);
@@ -888,8 +881,8 @@ namespace Transmog::ColorOverride::SwatchTable
             return static_cast<int>(idx);
         };
 
-        // Pass 1 -- palette: allocate one placeholder per `(submesh, token)` from the captured-row palette. No default
-        // colours are seeded; the engine fills `def_*` live on its first matching write via `capture_default_if_unset`.
+        // Pass 1 - palette: allocate one placeholder per `(submesh, token)` from the captured-row palette. No default
+        // colors are seeded; the engine fills `def_*` live on its first matching write via `capture_default_if_unset`.
         // `override_active` is left false; the override pass below promotes the specific rows the user ticked.
         for (const auto &pe : palette)
         {
@@ -904,8 +897,8 @@ namespace Transmog::ColorOverride::SwatchTable
             (void)alloc_placeholder(pe.submesh_name, tok);
         }
 
-        // Pass 2 -- user overrides: each entry merges onto the matching palette row by `(submesh, token)`. If no
-        // palette row exists (an override was saved for a row that wasn't in the palette), allocate a fresh
+        // Pass 2 - user overrides: each entry merges onto the matching palette row by `(submesh, token)`. If no
+        // palette row exists (an override was saved for a row that was not in the palette), allocate a fresh
         // placeholder.
         for (const auto &pe : overrides)
         {
@@ -936,7 +929,7 @@ namespace Transmog::ColorOverride::SwatchTable
             ovr.override_active = true;
         }
 
-        // Slot stays LOCKED after seeding -- promotion only updates existing placeholders; unrelated submeshes still
+        // Slot stays LOCKED after seeding - promotion only updates existing placeholders; unrelated submeshes still
         // fall through (no row created).
         g_postReinitLock[s].store(true, std::memory_order_release);
         g_reinitCaptureOpen[s].store(false, std::memory_order_release);
@@ -944,8 +937,7 @@ namespace Transmog::ColorOverride::SwatchTable
         if (seeded != 0 || skippedUnresolved != 0)
         {
             log.info(
-                "[swatch-seed] slot {} palette={} overrides_merged={} "
-                "overrides_orphan={} unresolved={}; slot LOCKED",
+                "[swatch-seed] slot {} palette={} overrides_merged={} overrides_orphan={} unresolved={}; slot LOCKED",
                 slot,
                 palette.size(),
                 mergedOverrides,
@@ -991,8 +983,7 @@ namespace Transmog::ColorOverride::SwatchTable
         const auto frozenFlag = State::swatch_frozen(slot).load(std::memory_order_acquire);
         const auto postLock = g_postReinitLock[s].load(std::memory_order_acquire);
         log.debug(
-            "[swatch-dump] slot={} rows={}/{} unique_submeshes={} "
-            "slot_enabled={} swatch_frozen={} post_reinit_lock={}",
+            "[swatch-dump] slot={} rows={}/{} unique_submeshes={} slot_enabled={} swatch_frozen={} post_reinit_lock={}",
             slot,
             upper,
             k_dyeSwatchesPerSlot,
@@ -1009,7 +1000,7 @@ namespace Transmog::ColorOverride::SwatchTable
             const auto &name = kv.first;
             const auto &rows = kv.second;
             // Use the first row's template_id as the region's tpl tag (rows in the same submesh share template_id; this
-            // is observation, not invariant -- if it diverges the first one is still useful as a hint).
+            // is observation, not invariant - if it diverges the first one is still useful as a hint).
             const auto firstTpl = g_table[s][rows.front()].template_id.load(std::memory_order_relaxed);
             const auto firstStable = g_table[s][rows.front()].stable_id.load(std::memory_order_relaxed);
             log.trace(
@@ -1038,8 +1029,7 @@ namespace Transmog::ColorOverride::SwatchTable
                                                    // first-fire pending capture
                                         : "PENDING";
                 log.trace(
-                    "    {} (0x{:04X}) def=#{:02X}{:02X}{:02X} "
-                    "user=#{:02X}{:02X}{:02X} hash=0x{:08X} [{}]",
+                    "    {} (0x{:04X}) def=#{:02X}{:02X}{:02X} user=#{:02X}{:02X}{:02X} hash=0x{:08X} [{}]",
                     tokName ? tokName : "(unnamed-tok)",
                     tok,
                     def_r,
@@ -1058,10 +1048,10 @@ namespace Transmog::ColorOverride::SwatchTable
     void dump_all_slots() noexcept
     {
         auto &log = DetourModKit::log();
-        log.trace("[swatch-dump] ===== begin all-slot snapshot =====");
+        log.trace("[swatch-dump] all-slot snapshot begin");
         for (std::size_t s = 0; s < k_slotCount; ++s)
             dump_slot(static_cast<int>(s));
-        log.trace("[swatch-dump] ===== end all-slot snapshot =====");
+        log.trace("[swatch-dump] all-slot snapshot end");
     }
 
     void lock_all_slots() noexcept
@@ -1110,14 +1100,8 @@ namespace Transmog::ColorOverride::SwatchTable
         const auto s = static_cast<std::size_t>(slot);
         const auto cnt = g_count[s].load(std::memory_order_acquire);
         const auto upper = (cnt < k_dyeSwatchesPerSlot) ? cnt : k_dyeSwatchesPerSlot;
-        DetourModKit::log().info(
-            "[swatch-table] apply_keep_set slot={} cnt={} upper={} "
-            "keep_count={}",
-            slot,
-            cnt,
-            upper,
-            keep_count
-        );
+        DetourModKit::log()
+            .info("[swatch-table] apply_keep_set slot={} cnt={} upper={} keep_count={}", slot, cnt, upper, keep_count);
         for (std::size_t i = 0; i < upper; ++i)
         {
             auto &e = g_table[s][i];

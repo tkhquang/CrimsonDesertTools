@@ -1,4 +1,5 @@
-#pragma once
+#ifndef TRANSMOG_COLOR_OVERRIDE_COLOR_STATE_HPP
+#define TRANSMOG_COLOR_OVERRIDE_COLOR_STATE_HPP
 
 // Per-slot apply-window state, batch gate, freeze flags, and timestamps shared across ColorOverride sub-modules.
 
@@ -22,11 +23,11 @@ namespace Transmog::ColorOverride::State
     // Window validity deadline (steady_ms). Publisher inserts and setter substitutes drop after this passes.
     std::atomic<std::int64_t> &active_apply_valid_until_ms() noexcept;
 
-    // Per-slot freeze: locks the swatch-insert path so the engine's unrelated render writes can't grow the table
+    // Per-slot freeze: locks the swatch-insert path so the engine's unrelated render writes cannot grow the table
     // mid-flight.
     std::atomic<bool> &swatch_frozen(int slot) noexcept;
 
-    // Publisher-insert block deadline: stamped by wipe_slot so the engine's real-item mesh load (post-untick) can't
+    // Publisher-insert block deadline: stamped by wipe_slot so the engine's real-item mesh load (post-untick) cannot
     // seed bleed.
     std::atomic<std::int64_t> &block_publisher_inserts_until_ms() noexcept;
 
@@ -34,3 +35,5 @@ namespace Transmog::ColorOverride::State
     // guard).
     std::atomic<std::int64_t> &hash_set_last_add_ms(int slot) noexcept;
 } // namespace Transmog::ColorOverride::State
+
+#endif // TRANSMOG_COLOR_OVERRIDE_COLOR_STATE_HPP

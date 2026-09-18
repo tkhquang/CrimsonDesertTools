@@ -2,7 +2,7 @@
 //
 // Per-slot dye + color-override popup. Drives the merged dye-record picker (16 ARMOR_MOD rows + material picker + top
 // action bar) and hosts the Color Override tab item that delegates to draw_color_override_tab_body. Called once per
-// slot from the per-slot loop in draw_overlay_content when the slot's dye chip is clicked (popup is owned here --
+// slot from the per-slot loop in draw_overlay_content when the slot's dye chip is clicked (popup is owned here -
 // BeginPopup/EndPopup pair stays internal to the function).
 
 #include "overlay_ui/dye_popup.hpp"
@@ -28,7 +28,8 @@
 #include "transmog_apply.hpp"
 #include "transmog_map.hpp"
 
-#include <DetourModKit.hpp>
+#include <DetourModKit/defines.hpp>
+#include <DetourModKit/math.hpp>
 
 #pragma warning(push, 0)
 #include <imgui.h>
@@ -58,7 +59,7 @@ namespace Transmog
         const bool isArmorSlot = curSlot == TransmogSlot::Helm || curSlot == TransmogSlot::Chest ||
                                  curSlot == TransmogSlot::Cloak || curSlot == TransmogSlot::Gloves ||
                                  curSlot == TransmogSlot::Boots;
-        // The caller manages the per-slot ImGui::PushID/PopID pair, so we just bail out -- non-armor slots (weapons,
+        // The caller manages the per-slot ImGui::PushID/PopID pair, so we just bail out - non-armor slots (weapons,
         // accessories) skip the dye chip entirely.
         if (!isArmorSlot)
             return;
@@ -66,8 +67,8 @@ namespace Transmog
 
         // Pull the active preset's slot dye state. We mutate it in place; the dispatch loop reads the same memory next
         // apply.
-        Preset *editPreset = PresetManager::instance().active_preset_mut();
-        SlotDyeChannels *slotDye = editPreset ? &editPreset->slots[slot].dye : nullptr;
+        Preset *edit_preset = PresetManager::instance().active_preset_mut();
+        SlotDyeChannels *slotDye = edit_preset ? &edit_preset->slots[slot].dye : nullptr;
 
         // Declared in the dye-picker outer scope so the
         // Color Override tab below can read them without a separate top-level lookup block.
@@ -79,16 +80,16 @@ namespace Transmog
         ImGui::SameLine();
 
         // Find first active channel (for adjacent swatch).
-        const ChannelDye *firstActiveCh = nullptr;
-        int activeChCount = 0;
+        const ChannelDye *first_active_ch = nullptr;
+        int active_ch_count = 0;
         if (slotDye)
         {
             for (const auto &c : *slotDye)
                 if (c.active())
                 {
-                    if (!firstActiveCh)
-                        firstActiveCh = &c;
-                    ++activeChCount;
+                    if (!first_active_ch)
+                        first_active_ch = &c;
+                    ++active_ch_count;
                 }
         }
 
@@ -99,10 +100,10 @@ namespace Transmog
         static bool s_dyePopupJumpToColor[k_slotCount] = {};
         static bool s_dyePopupJumpToDye[k_slotCount] = {};
 
-        // Dye button: always plain "Dye" with no background color override -- keeps text legible regardless of dye
+        // Dye button: always plain "Dye" with no background color override - keeps text legible regardless of dye
         // state. Active state is signalled by a small color-swatch chip rendered next to the button. Auto-sized so the
         // label fits at any font scale.
-        const bool dyeBtn = ImGui::Button("Dye##dyeBtn", ImVec2(0, 0));
+        const bool dye_btn = ImGui::Button("Dye##dye_btn", ImVec2(0, 0));
 
         // Constant row geometry: every slot reserves space for the dye chip + CO chip + reload icon even when inactive.
         // Without this, switching from a preset with dye/CO active to one without makes the standalone window
@@ -110,9 +111,9 @@ namespace Transmog
         // across preset switches.
         const float chip_h = ImGui::GetFrameHeight();
         ImGui::SameLine(0.0f, 4.0f);
-        if (firstActiveCh)
+        if (first_active_ch)
         {
-            ImVec4 sw(firstActiveCh->r / 255.0f, firstActiveCh->g / 255.0f, firstActiveCh->b / 255.0f, 1.0f);
+            ImVec4 sw(first_active_ch->r / 255.0f, first_active_ch->g / 255.0f, first_active_ch->b / 255.0f, 1.0f);
             ImGui::PushStyleColor(ImGuiCol_Button, sw);
             ImGui::PushStyleColor(ImGuiCol_ButtonHovered, sw);
             ImGui::PushStyleColor(ImGuiCol_ButtonActive, sw);
@@ -125,7 +126,7 @@ namespace Transmog
             if (ImGui::IsItemHovered())
             {
                 char tip[48];
-                std::snprintf(tip, sizeof(tip), "%d active mod%s", activeChCount, activeChCount == 1 ? "" : "s");
+                std::snprintf(tip, sizeof(tip), "%d active mod%s", active_ch_count, active_ch_count == 1 ? "" : "s");
                 ui_tooltip(tip);
             }
         }
@@ -135,26 +136,26 @@ namespace Transmog
         }
 
         // Color-override chip: circular (to distinguish from the square dye chip), shows the first active override
-        // colour for this slot. Clicking opens the popup AND jumps to the Color Override tab.
-        const Transmog::ColorOverride::SwatchTable::SwatchOverride *firstOv = nullptr;
-        int overrideCount = 0;
+        // color for this slot. Clicking opens the popup AND jumps to the Color Override tab.
+        const Transmog::ColorOverride::SwatchTable::SwatchOverride *first_ov = nullptr;
+        int override_count = 0;
         for (std::size_t k = 0; k < detected; ++k)
         {
             const auto &sw = dyeSlot.swatches[k];
             if (sw.override_active)
             {
-                if (!firstOv)
-                    firstOv = &sw;
-                ++overrideCount;
+                if (!first_ov)
+                    first_ov = &sw;
+                ++override_count;
             }
         }
         ImGui::SameLine(0.0f, 4.0f);
-        if (firstOv)
+        if (first_ov)
         {
             const ImVec2 cur = ImGui::GetCursorScreenPos();
             const ImVec2 center(cur.x + chip_h * 0.5f, cur.y + chip_h * 0.5f);
             const float radius = chip_h * 0.5f - 1.0f;
-            const ImVec4 colv(firstOv->r / 255.0f, firstOv->g / 255.0f, firstOv->b / 255.0f, 1.0f);
+            const ImVec4 colv(first_ov->r / 255.0f, first_ov->g / 255.0f, first_ov->b / 255.0f, 1.0f);
             const bool clicked = ImGui::InvisibleButton("##coSw", ImVec2(chip_h, chip_h));
             const bool hovered = ImGui::IsItemHovered();
             ImDrawList *dl = ImGui::GetWindowDrawList();
@@ -168,33 +169,32 @@ namespace Transmog
             if (hovered)
             {
                 char tip[64];
-                std::snprintf(tip, sizeof(tip), "%d active override%s", overrideCount, overrideCount == 1 ? "" : "s");
+                std::snprintf(tip, sizeof(tip), "%d active override%s", override_count, override_count == 1 ? "" : "s");
                 ui_tooltip(tip);
             }
 
             // Reload icon: manual single-pass commit-retick for the slot's color overrides. Only shown when at least
-            // one override is active (guarded by the outer `if (firstOv)` block). Coalesced if a reinit is already
+            // one override is active (guarded by the outer `if (first_ov)` block). Coalesced if a reinit is already
             // running.
             //
             // Drawn with ImDrawList primitives (3/4 arc + arrowhead) rather than a font glyph because the overlay loads
-            // only the default ImGui font (ASCII range) -- a Unicode reload glyph would render as a missing-glyph box.
+            // only the default ImGui font (ASCII range) - a Unicode reload glyph would render as a missing-glyph box.
             ImGui::SameLine(0.0f, 4.0f);
             const float reload_d = ImGui::GetFrameHeight();
             const ImVec2 reload_p = ImGui::GetCursorScreenPos();
-            const bool reloadClicked = ImGui::InvisibleButton("##coReload", ImVec2(reload_d, reload_d));
-            const bool reloadHovered = ImGui::IsItemHovered();
+            const bool reload_clicked = ImGui::InvisibleButton("##coReload", ImVec2(reload_d, reload_d));
+            const bool reload_hovered = ImGui::IsItemHovered();
             {
                 ImDrawList *rl_dl = ImGui::GetWindowDrawList();
                 const ImVec2 rl_center(reload_p.x + reload_d * 0.5f, reload_p.y + reload_d * 0.5f);
                 const float rl_radius = reload_d * 0.32f;
                 const float thickness = (std::max)(1.0f, reload_d * 0.10f);
                 // Slightly highlight on hover so the icon reads as interactive without needing a background frame.
-                const ImU32 col = ImGui::GetColorU32(reloadHovered ? ImGuiCol_Text : ImGuiCol_TextDisabled);
+                const ImU32 col = ImGui::GetColorU32(reload_hovered ? ImGuiCol_Text : ImGuiCol_TextDisabled);
                 // 3/4 arc from 45 deg (top-right) sweeping clockwise through 315 deg (right). The gap sits at the 0-45
                 // deg slice where the arrow tip points back along the circle's tangent.
-                constexpr float kPi = 3.14159265358979f;
-                const float a0 = -kPi * 0.25f; // -45
-                const float a1 = kPi * 1.5f;   // +270
+                const float a0 = DMK::math::degrees_to_radians(-45.0f);
+                const float a1 = DMK::math::degrees_to_radians(270.0f);
                 rl_dl->PathArcTo(rl_center, rl_radius, a0, a1, 24);
                 rl_dl->PathStroke(col, ImDrawFlags_None, thickness);
                 // Arrowhead at the arc's terminus (a0). The tangent at angle a is (-sin(a), cos(a)) (CCW direction);
@@ -212,13 +212,9 @@ namespace Transmog
                 const ImVec2 p_out(ax + ox * head * 0.7f, ay + oy * head * 0.7f);
                 rl_dl->AddTriangleFilled(p_tip, p_in, p_out, col);
             }
-            if (reloadHovered)
-                ui_tooltip(
-                    "Re-tick this slot once so color\n"
-                    "overrides commit. Use if a colour\n"
-                    "edit didn't take."
-                );
-            if (reloadClicked && !Transmog::ColorOverride::Reinit::any_slot_reinit_active())
+            if (reload_hovered)
+                ui_tooltip("Re-tick this slot once so color\noverrides commit. Use if a color\nedit did not take.");
+            if (reload_clicked && !Transmog::ColorOverride::Reinit::any_slot_reinit_active())
             {
                 Transmog::flag_enabled().store(true, std::memory_order_relaxed);
                 Transmog::ColorOverride::Reinit::schedule_color_commit_retick(static_cast<int>(slot));
@@ -232,15 +228,15 @@ namespace Transmog
             ImGui::Dummy(ImVec2(chip_h, chip_h));
         }
 
-        if (dyeBtn)
+        if (dye_btn)
         {
             // If the editing character has no preset yet, mint one from the current state so the popup has somewhere to
             // write instead of dropping the click. Re-fetch slotDye off the freshly-created preset so the popup body
             // below (and this frame's OpenPopup) observe it.
             if (!slotDye)
             {
-                editPreset = PresetManager::instance().active_preset_mut_or_create();
-                slotDye = editPreset ? &editPreset->slots[slot].dye : nullptr;
+                edit_preset = PresetManager::instance().active_preset_mut_or_create();
+                slotDye = edit_preset ? &edit_preset->slots[slot].dye : nullptr;
             }
             if (slotDye)
             {
@@ -250,7 +246,7 @@ namespace Transmog
         }
 
         // 10 color groups, ordered by HSL hue (red -> rose). Anchored by `string_key` (the data file's _stringKey
-        // field). Hash + sample swatch are looked up at render time from the dye_color_table -- nothing in this UI
+        // field). Hash + sample swatch are looked up at render time from the dye_color_table - nothing in this UI
         // hardcodes a `_key` integer, so the picker survives a game patch that renumbers `_key` (we just regen the
         // dye_color_table from the new dump).
         //
@@ -261,7 +257,7 @@ namespace Transmog
             const char *string_key;
             const char *label; // UI-only display text
         };
-        static constexpr GroupRow kGroupRows[] = {
+        static constexpr GroupRow group_rows[] = {
             {"Her_Color_Group_I", "Red"},
             {"Tom_Color_Group_I", "Orange"},
             {"Por_Color_Group_I", "Yellow"},
@@ -273,29 +269,27 @@ namespace Transmog
             {"Dem_Color_Group_II", "Magenta"},
             {"Dem_Color_Group_I", "Rose"},
         };
-        constexpr std::uint32_t kSampleShadeIdx = 18;
+        constexpr std::uint32_t sample_shade_idx = 18;
 
-        // Per-slot UI state: which mod row is expanded (only one at a time; clicking a row collapses siblings). Static
-        // so it persists across frames.
-        static int s_expandedMod[k_slotCount] = {};
-        static bool s_expandedInit = false;
-        if (!s_expandedInit)
+        // Per-slot UI state: which mod row is expanded. Only one row expands at a time, so a click on a row
+        // collapses its siblings. The storage is static, so it survives across frames, and -1 means no row.
+        static std::array<int, k_slotCount> s_expandedMod = []() -> std::array<int, k_slotCount>
         {
-            for (auto &v : s_expandedMod)
-                v = -1;
-            s_expandedInit = true;
-        }
+            std::array<int, k_slotCount> init{};
+            init.fill(-1);
+            return init;
+        }();
 
         // Dye changes are visual-only with no side effects, so we always re-apply on edit (regardless of the global
         // auto-apply toggle). force_apply_pending bypasses the dispatcher's no-change skip; without it a pure dye edit
         // (item id unchanged) would never re-fire the slotpop chain. flag_enabled is set so the user sees their pick
         // even if LT was toggled off when they opened the picker.
-        auto reapply_now = [slot]()
+        auto reapply_now = [slot]() -> void
         {
             force_apply_pending()[slot] = true;
             flag_enabled().store(true, std::memory_order_relaxed);
-            // Mark unsaved -- picker writes dye directly into the active preset, so a Save button check against
-            // slot_mappings can't catch it.
+            // Mark unsaved - picker writes dye directly into the active preset, so a Save button check against
+            // slot_mappings cannot catch it.
             dye_dirty().store(true, std::memory_order_relaxed);
             // A dye edit only needs the slot rebuilt. Fall back to the full apply when the rebuild is unavailable.
             if (!refresh_slot_appearance(slot))
@@ -303,32 +297,32 @@ namespace Transmog
         };
 
         // Helper lambda: render the picker body for one specific channel index. Used inside the expanded mod row.
-        auto draw_channel_picker = [&](std::size_t chIdx, ChannelDye &ch)
+        auto draw_channel_picker = [&](std::size_t chIdx, ChannelDye &ch) -> void
         {
             ImGui::PushID(static_cast<int>(chIdx) + 9000);
 
             // Scale swatch button dims by the current font size so the picker block stays proportional to surrounding
             // text. Without this, fixed-pixel buttons look tiny when the host (standalone DPI-scaled atlas / user
             // override / ReShade host scale) inflates everything else.
-            const float pickerScale = ImGui::GetFontSize() / 13.0f;
+            const float picker_scale = ImGui::GetFontSize() / 13.0f;
 
-            // Group buttons row -- color swatches only, hovering shows the family name. Selected group gets a thin
-            // border so the user knows which palette they're picking shades from. Hash + sample BGRA looked up
+            // Group buttons row - color swatches only, hovering shows the family name. Selected group gets a thin
+            // border so the user knows which palette they are picking shades from. Hash + sample BGRA looked up
             // dynamically from the data table: zero hardcoded `_key` integers in this UI.
-            for (std::size_t g = 0; g < std::size(kGroupRows); ++g)
+            for (std::size_t g = 0; g < std::size(group_rows); ++g)
             {
                 if (g != 0)
                     ImGui::SameLine();
-                const auto &row = kGroupRows[g];
+                const auto &row = group_rows[g];
                 const Group *grp = find_group_by_name(row.string_key);
-                // Sample = saturated shade idx 18 (or shade 0 if group missing -- shouldn't happen on a matched build,
+                // Sample = saturated shade idx 18 (or shade 0 if group missing - shouldn't happen on a matched build,
                 // but guards against patch mismatch).
-                const std::uint32_t sampleBgra = (grp && grp->shades && grp->shade_count > kSampleShadeIdx)
-                                                     ? grp->shades[kSampleShadeIdx].bgra
-                                                     : 0xFF888888u;
-                const float br = ((sampleBgra >> 16) & 0xFF) / 255.0f;
-                const float bg = ((sampleBgra >> 8) & 0xFF) / 255.0f;
-                const float bb = ((sampleBgra) & 0xFF) / 255.0f;
+                const std::uint32_t sample_bgra = (grp && grp->shades && grp->shade_count > sample_shade_idx)
+                                                      ? grp->shades[sample_shade_idx].bgra
+                                                      : 0xFF888888u;
+                const float br = ((sample_bgra >> 16) & 0xFF) / 255.0f;
+                const float bg = ((sample_bgra >> 8) & 0xFF) / 255.0f;
+                const float bb = ((sample_bgra) & 0xFF) / 255.0f;
                 ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(br, bg, bb, 1.0f));
                 ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(br * 1.15f, bg * 1.15f, bb * 1.15f, 1.0f));
                 ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(br, bg, bb, 1.0f));
@@ -337,10 +331,10 @@ namespace Transmog
                     ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
                 char gid[16];
                 std::snprintf(gid, sizeof(gid), "##g%zu", g);
-                if (ImGui::Button(gid, ImVec2(17.0f * pickerScale, 14.0f * pickerScale)))
+                if (ImGui::Button(gid, ImVec2(17.0f * picker_scale, 14.0f * picker_scale)))
                 {
                     // string_key is the source-of-truth; hash is derived. If the group is missing (patch mismatch) we
-                    // leave hash at 0 and the dye won't apply, but the picker state is preserved.
+                    // leave hash at 0 and the dye will not apply, but the picker state is preserved.
                     ch.group_name = row.string_key;
                     ch.group_hash = grp ? grp->key : 0;
                 }
@@ -373,7 +367,7 @@ namespace Transmog
                         ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(r, g2, b, 1.0f));
                         char nlabel[16];
                         std::snprintf(nlabel, sizeof(nlabel), "##n%u", s);
-                        if (ImGui::Button(nlabel, ImVec2(14.0f * pickerScale, 14.0f * pickerScale)))
+                        if (ImGui::Button(nlabel, ImVec2(14.0f * picker_scale, 14.0f * picker_scale)))
                         {
                             ch.r = (bgra >> 16) & 0xFF;
                             ch.g = (bgra >> 8) & 0xFF;
@@ -412,7 +406,7 @@ namespace Transmog
                         ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(r, g2, b, 1.0f));
                         char slabel[32];
                         std::snprintf(slabel, sizeof(slabel), "##s%u", s);
-                        if (ImGui::Button(slabel, ImVec2(14.0f * pickerScale, 14.0f * pickerScale)))
+                        if (ImGui::Button(slabel, ImVec2(14.0f * picker_scale, 14.0f * picker_scale)))
                         {
                             ch.r = (bgra >> 16) & 0xFF;
                             ch.g = (bgra >> 8) & 0xFF;
@@ -449,16 +443,16 @@ namespace Transmog
             // means max wear. We surface the inverse as "Repair %" so 100 = pristine and 0 = max wear, matching the
             // conventional reading. 0xFF is the legacy "no override" sentinel and is treated as 100% on read for old
             // presets.
-            int repairPct = (ch.repair_byte == 0xFF) ? 100 : 100 - ((ch.repair_byte * 100 + 63) / 127);
+            int repair_pct = (ch.repair_byte == 0xFF) ? 100 : 100 - ((ch.repair_byte * 100 + 63) / 127);
             ImGui::SetNextItemWidth(200.0f);
-            if (ImGui::SliderInt("Repair %", &repairPct, 0, 100))
+            if (ImGui::SliderInt("Repair %", &repair_pct, 0, 100))
             {
-                if (repairPct >= 100)
+                if (repair_pct >= 100)
                     ch.repair_byte = 0;
-                else if (repairPct <= 0)
+                else if (repair_pct <= 0)
                     ch.repair_byte = 127;
                 else
-                    ch.repair_byte = static_cast<std::uint8_t>(((100 - repairPct) * 127) / 100);
+                    ch.repair_byte = static_cast<std::uint8_t>(((100 - repair_pct) * 127) / 100);
                 reapply_now();
             }
 
@@ -544,30 +538,27 @@ namespace Transmog
                 if (selected)
                     ImGui::PopStyleColor();
                 if (ImGui::IsItemHovered())
-                    ui_tooltip(
-                        "0xFFFF -- engine picks the "
-                        "natural variant for this channel."
-                    );
+                    ui_tooltip("0xFFFF - engine picks the natural variant for this channel.");
             }
             // Render the label on the left so the trailing ImGui auto-label does not clip on the popup's right edge in
             // the standalone overlay.
-            int rawMat = static_cast<int>(ch.material_id);
+            int raw_mat = static_cast<int>(ch.material_id);
             ui_text("Raw u16:");
             ImGui::SameLine();
             ImGui::SetNextItemWidth(140.0f);
             if (ImGui::InputInt(
                     "##matRaw",
-                    &rawMat,
+                    &raw_mat,
                     1,
                     16,
                     ImGuiInputTextFlags_CharsHexadecimal | ImGuiInputTextFlags_EnterReturnsTrue
                 ))
             {
-                if (rawMat < 0)
-                    rawMat = 0;
-                if (rawMat > 0xFFFF)
-                    rawMat = 0xFFFF;
-                ch.material_id = static_cast<std::uint16_t>(rawMat);
+                if (raw_mat < 0)
+                    raw_mat = 0;
+                if (raw_mat > 0xFFFF)
+                    raw_mat = 0xFFFF;
+                ch.material_id = static_cast<std::uint16_t>(raw_mat);
                 reapply_now();
             }
 
@@ -583,7 +574,7 @@ namespace Transmog
         // Per-popup-session auto-trigger flag for the Color
         // Override tab's first-activation 1-pass reinit. One entry per slot; reset on popup close so the next open
         // re-fires on still-empty slots. Declared in overlay_ui/state.hpp so color_override.cpp can read it too. Pin a
-        // min size so the popup doesn't visibly collapse + re-expand while the 1-pass reinit runs (swatches arrive
+        // min size so the popup does not visibly collapse + re-expand while the 1-pass reinit runs (swatches arrive
         // ~1.5s after the tab is selected). Scaled by font size so the floor stays sensible on chunky DPI / overlay
         // scale.
         {
@@ -592,7 +583,7 @@ namespace Transmog
         }
         if (ImGui::BeginPopup("##dye_picker"))
         {
-            // Two-tab popup: Dye (engine partprefab dye-record picker) and Color Override (post-binding matInst colour
+            // Two-tab popup: Dye (engine partprefab dye-record picker) and Color Override (post-binding matInst color
             // injection). Distinct pipelines, unified entry point.
             if (ImGui::BeginTabBar("##dye_tabs"))
             {
@@ -621,7 +612,7 @@ namespace Transmog
                         reapply_now();
                     }
                     ImGui::SameLine();
-                    // Per-slot "sync from live" -- pulls the engine's current dye records for this slot (e.g. after the
+                    // Per-slot "sync from live" - pulls the engine's current dye records for this slot (e.g. after the
                     // user applied dye at an in-game dye station) into the active preset, overwriting any picker-set
                     // channels on this slot only. The real-item restore path already auto-mirrors on
                     // picker -> real transitions; this button covers
@@ -639,9 +630,7 @@ namespace Transmog
                             "apply dye at an in-game dye station and\n"
                             "want those bytes saved into this preset\n"
                             "without re-running Capture Outfit.\n"
-                            "\n"
-                            "No-op if the slot has no live auth-table\n"
-                            "entry (nothing equipped) or no dye records."
+                            "\nNo-op if the slot has no live auth-table\nentry (nothing equipped) or no dye records."
                         );
                     ImGui::SameLine();
                     if (ImGui::Button("Close", ImVec2(0, 0)))
@@ -650,12 +639,12 @@ namespace Transmog
                     // Per-slot dye-inject mode toggle. See PresetSlot::dyeSparse in preset_manager.hpp for the full
                     // semantics. Toggling reapplies immediately so the user sees the visual change without an extra
                     // Apply All click.
-                    if (editPreset != nullptr && slot < editPreset->slots.size())
+                    if (edit_preset != nullptr && slot < edit_preset->slots.size())
                     {
-                        bool sparse = editPreset->slots[slot].dyeSparse;
+                        bool sparse = edit_preset->slots[slot].dyeSparse;
                         if (ImGui::Checkbox("Sparse##dye_sparse", &sparse))
                         {
-                            editPreset->slots[slot].dyeSparse = sparse;
+                            edit_preset->slots[slot].dyeSparse = sparse;
                             dye_dirty().store(true, std::memory_order_release);
                             reapply_now();
                         }
@@ -666,16 +655,13 @@ namespace Transmog
                                 "the rest with its own defaults.\n"
                                 "\n"
                                 "Turn off for cross-class fake transmog where\n"
-                                "every channel needs your colour to suppress\n"
-                                "the carrier's default palette."
+                                "every channel needs your color to suppress\nthe carrier's default palette."
                             );
                     }
 
                     ui_text_disabled(
                         "Tip: items typically use mods (dye slots) 1-12; "
-                        "rest no-ops.\n"
-                        "This mod cannot tell which item is dyeable or "
-                        "has many slots."
+                        "rest no-ops.\nThis mod cannot tell which item is dyeable or has many slots."
                     );
                     ImGui::Separator();
 
@@ -709,8 +695,8 @@ namespace Transmog
                                                     : ImVec4(0.20f, 0.20f, 0.20f, 1.0f);
                             ImGui::PushStyleColor(ImGuiCol_Button, sw);
                             ImGui::PushStyleColor(ImGuiCol_ButtonHovered, sw);
-                            const float sw_size = ImGui::GetFrameHeight();
-                            if (ImGui::Button("##sw", ImVec2(sw_size, sw_size)))
+                            const float swatch_size = ImGui::GetFrameHeight();
+                            if (ImGui::Button("##sw", ImVec2(swatch_size, swatch_size)))
                             {
                                 s_expandedMod[slot] = expanded ? -1 : static_cast<int>(k);
                             }
@@ -720,9 +706,9 @@ namespace Transmog
                             ImGui::SameLine();
                             if (ch.active())
                             {
-                                int repairPct =
+                                int repair_pct =
                                     (ch.repair_byte == 0xFF) ? 100 : 100 - ((ch.repair_byte * 100 + 63) / 127);
-                                ui_text("RGB=(%u,%u,%u) rep=%d%%", ch.r, ch.g, ch.b, repairPct);
+                                ui_text("RGB=(%u,%u,%u) rep=%d%%", ch.r, ch.g, ch.b, repair_pct);
                             }
                             else
                             {
@@ -743,12 +729,12 @@ namespace Transmog
                     }
 
                     ImGui::EndTabItem();
-                } // end Dye tab
+                }
 
                 // Color Override tab
-                // Post-binding matInst colour injection. Different pipeline from dye records but presented in the same
+                // Post-binding matInst color injection. Different pipeline from dye records but presented in the same
                 // popup as a unified per-slot picker. On first activation per popup session, auto-fires a single-pass
-                // reinit so the swatch grid is populated without the user clicking Re-init -- one pass is enough; the
+                // reinit so the swatch grid is populated without the user clicking Re-init - one pass is enough; the
                 // 3-pass ghost-filtered variant remains available via the Re-init button below. Honor "jump to Color
                 // Override tab" set by the circular override chip on the row. One-shot:
                 // clear the flag after consuming so subsequent tab clicks behave normally.
@@ -766,7 +752,7 @@ namespace Transmog
         }
         else
         {
-            // Popup closed -- re-arm the auto-trigger so the next open will re-fire on still-empty slots.
+            // Popup closed - re-arm the auto-trigger so the next open will re-fire on still-empty slots.
             s_coAutoTriggered[slot] = false;
         }
     }

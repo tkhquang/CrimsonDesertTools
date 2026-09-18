@@ -1,12 +1,14 @@
-#pragma once
+#ifndef TRANSMOG_COLOR_OVERRIDE_MATINST_PROBE_HPP
+#define TRANSMOG_COLOR_OVERRIDE_MATINST_PROBE_HPP
 
-// Shared matInst identity probe + submesh-name reader.
-//
-// Both the publisher hook (color_publisher_hook.cpp) and the setter detour (color_override/setter_substitute.cpp) need
-// to read identity fields off a live matInst (template id, stable id, content hash) and the submesh name off its
-// wrapper. Centralised here so the v1.06 struct offsets + heap-floor sanity live in one place.
-//
-// All readers are SEH-guarded and `noexcept`. Bad pointers / freed memory return `false`; no exception escapes.
+/**
+ * @file matinst_probe.hpp
+ * @brief Shared matInst identity probe and submesh-name reader.
+ * @details The publisher hook and the setter detour both read identity fields off a live matInst (template id,
+ *          stable id, content hash) and the submesh name off its wrapper. The struct offsets and the heap-floor
+ *          sanity screen live here so one edit covers every reader. All readers are guarded and `noexcept`. A bad
+ *          pointer or freed memory returns `false` and no exception escapes.
+ */
 
 #include <DetourModKit.hpp>
 
@@ -15,26 +17,22 @@
 
 namespace Transmog::ColorOverride::MatInstProbe
 {
-    // Engine struct offsets
-    //
-    // Centralised here so a future patch that shifts them needs a single edit; every reader picks up the new value at
-    // once.
+    // Engine struct offsets. Centralized here so a future patch that shifts them needs a single edit. Every reader
+    // picks up the new value at once.
     inline constexpr std::ptrdiff_t k_offMi_PermutTok = 0x70;
     inline constexpr std::ptrdiff_t k_offMi_TemplateId = 0x48;
     inline constexpr std::ptrdiff_t k_offMi_StableId = 0x80;
     inline constexpr std::ptrdiff_t k_offMi_ArecBackref = 0xA0;
     inline constexpr std::ptrdiff_t k_offArec_ContentHash = 0x40;
 
-    // Material -> SkinnedMeshMaterialWrapper backref, and the
-    // wrapper's `_subMeshName` string-wrapper field offsets.
+    // Material to SkinnedMeshMaterialWrapper backref, and the wrapper's `_subMeshName` string-wrapper field offsets.
     inline constexpr std::ptrdiff_t k_offMat_WrapperBackref = 0x10;
     inline constexpr std::ptrdiff_t k_offWrapper_SubMeshNameSw = 0x28;
     inline constexpr std::ptrdiff_t k_offStringWrapper_Inline = 0x18;
 
-    // Address range sanity
-    //
-    // The engine heap pool sits above `0x200000000`; this floor is stricter than the generic user-space lower bound and
-    // screens out bogus-low pointers that the weaker `memory::is_plausible_ptr` floor (0x10000) would let through.
+    // Address range sanity. The engine heap pool sits above `0x200000000`. This floor is deliberately stricter than
+    // the generic user-space lower bound and screens out bogus-low pointers that the weaker `memory::is_plausible_ptr`
+    // floor (0x10000) accepts.
     inline constexpr std::uintptr_t k_heapFloor = 0x200000000ULL;
     inline constexpr std::uintptr_t k_heapCeiling = 0x800000000000ULL;
 
@@ -43,12 +41,20 @@ namespace Transmog::ColorOverride::MatInstProbe
         return p >= k_heapFloor && p < k_heapCeiling;
     }
 
-    // True when @p p lies inside the host EXE's mapped PE range (exact SizeOfImage, magic-static cached). Catches
-    // stale-pointer reads where freed heap memory was overwritten with non-vtable garbage that still happens to be
-    // mapped.
+    /**
+     * @brief Tests whether @p p lies inside the host EXE mapped PE range.
+     * @param p Absolute address to test.
+     * @return True when @p p falls inside the host image span.
+     * @details Catches stale-pointer reads where freed heap memory was overwritten with non-vtable garbage that still
+     *          happens to be mapped. `Region::host()` is loader-backed and re-walks the PE headers on every call, so
+     *          the span is captured once into a function-local static and every later call is pure arithmetic.
+     * @note Callback-safe after the first call. The first call resolves the host image and must not run under the
+     *       Windows loader lock.
+     */
     inline bool is_module_resident(std::uintptr_t p) noexcept
     {
-        return DMK::Region::host().contains(DMK::Address{p});
+        static const DMK::Region s_hostImage = DMK::Region::host();
+        return s_hostImage.contains(DMK::Address{p});
     }
 
     // Identity probe
@@ -63,29 +69,44 @@ namespace Transmog::ColorOverride::MatInstProbe
     };
 
     /**
-     * Probe a matInst pointer directly. Returns true with `out` filled on success; false on bad pointer / SEH fault.
+     * @brief Probes a matInst pointer directly.
+     * @param mi Absolute address of the matInst.
+     * @param out Receives the identity fields on success, and is cleared first on every call.
+     * @return True when every field read succeeded, false on a bad pointer or a read fault.
+     * @note Callback-safe: every hop is a guarded read and nothing allocates.
      */
     bool probe_matinst(std::uintptr_t mi, MatInstFields &out) noexcept;
 
     /**
-     * Probe via a wrapper-like struct whose `+0x10` field points to the matInst. Used by the setter detour where
-     * ctx.rdi is the wrapper, not the matInst itself.
+     * @brief Probes through a wrapper-like struct whose `+0x10` field points to the matInst.
+     * @param wrapper Absolute address of the wrapper.
+     * @param out Receives the identity fields on success, and is cleared first on every call.
+     * @return True when every field read succeeded, false on a bad pointer or a read fault.
+     * @details The setter detour holds the wrapper in `ctx.rdi`, not the matInst itself.
+     * @note Callback-safe: every hop is a guarded read and nothing allocates.
      */
     bool probe_from_wrapper(std::uintptr_t wrapper, MatInstFields &out) noexcept;
 
     // Submesh-name reader
 
     /**
-     * Read `_subMeshName` ASCIIZ from the SkinnedMeshMaterialWrapper parent of `material`. Returns true with `out`
-     * filled (null-terminated) on success. Returns false and writes `out[0]='\0'` on SEH, missing back-pointer,
-     * module-resident empty-string sentinel, or empty string.
-     *
-     * Defensive layers:
-     *   * material / wrapper pointers must be heap-resident
-     *   * wrapper's vtable (at +0) must be module-resident -- catches stale-pointer reads into reallocated heap garbage
-     *   * string-wrapper pointer must be heap-resident (rejects the module-resident empty-string sentinel the engine
-     *     uses for "no name set")
-     *   * each character must be printable ASCII (rejects UTF-16 / binary fragments from reallocated objects)
+     * @brief Reads the `_subMeshName` ASCIIZ off the SkinnedMeshMaterialWrapper parent of @p material.
+     * @param material Absolute address of the material.
+     * @param out Destination buffer, always null-terminated, cleared first on every call.
+     * @param out_cap Capacity of @p out in bytes, including the terminator.
+     * @return True with @p out filled on success. False on a read fault, a missing back-pointer, the module-resident
+     *         empty-string sentinel, or an empty name.
+     * @details Defensive layers, in order:
+     *          - material and wrapper pointers must be heap-resident
+     *          - the wrapper vtable at +0 must be module-resident, which catches stale-pointer reads into
+     *            reallocated heap garbage
+     *          - the string-wrapper pointer must be heap-resident, which rejects the module-resident empty-string
+     *            sentinel the engine uses for "no name set"
+     *          - every character must be printable ASCII, which rejects UTF-16 and binary fragments from reallocated
+     *            objects
+     * @note Callback-safe: every hop is a guarded read and nothing allocates.
      */
     bool read_submesh_name(std::uintptr_t material, char *out, std::size_t out_cap) noexcept;
 } // namespace Transmog::ColorOverride::MatInstProbe
+
+#endif // TRANSMOG_COLOR_OVERRIDE_MATINST_PROBE_HPP

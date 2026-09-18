@@ -1,4 +1,5 @@
-#pragma once
+#ifndef TRANSMOG_COLOR_OVERRIDE_COLOR_PUBLISHER_HOOK_HPP
+#define TRANSMOG_COLOR_OVERRIDE_COLOR_PUBLISHER_HOOK_HPP
 
 #include <DetourModKit/hook.hpp>
 
@@ -18,12 +19,14 @@ namespace Transmog::ColorOverride::PublisherHook
 
     struct Stats
     {
-        std::uint64_t entries;
-        std::uint64_t inserts;
-        std::uint64_t batch_rejects;
-        std::uint64_t window_rejects;
-        std::uint64_t host_rejects;
-        std::uint64_t arec_rejects;
+        std::uint64_t entries{};
+        std::uint64_t inserts{};
+        std::uint64_t batch_rejects{};
+        std::uint64_t window_rejects{};
+        std::uint64_t host_rejects{};
+        std::uint64_t arec_rejects{};
     };
     Stats snapshot_stats() noexcept;
 } // namespace Transmog::ColorOverride::PublisherHook
+
+#endif // TRANSMOG_COLOR_OVERRIDE_COLOR_PUBLISHER_HOOK_HPP

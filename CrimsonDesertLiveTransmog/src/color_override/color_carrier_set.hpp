@@ -1,10 +1,11 @@
-#pragma once
+#ifndef TRANSMOG_COLOR_OVERRIDE_COLOR_CARRIER_SET_HPP
+#define TRANSMOG_COLOR_OVERRIDE_COLOR_CARRIER_SET_HPP
 
 // Per-slot capture state: which matInst pointers + content_hashes were observed by the publisher hook during the slot's
 // apply window. Setter hook queries this to decide whether a write belongs to one of LT's transmog carriers.
 //
 // The hash set has a 500ms burst-lock (after no new hash for `k_hashSetBurstLockMs`, growth is refused) so
-// late-arriving NPC / mount / scenery matInsts can't pollute the slot.
+// late-arriving NPC / mount / scenery matInsts cannot pollute the slot.
 
 #include "shared_state.hpp"
 
@@ -43,3 +44,5 @@ namespace Transmog::ColorOverride::CarrierSet
     void clear_slot(int slot) noexcept;
     void clear_all() noexcept;
 } // namespace Transmog::ColorOverride::CarrierSet
+
+#endif // TRANSMOG_COLOR_OVERRIDE_COLOR_CARRIER_SET_HPP

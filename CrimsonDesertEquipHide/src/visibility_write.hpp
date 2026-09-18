@@ -1,16 +1,21 @@
-#pragma once
+#ifndef EQUIPHIDE_VISIBILITY_WRITE_HPP
+#define EQUIPHIDE_VISIBILITY_WRITE_HPP
 
 #include <cstddef>
 
 namespace EquipHide
 {
-    /** @brief Write vis-byte modifications for all tracked parts across all protagonists. */
+    /**
+     * @brief Write vis-byte modifications for all tracked parts across all protagonists.
+     * @note Best-effort: a faulting or stale part map skips that vis controller and the pass continues.
+     */
     void apply_direct_vis_write() noexcept;
 
     /**
      * @brief Restore all modified vis bytes to their original values.
      * @details Restores only entries tracked in original_vis_map. Unmodified entries (including injected zero-bone
      *          armor entries) are left as-is.
+     * @note Best-effort: a faulting or stale part map skips that vis controller and the pass continues.
      */
     void cleanup_vis_bytes() noexcept;
 
@@ -20,20 +25,21 @@ namespace EquipHide
      *          (`movzx <reg>, byte [<reg>+disp]`) so a PartInOut re-layout self-corrects, with 0x20 as the
      *          validated nominal kept on any miss. Which registers that instruction uses is a compiler choice and
      *          the decode ignores them. The decision struct EquipVisCheck reads and the IndexedString map entry the
-     *          direct-write path mutates are the same PartInOut layout -- the engine fills the decision struct by
-     *          copying the map entry field-for-field -- so this single offset is correct for every vis-byte access.
-     *          Warmed at hook install; the hot path then only reads the cached value.
+     *          direct-write path mutates share the PartInOut layout. The engine fills the decision struct by a
+     *          field-for-field copy of the map entry, so this single offset covers every vis-byte access.
+     *          Warmed at hook install. The hot path then only reads the cached value.
      */
     [[nodiscard]] std::size_t vis_byte_offset() noexcept;
 
     /**
      * @name Vis-ctrl to part-visibility-map pointer chain
+     * @brief Pointer-chain offsets from a vis controller to its part-visibility map base.
      * @details `mapBase = *(*(vc + k_visCtrlToCccOffset) + k_cccToDescriptorOffset) + k_descriptorToPartVisMapOffset`.
      *
      *          The direct-write and armor-injection passes both walk it and must agree, so the values live here and
      *          in no other translation unit. A copy in each caller is one offset to miss when the layout shifts.
      *
-     *          To re-verify: the decision-struct builder that feeds EquipVisCheck walks the same chain, opening
+     *          To re-verify: the decision-struct builder that feeds EquipVisCheck walks the same chain. It opens
      *          with `mov rax,[rcx+<ccc>] ; mov rcx,[rax+<desc>] ; ... ; add rcx,<map>` immediately ahead of its map
      *          lookup call. Read the three displacements out of that window rather than trusting these constants.
      *
@@ -49,3 +55,5 @@ namespace EquipHide
     /** @} */
 
 } // namespace EquipHide
+
+#endif // EQUIPHIDE_VISIBILITY_WRITE_HPP

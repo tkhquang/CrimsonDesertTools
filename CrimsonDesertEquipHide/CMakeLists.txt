@@ -2,29 +2,25 @@ cmake_minimum_required(VERSION 3.28)
 
 project(CrimsonDesertEquipHide VERSION 0.2.3 LANGUAGES CXX)
 
-# --- Standard and Compiler Options ---
+# Language level for every target in this directory and its subdirectories.
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# --- Compiler Flags ---
 add_compile_options(/W4)
 
-# --- Windows Definitions ---
+# Windows SDK target level and the macros every source in this tree expects.
 if(WIN32)
     add_compile_definitions(
         WINVER=0x0A00
         _WIN32_WINNT=0x0A00
         WIN32_LEAN_AND_MEAN
         NOMINMAX
-        _XM_SSE_INTRINSICS_ # Required for DirectXMath inline functions
     )
 endif()
 
-# --- CrimsonDesertCore (shared library, monorepo sibling) ---
-# Core owns DetourModKit as its own submodule and re-exports it via PUBLIC
-# link, so this target gets the DetourModKit target transitively; no
-# separate add_subdirectory for DMK is needed at this level.
+# CrimsonDesertCore is the monorepo sibling. Core owns DetourModKit as its own submodule and re-exports it through a
+# PUBLIC link, so this project gets the DetourModKit target transitively and needs no add_subdirectory for DMK.
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../CrimsonDesertCore/CMakeLists.txt")
     add_subdirectory(
         ${CMAKE_CURRENT_SOURCE_DIR}/../CrimsonDesertCore
@@ -37,10 +33,10 @@ else()
         "'git submodule update --init --recursive'.")
 endif()
 
-# --- Dev Build Option ---
+# Selects the two-DLL hot-reload layout instead of the single shipped ASI.
 option(EQUIPHIDE_DEV_BUILD "Build two-DLL hot-reload configuration for development" OFF)
 
-# --- Source Files ---
+# Every source shared by the dev logic DLL and the shipped ASI.
 set(COMMON_SOURCES
     src/aob_resolver.cpp
     src/dllmain.cpp
@@ -63,22 +59,20 @@ set(ASI_SOURCES
     ${COMMON_SOURCES}
 )
 
-# --- Include Directories ---
 set(COMMON_INCLUDE_DIRS
     src
 )
 
-# --- Game Output Directory (dev builds) ---
-set(GAME_BIN_DIR "D:/Games/SteamLibrary/steamapps/common/Crimson Desert/bin64/plugins")
+# Plugins directory the dev build deploys into. Override it at configure time on a machine with another install
+# path. Every deploy step is guarded on its existence, so a checkout elsewhere still configures and builds.
+set(CD_GAME_BIN_DIR "D:/Games/SteamLibrary/steamapps/common/Crimson Desert/bin64/plugins"
+    CACHE PATH "Crimson Desert plugins directory the dev build deploys into")
 
 if(EQUIPHIDE_DEV_BUILD)
-    # =====================================================================
-    # Dev Build: two-DLL hot-reload (loader + logic)
-    # =====================================================================
     message(STATUS "DEV BUILD enabled: building loader + logic DLL pair")
 
-    # --- Loader ASI (resident staged-generation loader) ---
-    # Sources live in CrimsonDesertCore; parameterized via CDCORE_LOADER_* macros.
+    # Resident staged-generation loader ASI. Its sources live in CrimsonDesertCore and take their parameters from the
+    # CDCORE_LOADER_* macros below.
     add_library(equip_hide_loader SHARED ${CDCORE_DEV_LOADER_SRC})
 
     target_compile_definitions(equip_hide_loader PRIVATE
@@ -88,17 +82,15 @@ if(EQUIPHIDE_DEV_BUILD)
 
     target_include_directories(equip_hide_loader PRIVATE ${CDCORE_DEV_INCLUDE_DIR})
 
-    # The loader hosts wheel capture for the process, so a user-bound mouse-wheel
-    # combo books its permanent module keepalive HERE instead of in the logic DLL,
-    # which is what lets a generation unmap. It links the resident host ONLY.
+    # The loader hosts wheel capture for the process, so a user-bound mouse-wheel combo books its permanent module
+    # keepalive HERE instead of in the logic DLL, which is what lets a generation unmap. It links the resident host
+    # ONLY, and that target already carries user32 on its INTERFACE.
     target_link_libraries(equip_hide_loader PRIVATE
         DetourModKit::WheelHost
-        kernel32
-        user32
     )
 
-    # Guard the property above: linking the full archive would give the loader its
-    # own DetourModKit instance, which is the arrangement DMK's unload proofs exclude.
+    # Guard the property above. A link against the full archive gives the loader its own DetourModKit instance, which
+    # is the arrangement DMK's unload proofs exclude.
     get_target_property(_eh_loader_links equip_hide_loader LINK_LIBRARIES)
     if(NOT _eh_loader_links MATCHES "DetourModKit::WheelHost")
         message(FATAL_ERROR "equip_hide_loader must link DetourModKit::WheelHost.")
@@ -107,8 +99,8 @@ if(EQUIPHIDE_DEV_BUILD)
         message(FATAL_ERROR "equip_hide_loader must not link the full DetourModKit archive.")
     endif()
 
-    # Build loader to build dir; post-build tries to copy to game folder.
-    # If the ASI is locked (game running), the copy silently fails.
+    # The loader links into the build tree. The post-build step tries to copy it into the game folder and gives up
+    # quietly when the ASI is locked by a running game.
     set_target_properties(equip_hide_loader PROPERTIES
         OUTPUT_NAME "CrimsonDesertEquipHide"
         SUFFIX ".asi"
@@ -127,17 +119,21 @@ else()
 endif()
 ]=])
 
-    add_custom_command(TARGET equip_hide_loader POST_BUILD
-        COMMAND ${CMAKE_COMMAND}
-            -DSRC_ASI=$<TARGET_FILE:equip_hide_loader>
-            -DDST_ASI=${GAME_BIN_DIR}/CrimsonDesertEquipHide.asi
-            -P "${CMAKE_CURRENT_BINARY_DIR}/deploy_loader.cmake"
-        COMMENT "Deploying Loader ASI (skips if locked)"
-    )
+    if(EXISTS "${CD_GAME_BIN_DIR}")
+        add_custom_command(TARGET equip_hide_loader POST_BUILD
+            COMMAND ${CMAKE_COMMAND}
+                -DSRC_ASI=$<TARGET_FILE:equip_hide_loader>
+                -DDST_ASI=${CD_GAME_BIN_DIR}/CrimsonDesertEquipHide.asi
+                -P "${CMAKE_CURRENT_BINARY_DIR}/deploy_loader.cmake"
+            COMMENT "Deploying Loader ASI (skips if locked)"
+        )
+    else()
+        message(STATUS "CD_GAME_BIN_DIR does not exist, loader ASI deploy disabled: ${CD_GAME_BIN_DIR}")
+    endif()
 
     target_compile_options(equip_hide_loader PRIVATE /W4)
 
-    # --- Logic DLL (all mod code) ---
+    # Logic DLL: every line of mod code, replaced wholesale on each hot reload.
     add_library(equip_hide_logic SHARED
         ${COMMON_SOURCES}
         src/dev/mod_logic.cpp
@@ -150,31 +146,25 @@ endif()
     target_link_libraries(equip_hide_logic PRIVATE
         DetourModKit
         CrimsonDesertCore::core
-        psapi
-        user32
-        kernel32
     )
 
-    # Build to staging/ so the linker never conflicts with a game-locked DLL.
-    # The loader copies from staging/ before LoadLibrary.
-    # Fallback drop point for a deploy that loses a race with the loader reading the deployed DLL.
-    set(GAME_STAGING_DIR "${GAME_BIN_DIR}/staging")
+    # Fallback drop point for a deploy that loses the race with the loader reading the deployed DLL. The loader copies
+    # from staging/ before LoadLibrary.
+    set(GAME_STAGING_DIR "${CD_GAME_BIN_DIR}/staging")
 
     set_target_properties(equip_hide_logic PROPERTIES
         OUTPUT_NAME "CrimsonDesertEquipHide.logic"
         PREFIX ""
     )
 
-    # Generate deploy script at configure time (no source file needed).
-    # Tries to copy DLL+PDB directly to plugins/ (game not running).
-    # On success, cleans the staging copies so the hot-reload loader
-    # does not pick up a stale build.  If the DLL is locked (game
-    # running), both files stay in staging/ for hot-reload instead.
-    # Link to the build tree (the CMake default) and deploy from there. The loader maps a per-generation COPY of
-    # the deployed DLL, never the file itself, so the direct copy is not racing a mapped image and succeeds in the
-    # normal case. Staging remains the fallback for the one window where it can fail: the loader reads this file
-    # while staging a new generation, and a build landing exactly then loses the copy. The loader promotes whatever
-    # it finds in staging on the next reload.
+    # The deploy script is generated at configure time, so no checked-in source file is needed. It copies the DLL and
+    # PDB straight into plugins/ and then clears the staging copies, so the hot-reload loader cannot promote a stale
+    # build over this one.
+    #
+    # The loader maps a per-generation COPY of the deployed DLL, never the file itself, so the direct copy never races
+    # a mapped image. One window remains: the loader reads this file as it stages a new generation, and a build that
+    # lands exactly then loses the copy. Both files then stay in staging/ and the loader promotes them on the next
+    # reload.
     file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/deploy_logic.cmake" [=[
 execute_process(
     COMMAND "${CMAKE_COMMAND}" -E copy "${SRC_DLL}" "${DST_DLL}"
@@ -188,7 +178,7 @@ if(rc EQUAL 0)
     # Clear anything an earlier fallback left behind, so the loader cannot promote a stale build over this one.
     file(REMOVE "${STAGING_DLL}" "${STAGING_PDB}")
 else()
-    message(STATUS "Direct deploy skipped (file locked) -- staging for the loader to promote on next reload")
+    message(STATUS "Direct deploy skipped (file locked). Staged for the loader to promote on the next reload.")
     get_filename_component(staging_dir "${STAGING_DLL}" DIRECTORY)
     file(MAKE_DIRECTORY "${staging_dir}")
     execute_process(COMMAND "${CMAKE_COMMAND}" -E copy "${SRC_DLL}" "${STAGING_DLL}")
@@ -198,27 +188,27 @@ else()
 endif()
 ]=])
 
-    add_custom_command(TARGET equip_hide_logic POST_BUILD
-        COMMAND ${CMAKE_COMMAND}
-            -DSRC_DLL=$<TARGET_FILE:equip_hide_logic>
-            -DDST_DLL=${GAME_BIN_DIR}/CrimsonDesertEquipHide.logic.dll
-            -DSTAGING_DLL=${GAME_STAGING_DIR}/CrimsonDesertEquipHide.logic.dll
-            -DSRC_PDB=$<TARGET_PDB_FILE:equip_hide_logic>
-            -DDST_PDB=${GAME_BIN_DIR}/CrimsonDesertEquipHide.logic.pdb
-            -DSTAGING_PDB=${GAME_STAGING_DIR}/CrimsonDesertEquipHide.logic.pdb
-            -P "${CMAKE_CURRENT_BINARY_DIR}/deploy_logic.cmake"
-        COMMENT "Deploying Logic DLL+PDB (falls back to staging if locked)"
-    )
+    if(EXISTS "${CD_GAME_BIN_DIR}")
+        add_custom_command(TARGET equip_hide_logic POST_BUILD
+            COMMAND ${CMAKE_COMMAND}
+                -DSRC_DLL=$<TARGET_FILE:equip_hide_logic>
+                -DDST_DLL=${CD_GAME_BIN_DIR}/CrimsonDesertEquipHide.logic.dll
+                -DSTAGING_DLL=${GAME_STAGING_DIR}/CrimsonDesertEquipHide.logic.dll
+                -DSRC_PDB=$<TARGET_PDB_FILE:equip_hide_logic>
+                -DDST_PDB=${CD_GAME_BIN_DIR}/CrimsonDesertEquipHide.logic.pdb
+                -DSTAGING_PDB=${GAME_STAGING_DIR}/CrimsonDesertEquipHide.logic.pdb
+                -P "${CMAKE_CURRENT_BINARY_DIR}/deploy_logic.cmake"
+            COMMENT "Deploying Logic DLL+PDB (falls back to staging if locked)"
+        )
+    else()
+        message(STATUS "CD_GAME_BIN_DIR does not exist, logic DLL deploy disabled: ${CD_GAME_BIN_DIR}")
+    endif()
 
     target_compile_options(equip_hide_logic PRIVATE /W4 /Zi)
     target_link_options(equip_hide_logic PRIVATE /DEBUG /INCREMENTAL:NO /OPT:REF /OPT:ICF)
 
 else() # EQUIPHIDE_DEV_BUILD=OFF
-    # =====================================================================
-    # Production Build: single ASI (unchanged)
-    # =====================================================================
-
-    # --- ASI Target (.asi file) ---
+    # Production build: one shipped ASI carrying every source.
     add_library(${PROJECT_NAME}-ASI SHARED ${ASI_SOURCES})
 
     target_include_directories(${PROJECT_NAME}-ASI PRIVATE ${COMMON_INCLUDE_DIRS})
@@ -226,9 +216,6 @@ else() # EQUIPHIDE_DEV_BUILD=OFF
     target_link_libraries(${PROJECT_NAME}-ASI PRIVATE
         DetourModKit
         CrimsonDesertCore::core
-        psapi
-        user32
-        kernel32
     )
 
     # Set output name and properties for ASI
@@ -238,9 +225,7 @@ else() # EQUIPHIDE_DEV_BUILD=OFF
         PREFIX ""
     )
 
-    # --- Target-Scoped Release Optimizations ---
-    # /Gy: function-level linking, /Gw: global data optimization.
-    # /O1: favor size (appropriate for an injected DLL).
+    # /Gy gives function-level linking, /Gw optimizes global data, and /O1 favors size, which suits an injected DLL.
     target_compile_options(${PROJECT_NAME}-ASI PRIVATE
         $<$<CONFIG:Release>:/O1 /Gy /Gw>
     )
@@ -250,7 +235,6 @@ else() # EQUIPHIDE_DEV_BUILD=OFF
         $<$<CONFIG:Release>:/OPT:REF /OPT:ICF>
     )
 
-    # --- Link-Time Optimization ---
     include(CheckIPOSupported)
     check_ipo_supported(RESULT _ipo_supported LANGUAGES CXX OUTPUT _ipo_error)
 
@@ -271,12 +255,9 @@ else() # EQUIPHIDE_DEV_BUILD=OFF
         COMMENT "Renaming ASI output to final name"
     )
 
-    # --- Build Summary ---
-    message(STATUS "---------------------------------------------------------------------")
     message(STATUS "CrimsonDesertEquipHide (${PROJECT_VERSION}) Configuration Summary:")
     message(STATUS "  Generator:                   ${CMAKE_GENERATOR}")
     message(STATUS "  Build Type:                  ${CMAKE_BUILD_TYPE}")
     message(STATUS "  Targets:")
     message(STATUS "    - ${PROJECT_NAME}-ASI      -> CrimsonDesertEquipHide.asi (via post-build copy)")
-    message(STATUS "---------------------------------------------------------------------")
 endif() # EQUIPHIDE_DEV_BUILD

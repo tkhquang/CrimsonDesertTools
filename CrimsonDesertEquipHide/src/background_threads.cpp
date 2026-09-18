@@ -27,45 +27,40 @@ namespace EquipHide
 {
     namespace
     {
-        // s_workersMtx serialises the lazy-launch arms; each worker pointer is set under the lock in launch_*(), then
-        // read unlocked in join_background_threads(). The atomic launch guards prevent a second launch_*() call from
-        // racing the first, so the unique_ptr writes themselves see no contention beyond the launch site.
+        // s_workersMtx serializes the lazy-launch arms. launch_*() sets each worker pointer under the lock and
+        // join_background_threads() reads it unlocked. The atomic launch guards stop a second launch_*() call from a
+        // race against the first, so the unique_ptr writes see no contention beyond the launch site.
         std::mutex s_workersMtx;
         std::unique_ptr<DetourModKit::StoppableWorker> s_deferredScanWorker;
         std::unique_ptr<DetourModKit::StoppableWorker> s_lazyProbeWorker;
         std::unique_ptr<DetourModKit::StoppableWorker> s_resolvePollWorker;
 
-        // Deferred IndexedStringA scan tuning
-        // Convergence rests on two gates plus a stability window:
-        //   (1) World-ready: user+0xD8 must hold a non-null controlled
-        //       actor. In main-menu / loading-screen state the
-        //       IndexedStringA table carries a tiny engine-internal
-        //       seed (~3 entries) that is naturally "stable" for
-        //       many seconds, which would false-trigger a pure
-        //       stability check. Walking the same chain EquipHide
-        //       already polls in resolve_poll_body lets us refuse to
-        //       commit until the world is actually live.
-        //   (2) Minimum count: even after the chain reports a
-        //       controlled actor we refuse to commit below
-        //       k_minStableCount so a torn / partially-loaded
-        //       registry cannot snapshot a sub-50 entry table that
-        //       happens to repeat itself across consecutive polls.
-        //   (3) Stability window: with both gates satisfied, k_-
-        //       stabilityRequired identical scans confirm the table
-        //       has finished growing for this load.
+        // Deferred IndexedStringA scan tuning. Convergence rests on two gates plus a stability window.
+        //
+        // World-ready: user+0xD8 must hold a non-null controlled actor. In main-menu or loading-screen state the
+        // IndexedStringA table carries a tiny engine-internal seed of about three entries that stays "stable" for
+        // many seconds and false-triggers a pure stability check. A walk of the same chain resolve_poll_body already
+        // polls lets the gate refuse the commit until the world is live.
+        //
+        // Minimum count: even once the chain reports a controlled actor, the gate refuses a commit below
+        // k_minStableCount, so a torn or partially loaded registry cannot snapshot a sub-50 entry table that happens
+        // to repeat itself across consecutive polls.
+        //
+        // Stability window: with both gates satisfied, k_stabilityRequired identical scans confirm that the table
+        // finished growing for this load.
         constexpr int k_scanRetryMs = 2000;
         constexpr int k_scanInitialDelayMs = 8000;
         constexpr int k_scanHeartbeatEvery = 30;
         constexpr int k_stabilityRequired = 5;
         constexpr std::size_t k_minStableCount = 32;
 
-        // Forward declaration: world-ready probe lives below for proximity to the resolve-poll thread that consumes it,
-        // but the deferred scan body needs to call it as a commit gate.
-        std::uintptr_t read_controlled_actor_ptr_seh() noexcept;
+        // Forward declaration. The world-ready probe lives below, next to the resolve-poll thread that consumes it,
+        // and the deferred scan body calls it as a commit gate.
+        std::uintptr_t read_controlled_actor_ptr() noexcept;
 
-        // Sleeps in short slices and observes both the StoppableWorker stop_token and the legacy shutdown_requested()
-        // flag so the worker exits within ~50ms of either signal regardless of how long the per-iteration retry delay
-        // is.
+        // Sleeps in short slices and observes both the StoppableWorker stop_token and the process-wide
+        // shutdown_requested() flag, so the worker exits within about 50ms of either signal whatever the
+        // per-iteration retry delay is.
         bool sleep_responsive_ms(std::stop_token st, int totalMs) noexcept
         {
             constexpr int sliceMs = 50;
@@ -88,8 +83,7 @@ namespace EquipHide
             if (!mapLookupAddr)
                 return;
 
-            // Initial grace mirrors LT's k_nametableInitialDelayMs so the game has a chance to seed the table before we
-            // start polling.
+            // The initial grace period gives the game a chance to seed the table before the first poll.
             if (!sleep_responsive_ms(st, k_scanInitialDelayMs))
                 return;
 
@@ -104,17 +98,16 @@ namespace EquipHide
 
                 ++attempt;
 
-                // World-ready gate. user+0xD8 is the controlled-actor pointer; it goes non-null only once the engine
-                // has finished initial world wiring. In main-menu / loading-screen state it stays zero while the
-                // IndexedStringA table carries a stable seed of a few engine-internal entries that would otherwise
-                // satisfy the stability check below and commit an almost-empty hash map.
-                if (read_controlled_actor_ptr_seh() == 0)
+                // World-ready gate. user+0xD8 is the controlled-actor pointer. It goes non-null only once the engine
+                // finishes the initial world wiring. In main-menu or loading-screen state it stays zero while the
+                // IndexedStringA table carries a stable seed of a few engine-internal entries, which otherwise
+                // satisfies the stability check below and commits an almost-empty hash map.
+                if (read_controlled_actor_ptr() == 0)
                 {
                     if (attempt % k_scanHeartbeatEvery == 0)
                         logger.debug(
                             "IndexedStringA deferred scan: still waiting "
-                            "after {} attempts (controlled actor not yet "
-                            "live)",
+                            "after {} attempts (controlled actor not yet live)",
                             attempt
                         );
                     stableStreak = 0;
@@ -127,11 +120,11 @@ namespace EquipHide
 
                 if (curCount == 0)
                 {
-                    // Table still entirely empty: reset streak so we never commit the empty state on stability.
+                    // The table is still entirely empty. Reset the streak so stability never commits the empty
+                    // state.
                     if (attempt % k_scanHeartbeatEvery == 0)
                         logger.debug(
-                            "IndexedStringA deferred scan: still waiting "
-                            "after {} attempts (table empty)",
+                            "IndexedStringA deferred scan: still waiting after {} attempts (table empty)",
                             attempt
                         );
                     stableStreak = 0;
@@ -141,14 +134,13 @@ namespace EquipHide
 
                 if (curCount < k_minStableCount)
                 {
-                    // Below the minimum-count gate. The world reports ready but the registry has only published a
-                    // partial table so far; treat as still settling.
+                    // Below the minimum-count gate. The world reports ready but the registry published only a
+                    // partial table so far. Treat it as still settling.
                     if (curCount != prevCount)
                     {
                         prevCount = curCount;
                         logger.trace(
-                            "IndexedStringA deferred scan: attempt {}, "
-                            "{} entries (below min {}, awaiting growth)",
+                            "IndexedStringA deferred scan: attempt {}, {} entries (below min {}, awaiting growth)",
                             attempt,
                             curCount,
                             k_minStableCount
@@ -157,8 +149,7 @@ namespace EquipHide
                     if (attempt % k_scanHeartbeatEvery == 0)
                         logger.debug(
                             "IndexedStringA deferred scan: {} entries "
-                            "after {} attempts (below min commit "
-                            "threshold {}, registry still loading)",
+                            "after {} attempts (below min commit threshold {}, registry still loading)",
                             curCount,
                             attempt,
                             k_minStableCount
@@ -173,8 +164,7 @@ namespace EquipHide
                     stableStreak = 0;
                     prevCount = curCount;
                     logger.trace(
-                        "IndexedStringA deferred scan: attempt {}, {} "
-                        "entries (changed, stability streak reset)",
+                        "IndexedStringA deferred scan: attempt {}, {} entries (changed, stability streak reset)",
                         attempt,
                         curCount
                     );
@@ -182,8 +172,7 @@ namespace EquipHide
                     if (attempt % k_scanHeartbeatEvery == 0)
                         logger.debug(
                             "IndexedStringA deferred scan: still waiting "
-                            "after {} attempts ({} entries currently, "
-                            "table still settling)",
+                            "after {} attempts ({} entries currently, table still settling)",
                             attempt,
                             curCount
                         );
@@ -194,8 +183,7 @@ namespace EquipHide
                 if (stableStreak < k_stabilityRequired)
                 {
                     logger.trace(
-                        "IndexedStringA deferred scan: attempt {}, {} "
-                        "entries (stable {}/{}, awaiting commit)",
+                        "IndexedStringA deferred scan: attempt {}, {} entries (stable {}/{}, awaiting commit)",
                         attempt,
                         curCount,
                         stableStreak,
@@ -205,8 +193,7 @@ namespace EquipHide
                     if (attempt % k_scanHeartbeatEvery == 0)
                         logger.debug(
                             "IndexedStringA deferred scan: {} entries "
-                            "after {} attempts (stable streak {}/{}, "
-                            "need {} consecutive identical scans)",
+                            "after {} attempts (stable streak {}/{}, need {} consecutive identical scans)",
                             curCount,
                             attempt,
                             stableStreak,
@@ -216,21 +203,21 @@ namespace EquipHide
                     continue;
                 }
 
-                // Re-check stop right before the blocking commit sequence. cleanup_vis_bytes() blocking-locks
-                // vis_write_mutex; if shutdown raced past join here, skipping the commit lets the worker exit cleanly.
+                // Re-check stop right before the blocking commit sequence. cleanup_vis_bytes() takes
+                // vis_write_mutex with a blocking lock. When shutdown raced past the join, a skipped commit lets the
+                // worker exit cleanly.
                 if (st.stop_requested() || shutdown_requested().load(std::memory_order_relaxed))
                     return;
 
                 const auto totalParts = total_part_count();
-                // Capture unresolved parts BEFORE moving runtimeHashes into the published map, since
+                // Capture the unresolved parts BEFORE the move of runtimeHashes into the published map, because
                 // get_unresolved_parts borrows it.
                 auto unresolved = get_unresolved_parts(runtimeHashes);
                 const auto resolvedCount = totalParts - unresolved.size();
 
                 logger.info(
                     "IndexedStringA deferred scan: stable at {} entries "
-                    "across {} consecutive scans, committing "
-                    "({}/{} resolved, {} attempts)",
+                    "across {} consecutive scans, committing ({}/{} resolved, {} attempts)",
                     curCount,
                     k_stabilityRequired,
                     resolvedCount,
@@ -249,7 +236,7 @@ namespace EquipHide
                 auto &ps = player_state();
                 for (int j = 0; j < k_maxProtagonists; ++j)
                     ps.armorInjected[j].store(false, std::memory_order_relaxed);
-                needs_direct_write().store(true, std::memory_order_relaxed);
+                needs_direct_write().store(true, std::memory_order_release);
 
                 if (!unresolved.empty())
                     lazy_probe_pending().store(true, std::memory_order_relaxed);
@@ -263,9 +250,9 @@ namespace EquipHide
             const auto mapLookupAddr = resolved_addrs().mapLookup;
             int probeCount = 0;
 
-            // Track the lowest unresolved count we have committed so far. A scan that drops the unresolved count below
-            // this baseline means new INI parts became resolvable since the last commit, so we publish even if some
-            // still miss -- a single typo in the INI no longer blocks the rest of the part map from being applied.
+            // Track the lowest unresolved count committed so far. A scan that drops the unresolved count below this
+            // baseline means new INI parts turned resolvable since the last commit, so the worker publishes even
+            // while some still miss. One typo in the INI therefore no longer blocks the rest of the part map.
             // Seeded with size_t-max so the first non-empty scan always wins.
             std::size_t bestUnresolved = std::numeric_limits<std::size_t>::max();
 
@@ -277,11 +264,7 @@ namespace EquipHide
             // sentinel, which it re-arms on immediately, collapsing the real interval to this loop's sleep period.
             int64_t lastSignal = 0;
 
-            logger.info(
-                "Lazy probe started for demand-loaded parts "
-                "(interval: {}s)",
-                k_lazyProbeIntervalMs / 1000
-            );
+            logger.info("Lazy probe started for demand-loaded parts (interval: {}s)", k_lazyProbeIntervalMs / 1000);
 
             while (lazy_probe_pending().load(std::memory_order_relaxed))
             {
@@ -311,17 +294,16 @@ namespace EquipHide
                     // unresolvable entries (typos or parts the game never registers). Keep the probe alive in case the
                     // registry grows later but skip the rebuild work for this tick.
                     logger.trace(
-                        "Lazy probe #{}: {} parts unresolved "
-                        "(no progress since last commit)",
+                        "Lazy probe #{}: {} parts unresolved (no progress since last commit)",
                         probeCount,
                         unresolvedCount
                     );
                     continue;
                 }
 
-                // Same stop-check rationale as deferred_scan_body:
-                // cleanup_vis_bytes() takes vis_write_mutex blocking, which can stall behind the resolve-poll worker's
-                // try-locked critical section during shutdown.
+                // Same stop-check rationale as deferred_scan_body. cleanup_vis_bytes() takes vis_write_mutex with a
+                // blocking lock, which stalls behind the resolve-poll worker's try-locked critical section during
+                // shutdown.
                 if (st.stop_requested() || shutdown_requested().load(std::memory_order_relaxed))
                     return;
 
@@ -332,25 +314,20 @@ namespace EquipHide
                 auto &ps = player_state();
                 for (int j = 0; j < k_maxProtagonists; ++j)
                     ps.armorInjected[j].store(false, std::memory_order_relaxed);
-                needs_direct_write().store(true, std::memory_order_relaxed);
+                needs_direct_write().store(true, std::memory_order_release);
 
                 bestUnresolved = unresolvedCount;
 
                 if (fullyResolved)
                 {
                     lazy_probe_pending().store(false, std::memory_order_relaxed);
-                    logger.info(
-                        "Lazy probe resolved all remaining parts "
-                        "({} probes)",
-                        probeCount
-                    );
+                    logger.info("Lazy probe resolved all remaining parts ({} probes)", probeCount);
                     return;
                 }
 
                 logger.info(
                     "Lazy probe #{}: committed {} runtime hashes; "
-                    "{} INI parts still unresolved (will keep "
-                    "polling for late registrations)",
+                    "{} INI parts still unresolved (will keep polling for late registrations)",
                     probeCount,
                     newHashCount,
                     unresolvedCount
@@ -358,32 +335,28 @@ namespace EquipHide
             }
         }
 
-        // Walks WorldSystem -> ActorManager -> UserActor -> +0xD8 and
-        // returns the currently-controlled ClientChildOnlyInGameActor pointer, or 0 on any fault or unresolved
-        // intermediate. The pointer rotates on three game events the poll thread observes:
+        // Walks WorldSystem -> ActorManager -> UserActor -> +0xD8 and returns the currently-controlled
+        // ClientChildOnlyInGameActor pointer, or 0 on any fault or unresolved intermediate. The pointer rotates on
+        // three game events the poll thread observes.
         //
-        //   1. World / save load          -- UserActor reallocates, so
-        //                                    user+0xD8 resolves through a
-        //                                    different chain entirely.
-        //   2. In-session character swap  -- UserActor stays; the +0xD8
-        //                                    slot rotates to the new
-        //                                    party member's actor.
-        //   3. Controlled-actor teardown  -- returns 0 while the new
-        //                                    actor is being wired up.
+        // - World or save load: the UserActor reallocates, so user+0xD8 resolves through a different chain entirely.
+        // - In-session character swap: the UserActor stays and the +0xD8 slot rotates to the new party member's
+        //   actor.
+        // - Controlled-actor teardown: the read returns 0 while the engine wires the new actor up.
         //
-        // All three settle on a stable non-zero pointer on success, so comparing the current read against the previous
-        // tick catches every case without needing separate UA and actor watchers. SEH-guarded because every
-        // intermediate deref may land on a half-torn state during a rotation.
-        std::uintptr_t read_controlled_actor_ptr_seh() noexcept
+        // All three settle on a stable non-zero pointer on success, so a compare of the current read against the
+        // previous tick catches every case and needs no separate UserActor and actor watchers. The walk is fault
+        // guarded, because every intermediate deref can land on a half-torn state during a rotation.
+        std::uintptr_t read_controlled_actor_ptr() noexcept
         {
             auto &addrs = resolved_addrs();
             if (!addrs.worldSystem)
                 return 0;
             // The walk steps WorldSystem -> ActorManager -> UserActor -> controlled-actor SLOT under one fault
             // guard, and the trailing read performs the terminal deref, so a half-torn rotation state faults safely
-            // instead of crashing. The final >= 0x10000 guard rejects the not-yet-wired-up sentinel range. Layout
-            // offsets come from CDCore::ActorChainOffsets (controlled_char.hpp), the single authority shared with
-            // LiveTransmog and CDCore's own resolver.
+            // instead of a crash. The final floor rejects the not-yet-wired-up sentinel range. Layout offsets come
+            // from CDCore::ActorChainOffsets (controlled_char.hpp), the single authority shared with LiveTransmog and
+            // with CDCore's own resolver.
             namespace AC = CDCore::ActorChainOffsets;
             const auto r = DMK::memory::walk(
                                DMK::Address{addrs.worldSystem},
@@ -395,51 +368,48 @@ namespace EquipHide
                                }
             )
                                .and_then([](DMK::Address leaf) { return DMK::memory::read<std::uintptr_t>(leaf); });
-            return (r && *r >= 0x10000) ? *r : 0;
+            return (r && *r >= DMK::memory::USERSPACE_PTR_MIN) ? *r : 0;
         }
 
-        // Fires resolve_player_vis_ctrls when either:
-        //   (a) the controlled-actor pointer rotates (radial swap or
-        //       save-load), or
-        //   (b) the player snapshot count grows (Damiane / Oongka
-        //       summoned mid-session while the user stays on Kliff).
+        // Fires resolve_player_vis_ctrls on either trigger: the controlled-actor pointer rotates (a radial swap or a
+        // save-load), or the player snapshot count changes (Damiane or Oongka summoned mid-session while the user
+        // stays on Kliff).
         //
-        // Without (b) a mid-session summon never triggers a re-resolve:
-        // the controlled actor stays put and ps.count remains stuck at its pre-summon value, so DirectWrite keeps
-        // hiding gear for only the original character. The snapshot-count poll matches LT's roster-grew trigger and
-        // uses the (size_t)-1 uninit sentinel so the first observation does not double-fire.
+        // Without the snapshot trigger a mid-session summon never re-resolves. The controlled actor stays put and
+        // ps.count sticks at its pre-summon value, so DirectWrite hides gear for the original character only. The
+        // snapshot-count poll uses a (size_t)-1 uninit sentinel so the first observation does not double-fire.
         void resolve_poll_body(std::stop_token st) noexcept
         {
             auto &logger = DMK::log();
             logger.info("Resolve poll thread started (interval: {}ms)", k_resolvePollIntervalMs);
 
             std::uintptr_t prevActor = 0;
-            constexpr std::size_t kSnapshotCountUninit = static_cast<std::size_t>(-1);
-            std::size_t prevSnapshotCount = kSnapshotCountUninit;
+            constexpr std::size_t k_snapshotCountUninit = static_cast<std::size_t>(-1);
+            std::size_t prevSnapshotCount = k_snapshotCountUninit;
 
             while (!st.stop_requested() && !shutdown_requested().load(std::memory_order_relaxed))
             {
                 if (!sleep_responsive_ms(st, static_cast<int>(k_resolvePollIntervalMs)))
                     return;
 
-                // Defer until the AOB-resolved singletons are populated. read_controlled_actor_ptr_seh has an
-                // equivalent guard but checking here avoids the SEH frame cost on every early tick before init
+                // Defer until the AOB-resolved singletons are populated. read_controlled_actor_ptr carries an
+                // equivalent guard, and this check avoids the guarded-walk cost on every early tick before init
                 // completes.
                 auto &addrs = resolved_addrs();
                 if (!addrs.worldSystem || !addrs.childActorVtbl)
                     continue;
 
-                const auto curActor = read_controlled_actor_ptr_seh();
+                const auto curActor = read_controlled_actor_ptr();
                 const bool actorRotated = (curActor != prevActor);
 
-                // Any change in roster size re-resolves, in both directions. A shrink matters as much as a growth: a
-                // despawned companion leaves its vis ctrl published, and the direct-write path would keep writing
-                // through that stale pointer. Nothing else observes a despawn -- the controlled actor does not rotate
-                // for it -- so this is the only trigger that catches one.
+                // Any change in roster size re-resolves, in both directions. A shrink matters as much as a growth. A
+                // despawned companion leaves its vis ctrl published and the direct-write path then keeps writing
+                // through that stale pointer. Nothing else observes a despawn, because the controlled actor does not
+                // rotate for it, so this is the only trigger that catches one.
                 std::array<CDCore::BodyCacheEntry, k_maxProtagonists> snap{};
                 const auto curSnapshotCount = CDCore::snapshot_body_cache(snap.data(), snap.size());
                 const bool rosterChanged =
-                    (prevSnapshotCount != kSnapshotCountUninit && curSnapshotCount != prevSnapshotCount);
+                    (prevSnapshotCount != k_snapshotCountUninit && curSnapshotCount != prevSnapshotCount);
 
                 const auto prevSnapshotCountForLog = prevSnapshotCount;
                 if (actorRotated)
@@ -451,8 +421,7 @@ namespace EquipHide
 
                 if (rosterChanged)
                     logger.info(
-                        "Player roster changed {} -> {}; re-resolving "
-                        "vis-ctrls",
+                        "Player roster changed {} -> {}; re-resolving vis-ctrls",
                         prevSnapshotCountForLog,
                         curSnapshotCount
                     );
@@ -502,18 +471,18 @@ namespace EquipHide
 
     void join_background_threads()
     {
-        // shutdown() flips the legacy shutdown_requested() flag before calling here; explicit shutdown() on each worker
-        // also request_stop()s the stop_token so bodies exit promptly.
+        // shutdown() flips the process-wide shutdown_requested() flag before this call. The explicit shutdown() on
+        // each worker also calls request_stop() on its stop_token, so the bodies exit promptly.
         //
-        // Lock-ordering: extract each unique_ptr into a local under s_workersMtx, then RELEASE the mutex before
-        // joining. Joining while holding s_workersMtx deadlocks against the mid-hook path on the game thread: an
-        // EquipVisCheck tick calls launch_lazy_probe() which blocks on s_workersMtx.lock(); meanwhile the lazy-probe
-        // worker body itself calls cleanup_vis_bytes() (blocking lock on vis_write_mutex) which can stall behind the
-        // resolve-poll worker's try_lock-held critical section in resolve_player_vis_ctrls. With the lock held,
-        // shutdown waits on the lazy-probe join while the game thread waits on s_workersMtx -- forever.
+        // Lock ordering: extract each unique_ptr into a local under s_workersMtx, then RELEASE the mutex before the
+        // join. A join under s_workersMtx deadlocks against the mid-hook path on the game thread. An EquipVisCheck
+        // tick calls launch_lazy_probe(), which blocks on s_workersMtx.lock(). Meanwhile the lazy-probe worker body
+        // calls cleanup_vis_bytes(), whose blocking lock on vis_write_mutex stalls behind the resolve-poll worker's
+        // try_lock-held critical section in resolve_player_vis_ctrls. With the lock held, shutdown waits on the
+        // lazy-probe join while the game thread waits on s_workersMtx, forever.
         //
-        // Request stop on all three first so the bodies start unwinding concurrently while we sequentially join,
-        // shaving wall-clock shutdown latency without changing the join order.
+        // Request stop on all three first so the bodies unwind concurrently across the sequential joins below. That
+        // shaves wall-clock shutdown latency and leaves the join order unchanged.
         auto &logger = DMK::log();
 
         std::unique_ptr<DetourModKit::StoppableWorker> deferredLocal;

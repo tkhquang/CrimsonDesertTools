@@ -8,9 +8,9 @@
 // external/reshade-sdk/source/imgui_function_table_19250.{hpp,cpp}. Refresh the vendored files with
 // scripts/refresh_reshade_populator.sh when bumping ImGui to a new IMGUI_VERSION_NUM.
 //
-// Return type is `const void *` so the overlay TU (which sees the SDK's struct definition) and the populator TU (which
-// sees the source-tree struct definition with the same byte layout but slightly different type-alias spellings) can
-// pass the table across a TU boundary without redeclaring the struct.
+// The return type is `const void *` so the overlay TU (which sees the SDK's struct definition) and the populator TU
+// (which sees the source-tree struct definition with the same byte layout but slightly different type-alias
+// spellings) can pass the table across a TU boundary without a redeclaration of the struct.
 
 #ifndef TRANSMOG_IMGUI_FUNCTION_TABLE_POPULATOR_HPP
 #define TRANSMOG_IMGUI_FUNCTION_TABLE_POPULATOR_HPP
@@ -20,7 +20,12 @@ extern "C"
 {
 #endif
 
-    const void *lt_get_imgui_function_table();
+    /**
+     * @brief Returns the address of the populated imgui_function_table_19250 for this process.
+     * @return A pointer to the function-local table, which lives for the rest of the process.
+     * @note The call has no observable effect beyond the return value, so a discarded result is always a bug.
+     */
+    [[nodiscard]] const void *lt_get_imgui_function_table();
 
 #ifdef __cplusplus
 } // extern "C"

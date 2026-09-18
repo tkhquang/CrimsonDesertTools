@@ -18,7 +18,8 @@
 #include "transmog_apply.hpp"
 #include "transmog_map.hpp"
 
-#include <DetourModKit.hpp>
+#include <DetourModKit/defines.hpp>
+#include <DetourModKit/logger.hpp>
 
 #pragma warning(push, 0)
 #include <imgui.h>
@@ -40,10 +41,7 @@
 namespace Transmog
 {
 
-    // Draw a search-filterable picker popup for one slot. Returns true if the user committed a selection this frame
-    // (caller is responsible for persisting it). When autoApply is true, hovering an item starts a debounce timer; once
-    // it expires the slot-scoped apply fires via manual_apply_slot so only the hovered slot re-equips.
-    [[nodiscard]] bool draw_item_picker_popup(
+    bool draw_item_picker_popup(
         const char *popupId,
         SlotUIState &ui,
         Transmog::TransmogSlot slotCategory,
@@ -57,15 +55,15 @@ namespace Transmog
         if (!ImGui::BeginPopup(popupId))
             return false;
 
-        // Reset hover-debounce state on first frame so stale state from a previous open doesn't suppress or prematurely
-        // fire an apply.
+        // Reset hover-debounce state on the first frame, so stale state from a previous open does not suppress or
+        // prematurely fire an apply.
         if (ImGui::IsWindowAppearing())
         {
             ui.hoverPendingId = targetItemId;
             ui.hoverAppliedId = targetItemId;
             ui.hoverStartMs = 0;
             // Prefab-mode equivalent: seed both pending and applied with the popup-slot's current pick so the anchor
-            // row doesn't trigger a redundant re-apply on open.
+            // row does not trigger a redundant re-apply on open.
             ui.hoverPendingPrefab = ui.pickedPrefabName;
             ui.hoverAppliedPrefab = ui.pickedPrefabName;
             ui.hoverPrefabStartMs = 0;
@@ -86,7 +84,7 @@ namespace Transmog
         //        non-functional items.
         // Body-aware filters only matter for the 5 armor slots (Helm/Chest/ Cloak/Gloves/Boots) where the body-mesh
         // family is gender-specific (cd_phm_* vs cd_phw_*). Accessory + weapon slots share their mesh families across
-        // genders, so the filter has no effect there and the checkboxes just create confusion -- hide them.
+        // genders, so the filter has no effect there and the checkboxes just create confusion - hide them.
         const bool isArmorSlotPickerHeader = Transmog::slot_meta(slotCategory).partShowHashKey != nullptr;
         if (!ui.prefabMode)
         {
@@ -102,8 +100,7 @@ namespace Transmog
                 if (ImGui::IsItemHovered())
                     ui_tooltip(
                         "Hide items whose body type (male/female) "
-                        "doesn't match the active character. Cross-body "
-                        "items may render with broken meshes."
+                        "does not match the active character. Cross-body items may render with broken meshes."
                     );
             }
         }
@@ -115,18 +112,16 @@ namespace Transmog
             if (ImGui::IsItemHovered())
                 ui_tooltip(
                     "Limit the list to prefabs whose body-mesh family "
-                    "matches this slot. Untick to browse the full cross-"
-                    "slot catalog."
+                    "matches this slot. Untick to browse the full cross-slot catalog."
                 );
             ImGui::SameLine();
             ImGui::Checkbox("Keep open##prefab_keep_open", &ui.prefabKeepOpenOnPick);
             if (ImGui::IsItemHovered())
                 ui_tooltip(
-                    "Keep the picker open after each pick so you can "
-                    "quickly compare prefabs. Untick to close on click."
+                    "Keep the picker open after each pick so you can quickly compare prefabs. Untick to close on click."
                 );
             // In-picker Apply button so users with Instant Apply off can commit a pick without leaving the popup. ImGui
-            // closes a popup on outside clicks AND consumes the click, so the main Apply All below the picker can't be
+            // closes a popup on outside clicks AND consumes the click, so the main Apply All below the picker cannot be
             // reached without re-opening. This button fires the same manual_apply() the footer's Apply All uses;
             // staying inside the popup keeps both the click consumption and the popup persistence happy.
             ImGui::SameLine();
@@ -136,10 +131,7 @@ namespace Transmog
                 Transmog::manual_apply();
             }
             if (ImGui::IsItemHovered())
-                ui_tooltip(
-                    "Apply all pending changes without closing the "
-                    "picker. Same as the main Apply All button."
-                );
+                ui_tooltip("Apply all pending changes without closing the picker. Same as the main Apply All button.");
         }
 
         ImGui::SetNextItemWidth(320.0f);
@@ -162,13 +154,13 @@ namespace Transmog
             ui.navIndex = 0;
         }
 
-        // Navigation buttons: move the highlight through the visible list. Placed next to the search bar so they're
+        // Navigation buttons: move the highlight through the visible list. Placed next to the search bar so they are
         // always reachable without scrolling. Enter commits the highlighted item.
         ImGui::SameLine();
         ui.navMoved = false;
         {
             const int maxNav = ui.lastVisibleCount - 1;
-            // Up/Down arrow keys mirror the GUI nav buttons. ImGui's single-line InputText (the search box) doesn't
+            // Up/Down arrow keys mirror the GUI nav buttons. ImGui's single-line InputText (the search box) does not
             // consume vertical arrows, so this is safe even when the search box has keyboard focus.
             const bool keyUp = ImGui::IsKeyPressed(ImGuiKey_UpArrow);
             const bool keyDown = ImGui::IsKeyPressed(ImGuiKey_DownArrow);
@@ -186,8 +178,8 @@ namespace Transmog
         }
         // Prefabs toggle: only meaningful for slots that have a body-mesh carrier. The source comes from the slot's
         // carrier item in carrier_defaults.hpp, resolved to a rig mesh at runtime. A slot with no carrier named there
-        // gets -1 from selection_src_index and the toggle is hidden -- there's no point browsing prefabs from a slot
-        // that can never receive one. Force prefabMode off for those slots so a pre-existing true value doesn't blank
+        // gets -1 from selection_src_index and the toggle is hidden - there is no point browsing prefabs from a slot
+        // that can never receive one. Force prefabMode off for those slots so a pre-existing true value does not blank
         // the popup.
         {
             const bool slotHasCarrier = (Transmog::PrefabWrapperSwap::selection_src_index(slotCategory) >= 0);
@@ -199,8 +191,7 @@ namespace Transmog
                     ui_tooltip(
                         "Browse all body-mesh prefabs across every "
                         "slot. The search bar filters across the "
-                        "merged prefab list. Picking applies to the "
-                        "prefab's native slot."
+                        "merged prefab list. Picking applies to the prefab's native slot."
                     );
             }
             else if (ui.prefabMode)
@@ -217,7 +208,7 @@ namespace Transmog
         // Two-line row: display name + smaller internal name line.
         const float twoLineH = lineH * 2.0f + 4.0f;
 
-        // Fixed-height scrollable region so the popup doesn't resize per keystroke as the filter narrows.
+        // Fixed-height scrollable region so the popup does not resize per keystroke as the filter narrows.
         //
         // Width is content-derived in standalone mode: ~60 'M' glyphs at the current font is enough for the longest
         // item names without leaving a wide empty band. The previous DPI-linear value scaled past 1800px on 4K screens
@@ -227,7 +218,7 @@ namespace Transmog
         ImGui::BeginChild("##itemlist", ImVec2(popupW, twoLineH * 12.0f), true);
 
         // Increase vertical spacing between items for easier click/hover targets. Pushed INSIDE BeginChild so the
-        // popup-level spacing stays default -- otherwise the popup's own scroll region may capture mouse wheel events
+        // popup-level spacing stays default - otherwise the popup's own scroll region may capture mouse wheel events
         // instead of the child.
         ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(ImGui::GetStyle().ItemSpacing.x, rowH * 0.35f));
 
@@ -236,7 +227,7 @@ namespace Transmog
         if (!ui.prefabMode)
         {
             const bool selected = (targetItemId == 0);
-            if (ImGui::Selectable("(none -- id 0)##picker_none", selected, 0, ImVec2(0, 0)))
+            if (ImGui::Selectable("(none - id 0)##picker_none", selected, 0, ImVec2(0, 0)))
             {
                 targetItemId = 0;
                 committed = true;
@@ -251,19 +242,19 @@ namespace Transmog
             }
         }
 
-        // Hoist draw-list pointer outside the loop -- it is stable for the entire BeginChild region and avoids a
+        // Hoist draw-list pointer outside the loop - it is stable for the entire BeginChild region and avoids a
         // per-item lookup.
         ImDrawList *const dl = ImGui::GetWindowDrawList();
 
         // Semantic color constants for the two-line item display.
         static constexpr ImU32 k_colorCrashRisk = IM_COL32(255, 89, 89, 255);
         static constexpr ImU32 k_colorCarrier = IM_COL32(128, 217, 255, 255);
-        // Orange -- carrier path works but body type mismatched. Item will equip and may display with minor mesh
+        // Orange - carrier path works but body type mismatched. Item will equip and may display with minor mesh
         // artifacts; we show it when the user disables "Hide cross-body".
         static constexpr ImU32 k_colorCrossBody = IM_COL32(255, 176, 64, 255);
-        // Amber -- item has humanoid-range classifier tokens but none are in the male/female body set (e.g. NPC
+        // Amber - item has humanoid-range classifier tokens but none are in the male/female body set (e.g. NPC
         // variants like Antumbra/Badran gloves with only `0x012F`). Equip goes through the carrier path but render
-        // fidelity is inconsistent -- some items resolve correctly, others show as broken meshes.
+        // fidelity is inconsistent - some items resolve correctly, others show as broken meshes.
         static constexpr ImU32 k_colorAmbiguous = IM_COL32(230, 210, 120, 255);
         static constexpr ImU32 k_colorDimmed = IM_COL32(160, 160, 160, 200);
 
@@ -273,7 +264,7 @@ namespace Transmog
         // equip-eligibility column of the display_names TSV (item_name_table.cpp::m_bodyByName):
         //   Horse / pet / wagon / dragon: separate token pools with
         //     zero overlap with humanoid. Flagged as NonHumanoid and
-        //     hidden unconditionally -- these never render on a human
+        //     hidden unconditionally - these never render on a human
         //     skeleton (horse saddles, cat backpacks, etc.).
         using BK = Transmog::ItemNameTable::BodyKind;
         BK charBody;
@@ -289,7 +280,7 @@ namespace Transmog
                 charBody = BK::Female;
             else if (ov == "Both")
                 charBody = BK::Both;
-            else // "Auto" or unrecognised
+            else // "Auto" or unrecognized
                 charBody = Transmog::ItemNameTable::body_kind_for_character(pm.editing_character());
         }
 
@@ -301,9 +292,10 @@ namespace Transmog
         // frame stay well inside frame budget, and the unclipped loop keeps post-loop nav-clamp logic simple (it needs
         // the full visible count, which a clipper hides behind its internal stepping).
         //
-        // s_filtered is thread_local + static so the storage is reused across frames without per-frame allocation. Safe
-        // because only one picker popup can be open at a time (single call site, no nested-popup re-entry path exists).
-        static thread_local std::vector<std::size_t> s_filtered;
+        // s_filtered is a function-local static, so the storage survives across frames with no per-frame
+        // allocation. Only one picker popup is ever open at a time (single call site, no nested-popup re-entry path
+        // exists), so one instance of the buffer serves every caller.
+        static std::vector<std::size_t> s_filtered;
         s_filtered.clear();
         s_filtered.reserve(entries.size());
         int filteredByCategory = 0;
@@ -313,7 +305,7 @@ namespace Transmog
         // (Helm/Chest/Cloak/Gloves/Boots) where the body-mesh family is gender-specific (cd_phm_* vs cd_phw_*).
         // Earrings/Necklace/Rings/Lantern/Glasses/Mask/Backpack/Bracelet and weapons share their mesh families across
         // genders, so the gender / body-kind filter just hides perfectly-good options. partShowHashKey is non-null
-        // exactly for the 5 armor slots in slot_metadata.hpp -- reuse that table as the gate.
+        // exactly for the 5 armor slots in slot_metadata.hpp - reuse that table as the gate.
         const bool isArmorSlot = Transmog::slot_meta(slotCategory).partShowHashKey != nullptr;
 
         if (!ui.prefabMode)
@@ -322,7 +314,7 @@ namespace Transmog
             {
                 const auto &e = entries[idx];
                 // Exact filter accepts the slot itself OR its picker partner (Earring1/2, Ring1/2, MainHand/OffHand
-                // share items because their descriptor typeCodes are identical -- see ItemNameTable::category_of which
+                // share items because their descriptor typeCodes are identical - see ItemNameTable::category_of which
                 // returns the lower-indexed half for these pairs).
                 if (ui.exactFilter && !Transmog::slots_share_picker(e.category, slotCategory))
                 {
@@ -359,7 +351,7 @@ namespace Transmog
 
             // Anchor nav on the popup-slot's current item pick so Up/Down starts stepping from the user's prior
             // selection rather than the top of the filtered list. Only runs on frames where navIndex was freshly reset
-            // (popup-open via IsWindowAppearing, or filter edit). Falls back to row 0 when there's no selection
+            // (popup-open via IsWindowAppearing, or filter edit). Falls back to row 0 when there is no selection
             // (targetItemId==0) or the selection is hidden by the current filters / search.
             if (ui.navIndex == -1 && shown > 0)
             {
@@ -383,7 +375,7 @@ namespace Transmog
             }
 
             // Pass 2: render the filtered rows. bodyMatches is recomputed here rather than cached from pass 1 because
-            // the per-item flag also drives the colour tier and the carrier/crash-risk tag -- recomputation is cheaper
+            // the per-item flag also drives the color tier and the carrier/crash-risk tag - recomputation is cheaper
             // than a parallel side-vector allocation.
             for (int row = 0; row < shown; ++row)
             {
@@ -392,7 +384,7 @@ namespace Transmog
                 const bool ambiguousBody = (e.bodyKind == BK::Ambiguous);
                 // Body-mesh family is gender-specific only for the 5 armor slots (cd_phm_* vs cd_phw_*). Accessory +
                 // weapon slots share their meshes across genders, so a "BODY MISMATCH" or "UNCERTAIN BODY" tag would be
-                // misleading. Treat every entry as body-matching for non-armor slots so the colour/tag flow below
+                // misleading. Treat every entry as body-matching for non-armor slots so the color/tag flow below
                 // collapses to plain `usesCarrier` (cyan) or untagged.
                 const bool bodyMatches =
                     !isArmorSlot ||
@@ -407,29 +399,29 @@ namespace Transmog
                 // NPC variant items (hasVariantMeta) are humanoid and now render via carrier + char-class bypass. True
                 // crash risks are non-player items WITHOUT variant meta (horse tack, etc).
                 const bool usesCarrier = e.hasVariantMeta;
-                // Colour tiers:
-                //   red    CRASH RISK         -- rule list rejects this body,
+                // Color tiers:
+                //   red    CRASH RISK         - rule list rejects this body,
                 //                               no carrier path rescue.
-                //   orange BODY MISMATCH      -- cross-body carrier, will equip
+                //   orange BODY MISMATCH      - cross-body carrier, will equip
                 //                               but mesh likely breaks.
-                //   amber  UNCERTAIN BODY     -- humanoid-range but no body-
+                //   amber  UNCERTAIN BODY     - humanoid-range but no body-
                 //                               set match (e.g. 0x012F-only
                 //                               NPC variants); render may or
                 //                               may not resolve correctly.
-                //   blue   carrier            -- NPC variant, same-body match,
+                //   blue   carrier            - NPC variant, same-body match,
                 //                               reliable carrier path.
                 const bool crashRisk = !bodyMatches && !e.hasVariantMeta;
                 const bool crossBodyCarrier = !bodyMatches && e.hasVariantMeta;
-                // Only flag ambiguous when it's actually a carrier item and not already bucketed as cross-body (it
-                // isn't -- ambiguous passes bodyMatches above). Suppressed entirely on non-armor slots where body kind
+                // Only flag ambiguous when it is actually a carrier item and not already bucketed as cross-body (it
+                // is not - ambiguous passes bodyMatches above). Suppressed entirely on non-armor slots where body kind
                 // is irrelevant.
                 const bool ambiguousCarrier = isArmorSlot && ambiguousBody && e.hasVariantMeta;
                 if (crashRisk)
-                    tag = "non-player -- CRASH RISK";
+                    tag = "non-player - CRASH RISK";
                 else if (crossBodyCarrier)
-                    tag = "carrier -- BODY MISMATCH";
+                    tag = "carrier - BODY MISMATCH";
                 else if (ambiguousCarrier)
-                    tag = "carrier -- UNCERTAIN BODY";
+                    tag = "carrier - UNCERTAIN BODY";
                 else if (usesCarrier)
                     tag = "carrier";
 
@@ -504,7 +496,7 @@ namespace Transmog
                 }
                 else if (targetItemId == e.id)
                 {
-                    // Scroll to the currently selected item on popup open so it's visible without manual scrolling.
+                    // Scroll to the currently selected item on popup open so it is visible without manual scrolling.
                     ImGui::SetItemDefaultFocus();
                 }
 
@@ -524,28 +516,21 @@ namespace Transmog
             if (shown == 0)
             {
                 if (ui.exactFilter && filteredByCategory > 0)
-                    ui_text_disabled(
-                        "no matches in this category -- "
-                        "uncheck Exact to widen"
-                    );
+                    ui_text_disabled("no matches in this category - uncheck Exact to widen");
                 else if ((ui.hideIncompatible || ui.hideVariants || ui.hideBodyMismatch) && filteredByUnsafe > 0)
-                    ui_text_disabled(
-                        "no matches -- uncheck filters "
-                        "to show more items"
-                    );
+                    ui_text_disabled("no matches - uncheck filters to show more items");
                 else
                     ui_text_disabled("no matches");
             }
-        } // if (!ui.prefabMode)
+        }
 
         // Body-Mesh Prefab section
         //
         // Mirrors the carrier picker but for raw body-mesh prefabs. Picking an entry here is equivalent to setting a
         // body-mesh override on the slot: the engine still equips the player's actual carrier item, but the body-mesh
         // hook substitutes the wrapper at apply time so the visible mesh becomes the chosen prefab. The source wrapper
-        // is auto-derived from the slot's INI source pair (the
-        // Kliff carrier defaults). When outPrefabIdx is null the caller doesn't want this section -- skip it so legacy
-        // callers see no change.
+        // comes from the slot's INI source pair, that is the Kliff carrier defaults. A null outPrefabIdx means the
+        // caller wants no prefab section, so the whole block is skipped for it.
         if (outPrefabIdx != nullptr)
         {
             namespace PWS = Transmog::PrefabWrapperSwap;
@@ -556,7 +541,7 @@ namespace Transmog
                 // Cross-slot prefab browser
                 //
                 // Walks every TransmogSlot's catalog, applies the search filter, and labels each entry with its native
-                // slot. Clicking applies the prefab to its NATIVE slot (not the popup slot) -- the popup is just an
+                // slot. Clicking applies the prefab to its NATIVE slot (not the popup slot) - the popup is just an
                 // entry point for browsing the merged catalog. This way the user can pick any prefab from any slot's
                 // picker. After populate_slot_catalogs unified the per-slot vectors (every slot now holds the FULL
                 // prefab set), iterating every slot would push each prefab 20x with a meaningless [Type] tag. Iterate
@@ -568,7 +553,7 @@ namespace Transmog
                 const auto &cat0 = PWS::slot_catalog(static_cast<Transmog::TransmogSlot>(0));
                 const std::size_t catalogedTotal = cat0.size();
 
-                static thread_local std::vector<std::uint32_t> s_prefabFlat;
+                static std::vector<std::uint32_t> s_prefabFlat;
                 s_prefabFlat.clear();
                 for (std::size_t pi = 0; pi < cat0.size(); ++pi)
                 {
@@ -586,7 +571,7 @@ namespace Transmog
 
                 // Anchor nav on the popup-slot's current prefab pick so Up/Down starts stepping from the user's prior
                 // selection rather than the top of the filtered prefab list. Mirrors the items-mode anchor block above.
-                // Falls back to row 0 when there's no selection or the picked prefab was filtered out by Exact /
+                // Falls back to row 0 when there is no selection or the picked prefab was filtered out by Exact /
                 // search.
                 if (ui.navIndex == -1 && totalShown > 0)
                 {
@@ -681,7 +666,7 @@ namespace Transmog
                 // chain (PWS::set_selection
                 // + force-carrier + manual_apply) but suppresses the popup
                 // close so the user can keep auditioning prefabs. Click /
-                // Enter pass previewOnly=false and still honour KeepOpen.
+                // Enter pass previewOnly=false and still honor KeepOpen.
                 auto commit_prefab_at = [&](std::size_t pi, bool previewOnly = false) -> bool
                 {
                     // Per-slot catalogs were identical right after populate_slot_catalogs seeded them from the shared
@@ -706,8 +691,7 @@ namespace Transmog
                         *outPrefabIdx = adoptedIdx;
                     committed = true;
                     DMK::log().info(
-                        "[picker] prefabs-mode pick: popupSlot={} "
-                        "label={} adoptedIdx={} name='{}'",
+                        "[picker] prefabs-mode pick: popupSlot={} label={} adoptedIdx={} name='{}'",
                         Transmog::slot_name(slotCategory),
                         label_for_prefab(pe.name),
                         adoptedIdx,
@@ -759,7 +743,7 @@ namespace Transmog
                         {
                             commit_prefab_at(pi);
                         }
-                        // Auto-apply on nav only -- when the Up/Down nav cursor (GUI buttons or arrow keys) lands on a
+                        // Auto-apply on nav only - when the Up/Down nav cursor (GUI buttons or arrow keys) lands on a
                         // new row, feed its name into the prefab-mode hover-apply debounce. After k_hoverDebounceMs of
                         // dwell the commit fires with previewOnly=true so the popup stays open. Mouse hover does NOT
                         // trigger here: a body-mesh preview fans out to a full multi-actor manual_apply, which is too
@@ -774,7 +758,7 @@ namespace Transmog
                 if (lastVis < total)
                     ImGui::Dummy(ImVec2(0.0f, (total - lastVis) * prefabRowH));
 
-                // Keyboard Enter commits the nav-targeted row. Mirrors the items-list Enter behaviour above, routed
+                // Keyboard Enter commits the nav-targeted row. Mirrors the items-list Enter behavior above, routed
                 // through commit_prefab_at so the keep-open policy applies.
                 if (ui.navIndex >= 0 && ui.navIndex < total &&
                     (ImGui::IsKeyPressed(ImGuiKey_Enter) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter)))
@@ -787,7 +771,7 @@ namespace Transmog
                 // k_hoverDebounceMs. previewOnly=true keeps the popup open across the re-equip so the user can continue
                 // browsing. The cat0 scan resolves the pending name back to a catalog index because the row loop has
                 // already ended and pi is no longer in scope. A side-cache of pi next to the name would skip this scan
-                // but the worst-case cost (~5000 entries x ~3 Hz = ~15us per 300ms) doesn't justify adding another
+                // but the worst-case cost (~5000 entries x ~3 Hz = ~15us per 300ms) does not justify adding another
                 // SlotUIState field.
                 if (autoApply && ui.hoverPendingPrefab != ui.hoverAppliedPrefab && !ui.hoverPendingPrefab.empty() &&
                     ui.hoverPrefabStartMs != 0 && (Transmog::steady_ms() - ui.hoverPrefabStartMs) >= k_hoverDebounceMs)
@@ -814,10 +798,7 @@ namespace Transmog
                 shown = total;
                 if (catalogedTotal == 0)
                 {
-                    ui_text_disabled(
-                        "no prefabs cataloged yet -- catalog may still "
-                        "be populating, try Refresh"
-                    );
+                    ui_text_disabled("no prefabs cataloged yet - catalog may still be populating, try Refresh");
                 }
                 else if (totalShown == 0)
                 {
@@ -846,7 +827,7 @@ namespace Transmog
             }
         }
 
-        // Clamp nav index to the actual visible count so stale values from a wider filter don't point past the end of
+        // Clamp nav index to the actual visible count so stale values from a wider filter do not point past the end of
         // the list.
         ui.lastVisibleCount = shown;
         if (ui.navIndex >= shown)
@@ -857,7 +838,7 @@ namespace Transmog
 
         // Hover-apply debounce
         // Fire manual_apply_slot() only after the cursor has rested on the same item for k_hoverDebounceMs. Uses the
-        // slot-scoped apply path so only this slot re-equips -- other slots are untouched and don't flicker.
+        // slot-scoped apply path so only this slot re-equips - other slots are untouched and do not flicker.
         if (autoApply && ui.hoverPendingId != ui.hoverAppliedId && ui.hoverStartMs != 0 &&
             (Transmog::steady_ms() - ui.hoverStartMs) >= k_hoverDebounceMs)
         {

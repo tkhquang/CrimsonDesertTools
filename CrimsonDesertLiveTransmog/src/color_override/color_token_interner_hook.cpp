@@ -1,14 +1,15 @@
 #include "color_token_interner_hook.hpp"
 
 #include "../aob_resolver.hpp"
+#include "color_state.hpp"
 
 #include <DetourModKit.hpp>
+#include <DetourModKit/memory.hpp>
 
 #include <Windows.h>
 
 #include <array>
 #include <atomic>
-#include <chrono>
 #include <cstring>
 #include <mutex>
 
@@ -20,8 +21,8 @@ namespace Transmog::ColorOverride::InternerHook
         // copies referenced by the interner's entries array).
         struct Entry
         {
-            const char *name;
-            std::uint32_t token;
+            const char *name{};
+            std::uint32_t token{};
         };
         // Engine's interner sentinel-cap is 0x2FFFF (196607). Size our capture table to absorb realistic full dumps
         // (live tables typically run 10k-30k entries on a loaded scene; the engine reserves up to ~200k slots).
@@ -40,9 +41,9 @@ namespace Transmog::ColorOverride::InternerHook
         // each call.
         std::atomic<std::uintptr_t> g_stateSlot{0};
 
-        // Field offset (within the state struct) that holds the entries-array pointer. The engine has shifted this
-        // between +0x40 and +0x48 across patches; init() probes both and caches whichever address actually contains
-        // valid records here so refresh() reads through the same offset.
+        // Field offset inside the state struct that holds the entries-array pointer. The engine shifted this between
+        // +0x40 and +0x48 across patches. init() probes both and caches whichever address holds valid records, so
+        // refresh() reads through the same offset.
         std::atomic<std::ptrdiff_t> g_offEntriesArray{0x48};
 
         // Incremental-walk cursor used by refresh(). When the engine reallocates the entries array, `g_lastEntriesBase`
@@ -78,25 +79,23 @@ namespace Transmog::ColorOverride::InternerHook
             }
         }
 
-        // Scan the function body for the FIRST `mov [rip+disp32], REG` whose target slot lies inside the loaded module.
-        // That write is the engine's `qword = state` publish (encoded as `48 89 35 disp32` -- `mov [rip+d], rsi` -- at
-        // function offset 0x312). The slot ADDRESS has drifted across patches (0x145E15620 in v1.06, 0x145F52510 in
-        // 1.10.00), so it is always computed from the RIP displacement, never hardcoded.
+        // Scan the function body for the FIRST `mov [rip+disp32], REG` whose target slot lies inside the loaded
+        // module. That write is the engine `qword = state` publish, encoded as `48 89 35 disp32`, a `mov [rip+d], rsi`.
+        // The slot ADDRESS drifts across patches, so it is always computed from the RIP displacement and never
+        // hardcoded.
         //
         // REX byte: 0x48 covers rax-rdi, 0x4C covers r8-r15.
-        // ModR/M: `(byte & 0xC7) == 0x05` selects mod=00 / r/m=101
-        //           (RIP-relative addressing). The middle 3 bits hold
-        //           the source register and are wildcarded by the
-        //           mask so the scan tolerates compiler register-
-        //           allocation churn between patches.
+        // ModR/M: `(byte & 0xC7) == 0x05` selects mod=00 and r/m=101, which is RIP-relative addressing. The middle 3
+        //         bits hold the source register and the mask wildcards them, so the scan tolerates compiler
+        //         register-allocation churn between patches.
         //
-        // Value-based disambiguation: a slot already holding a heap pointer is a confident match (the engine has
-        // published the state). But the engine fills that global LAZILY on first interner use, which can happen AFTER
-        // mod startup -- at which point the slot still reads 0. Since the publish is structurally the first in-module
-        // RIP-relative qword store in this function, we prefer a heap pointer but fall back to the first ZEROED store,
-        // resolving the slot correctly both before and after the engine populates it. A non-zero, non-heap value (small
-        // int / sentinel) still rejects, preserving the guard against unrelated early-init globals that share the
-        // encoding.
+        // Value-based disambiguation: a slot already holding a heap pointer is a confident match, because the engine
+        // published the state. The engine fills that global LAZILY on first interner use, which happens AFTER mod
+        // startup, and until then the slot reads 0. The publish is structurally the first in-module RIP-relative qword
+        // store in this function, so the scan prefers a heap pointer and falls back to the first ZEROED store. That
+        // resolves the slot both before and after the engine populates it. A non-zero, non-heap value such as a small
+        // int or a sentinel still rejects, which preserves the guard against unrelated early-init globals that share
+        // the encoding.
         std::uintptr_t
         find_state_slot_in_function(std::uintptr_t funcAddr, std::uintptr_t modBase, std::size_t modSize) noexcept
         {
@@ -120,7 +119,7 @@ namespace Transmog::ColorOverride::InternerHook
                         // Exactly zero -> pre-publish slot; remember
                         // the FIRST as a fallback. Otherwise skip (unrelated early-init global).
                         const auto v = *reinterpret_cast<const std::uint64_t *>(target);
-                        if (v >= 0x10000ULL && v < 0x7FFFFFFFFFFFULL)
+                        if (DMK::memory::is_plausible_ptr(DMK::Address{static_cast<std::uintptr_t>(v)}))
                             return target;
                         if (v == 0 && firstZeroSlot == 0)
                             firstZeroSlot = target;
@@ -152,9 +151,10 @@ namespace Transmog::ColorOverride::InternerHook
                 const auto entryAddr = entriesBase + i * k_entryStride;
                 const auto namePtr = DMK::memory::read<std::uint64_t>(DMK::Address{entryAddr + k_offName}).value_or(0);
                 const auto token = DMK::memory::read<std::uint32_t>(DMK::Address{entryAddr + k_offToken}).value_or(0);
-                // Bail when we walk off the end -- consecutive entries with null/garbage indicate we've left the
-                // allocated array.
-                if (namePtr < 0x10000ULL || namePtr > 0x7FFFFFFFFFFFULL || token == 0 || token > 0x100000u)
+                // Bail when the walk runs off the end. Consecutive entries with null or garbage mean the walk left
+                // the allocated array.
+                if (!DMK::memory::is_plausible_ptr(DMK::Address{static_cast<std::uintptr_t>(namePtr)}) || token == 0 ||
+                    token > 0x100000u)
                 {
                     if (++consecutiveBad >= 16)
                         break;
@@ -185,8 +185,8 @@ namespace Transmog::ColorOverride::InternerHook
         {
             auto &logger = DMK::log();
 
-            // Stage 1: resolve the interner function and the state-slot ADDRESS. Timing-independent -- it locates
-            // the publish *instruction*, not a populated value -- so it succeeds even at startup, before the engine has
+            // Stage 1: resolve the interner function and the state-slot ADDRESS. Timing-independent - it locates
+            // the publish *instruction*, not a populated value - so it succeeds even at startup, before the engine has
             // run the interner's once-only init path. Runs once; the resolved slot is cached in g_stateSlot and reused
             // on every retry.
             auto stateSlot = g_stateSlot.load(std::memory_order_acquire);
@@ -200,58 +200,48 @@ namespace Transmog::ColorOverride::InternerHook
                 const auto funcAddr = anchor_address(AnchorId::ColorTokenInterner);
                 if (funcAddr == 0)
                 {
-                    logger.warning(
-                        "[interner-hook] ColorTokenInterner not "
-                        "resolved"
-                    );
+                    logger.warning("[interner-hook] ColorTokenInterner not resolved");
                     return;
                 }
                 stateSlot = find_state_slot_in_function(funcAddr, modBase, modSize);
                 if (stateSlot == 0)
                 {
                     logger.warning(
-                        "[interner-hook] state-publish store not "
-                        "found in interner body (func=0x{:X})",
+                        "[interner-hook] state-publish store not found in interner body (func=0x{:X})",
                         funcAddr
                     );
                     return;
                 }
                 g_stateSlot.store(stateSlot, std::memory_order_release);
-                logger.info(
-                    "[interner-hook] resolved state slot 0x{:X} "
-                    "(func=0x{:X})",
-                    stateSlot,
-                    funcAddr
-                );
+                logger.info("[interner-hook] resolved state slot 0x{:X} (func=0x{:X})", stateSlot, funcAddr);
             }
 
-            // Stage 2: read the published state pointer and walk the entries array. Retry-able -- the engine
+            // Stage 2: read the published state pointer and walk the entries array. Retry-able - the engine
             // publishes the state lazily on first shader-property registration, which can occur after mod startup.
             // While the slot still reads 0 we leave g_dumped false and return; refresh() re-drives this until the slot
             // is populated.
             const auto stateAddr = DMK::memory::read<std::uint64_t>(DMK::Address{stateSlot}).value_or(0);
-            if (stateAddr < 0x10000ULL)
+            if (!DMK::memory::is_plausible_ptr(DMK::Address{static_cast<std::uintptr_t>(stateAddr)}))
             {
                 if (!g_loggedPending.exchange(true, std::memory_order_acq_rel))
                     logger.info(
                         "[interner-hook] state slot 0x{:X} not yet "
-                        "published; will capture lazily on first "
-                        "interner use",
+                        "published; will capture lazily on first interner use",
                         stateSlot
                     );
                 return;
             }
-            // State-struct field layout (decompile of sub_140F46680):
+            // State-struct field layout, from the interner body:
             //   state + 0x30 = num_buckets       (u32)
             //   state + 0x40 = bucket_array_ptr  (u64)
             //   state + 0x48 = entries_array_ptr (u64)
-            // Live capture in v1.06 has shown the entries-array pointer landing at +0x40 in some builds and +0x48 in
-            // others (the engine appears to have shifted the field by one slot during a header rev). Probe both with a
-            // small leading-record validator and persist the chosen offset in g_offEntriesArray so refresh() reads
-            // through the same field on subsequent walks.
+            // Live capture puts the entries-array pointer at +0x40 in some builds and +0x48 in others, because the
+            // engine shifted the field by one slot during a header rev. Probe both with a small leading-record
+            // validator and persist the chosen offset in g_offEntriesArray so refresh() reads through the same field
+            // on later walks.
             auto probe = [](std::uintptr_t base) noexcept -> std::size_t
             {
-                if (base < 0x10000ULL)
+                if (!DMK::memory::is_plausible_ptr(DMK::Address{base}))
                     return 0;
                 std::size_t valid = 0;
                 for (std::size_t i = 0; i < 256; ++i)
@@ -259,7 +249,7 @@ namespace Transmog::ColorOverride::InternerHook
                     const auto e = base + i * 32;
                     const auto np = DMK::memory::read<std::uint64_t>(DMK::Address{e + 0x08}).value_or(0);
                     const auto tk = DMK::memory::read<std::uint32_t>(DMK::Address{e + 0x18}).value_or(0);
-                    if (np < 0x10000ULL || np > 0x7FFFFFFFFFFFULL)
+                    if (!DMK::memory::is_plausible_ptr(DMK::Address{static_cast<std::uintptr_t>(np)}))
                         continue;
                     if (tk == 0 || tk > 0x100000u)
                         continue;
@@ -273,30 +263,26 @@ namespace Transmog::ColorOverride::InternerHook
             const auto v40 = probe(base40);
             const auto v48 = probe(base48);
             logger.info(
-                "[interner-hook] probe state=0x{:X} "
-                "base40=0x{:X} valid40={} base48=0x{:X} valid48={}",
+                "[interner-hook] probe state=0x{:X} base40=0x{:X} valid40={} base48=0x{:X} valid48={}",
                 stateAddr,
                 base40,
                 v40,
                 base48,
                 v48
             );
-            const bool pick40 = (v40 >= v48 && base40 >= 0x10000ULL);
+            const bool pick40 =
+                (v40 >= v48 && DMK::memory::is_plausible_ptr(DMK::Address{static_cast<std::uintptr_t>(base40)}));
             const auto entriesBase = pick40 ? base40 : base48;
             const std::ptrdiff_t entriesOff = pick40 ? 0x40 : 0x48;
-            if (entriesBase < 0x10000ULL)
+            if (!DMK::memory::is_plausible_ptr(DMK::Address{static_cast<std::uintptr_t>(entriesBase)}))
             {
-                logger.warning(
-                    "[interner-hook] neither state+0x40 nor +0x48 "
-                    "has a valid entries-array pointer"
-                );
+                logger.warning("[interner-hook] neither state+0x40 nor +0x48 has a valid entries-array pointer");
                 return;
             }
             std::size_t nextIdx = 0;
             const auto captured = walk_entries_array(entriesBase, 0, nextIdx);
             logger.info(
-                "[interner-hook] stateSlot=0x{:X} state=0x{:X} "
-                "entries=0x{:X} off=0x{:X} captured={} nextIdx={}",
+                "[interner-hook] stateSlot=0x{:X} state=0x{:X} entries=0x{:X} off=0x{:X} captured={} nextIdx={}",
                 stateSlot,
                 stateAddr,
                 entriesBase,
@@ -316,8 +302,8 @@ namespace Transmog::ColorOverride::InternerHook
         if (g_dumped.load(std::memory_order_acquire))
             return true;
         // Re-entrant: a single early attempt can find the interner's state global still unpublished (the engine fills
-        // it lazily on first use, which may be after mod startup). Serialize attempts -- do_init mutates the shared
-        // capture table -- and latch g_dumped only on a successful walk. refresh() drives the retries until then.
+        // it lazily on first use, which may be after mod startup). Serialize attempts - do_init mutates the shared
+        // capture table - and latch g_dumped only on a successful walk. refresh() drives the retries until then.
         bool expected = false;
         if (!g_captureBusy.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
             return g_dumped.load(std::memory_order_acquire);
@@ -330,22 +316,22 @@ namespace Transmog::ColorOverride::InternerHook
     {
         // No hard attempt cap. Mirroring item_name_table's stability check: keep walking the engine's interner each
         // time the setter sees an unclassified token, and only stop once two consecutive walks return the same g_count
-        // -- that means the engine has stopped interning new names. After settle this becomes a permanent no-op for the
+        // - that means the engine has stopped interning new names. After settle this becomes a permanent no-op for the
         // rest of the session.
         //
         // Throttled to ~1.5 s between walks because each walk is
         // O(entries); the engine can have 100k+ entries in a loaded scene.
         static std::atomic<bool> s_settled{false};
-        static std::atomic<long long> s_lastMs{0};
+        static std::atomic<std::int64_t> s_last_ms{0};
         static std::atomic<bool> s_busy{false};
         static std::atomic<std::size_t> s_lastCount{0};
         if (s_settled.load(std::memory_order_acquire))
             return 0;
-        using clock = std::chrono::steady_clock;
-        const auto nowMs =
-            std::chrono::duration_cast<std::chrono::milliseconds>(clock::now().time_since_epoch()).count();
-        auto last = s_lastMs.load(std::memory_order_acquire);
-        if (last != 0 && (nowMs - last) < 1500)
+        // One clock owner for the whole module, so this throttle and the apply window share a time base by
+        // construction.
+        const auto now = State::now_ms();
+        const auto last = s_last_ms.load(std::memory_order_acquire);
+        if (last != 0 && (now - last) < 1500)
             return 0;
         // Until the first successful capture, re-drive init(): the interner's state global may not have been published
         // when init() ran at startup (the engine fills it lazily on first shader-property registration). do_init()
@@ -353,7 +339,7 @@ namespace Transmog::ColorOverride::InternerHook
         // as the walk below.
         if (!g_dumped.load(std::memory_order_acquire))
         {
-            s_lastMs.store(nowMs, std::memory_order_release);
+            s_last_ms.store(now, std::memory_order_release);
             init();
             return 0;
         }
@@ -363,16 +349,16 @@ namespace Transmog::ColorOverride::InternerHook
         bool expected = false;
         if (!s_busy.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
             return 0;
-        s_lastMs.store(nowMs, std::memory_order_release);
+        s_last_ms.store(now, std::memory_order_release);
         const auto stateAddr = DMK::memory::read<std::uint64_t>(DMK::Address{slot}).value_or(0);
         std::size_t added = 0;
-        if (stateAddr >= 0x10000ULL)
+        if (DMK::memory::is_plausible_ptr(DMK::Address{static_cast<std::uintptr_t>(stateAddr)}))
         {
             const auto entriesOff = g_offEntriesArray.load(std::memory_order_acquire);
             const auto entriesBase = DMK::memory::read<std::uint64_t>(DMK::Address{stateAddr + entriesOff}).value_or(0);
-            if (entriesBase >= 0x10000ULL)
+            if (DMK::memory::is_plausible_ptr(DMK::Address{static_cast<std::uintptr_t>(entriesBase)}))
             {
-                // Resume the walk where the previous one stopped if the engine hasn't reallocated the entries array;
+                // Resume the walk where the previous one stopped if the engine has not reallocated the entries array;
                 // otherwise restart from index 0 against the new base so we capture every entry exactly once.
                 const auto cachedBase = g_lastEntriesBase.load(std::memory_order_acquire);
                 std::size_t startIdx = 0;
@@ -390,8 +376,7 @@ namespace Transmog::ColorOverride::InternerHook
                 {
                     DMK::log().info(
                         "[interner-hook] refresh: entries=0x{:X} "
-                        "off=0x{:X} resumeFrom={} added={} total={} "
-                        "prev_total={} nextIdx={}",
+                        "off=0x{:X} resumeFrom={} added={} total={} prev_total={} nextIdx={}",
                         entriesBase,
                         entriesOff,
                         startIdx,
@@ -402,15 +387,11 @@ namespace Transmog::ColorOverride::InternerHook
                     );
                 }
                 // Two consecutive walks with the same total = the interner has stopped growing. Require a non-zero
-                // baseline so an early empty-table walk can't latch settled immediately.
+                // baseline so an early empty-table walk cannot latch settled immediately.
                 if (after == prev && after > 0)
                 {
                     s_settled.store(true, std::memory_order_release);
-                    DMK::log().info(
-                        "[interner-hook] settled at {} captures; "
-                        "no further refreshes this session",
-                        after
-                    );
+                    DMK::log().info("[interner-hook] settled at {} captures; no further refreshes this session", after);
                 }
             }
         }

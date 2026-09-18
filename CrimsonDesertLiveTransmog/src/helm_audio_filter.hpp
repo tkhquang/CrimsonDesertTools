@@ -1,4 +1,5 @@
-#pragma once
+#ifndef TRANSMOG_HELM_AUDIO_FILTER_HPP
+#define TRANSMOG_HELM_AUDIO_FILTER_HPP
 
 #include <DetourModKit/hook.hpp>
 
@@ -114,3 +115,5 @@ namespace Transmog::HelmAudioFilter
     bool init(DetourModKit::hook::HookStack &hooks);
 
 } // namespace Transmog::HelmAudioFilter
+
+#endif // TRANSMOG_HELM_AUDIO_FILTER_HPP

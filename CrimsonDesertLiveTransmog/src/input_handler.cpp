@@ -26,8 +26,8 @@ namespace Transmog
         const DMK::config::SectionBinder presets = DMK::config::section("Presets");
 
         // Every binding passes false as press_combo's trailing `consume`, which registers a "<ini_key>.Consume"
-        // bool defaulting OFF. Registering it costs nothing at runtime -- the input engine only installs its XInput
-        // interception once some binding is actually set true -- and withholding it would hide the option entirely,
+        // bool defaulting OFF. Registering it costs nothing at runtime - the input engine only installs its XInput
+        // interception once some binding is actually set true - and withholding it would hide the option entirely,
         // because an INI key that was never registered is ignored without a warning. Whether a binding can USE
         // suppression is not fixed here either: the combo is user-editable, so any binding can become a gamepad
         // binding. Suppression is honored for digital gamepad buttons and the mouse wheel only, masks just the
@@ -41,21 +41,21 @@ namespace Transmog
             "ToggleHotkey",
             "Toggle Hotkey",
             "ToggleTransmog",
-            []()
+            []() -> void
             {
                 // flag_enabled() is the single source of truth used by every hook and the overlay checkbox. The
                 // toggle flips it so all state stays consistent.
                 auto &ff = flag_enabled();
-                const bool nowEnabled = !ff.load(std::memory_order_relaxed);
-                ff.store(nowEnabled, std::memory_order_relaxed);
-                if (nowEnabled)
+                const bool now_enabled = !ff.load(std::memory_order_relaxed);
+                ff.store(now_enabled, std::memory_order_relaxed);
+                if (now_enabled)
                 {
-                    DMK::log().info("Transmog ON (hotkey) -- applying");
+                    DMK::log().info("Transmog ON (hotkey) - applying");
                     Transmog::manual_apply();
                 }
                 else
                 {
-                    DMK::log().info("Transmog OFF (hotkey) -- restoring original");
+                    DMK::log().info("Transmog OFF (hotkey) - restoring original");
                     Transmog::manual_clear();
                 }
             },
@@ -67,7 +67,7 @@ namespace Transmog
             "ApplyHotkey",
             "Apply Transmog Hotkey",
             "ApplyTransmog",
-            []()
+            []() -> void
             {
                 DMK::log().info("Apply hotkey pressed");
                 Transmog::manual_apply();
@@ -80,11 +80,10 @@ namespace Transmog
             "ClearHotkey",
             "Clear Transmog Hotkey",
             "ClearTransmog",
-            []()
+            []() -> void
             {
-                // Clear also flips flag_enabled to false so a subsequent
-                // Toggle sees cleared == disabled (avoids 2-press bug).
-                DMK::log().info("Clear hotkey pressed -- disabling transmog");
+                // Clear also stores false into flag_enabled, so the next Toggle reads cleared as disabled.
+                DMK::log().info("Clear hotkey pressed - disabling transmog");
                 flag_enabled().store(false, std::memory_order_relaxed);
                 Transmog::manual_clear();
             },
@@ -96,7 +95,7 @@ namespace Transmog
             "CaptureHotkey",
             "Capture Outfit Hotkey",
             "CaptureOutfit",
-            []()
+            []() -> void
             {
                 DMK::log().info("Capture hotkey pressed");
                 Transmog::capture_outfit();
@@ -109,7 +108,7 @@ namespace Transmog
             "AppendHotkey",
             "Append Preset Hotkey",
             "PresetAppend",
-            []()
+            []() -> void
             {
                 DMK::log().info("Preset append hotkey pressed");
                 PresetManager::instance().append_from_state();
@@ -123,7 +122,7 @@ namespace Transmog
             "ReplaceHotkey",
             "Replace Preset Hotkey",
             "PresetReplace",
-            []()
+            []() -> void
             {
                 DMK::log().info("Preset replace hotkey pressed");
                 PresetManager::instance().replace_current_from_state();
@@ -136,7 +135,7 @@ namespace Transmog
             "RemoveHotkey",
             "Remove Preset Hotkey",
             "PresetRemove",
-            []()
+            []() -> void
             {
                 DMK::log().info("Preset remove hotkey pressed");
                 PresetManager::instance().remove_current();
@@ -149,7 +148,7 @@ namespace Transmog
             "NextHotkey",
             "Next Preset Hotkey",
             "PresetNext",
-            []()
+            []() -> void
             {
                 auto &pm = PresetManager::instance();
                 pm.next_preset();
@@ -164,7 +163,7 @@ namespace Transmog
             "PrevHotkey",
             "Previous Preset Hotkey",
             "PresetPrev",
-            []()
+            []() -> void
             {
                 auto &pm = PresetManager::instance();
                 pm.prev_preset();

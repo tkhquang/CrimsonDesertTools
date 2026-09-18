@@ -1,4 +1,5 @@
-#pragma once
+#ifndef TRANSMOG_TRANSMOG_WORKER_HPP
+#define TRANSMOG_TRANSMOG_WORKER_HPP
 
 #include <cstdint>
 
@@ -9,79 +10,100 @@ namespace Transmog
     inline constexpr std::uint64_t k_applyDebounceMs = 1500;
     inline constexpr std::uint64_t k_manualDebounceMs = 100;
 
-    // Debounce window used once requests start arriving in a run, replacing the 100 ms above.
+    // Debounce window that replaces k_manualDebounceMs once requests start arriving in a run.
     //
-    // 100 ms only collapses requests landing within 100 ms of each other, which a person clicking through presets
-    // never does -- measured spacing is 300-400 ms. So every switch ran its own full apply, and the intermediate
-    // presets were each visibly built and torn down on the way to the one actually wanted.
+    // A request that arrives within this window of the PREVIOUS REQUEST belongs to a burst and re-arms the deadline
+    // this far out. While the clicks continue the deadline keeps moving and nothing is built. Once they stop, ONE
+    // apply runs and reads live state, so only the preset the user landed on reaches the body. A lone switch keeps
+    // the short debounce and applies at once.
     //
-    // A request arriving within this window of the PREVIOUS REQUEST is treated as part of a burst and re-arms the
-    // deadline this far out. While the clicking continues the deadline keeps moving and nothing is built; once it
-    // stops, ONE apply runs and reads live state, so only the preset landed on is applied. A lone switch is not
-    // affected -- with no recent request it keeps the short debounce and applies immediately.
-    //
-    // Sized above the observed 300-400 ms click spacing so an ordinary burst coalesces. Raising it absorbs slower
-    // clicking, at the cost of a longer wait after the last one.
+    // The value sits above the measured 300-400 ms click spacing so an ordinary burst coalesces. A larger value
+    // absorbs slower clicks and costs a longer wait after the last one.
     inline constexpr std::uint64_t k_burstCoalesceMs = 500;
 
     // Player component resolution
 
     /**
-     * Walks the WorldSystem pointer chain to resolve the player's equipment component (a1 for SlotPopulator). Returns 0
-     * if any link in the chain is null or invalid (pre-world, loading screen).
+     * @brief Walks the WorldSystem pointer chain to the player's equipment component (a1 for SlotPopulator).
+     * @return The component pointer, or 0 when any link in the chain is null or invalid (pre-world, loading screen).
      */
     __int64 resolve_player_component() noexcept;
 
     // Debounce worker
 
     /**
-     * Bumps the debounce deadline forward by @p debounce_ms and kicks the persistent worker. Multiple rapid calls
-     * collapse into a single apply/clear once the burst has been quiet for the specified window.
+     * @brief Bumps the debounce deadline forward by @p debounce_ms and kicks the persistent worker.
+     * @param debounce_ms Quiet window the burst must clear before the apply runs.
+     * @details Multiple rapid calls collapse into a single apply or clear once the burst stays quiet for the window.
      */
     void schedule_transmog_ms(std::uint64_t debounce_ms);
 
     /**
-     * Hook-thread entry point. Arguments are intentionally dropped; the worker re-resolves both from authoritative
-     * state at apply time.
+     * @brief Hook-thread entry point for a scheduled apply.
+     * @param a1 Equip component the hook observed. Dropped on purpose.
+     * @param targetId Item the hook observed. Dropped on purpose.
+     * @details The worker re-resolves both from authoritative state at apply time.
      */
     void schedule_transmog(__int64 a1, std::uint16_t targetId);
 
+    /// Starts the persistent apply worker if it is not already running.
     void ensure_apply_worker_started();
+
+    /// Requests stop and joins the persistent apply worker.
     void stop_apply_worker();
 
     // Load-detection thread
 
+    /// Starts the load-detection thread that watches for world reloads and character swaps.
     void start_load_detect_thread();
+
+    /// Requests stop and joins the load-detection thread.
     void stop_load_detect_thread();
 
     // Deferred nametable scan
 
+    /// Launches the background worker that builds the item-name catalog once the engine publishes it.
     void launch_deferred_nametable_scan() noexcept;
+
+    /// Requests stop and joins the deferred nametable scan worker.
     void join_deferred_nametable_scan();
 
     // Deferred PartShowSuppress slot-hash scan
     //
-    // IndexedStringA carries the `CD_Helm` / `CD_Upperbody` / ... part names PartShowSuppress keys on; the table is
-    // populated by the engine during world load. Loading LT at cold-launch (before main menu finishes wiring) would
-    // otherwise leave PartShowSuppress inert for the whole session because the synchronous scan at LT init would
-    // observe a near-empty table. The deferred worker mirrors the nametable pattern: poll for world-ready, scan until
+    // IndexedStringA carries the `CD_Helm` / `CD_Upperbody` / ... part names PartShowSuppress keys on. The table is
+    // populated by the engine during world load. An LT load at cold-launch (before the main menu finishes its wiring)
+    // otherwise leaves PartShowSuppress inert for the whole session, because the synchronous scan at LT init observes
+    // a near-empty table. The deferred worker mirrors the nametable pattern: poll for world-ready, scan until
     // every expected slot hash is present, then call init_slot_hashes once to commit.
 
+    /// Launches the background worker that resolves the PartShowSuppress slot hashes.
     void launch_deferred_slot_hash_scan() noexcept;
+
+    /// Requests stop and joins the deferred slot-hash scan worker.
     void join_deferred_slot_hash_scan();
 
     // Targeted-apply redirect
-    //
-    // When the user has the editing dropdown pinned to a non-controlled character AND `flag_apply_to_editing` is on,
-    // overlay-UI entry points (manual_apply, manual_apply_slot, manual_clear, picker changes, preset cycles) call this
-    // to redirect the next scheduled apply onto the editing character's body. The worker consumes the idx once --
-    // subsequent engine-triggered applies (hooks) fall through to the default controlled-body path. Pass 0 to clear a
-    // pending redirect without scheduling.
+
+    /**
+     * @brief Redirects the next scheduled apply onto the editing character's body.
+     * @param charIdx 1-based protagonist index of the editing character. Pass 0 to clear a pending redirect without
+     *                a schedule.
+     * @details Overlay-UI entry points (manual_apply, manual_apply_slot, manual_clear, picker changes, preset cycles)
+     *          call this when the user pins the editing dropdown to a non-controlled character and
+     *          `flag_apply_to_editing` is on. The worker consumes the idx once. Engine-triggered applies fall through
+     *          to the default controlled-body path.
+     */
     void set_targeted_apply_char_idx(std::uint32_t charIdx) noexcept;
 
-    // Read the current pending redirect without consuming it. Used by entry points that want to skip scheduling
-    // entirely when the editing character isn't live (the worker would only fall back to the controlled body, which is
-    // the legacy cross-body behaviour the user explicitly opted out of).
+    /**
+     * @brief Reads the pending targeted-apply redirect without consuming it.
+     * @return The pending 1-based protagonist index, or 0 when no redirect is armed.
+     * @details Entry points use it to skip the schedule entirely when the editing character is not live, because the
+     *          worker then falls back to the controlled body, which is the legacy cross-body behavior the user opted
+     *          out of.
+     */
     [[nodiscard]] std::uint32_t pending_targeted_apply_char_idx() noexcept;
 
 } // namespace Transmog
+
+#endif // TRANSMOG_TRANSMOG_WORKER_HPP

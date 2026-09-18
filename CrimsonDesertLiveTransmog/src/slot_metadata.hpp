@@ -1,4 +1,5 @@
-#pragma once
+#ifndef TRANSMOG_SLOT_METADATA_HPP
+#define TRANSMOG_SLOT_METADATA_HPP
 
 #include "shared_state.hpp"
 
@@ -15,10 +16,10 @@ namespace Transmog
     //
     // Adding a new slot = one row added below. Adding a new per-slot attribute = one new field on this struct + one
     // column populated per row. All consumers (transmog_map.cpp, transmog_apply.cpp, prefab_wrapper_swap.cpp,
-    // part_show_suppress.cpp) read this table; no parallel slot tables anywhere else.
+    // part_show_suppress.cpp) read this table. No parallel slot table exists anywhere else.
     struct SlotMetadata
     {
-        TransmogSlot slot; // == array index, asserted at compile time
+        TransmogSlot slot{}; // == array index, asserted at compile time
         // Engine slot tag: the character's equip-slot enum, as it appears at `record+0xC8` of the auth-table part
         // records and as the first argument to the tag->handle lookup.
         //
@@ -28,66 +29,58 @@ namespace Transmog
         // gameplay-design constant: no tag here has changed across any game version this mod has shipped against, and
         // patches have only ever APPENDED (Tool, then the two overflow slots).
         //
-        // A runtime derivation is also not available. The auth table lists only FILLED slots -- eleven of these
-        // twenty-three on a fully equipped character -- so it can never produce the whole table, and the table is
+        // A runtime derivation is also not available. The auth table lists only FILLED slots - eleven of these
+        // twenty-three on a fully equipped character - so it can never produce the whole table, and the table is
         // needed at apply time. EquipTypeInfo rows are variable-length with no tag at a fixed offset, and the part
         // records carry no name.
         //
         // What IS derived is a CHECK. The auth-table walk in real_part_tear_down.cpp compares every live
         // `(tag, itemId)` pair against the catalog's own name-derived classification and warns on disagreement, so a
         // patch that renumbers this column reports itself instead of silently routing applies into the wrong slot.
-        std::int16_t gameTag;
-        const char *displayName; // "Helm", "Chest", ... (UI / log labels)
+        std::int16_t gameTag{};
+        const char *displayName{nullptr}; // "Helm", "Chest", ... (UI / log labels)
         // PartShowSuppress IndexedStringA hash key (CD_*). nullptr when the slot does NOT participate in
-        // PartShowSuppress (only the 5 armor slots have CD_* hashes; accessory/weapon slots use different suppression
-        // mechanisms or none at all).
-        const char *partShowHashKey;
+        // PartShowSuppress. Only the 5 armor slots have CD_* hashes. Accessory and weapon slots use different
+        // suppression mechanisms or none at all.
+        const char *partShowHashKey{nullptr};
         // Master enable flag. When false, the slot is omitted from the overlay slot picker AND skipped in the
         // apply/clear dispatcher, so even a preset that loaded with `active=true` for this slot becomes a no-op until
         // the flag is flipped back on.
         //
         // Currently disabled slots fall into two unsolved categories:
         //
-        // (A) MULTI-PREFAB NON-ARMOR slots (rings, earrings, brackets,
-        //     all weapon slots, sub-weapons): a single equipped item
-        //     emits MORE THAN ONE prefab into the engine's render list,
-        //     so the current "swap one source wrapper -> one target
-        //     wrapper" pipeline in prefab_wrapper_swap drops 2nd/3rd
-        //     prefabs and leaves the visual half-applied. Needs
-        //     refactor to either (1) widen the swap map to N->M or
-        //     (2) drive the swap from the auth-table mod array which
-        //     already enumerates every contributing prefab.
+        // (A) MULTI-PREFAB NON-ARMOR slots (rings, earrings, brackets, all weapon slots, sub-weapons): a single
+        //     equipped item emits MORE THAN ONE prefab into the engine's render list, so the current "swap one source
+        //     wrapper -> one target wrapper" pipeline in prefab_wrapper_swap drops 2nd/3rd prefabs and leaves the
+        //     visual half-applied. Needs refactor to either (1) widen the swap map to N->M or (2) drive the swap from
+        //     the auth-table mod array which already enumerates every contributing prefab.
         //
-        // (B) DUPLICATE-TAG slots (Ring1/Ring2 share tag 0x0A/0x0B,
-        //     Earring1/Earring2 share 0x07/0x08, MainHand/OffHand
-        //     share dual-wield instances of the same item-id): the
-        //     SlotPopulator hook upstream sees one record per engine
-        //     tag and cannot disambiguate which UI slot the user
-        //     targeted. Need to identify the disambiguator field on
-        //     the swap-entry record (likely a sub-index byte at a
-        //     yet-unmapped offset).
+        // (B) DUPLICATE-TAG slots (Ring1/Ring2 share tag 0x0A/0x0B, Earring1/Earring2 share 0x07/0x08,
+        //     MainHand/OffHand share dual-wield instances of the same item-id): the SlotPopulator hook upstream sees
+        //     one record per engine tag and cannot disambiguate which UI slot the user targeted. Need to identify the
+        //     disambiguator field on the swap-entry record (likely a sub-index byte at a yet-unmapped offset).
         //
         // Both classes are flipped back on by replacing `false` with `true` in the row below AND landing the
-        // corresponding refactor; the slot is otherwise fully wired through the metadata table -- no other code paths
-        // gate on the slot identity once `enabled` is true.
-        bool enabled;
+        // corresponding refactor. The slot is otherwise fully wired through the metadata table. No other code path
+        // gates on the slot identity once `enabled` is true.
+        bool enabled{false};
     };
 
     inline constexpr SlotMetadata k_slotMetadata[k_slotCount] = {
         // clang-format off
         // slot              gameTag  displayName       partShowHashKey   enabled
-        // -- 5 armor slots: the original transmog targets, driven by PartShowSuppress plus the wrapper swap.
+        // - 5 armor slots: the original transmog targets, driven by PartShowSuppress plus the wrapper swap.
         { TransmogSlot::Helm,          0x03, "Helm",          "CD_Helm"      , true  },
         { TransmogSlot::Chest,         0x04, "Chest",         "CD_Upperbody" , true  },
         { TransmogSlot::Cloak,         0x10, "Cloak",         "CD_Cloak"     , true  },
         { TransmogSlot::Gloves,        0x05, "Gloves",        "CD_Hand"      , true  },
         { TransmogSlot::Boots,         0x06, "Boots",         "CD_Foot"      , true  },
-        // -- Paired accessory slots. Both halves of a pair share one item TYPE, so an equip that lets the engine
+        // - Paired accessory slots. Both halves of a pair share one item TYPE, so an equip that lets the engine
         //    derive its destination can only ever reach the first half. They are enabled because the apply path names
-        //    the destination explicitly for them -- see slot_needs_explicit_destination below.
+        //    the destination explicitly for them - see slot_needs_explicit_destination below.
         { TransmogSlot::Earring1,      0x07, "Earring1",      nullptr        , true  },
         { TransmogSlot::Earring2,      0x08, "Earring2",      nullptr        , true  },
-        // -- Necklace: single-prefab single-tag, treated like an armor slot.
+        // - Necklace: single-prefab single-tag, treated like an armor slot.
         { TransmogSlot::Necklace,      0x09, "Necklace",      nullptr        , true  },
         { TransmogSlot::Ring1,         0x0A, "Ring1",         nullptr        , true  },
         { TransmogSlot::Ring2,         0x0B, "Ring2",         nullptr        , true  },
@@ -112,7 +105,7 @@ namespace Transmog
         { TransmogSlot::Tool,          0x0E, "Tool",          nullptr        , false },
         { TransmogSlot::OffHand2,      0x17, "OffHand2",      nullptr        , false },
         { TransmogSlot::Ranged2,       0x18, "Ranged2",       nullptr        , false },
-        // Tag 0x15 "OongkaRocket" intentionally omitted -- see TransmogSlot enum comments in shared_state.hpp.
+        // Tag 0x15 "OongkaRocket" intentionally omitted - see TransmogSlot enum comments in shared_state.hpp.
         // clang-format on
     };
 
@@ -142,25 +135,25 @@ namespace Transmog
     );
 
     // Direct accessor by enum value. O(1).
-    inline constexpr const SlotMetadata &slot_meta(TransmogSlot s) noexcept
+    [[nodiscard]] inline constexpr const SlotMetadata &slot_meta(TransmogSlot s) noexcept
     {
         return k_slotMetadata[static_cast<std::size_t>(s)];
     }
 
-    // Master enable check. Disabled slots are hidden from the slot picker and short-circuited in the apply/clear
-    // dispatcher. See SlotMetadata::enabled doc-block for the refactor blockers.
-    inline constexpr bool slot_enabled(TransmogSlot s) noexcept
+    // Master enable check. The slot picker hides a disabled slot and the apply/clear dispatcher short-circuits it.
+    // See SlotMetadata::enabled doc-block for the refactor blockers.
+    [[nodiscard]] inline constexpr bool slot_enabled(TransmogSlot s) noexcept
     {
         return slot_meta(s).enabled;
     }
-    inline constexpr bool slot_enabled(std::size_t i) noexcept
+    [[nodiscard]] inline constexpr bool slot_enabled(std::size_t i) noexcept
     {
         return i < k_slotCount && k_slotMetadata[i].enabled;
     }
 
     // Reverse lookup: engine slot tag -> TransmogSlot. Returns std::nullopt for tags LT does not manage (e.g. 0x15).
-    // Linear search over the table -- cheap, called sparingly.
-    inline std::optional<TransmogSlot> slot_from_game_tag(std::int16_t gameTag) noexcept
+    // Linear search over the table. The search is cheap and runs sparingly.
+    [[nodiscard]] inline constexpr std::optional<TransmogSlot> slot_from_game_tag(std::int16_t gameTag) noexcept
     {
         for (const auto &m : k_slotMetadata)
         {
@@ -178,21 +171,20 @@ namespace Transmog
     //   Accessory: cd_t0000_lantern_*       (no role prefix)
     //   Mount:     cd_m0001_*               (suffix-driven)
     //
-    // The numeric role chunk `_NN_` (e.g. `_02_` for 2H weapons, `_13_` for 1H cannons) is extracted regardless of the
-    // role prefix so a future `cd_xxx_02_sword_*` family inherits the 2H classification automatically. Specific
-    // weapon-type tags (dagger, alebard, pike, ...) are checked first because they have unambiguous slot mappings;
-    // ambiguous tags (sword, axe, hammer, cannon, mace, lance, fist) fall through to the numeric role for 1H vs 2H vs
+    // The scan extracts the numeric role chunk `_NN_` (e.g. `_02_` for 2H weapons, `_13_` for 1H cannons) regardless
+    // of the role prefix, so a future `cd_xxx_02_sword_*` family inherits the 2H classification automatically.
+    // Specific weapon-type tags (dagger, alebard, pike, ...) come first because they carry unambiguous slot mappings.
+    // Ambiguous tags (sword, axe, hammer, cannon, mace, lance, fist) fall through to the numeric role for 1H vs 2H vs
     // ranged disambiguation.
     //
-    // Returns std::nullopt for prefabs that match nothing the picker should label (e.g. environmental meshes, food
-    // items).
-    inline std::optional<TransmogSlot> slot_for_prefab_name(const std::string &name) noexcept
+    // Returns std::nullopt for prefabs that match nothing the picker labels (e.g. environmental meshes, food items).
+    [[nodiscard]] inline std::optional<TransmogSlot> slot_for_prefab_name(const std::string &name) noexcept
     {
         const auto has = [&](const char *tag) noexcept { return name.find(tag) != std::string::npos; };
 
         // Reject UI/knowledge/icon assets that embed a real prefab as a substring (e.g.
         // "cd_knowledgeimage_Knowledge_ItemIcon_Prefab_cd_phm_00_hel_00_0363_c" would otherwise match `_hel_` and
-        // pollute the Helm Exact list). Body-mesh prefab names are all-lowercase snake_case by engine convention -- any
+        // pollute the Helm Exact list). Body-mesh prefab names are all-lowercase snake_case by engine convention - any
         // uppercase ASCII letter means the name is a UI / knowledge / icon asset that happens to embed an armor prefab
         // in its identifier. Structural rather than allowlist-based so new lowercase role families (mounts, future NPC
         // variants, etc.) keep working without a code change.
@@ -201,20 +193,20 @@ namespace Transmog
             if (c >= 'A' && c <= 'Z')
                 return std::nullopt;
         }
-        // Real prefab names also start with the engine's `cd_` family marker. Reject anything that doesn't (cheap
-        // sanity check against accidentally-lowercased UI strings).
+        // Real prefab names also start with the engine's `cd_` family marker. Reject anything that does not. This is a
+        // cheap sanity check against accidentally-lowercased UI strings.
         if (name.size() < 3 || name[0] != 'c' || name[1] != 'd' || name[2] != '_')
             return std::nullopt;
 
         // Extract the first `_NN_` (two-digit) numeric role marker after the `cd_<role>_` prefix. -1 when absent (NPC,
-        // t0000, m0001 families). Cheap manual scan; no <regex> dependency.
-        int roleNum = -1;
+        // t0000, m0001 families). A manual scan keeps this cheap and drops the <regex> dependency.
+        int role_num = -1;
         for (std::size_t i = 0; i + 4 <= name.size(); ++i)
         {
             if (name[i] == '_' && std::isdigit(static_cast<unsigned char>(name[i + 1])) &&
                 std::isdigit(static_cast<unsigned char>(name[i + 2])) && name[i + 3] == '_')
             {
-                roleNum = (name[i + 1] - '0') * 10 + (name[i + 2] - '0');
+                role_num = (name[i + 1] - '0') * 10 + (name[i + 2] - '0');
                 break;
             }
         }
@@ -231,13 +223,13 @@ namespace Transmog
             has("_shotgun_") || has("_bomb_") || has("_blowpipe_"))
             return TransmogSlot::Ranged;
 
-        // Ambiguous weapon tags: disambiguate by numeric role
-        // Convention from the v1.05.01 prefab catalog (TSV scan):
-        //   _01_ = 1H, _02_ = 2H, _03_ = shield, _04..06,08,10,13 = ranged.
+        // Ambiguous weapon tags: disambiguate by numeric role.
+        // Numeric role convention: _01_ is one-hand, _02_ is two-hand, _03_ is shield, and _04, _05, _06, _08, _10,
+        // _13 are ranged.
         if (has("_sword_") || has("_axe_") || has("_mace_") || has("_lance_") || has("_hammer_") || has("_cannon_") ||
             has("_fist_"))
         {
-            switch (roleNum)
+            switch (role_num)
             {
             case 2:
             case 12:
@@ -297,7 +289,7 @@ namespace Transmog
      * @note The tags are read out of @ref k_slotMetadata rather than restated, so a patch that renumbers the column
      *       cannot leave this function pointing at the old value.
      */
-    inline constexpr std::uint16_t paired_first_half_tag(TransmogSlot s) noexcept
+    [[nodiscard]] inline constexpr std::uint16_t paired_first_half_tag(TransmogSlot s) noexcept
     {
         const auto tag_of = [](TransmogSlot first) constexpr
         { return static_cast<std::uint16_t>(k_slotMetadata[static_cast<std::size_t>(first)].gameTag); };
@@ -310,7 +302,7 @@ namespace Transmog
 
     // The pair tags themselves are deliberately NOT pinned to literals here: they are derived from k_slotMetadata so
     // a renumbered column propagates on its own, and a live mismatch is reported by the TAG DRIFT check in
-    // real_part_tear_down.cpp. What is pinned is this function's own contract -- a slot that is not the second half
+    // real_part_tear_down.cpp. What is pinned is this function's own contract - a slot that is not the second half
     // of a pair must name no first half, or the apply path would exclude an unrelated slot from resolution.
     static_assert(paired_first_half_tag(TransmogSlot::Helm) == k_noGameTag, "only paired slots may name a first half");
     static_assert(
@@ -322,21 +314,21 @@ namespace Transmog
      * @brief Does this slot share its item TYPE with a sibling slot?
      *
      * @details Both rings report one item type and both earrings another, so an equip that lets the engine derive its
-     *          destination from the item can only ever resolve to the first of the pair -- the second is unreachable.
+     *          destination from the item can only ever resolve to the first of the pair - the second is unreachable.
      *          These are the only slots that need the destination named explicitly.
      * @warning Every other slot must NOT name it. The engine's own derivation is already correct there, and forcing
      *          the issue makes the slot refresh twice, which visibly corrupts it.
      */
-    inline constexpr bool slot_needs_explicit_destination(TransmogSlot s) noexcept
+    [[nodiscard]] inline constexpr bool slot_needs_explicit_destination(TransmogSlot s) noexcept
     {
         return s == TransmogSlot::Ring1 || s == TransmogSlot::Ring2 || s == TransmogSlot::Earring1 ||
                s == TransmogSlot::Earring2;
     }
 
-    // Picker-side compatibility: when the user opens slot X's picker in prefab mode with the Exact filter on, prefabs
-    // whose `slot_for_prefab_name()` is in the same equivalence group as X should still pass. Pair-slots (Ring1/Ring2,
+    // Picker-side compatibility: when the user opens slot X's picker in prefab mode with the Exact filter on, a prefab
+    // whose `slot_for_prefab_name()` lands in the same equivalence group as X still passes. Pair-slots (Ring1/Ring2,
     // Earring1/Earring2, MainHand/OffHand) share their body-mesh family.
-    inline bool slots_share_prefab_family(TransmogSlot a, TransmogSlot b) noexcept
+    [[nodiscard]] inline constexpr bool slots_share_prefab_family(TransmogSlot a, TransmogSlot b) noexcept
     {
         if (a == b)
             return true;
@@ -352,3 +344,5 @@ namespace Transmog
         return false;
     }
 } // namespace Transmog
+
+#endif // TRANSMOG_SLOT_METADATA_HPP

@@ -1,4 +1,4 @@
-// Auto-generated (material palette generator, kept out of tree) -- DO NOT EDIT.
+// Auto-generated (material palette generator, kept out of tree) - DO NOT EDIT.
 // Source: 00_idea/dyetex_palette.json
 //   (parsed from gamedata/partprefabdyetexturepalleteinfo.pabgb)
 // Game data: Crimson Desert build 1.0.0.2258
@@ -10,13 +10,14 @@
 // variant to apply for each cat_code slot:
 //   cat_code 1 = primary fabric  ("cloth")
 //   cat_code 2 = secondary fabric (label varies: "leather", "wool",
-//                "silk", "velvet" -- engine treats as one slot)
+//                "silk", "velvet" - engine treats as one slot)
 //   cat_code 3 = metal / hard surface ("metal")
 //
 // At runtime the engine looks up partprefabdyeslotinfo[item] to find
 // each channel's cat_code, then partprefabdyetexturepalleteinfo[idx]
 // for the variant in that cat_code.
-#pragma once
+#ifndef TRANSMOG_GENERATED_MATERIAL_PALETTE_TABLE_HPP
+#define TRANSMOG_GENERATED_MATERIAL_PALETTE_TABLE_HPP
 
 #include <cstddef>
 #include <cstdint>
@@ -26,26 +27,30 @@ namespace Transmog::MaterialPaletteTable
     /// One cat_code slot inside a template.
     struct CatSlot
     {
-        std::uint8_t  cat_code;     // 1, 2, or 3
-        std::uint16_t variant;      // 5001..5010
-        const char *  label;        // primary label
-        const char *  alias;        // optional alias label or nullptr
-        const char *  texture_path; // "character/texture/cd_texturelayer_NNN_MMMM.dds"
+        std::uint8_t cat_code;    // 1, 2, or 3
+        std::uint16_t variant;    // 5001..5010
+        const char *label;        // primary label
+        const char *alias;        // optional alias label or nullptr
+        const char *texture_path; // "character/texture/cd_texturelayer_NNN_MMMM.dds"
     };
 
     /// One dye-preset template (1..10).
     struct TemplateEntry
     {
-        std::uint16_t idx;          // matches the dye record's u16
-        float         blend;        // engine blend weight
-        std::uint8_t  slot_count;   // typically 3
-        CatSlot       slots[4];     // headroom; unused slots zero-initialized
+        std::uint16_t idx;       // matches the dye record's u16
+        float blend;             // engine blend weight
+        std::uint8_t slot_count; // typically 3
+        CatSlot slots[4];        // headroom; unused slots zero-initialized
     };
 
     inline constexpr std::size_t kTemplateCount = 10;
     extern const TemplateEntry kTemplates[kTemplateCount];
 
-    /// Returns the template for material_id (1..10). Returns nullptr
-    /// for out-of-range or 0xFFFF (engine default).
+    /**
+     * @brief Returns the template for a material id in the range 1 through 10.
+     * @return The template, or nullptr for an out-of-range id or for 0xFFFF, the engine default.
+     */
     const TemplateEntry *find(std::uint16_t material_id) noexcept;
-}
+} // namespace Transmog::MaterialPaletteTable
+
+#endif // TRANSMOG_GENERATED_MATERIAL_PALETTE_TABLE_HPP

@@ -1,4 +1,5 @@
-#pragma once
+#ifndef EQUIPHIDE_BACKGROUND_THREADS_HPP
+#define EQUIPHIDE_BACKGROUND_THREADS_HPP
 
 #include <cstdint>
 
@@ -6,33 +7,28 @@ namespace EquipHide
 {
     /**
      * @brief Minimum interval between lazy probe signals (ms).
-     *
-     *  Enforced on the producer side, by the EquipVisCheck mid-hook that arms the signal. The probe worker must consume
-     *  the signal by value and never reset it: the producer treats a zeroed signal as "never armed" and re-arms
-     *  immediately, which drops the real interval to k_lazyProbeTickMs.
+     * @details The EquipVisCheck mid-hook that arms the signal enforces it on the producer side. The probe worker
+     *          must consume the signal by value and never reset it. The producer reads a zeroed signal as "never
+     *          armed" and re-arms immediately, which drops the real interval to k_lazyProbeTickMs.
      */
     inline constexpr int64_t k_lazyProbeIntervalMs = 60'000;
 
     /**
      * @brief Lazy probe worker wake period (ms).
-     *
-     *  Not the probe interval -- that is k_lazyProbeIntervalMs above, enforced by how often the signal advances. This
-     *  is only how promptly the worker notices a freshly armed signal; a tick that finds the signal unchanged costs one
-     *  relaxed atomic load and goes back to sleep.
+     * @details This is not the probe interval. k_lazyProbeIntervalMs above is, and how often the signal advances
+     *          enforces it. This value only sets how promptly the worker notices a freshly armed signal. A tick that
+     *          finds the signal unchanged costs one relaxed atomic load and goes back to sleep.
      */
     inline constexpr int64_t k_lazyProbeTickMs = 5'000;
 
     /**
      * @brief Controlled-actor watcher poll interval (ms).
-     *
-     *  The poll thread reads the cheap WS->AM->UA->+0xD8 chain on each tick and fires the full resolve_player_vis_ctrls
-     *  only when the pointer has rotated (save load, character swap, or controlled-actor teardown). The interval
-     *  therefore bounds the worst-case latency between a swap and the visCtrl list rebuilding against the new actor; 1s
-     *  matches LT's load_detect_thread cadence.
-     *
-     *  Runs independently of the EquipVisCheck hook: on v1.04.00 the hook fires on a narrower event set than on
-     *  v1.03.01, so the lazy resolve inside check_player_filter is not sufficient on its own to drive cold-load and
-     *  swap detection.
+     * @details The poll thread reads the cheap WS->AM->UA->+0xD8 chain on each tick and fires the full
+     *          resolve_player_vis_ctrls only once the pointer rotates (a save load, a character swap, or a
+     *          controlled-actor teardown). The interval therefore bounds the worst-case latency between a swap and
+     *          the rebuilt visCtrl list.
+     * @note The poll runs independently of the EquipVisCheck hook. The hook alone does not drive cold-load and swap
+     *       detection, so the lazy resolve inside check_player_filter is not sufficient on its own.
      */
     inline constexpr int64_t k_resolvePollIntervalMs = 1'000;
 
@@ -43,8 +39,7 @@ namespace EquipHide
     void launch_lazy_probe() noexcept;
 
     /**
-     * @brief Launch the resolver poll thread. Safe to call multiple times; only the first call actually starts the
-     *        thread.
+     * @brief Launch the resolver poll thread. Safe to call multiple times. Only the first call starts the thread.
      */
     void launch_resolve_poll() noexcept;
 
@@ -52,3 +47,5 @@ namespace EquipHide
     void join_background_threads();
 
 } // namespace EquipHide
+
+#endif // EQUIPHIDE_BACKGROUND_THREADS_HPP

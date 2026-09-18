@@ -88,7 +88,7 @@ namespace Transmog::ColorOverride::TokenTable
         if (disc >= 0)
             return disc;
         // Fallback: look up name via interner dump, classify by prefix. Catches tokens from name families our static
-        // discovery doesn't cover (e.g. `_scratchTintColor*`).
+        // discovery does not cover (e.g. `_scratchTintColor*`).
         const auto *name = InternerHook::name_for_token(tok);
         if (name == nullptr)
             return -1;

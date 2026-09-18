@@ -2,96 +2,88 @@
 
 namespace EquipHide
 {
-    static ResolvedAddresses s_resolvedAddrs{};
-    // Initialise visCharIdx to -1 (unknown) so any pre-resolve consumer (e.g. apply_direct_vis_write firing before
-    // resolve_player_vis_ctrls has populated the slots) treats the entry as "no per-character override -- fall back to
-    // the active character's hide mask". PlayerState's default ctor zero-inits the array; bring up an initialiser
-    // helper invoked at first access via construct-on-first-use.
-    static PlayerState &make_player_state() noexcept
+    namespace
     {
-        static PlayerState state{};
-        static const bool s_seeded = []() noexcept
-        {
-            for (int i = 0; i < k_maxProtagonists; ++i)
-                state.visCharIdx[i].store(-1, std::memory_order_relaxed);
-            return true;
-        }();
-        (void)s_seeded;
-        return state;
-    }
+        ResolvedAddresses s_resolved_addrs{};
 
-    static std::mutex s_visWriteMtx;
-    static std::unordered_map<VisKey, uint8_t, VisKeyHash> s_originalVis;
-    static std::atomic<bool> s_needsDirectWrite{false};
+        // Every member carries a constexpr initializer, so this table is constant-initialized and needs no run-time
+        // seeding pass. visCharIdx already reads -1 (unidentified) in a pre-resolve consumer: apply_direct_vis_write
+        // runs before resolve_player_vis_ctrls fills the slots and falls back to the active character's hide mask.
+        constinit PlayerState s_player_state{};
 
-    static std::atomic<bool> s_baldFix{true};
-    static std::atomic<bool> s_glidingFix{true};
-    static std::atomic<bool> s_fallbackMode{false};
-    static std::atomic<bool> s_independentToggle{false};
-    static std::atomic<bool> s_cascadeFix{false};
+        std::mutex s_vis_write_mutex;
+        std::unordered_map<VisKey, std::uint8_t, VisKeyHash> s_original_vis;
+        std::atomic<bool> s_needs_direct_write{false};
 
-    static std::atomic<bool> s_shutdownRequested{false};
-    static std::atomic<bool> s_deferredScanPending{false};
-    static std::atomic<bool> s_lazyProbePending{false};
-    static std::atomic<int64_t> s_lazyProbeSignal{0};
+        std::atomic<bool> s_bald_fix{true};
+        std::atomic<bool> s_gliding_fix{true};
+        std::atomic<bool> s_fallback_mode{false};
+        std::atomic<bool> s_independent_toggle{false};
+        std::atomic<bool> s_cascade_fix{false};
+
+        std::atomic<bool> s_shutdown_requested{false};
+        std::atomic<bool> s_deferred_scan_pending{false};
+        std::atomic<bool> s_lazy_probe_pending{false};
+        std::atomic<std::int64_t> s_lazy_probe_signal{0};
+    } // namespace
 
     ResolvedAddresses &resolved_addrs()
     {
-        return s_resolvedAddrs;
+        return s_resolved_addrs;
     }
     PlayerState &player_state()
     {
-        return make_player_state();
+        return s_player_state;
     }
     std::mutex &vis_write_mutex()
     {
-        return s_visWriteMtx;
+        return s_vis_write_mutex;
     }
-    std::unordered_map<VisKey, uint8_t, VisKeyHash> &original_vis_map()
+    std::unordered_map<VisKey, std::uint8_t, VisKeyHash> &original_vis_map()
     {
-        return s_originalVis;
+        return s_original_vis;
     }
     std::atomic<bool> &needs_direct_write()
     {
-        return s_needsDirectWrite;
+        return s_needs_direct_write;
     }
 
     std::atomic<bool> &flag_bald_fix()
     {
-        return s_baldFix;
+        return s_bald_fix;
     }
     std::atomic<bool> &flag_gliding_fix()
     {
-        return s_glidingFix;
+        return s_gliding_fix;
     }
     std::atomic<bool> &flag_fallback_mode()
     {
-        return s_fallbackMode;
+        return s_fallback_mode;
     }
     std::atomic<bool> &flag_independent_toggle()
     {
-        return s_independentToggle;
+        return s_independent_toggle;
     }
     std::atomic<bool> &flag_cascade_fix()
     {
-        return s_cascadeFix;
+        return s_cascade_fix;
     }
 
     std::atomic<bool> &shutdown_requested()
     {
-        return s_shutdownRequested;
+        return s_shutdown_requested;
     }
     std::atomic<bool> &deferred_scan_pending()
     {
-        return s_deferredScanPending;
+        return s_deferred_scan_pending;
     }
     std::atomic<bool> &lazy_probe_pending()
     {
-        return s_lazyProbePending;
+        return s_lazy_probe_pending;
     }
-    std::atomic<int64_t> &lazy_probe_signal()
+    std::atomic<std::int64_t> &lazy_probe_signal()
     {
-        return s_lazyProbeSignal;
+        return s_lazy_probe_signal;
     }
 
 } // namespace EquipHide

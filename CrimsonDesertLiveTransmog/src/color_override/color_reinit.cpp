@@ -1,4 +1,6 @@
 #include "color_reinit.hpp"
+
+#include "color_state.hpp"
 #include "color_swatch_table.hpp"
 #include "preset_manager.hpp"
 #include "shared_state.hpp"
@@ -8,7 +10,6 @@
 
 #include <array>
 #include <atomic>
-#include <chrono>
 #include <cstdint>
 #include <mutex>
 #include <vector>
@@ -51,12 +52,6 @@ namespace Transmog::ColorOverride::Reinit
         std::mutex g_mutex;
         std::array<std::atomic<std::uint32_t>, k_slotCount> g_lastTargetItemId{};
 
-        std::int64_t now_ms() noexcept
-        {
-            using namespace std::chrono;
-            return duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
-        }
-
         bool valid_slot(int slot) noexcept
         {
             return slot >= 0 && static_cast<std::size_t>(slot) < k_slotCount;
@@ -71,8 +66,7 @@ namespace Transmog::ColorOverride::Reinit
         if (!m.active || m.targetItemId == 0)
         {
             DMK::log().debug(
-                "[color-reinit] start-once slot={} REJECTED "
-                "(active={} target={:#06x})",
+                "[color-reinit] start-once slot={} REJECTED (active={} target={:#06x})",
                 slot,
                 m.active,
                 m.targetItemId
@@ -111,8 +105,8 @@ namespace Transmog::ColorOverride::Reinit
             const int curMode = st.mode.load(std::memory_order_acquire);
             return curMode == SlotReinitState::ModeCommitRetick;
         }
-        // The unmount is REQUIRED, not ceremony. Entering at CarrierApply -- one apply, no tear-down -- runs cleanly
-        // and the new colour simply does not take: the engine keeps the material state it already resolved and only
+        // The unmount is REQUIRED, not ceremony. Entering at CarrierApply - one apply, no tear-down - runs cleanly
+        // and the new color simply does not take: the engine keeps the material state it already resolved and only
         // re-reads it after the slot is torn down. Measured, so do not "optimise" this into a single apply.
         //
         // Dye is different and does not need this: its records are injected on the next DyeCopier call, which a plain
@@ -122,12 +116,7 @@ namespace Transmog::ColorOverride::Reinit
             return st.mode.load(std::memory_order_acquire) == SlotReinitState::ModeCommitRetick;
         st.mode.store(SlotReinitState::ModeCommitRetick, std::memory_order_release);
         st.pass.store(0, std::memory_order_release);
-        DMK::log().debug(
-            "[color-reinit] slot={} commit-retick scheduled "
-            "target={:#06x}",
-            slot,
-            m.targetItemId
-        );
+        DMK::log().debug("[color-reinit] slot={} commit-retick scheduled target={:#06x}", slot, m.targetItemId);
         return true;
     }
 
@@ -177,7 +166,7 @@ namespace Transmog::ColorOverride::Reinit
         const auto last = g_lastTargetItemId[static_cast<std::size_t>(slot)].load(std::memory_order_acquire);
         if (newTargetItemId == 0)
         {
-            // Untick / clear: reset tracking but DO NOT wipe -- user override choices on tick->untick->re-tick of the
+            // Untick / clear: reset tracking but DO NOT wipe - user override choices on tick->untick->re-tick of the
             // same item should survive.
             g_lastTargetItemId[static_cast<std::size_t>(slot)].store(0, std::memory_order_release);
             return;
@@ -199,7 +188,7 @@ namespace Transmog::ColorOverride::Reinit
 
     void tick() noexcept
     {
-        const auto now = now_ms();
+        const auto now = State::now_ms();
         for (int slot = 0; slot < static_cast<int>(k_slotCount); ++slot)
         {
             auto &st = g_state[static_cast<std::size_t>(slot)];
@@ -213,13 +202,12 @@ namespace Transmog::ColorOverride::Reinit
                 const auto prevTarget = m.targetItemId;
                 m.active = false;
                 // Bypass apply_single_slot_transmog's equality early-out and any other "nothing to do" shortcuts. The
-                // reinit's whole point is to force the engine through a full tear-down + restore cycle, even if the
-                // engine thinks state is unchanged.
+                // whole point of reinit is to force the engine through a full tear-down and restore cycle, even
+                // when the engine thinks state is unchanged.
                 force_apply_pending()[static_cast<std::size_t>(slot)] = true;
                 DMK::log().debug(
                     "[color-reinit] slot={} TeardownApply pass={} "
-                    "(prev_target={:#06x}, m.active=false; engine "
-                    "should tear down fake + restore real if any)",
+                    "(prev_target={:#06x}, m.active=false; engine should tear down fake + restore real if any)",
                     slot,
                     st.pass.load(std::memory_order_acquire),
                     prevTarget
@@ -235,9 +223,7 @@ namespace Transmog::ColorOverride::Reinit
                     continue;
                 const auto lastApplied = last_applied_ids()[static_cast<std::size_t>(slot)];
                 DMK::log().debug(
-                    "[color-reinit] slot={} TeardownWait done "
-                    "(lastIds[slot]={:#06x}; expected 0 if untick "
-                    "completed)",
+                    "[color-reinit] slot={} TeardownWait done (lastIds[slot]={:#06x}; expected 0 if untick completed)",
                     slot,
                     lastApplied
                 );
@@ -252,13 +238,12 @@ namespace Transmog::ColorOverride::Reinit
                 // to true on rows that fire property writes this pass; rows that DON'T fire stay inactive.
                 // snapshot_active_identities then returns only the rows actually seen this pass.
                 //
-                // Without this reset, active_this_apply persists (it's only set true on insert/hit, never cleared) so
+                // Without this reset, active_this_apply persists (it is only set true on insert/hit, never cleared) so
                 // the snapshot would return the full accumulated set rather than the live identities for this capture.
                 SwatchTable::mark_all_inactive(slot);
                 DMK::log().debug(
                     "[color-reinit] slot={} CarrierApply pass={} "
-                    "(target={:#06x}, m.active=true, all rows "
-                    "reset to inactive)",
+                    "(target={:#06x}, m.active=true, all rows reset to inactive)",
                     slot,
                     st.pass.load(std::memory_order_acquire),
                     m.targetItemId
@@ -295,7 +280,7 @@ namespace Transmog::ColorOverride::Reinit
                 }
                 DMK::log().debug("[color-reinit] slot={} pass={} captured={}", slot, pass + 1, captured);
                 // Single-pass capture: go straight to Finalize. The intersection logic there handles non-empty pass
-                // selection -- with only seen[0] populated it becomes "keep everything captured this pass" (no ghost
+                // selection - with only seen[0] populated it becomes "keep everything captured this pass" (no ghost
                 // filtering).
                 st.phase.store(SlotReinitState::Finalize, std::memory_order_release);
                 continue;
@@ -305,17 +290,21 @@ namespace Transmog::ColorOverride::Reinit
                 // Intersection over NON-empty passes only. Empty pass means "no data" (publisher pipeline wedged that
                 // cycle); treating {} as 0 wipes everything. Skip empty passes instead.
                 std::vector<SwatchTable::SwatchIdentity> keep;
-                std::array<std::size_t, 3> passCounts{0, 0, 0};
+                std::array<std::size_t, 3> pass_counts{
+                    0,
+                    0,
+                    0,
+                };
                 std::size_t nonEmpty = 0;
                 {
                     std::lock_guard<std::mutex> lk(g_mutex);
                     for (int p = 0; p < 3; ++p)
                     {
-                        passCounts[p] = st.seen[p].size();
+                        pass_counts[p] = st.seen[p].size();
                         if (!st.seen[p].empty())
                             ++nonEmpty;
                     }
-                    // DIAG: log every identity each pass captured. Helps debug the intersection -- you should see up to
+                    // DIAG: log every identity each pass captured. Helps debug the intersection - you should see up to
                     // 32 unique tuples in seen[0] and a subset in seen[1] / seen[2]. If sizes are inconsistent with the
                     // per-pass `captured` lines, something is racing on g_mutex.
                     for (int p = 0; p < 3; ++p)
@@ -325,8 +314,7 @@ namespace Transmog::ColorOverride::Reinit
                         {
                             const auto &k = st.seen[p][i];
                             DMK::log().debug(
-                                "[color-reinit]   p{}[{}] hash={:08X} "
-                                "stable={:016X} tpl={:04X} token={:04X}",
+                                "[color-reinit]   p{}[{}] hash={:08X} stable={:016X} tpl={:04X} token={:04X}",
                                 p + 1,
                                 i,
                                 k.hash,
@@ -377,23 +365,22 @@ namespace Transmog::ColorOverride::Reinit
                 // Auto-tick the master Dye toggle the UI binds to dye_state()[slot].slot_enabled. The UI looks at
                 // SwatchTable::slot_enabled_get(slot) for the master toggle and the substitute path gates on it too.
                 // After a fresh reinit capture the slot is ready to substitute, so flip the toggle ON so the user
-                // doesn't have to click it manually before colours start applying.
+                // does not have to click it manually before colors start applying.
                 SwatchTable::slot_enabled_set(slot, true);
-                // Mark dirty so the user knows to click Save -- but do NOT auto-save. Auto-saving here also commits any
+                // Mark dirty so the user knows to click Save - but do NOT auto-save. Auto-saving here also commits any
                 // unrelated pending edits (e.g. user picks the user might want to revert before saving), which breaks
                 // the "pending until Save" contract the other UI buttons honour.
                 ::Transmog::dye_dirty().store(true, std::memory_order_release);
                 DMK::log().debug(
                     "[color-reinit] slot={} DONE intersection={} "
-                    "kept={} hidden={} (pass1={} pass2={} pass3={} "
-                    "nonEmpty={}) -- slot LOCKED",
+                    "kept={} hidden={} (pass1={} pass2={} pass3={} nonEmpty={}) - slot LOCKED",
                     slot,
                     keep.size(),
                     kr.kept,
                     kr.hidden,
-                    passCounts[0],
-                    passCounts[1],
-                    passCounts[2],
+                    pass_counts[0],
+                    pass_counts[1],
+                    pass_counts[2],
                     nonEmpty
                 );
                 st.pass.store(0, std::memory_order_release);

@@ -2,11 +2,13 @@
 
 #include <cdcore/controlled_char.hpp>
 
-#include <DetourModKit.hpp>
+#include <DetourModKit/filesystem.hpp>
+#include <DetourModKit/memory.hpp>
 
 #include <Windows.h>
 
 #include <mutex>
+#include <optional>
 
 namespace Transmog
 {
@@ -26,45 +28,55 @@ namespace Transmog
         return dir;
     }
 
-    static ResolvedAddresses s_resolvedAddrs{};
-    static std::array<SlotMapping, k_slotCount> s_slotMappings{};
-    static std::array<uint16_t, k_slotCount> s_lastAppliedIds{};
+    namespace
+    {
+        ResolvedAddresses s_resolvedAddrs{};
+        std::array<SlotMapping, k_slotCount> s_slotMappings{};
+        std::array<uint16_t, k_slotCount> s_lastAppliedIds{};
 
-    static std::atomic<bool> s_playerOnly{true};
-    static std::atomic<bool> s_enabled{true};
-    static std::atomic<bool> s_shutdownRequested{false};
-    static std::atomic<bool> s_colorOverride{false};
-    static std::atomic<bool> s_helmAudioUnmuffle{true};
-    static std::atomic<bool> s_dumpItemPrefabs{false};
-    static std::atomic<bool> s_dumpItemCatalog{false};
-    static std::atomic<bool> s_applyToEditing{true};
+        std::atomic<bool> s_playerOnly{true};
+        std::atomic<bool> s_enabled{true};
+        std::atomic<bool> s_shutdownRequested{false};
+        std::atomic<bool> s_colorOverride{false};
+        std::atomic<bool> s_helmAudioUnmuffle{true};
+        std::atomic<bool> s_dumpItemPrefabs{false};
+        std::atomic<bool> s_dumpItemCatalog{false};
+        std::atomic<bool> s_applyToEditing{true};
 
-    static SlotPopulatorFn s_slotPopulator = nullptr;
-    static PartSlotRefreshFn s_partSlotRefresh = nullptr;
-    static SlotTagToHandleFn s_slotTagToHandle = nullptr;
-    static ItemToSlotResolveFn s_itemToSlotResolve = nullptr;
-    static InitSwapEntryFn s_initSwapEntry = nullptr;
+        SlotPopulatorFn s_slotPopulator = nullptr;
+        PartSlotRefreshFn s_partSlotRefresh = nullptr;
+        SlotTagToHandleFn s_slotTagToHandle = nullptr;
+        ItemToSlotResolveFn s_itemToSlotResolve = nullptr;
+        InitSwapEntryFn s_initSwapEntry = nullptr;
 
-    static std::atomic<bool> s_inTransmog{false};
-    static std::atomic<bool> s_suppressVEC{false};
-    static std::atomic<__int64> s_playerA1{0};
-    static std::atomic<uintptr_t> s_worldSystemPtr{0};
-    static std::array<bool, k_slotCount> s_realDamaged{};
-    static std::array<std::uint16_t, k_slotCount> s_lastAppliedRealIds{};
-    static std::atomic<bool> s_clearPending{false};
-    static std::atomic<bool> s_dyeDirty{false};
-    static std::atomic<std::size_t> s_pendingSlotIndex{k_slotCount};
-    static std::array<std::uint16_t, k_slotCount> s_lastAppliedCarrierIds{};
-    static std::array<bool, k_slotCount> s_forceApplyPending{};
+        std::atomic<bool> s_inTransmog{false};
+        std::atomic<__int64> s_playerA1{0};
+        std::atomic<uintptr_t> s_worldSystemPtr{0};
+        std::array<bool, k_slotCount> s_realDamaged{};
+        std::array<std::uint16_t, k_slotCount> s_lastAppliedRealIds{};
+        std::atomic<bool> s_clearPending{false};
+        std::atomic<bool> s_dyeDirty{false};
+        std::atomic<std::size_t> s_pendingSlotIndex{k_slotCount};
+        std::array<std::uint16_t, k_slotCount> s_lastAppliedCarrierIds{};
+        std::array<bool, k_slotCount> s_forceApplyPending{};
 
-    // Per-character buffered snapshots of the four applied-state arrays above. Indexed by (idx-1) where idx is the
-    // 1-based CDCore protagonist index (1=Kliff, 2=Damiane, 3=Oongka). The worker hydrates the globals from the
-    // relevant slot before each apply and writes the post-apply globals back, so Phase A teardown always sees a
-    // per-body truth source.
-    static std::array<std::array<std::uint16_t, k_slotCount>, 3> s_lastAppliedIdsPerChar{};
-    static std::array<std::array<bool, k_slotCount>, 3> s_realDamagedPerChar{};
-    static std::array<std::array<std::uint16_t, k_slotCount>, 3> s_lastAppliedRealIdsPerChar{};
-    static std::array<std::array<std::uint16_t, k_slotCount>, 3> s_lastAppliedCarrierIdsPerChar{};
+        // Per-character buffered snapshots of the four applied-state arrays above. Indexed by (idx-1) where idx is
+        // the 1-based CDCore protagonist index (1=Kliff, 2=Damiane, 3=Oongka). The worker hydrates the globals from
+        // the relevant slot before each apply and writes the post-apply globals back, so Phase A teardown always sees
+        // a per-body truth source.
+        std::array<std::array<std::uint16_t, k_slotCount>, k_bodyOwnerCap> s_lastAppliedIdsPerChar{};
+        std::array<std::array<bool, k_slotCount>, k_bodyOwnerCap> s_realDamagedPerChar{};
+        std::array<std::array<std::uint16_t, k_slotCount>, k_bodyOwnerCap> s_lastAppliedRealIdsPerChar{};
+        std::array<std::array<std::uint16_t, k_slotCount>, k_bodyOwnerCap> s_lastAppliedCarrierIdsPerChar{};
+
+        /// Maps a 1-based protagonist index to its per-character bucket, or nothing when the index names no bucket.
+        std::optional<std::size_t> bucket_for_char(std::uint32_t idx) noexcept
+        {
+            if (idx < 1 || idx > k_bodyOwnerCap)
+                return std::nullopt;
+            return static_cast<std::size_t>(idx - 1);
+        }
+    } // namespace
 
     ResolvedAddresses &resolved_addrs()
     {
@@ -147,10 +159,8 @@ namespace Transmog
 
     std::string current_controlled_character_name() noexcept
     {
-        // Delegates to the shared Core resolver (focus-broadcast cache populated by sub_14353BA60's R9 hash, with LKG /
-        // structural
-        // Kliff fallbacks). Returns an empty string when the resolver has not yet observed a known identity this
-        // session.
+        // Delegates to the shared Core resolver, whose focus-broadcast cache carries last-known-good and structural
+        // Kliff fallbacks. Returns an empty string when the resolver observes no known identity this session.
         const auto name = CDCore::current_controlled_character_name();
         return std::string(name);
     }
@@ -189,9 +199,10 @@ namespace Transmog
 
     void rehydrate_applied_state_for_char(std::uint32_t idx) noexcept
     {
-        if (idx < 1 || idx > 3)
+        const auto slot = bucket_for_char(idx);
+        if (!slot)
             return;
-        const auto bucket = static_cast<std::size_t>(idx - 1);
+        const auto bucket = *slot;
         s_lastAppliedIds = s_lastAppliedIdsPerChar[bucket];
         s_realDamaged = s_realDamagedPerChar[bucket];
         s_lastAppliedRealIds = s_lastAppliedRealIdsPerChar[bucket];
@@ -200,9 +211,10 @@ namespace Transmog
 
     void capture_applied_state_for_char(std::uint32_t idx) noexcept
     {
-        if (idx < 1 || idx > 3)
+        const auto slot = bucket_for_char(idx);
+        if (!slot)
             return;
-        const auto bucket = static_cast<std::size_t>(idx - 1);
+        const auto bucket = *slot;
         s_lastAppliedIdsPerChar[bucket] = s_lastAppliedIds;
         s_realDamagedPerChar[bucket] = s_realDamaged;
         s_lastAppliedRealIdsPerChar[bucket] = s_lastAppliedRealIds;
@@ -211,17 +223,18 @@ namespace Transmog
 
     void reset_applied_state_for_char(std::uint32_t idx) noexcept
     {
-        if (idx < 1 || idx > 3)
+        const auto slot = bucket_for_char(idx);
+        if (!slot)
             return;
-        const auto bucket = static_cast<std::size_t>(idx - 1);
+        const auto bucket = *slot;
         s_lastAppliedIdsPerChar[bucket].fill(0);
         s_realDamagedPerChar[bucket].fill(false);
         s_lastAppliedRealIdsPerChar[bucket].fill(0);
         s_lastAppliedCarrierIdsPerChar[bucket].fill(0);
-        // Also wipe the live globals: apply_all_transmog reads these directly (last_applied_ids / real_damaged /
-        // last_applied_real_ids / last_applied_carrier_ids), so a stale global would drive the no-change early-out
-        // even after the bucket was cleared. rehydrate_applied_state_for_char would normally overwrite the globals from
-        // the bucket, but the body-reallocation path skips rehydrate by design and calls this instead.
+        // Also wipe the live globals. apply_all_transmog reads these directly (last_applied_ids / real_damaged /
+        // last_applied_real_ids / last_applied_carrier_ids), so a stale global drives the no-change early-out even
+        // after the bucket is cleared. rehydrate_applied_state_for_char normally overwrites the globals from the
+        // bucket, but the body-reallocation path skips rehydrate by design and calls this instead.
         s_lastAppliedIds.fill(0);
         s_realDamaged.fill(false);
         s_lastAppliedRealIds.fill(0);
@@ -234,20 +247,19 @@ namespace Transmog
     // producer owns the expensive part, the actor-array walk, so a reader never pays for it.
     //
     // Each row keeps the CCOIA it was derived from alongside the equip-slot address, because the address alone is not
-    // a safe key. The engine pools both objects, so between two publishes a body can be freed and its addresses handed
-    // to an unrelated actor, and a bare address compare would then report a protagonist index for somebody else's
-    // body.
+    // a safe key. The engine pools both objects, so between two publishes a body can be freed and its addresses
+    // handed to an unrelated actor. A bare address compare then reports a protagonist index for somebody else's body.
     //
     // A hit therefore confirms two independent things before it trusts the row, because either alone leaves a hole:
-    //   - the CCOIA still classifies as the same character, which rules out the pool reissuing the actor. A structural
-    //     walk cannot detect that on its own, since the successor object occupies the identical layout;
+    //   - the CCOIA still classifies as the same character, which rules out a pool reissue of the actor. A
+    //     structural walk cannot detect that on its own, because the successor object occupies the identical layout.
     //   - the CCOIA still resolves to this equip slot, which rules out the slot being reissued on its own.
     // Both are paid only by the handful of bodies that match an entry, never by the NPCs and creatures that make up
     // the traffic, and together they turn a silent mis-identification into an ordinary miss.
     //
     // A plain mutex rather than a reader/writer lock: the guarded region is a scan of at most three integers, and the
-    // detour reaches it on the order of once per second, so shared-reader parallelism would buy nothing that the
-    // narrower critical section does not already give.
+    // detour reaches it on the order of once per second, so shared-reader parallelism buys nothing that the narrower
+    // critical section does not already give.
     namespace
     {
         /// One published protagonist body. Plain data, no invariant beyond what publish_body_owner_table enforces.
@@ -268,8 +280,8 @@ namespace Transmog
         if (ccoias == nullptr || charIdxs == nullptr)
             return;
 
-        // Resolve before taking the lock. equip_slot_for_ccoia walks engine memory under SEH, and holding a lock
-        // across a foreign-memory read would expose every reader to whatever that walk costs on a torn chain.
+        // Resolve before the lock. equip_slot_for_ccoia walks engine memory under SEH, and a lock held across a
+        // foreign-memory read exposes every reader to whatever that walk costs on a torn chain.
         std::array<BodyOwnerRow, k_bodyOwnerCap> built{};
         std::size_t written = 0;
         for (std::size_t i = 0; i < n && i < built.size(); ++i)
@@ -281,9 +293,9 @@ namespace Transmog
             ++written;
         }
 
-        // An exhausted snapshot leaves written at 0, which publishes an empty table. That is deliberate: holding the
-        // previous rows through a teardown is the dangerous direction, because their bodies are freed and their
-        // addresses reissued, so a surviving row would name a dead character as the owner.
+        // An exhausted snapshot leaves written at 0, which publishes an empty table. That is deliberate. Rows held
+        // through a teardown are the dangerous direction, because their bodies are freed and their addresses
+        // reissued, so a surviving row names a dead character as the owner.
         std::scoped_lock lk(s_bodyOwnerMutex);
         s_bodyOwners = built;
         s_bodyOwnerCount = written;
@@ -291,9 +303,9 @@ namespace Transmog
 
     std::uint32_t char_idx_for_equip_slot_uncached(std::uintptr_t a1) noexcept
     {
-        if (a1 < 0x10000)
+        if (!DMK::memory::is_plausible_ptr(DMK::Address{a1}))
             return 0;
-        std::array<CDCore::BodyCacheEntry, 3> entries{};
+        std::array<CDCore::BodyCacheEntry, k_bodyOwnerCap> entries{};
         const auto n = CDCore::snapshot_body_cache(entries.data(), entries.size());
         for (std::size_t i = 0; i < n; ++i)
         {
@@ -305,7 +317,7 @@ namespace Transmog
 
     std::uint32_t char_idx_for_equip_slot(std::uintptr_t a1) noexcept
     {
-        if (a1 < 0x10000)
+        if (!DMK::memory::is_plausible_ptr(DMK::Address{a1}))
             return 0;
 
         std::uintptr_t ccoia = 0;

@@ -3,12 +3,11 @@
  * @brief Fixed-width contract between the resident dev loader and one logic generation.
  *
  * The loader outlives every generation, so everything it hands across the DLL boundary must have a layout both sides
- * agree on without sharing a C++ ABI. A plain C struct with an explicit size and version does that: the logic DLL
+ * agree on with no shared C++ ABI. A plain C struct with an explicit size and version does that: the logic DLL
  * validates both before touching a field, so a stale generation left in the deploy directory fails loudly instead of
  * reading through a shifted layout.
  *
- * Modelled on DetourModKit's checked-in staged_reload example, which its hot-reload guide treats as the reference
- * pair.
+ * Modeled on DetourModKit's checked-in staged_reload example, which its hot-reload guide treats as the reference pair.
  */
 #ifndef CDCORE_DEV_PROTOCOL_H
 #define CDCORE_DEV_PROTOCOL_H
@@ -46,7 +45,7 @@ extern "C"
         const WheelHostTable *wheel_host;
     } CdReloadInitRequest;
 
-    /// Exports the loader resolves by name on every generation.
+    // Exports the loader resolves by name on every generation.
 #define CDCORE_RELOAD_INIT_SYMBOL "Init"
 #define CDCORE_RELOAD_SHUTDOWN_SYMBOL "Shutdown"
 #define CDCORE_RELOAD_REVISION_SYMBOL "Revision"

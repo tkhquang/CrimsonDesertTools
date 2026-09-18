@@ -1,17 +1,14 @@
-#pragma once
+#ifndef EQUIPHIDE_VERSION_HPP
+#define EQUIPHIDE_VERSION_HPP
 
 #include <string>
 
-// ========================================================================== //
-//                           VERSION DEFINITION                               //
-//            >>> MODIFY ONLY THESE VALUES WHEN UPDATING VERSION <<<          //
-// ========================================================================== //
+// Bump these three values to release a new version. Nothing else in this file needs an edit.
 #define VERSION_MAJOR 0
 #define VERSION_MINOR 9
 #define VERSION_PATCH 1
-// ========================================================================== //
 
-// Helper macros for stringification -- DO NOT MODIFY.
+// Stringification helpers. Nothing below this line carries a version value.
 #define VERSION_STRINGIFY_IMPL(x) #x
 #define VERSION_STRINGIFY(x) VERSION_STRINGIFY_IMPL(x)
 
@@ -23,7 +20,7 @@
 
 namespace EquipHide::Version
 {
-    // Numeric components.
+    /** @brief Numeric version components, taken from the three macros above. */
     inline constexpr int MAJOR = VERSION_MAJOR;
     inline constexpr int MINOR = VERSION_MINOR;
     inline constexpr int PATCH = VERSION_PATCH;
@@ -37,12 +34,12 @@ namespace EquipHide::Version
     /** @brief Semantic-versioning string (currently an alias for VERSION_STR). */
     inline constexpr const char *SEMVER = VERSION_STRING;
 
-    /** @brief Compile-time date ("Apr 19 2026") from __DATE__. */
+    /// The __DATE__ stamp of this build.
     inline constexpr const char *BUILD_DATE = __DATE__;
-    /** @brief Compile-time HH:MM:SS from __TIME__. */
+    /// The __TIME__ stamp of this build.
     inline constexpr const char *BUILD_TIME = __TIME__;
 
-    // Static project metadata.
+    /** @brief Project identity strings, fixed for the lifetime of the mod. */
     inline constexpr const char *MOD_NAME = "CrimsonDesertEquipHide";
     inline constexpr const char *AUTHOR = "tkhquang";
     inline constexpr const char *REPOSITORY = "https://github.com/tkhquang/CrimsonDesertTools";
@@ -53,7 +50,7 @@ namespace EquipHide::Version
         "https://github.com/tkhquang/CrimsonDesertTools/releases/tag/equip-hide/" VERSION_TAG;
 
     /** @brief Expected artifact filename, e.g. "CrimsonDesertEquipHide_v0.5.2.zip". */
-    inline std::string get_artifact_name()
+    [[nodiscard]] inline std::string get_artifact_name()
     {
         return std::string(MOD_NAME) + "_" + TAG + ".zip";
     }
@@ -65,3 +62,5 @@ namespace EquipHide::Version
     void log_version_info();
 
 } // namespace EquipHide::Version
+
+#endif // EQUIPHIDE_VERSION_HPP

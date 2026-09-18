@@ -1,4 +1,5 @@
-#pragma once
+#ifndef TRANSMOG_SHARED_STATE_HPP
+#define TRANSMOG_SHARED_STATE_HPP
 
 #include <array>
 #include <atomic>
@@ -13,11 +14,11 @@ namespace Transmog
     struct ResolvedAddresses
     {
         uintptr_t slotPopulator = 0;
-        uintptr_t mapLookup = 0;           // IndexedStringA::lookup -- used to resolve CD_* slot hashes at runtime
-        uintptr_t subTranslator = 0;       // sub_14076D950 -- anchor for iteminfo item-name table scan
-        uintptr_t safeTearDown = 0;        // sub_14075FE60 -- scene-graph tear-down used by real_part_tear_down
-        uintptr_t indexedStringLookup = 0; // sub_1402D75D0 -- IndexedStringA short->hash; resolved via ItemNameTable
-                                           // chain walk (50+ template siblings prevent direct AOB)
+        uintptr_t mapLookup = 0;           // IndexedStringA::lookup - resolves CD_* slot hashes at runtime
+        uintptr_t subTranslator = 0;       // Anchor for the iteminfo item-name table scan
+        uintptr_t safeTearDown = 0;        // Scene-graph tear-down real_part_tear_down drives
+        uintptr_t indexedStringLookup = 0; // IndexedStringA short to hash. ItemNameTable resolves it through a chain
+                                           // walk, because 50+ template siblings prevent a direct AOB
     };
 
     ResolvedAddresses &resolved_addrs();
@@ -25,8 +26,8 @@ namespace Transmog
     // Transmog slot definitions
 
     // Order is preset-format-stable: existing slots 0..4 (Helm..Boots) MUST keep their indices so legacy presets load
-    // unchanged. New accessory/utility slots append after Boots. Engine slot tags for each entry are listed below;
-    // resolved via game_slot_from_transmog.
+    // unchanged. New accessory/utility slots append after Boots. The engine slot tag for each entry is listed below.
+    // game_slot_from_transmog resolves it.
     enum class TransmogSlot : uint8_t
     {
         Helm,     // engine tag 0x03
@@ -44,7 +45,7 @@ namespace Transmog
         Mask,     // engine tag 0x12
         Backpack, // engine tag 0x13
         Bracelet, // engine tag 0x14
-        // Weapons -- visible meshes on character but live in the cd_phw_* prefab family, not cd_phm_*.
+        // Weapons - visible meshes on character but live in the cd_phw_* prefab family, not cd_phm_*.
         // prefab_wrapper_swap module skips them (empty prefixes) so they go through the carrier-only path.
         MainHand,      // engine tag 0x00 (mainhand 1H)
         OffHand,       // engine tag 0x01 (offhand / shield / 1H mirror)
@@ -67,11 +68,11 @@ namespace Transmog
         // Kliff and Damiane reject this slot (engine metadata does not include tag 0x15 for them) and the slot adds no
         // transmog value for the typical case. To re-enable, add an `OongkaRocket, // engine tag 0x15` row here AND
         // extend every per-slot table that indexes by TransmogSlot:
-        //   slot_metadata.hpp       (k_slotMetadata -- master row:
+        //   slot_metadata.hpp       (k_slotMetadata - master row:
         //                            gameTag, displayName, partShowHashKey, enabled)
-        //   carrier_defaults.hpp    (k_carriers -- one carrier item
+        //   carrier_defaults.hpp    (k_carriers - one carrier item
         //                            per character per slot)
-        //   prefab_wrapper_swap.cpp (k_slotTagPatterns -- registry
+        //   prefab_wrapper_swap.cpp (k_slotTagPatterns - registry
         //                            classifier patterns)
         Count
     };
@@ -91,12 +92,12 @@ namespace Transmog
      *
      * @details Answered from the table @ref publish_body_owner_table maintains, so a caller pays three integer
      *          compares rather than a walk of the engine's actor array. A matching row is re-derived from the actor
-     *          it came from before its index is returned, so an equip-slot address the allocator has reissued cannot
+     *          it came from before its index is returned, so an equip-slot address the allocator reissued cannot
      *          borrow a protagonist's identity.
      *
      *          Returns 0 for NPCs and wildlife, while the chain is mid-teardown, and also before the first table is
      *          published or while its rows are between refreshes. Callers must treat 0 as "unknown", never as
-     *          "confirmed not a protagonist" -- see @ref char_idx_for_equip_slot_uncached where that distinction
+     *          "confirmed not a protagonist". @ref char_idx_for_equip_slot_uncached is where that distinction
      *          matters.
      * @warning Use this, NOT resolve_player_component(), to answer "whose body is this?". resolve_player_component()
      *          always returns Kliff's component whatever character is controlled, so comparing against it silently
@@ -108,9 +109,9 @@ namespace Transmog
      * @brief Live, uncached form of @ref char_idx_for_equip_slot.
      * @details Walks the actor array on every call, so it always answers from current state and never reports
      *          "unknown" merely because the published table is between refreshes. Reserve it for the apply pipeline,
-     *          which runs a handful of times a second and where a blind window would silently disarm an ownership
-     *          guard. It must never be called from an engine-driven hook: the walk is the cost this whole table
-     *          exists to keep off those threads.
+     *          which runs a handful of times a second and where a blind window silently disarms an ownership guard.
+     *          No engine-driven hook must call it. The walk is the cost this whole table exists to keep off those
+     *          threads.
      */
     [[nodiscard]] std::uint32_t char_idx_for_equip_slot_uncached(std::uintptr_t a1) noexcept;
 
@@ -119,9 +120,9 @@ namespace Transmog
 
     /**
      * @brief Republishes the table of protagonist bodies that @ref char_idx_for_equip_slot answers from.
-     * @details Ownership is derived from a full walk of the engine's actor array. That walk can only stop early once
-     *          every companion has been found, so a party of one sweeps the array end to end -- far too expensive to
-     *          repeat per socket build on an engine thread, which is where the question is asked.
+     * @details Ownership is derived from a full walk of the engine's actor array. The walk stops early only once it
+     *          finds every companion, so a party of one sweeps the array end to end - far too expensive to repeat per
+     *          socket build on an engine thread, which is where the question is asked.
      *
      *          Ownership therefore has exactly one producer: the load-detect worker, which already holds a fresh
      *          snapshot each tick. Engine threads only ever read the published result. Republishing unconditionally
@@ -130,14 +131,14 @@ namespace Transmog
      *          scheme cannot recover from that, because the very signal it waits for is the one that already fired.
      *
      *          The two parallel arrays exist so this header stays free of a CDCore include. Its consumers pull it
-     *          in for slot mappings and flags alone, and none of them should acquire the actor-chain headers just to
+     *          in for slot mappings and flags alone, and none of them must acquire the actor-chain headers to
      *          reach a publish entry point.
      *
      * @param ccoias   Protagonist CCOIA pointers, @p n entries.
      * @param charIdxs Matching 1-based character indices (1 Kliff, 2 Damiane, 3 Oongka), @p n entries.
-     * @param n        Number of entries; anything past @ref k_bodyOwnerCap is ignored.
-     * @note An empty snapshot publishes an empty table. Keeping the previous rows would leave them naming bodies
-     *       the engine has already freed and whose addresses it reissues.
+     * @param n        Number of entries. The publish ignores anything past @ref k_bodyOwnerCap.
+     * @note An empty snapshot publishes an empty table. Rows held from the previous publish name bodies the engine
+     *       already freed and whose addresses it reissues.
      */
     void publish_body_owner_table(const std::uintptr_t *ccoias, const std::uint32_t *charIdxs, std::size_t n) noexcept;
 
@@ -153,39 +154,41 @@ namespace Transmog
     std::atomic<std::uint32_t> &slot_mappings_owner() noexcept;
 
     /**
-     * Item IDs that were last written to slot_mappings (saved before preset switch). Used by clear_all_transmog to know
-     * what to unequip.
+     * @brief Item IDs last written to slot_mappings, saved before a preset switch.
+     * @details clear_all_transmog reads it to know what to unequip.
      */
     std::array<uint16_t, k_slotCount> &last_applied_ids();
 
     /**
-     * Per-character tracking of the last-applied transmog snapshot. The four globals (last_applied_ids / real_damaged /
-     * last_-applied_real_ids / last_applied_carrier_ids) describe ONE body's installed state at a time. With
-     * multi-character auto-apply and the "Apply To Selected" feature, the worker can apply to any of the three
-     * protagonists between hook events, so a single global snapshot would conflate state across bodies (Phase A
-     * teardown of Damiane's fakes would try to use Kliff's `lastIds` as the truth source).
+     * @brief Per-character tracking of the last-applied transmog snapshot.
+     * @param idx 1-based protagonist index: 1 Kliff, 2 Damiane, 3 Oongka. An out-of-range idx is a no-op.
+     * @details The four globals (last_applied_ids, real_damaged, last_applied_real_ids, last_applied_carrier_ids)
+     *          describe ONE body's installed state at a time. With multi-character auto-apply and the "Apply To
+     *          Selected" feature, the worker applies to any of the three protagonists between hook events, so a
+     *          single global snapshot conflates state across bodies. Phase A teardown of Damiane's fakes then uses
+     *          Kliff's `lastIds` as its truth source.
      *
-     * Each char's snapshot is buffered behind the scenes. Before each apply the worker hydrates the globals from the
-     * target character's buffered snapshot; after the apply finishes the new globals are captured back. Pass idx
-     * 1=Kliff, 2=Damiane, 3=Oongka. Out-of-range idx is a no-op.
+     *          Each character's snapshot is buffered. Before each apply the worker hydrates the globals from the
+     *          target character's buffered snapshot. After the apply finishes it captures the new globals back.
      */
     void rehydrate_applied_state_for_char(std::uint32_t idx) noexcept;
     void capture_applied_state_for_char(std::uint32_t idx) noexcept;
 
     /**
-     * Wipe ONE character's buffered snapshot AND the live globals, marking the character as having no installed fakes.
-     * Called by the multi-character auto-apply path when a protagonist's body (CCOIA) has been reallocated -- a
-     * despawn/respawn (off-screen stream-out + return, follower injury cooldown + recall) hands back a fresh body
-     * wearing vanilla gear, so the prior snapshot lists fakes that no longer exist. Without this, apply_all_transmog
-     * would observe preset==last-applied and real==last-real, fire its "no state change, skipping" early-out, and leave
-     * the respawned body un-transmogged. Pass idx 1=Kliff, 2=Damiane, 3=Oongka. Out-of-range idx is a no-op.
+     * @brief Wipes ONE character's buffered snapshot AND the live globals, so the character carries no installed fake.
+     * @param idx 1-based protagonist index: 1 Kliff, 2 Damiane, 3 Oongka. An out-of-range idx is a no-op.
+     * @details The multi-character auto-apply path calls it when the engine reallocates a protagonist's body (CCOIA).
+     *          A despawn and respawn (off-screen stream-out and return, follower injury cooldown and recall) hands
+     *          back a fresh body in vanilla gear, so the prior snapshot lists fakes that no longer exist. Without the
+     *          wipe, apply_all_transmog observes preset==last-applied and real==last-real, fires its "no state
+     *          change, skipping" early-out, and leaves the respawned body untransmogged.
      */
     void reset_applied_state_for_char(std::uint32_t idx) noexcept;
 
     /**
-     * Wipe both the globals and every per-character buffered snapshot. Called from the save-load wipe path: all bodies
-     * have been reallocated by the engine, every fake transmog item from the prior session is gone, so the trackers
-     * must reset to match.
+     * @brief Wipes both the globals and every per-character buffered snapshot.
+     * @details The save-load wipe path calls it. The engine reallocated every body and every fake transmog item from
+     *          the prior session is gone, so the trackers must reset to match.
      */
     void reset_all_applied_state() noexcept;
 
@@ -196,45 +199,48 @@ namespace Transmog
     std::atomic<bool> &shutdown_requested();
 
     /**
-     * Master gate for the ColorOverride subsystem (publisher hook, setter substitute, host-scope owner-vfunc midhooks,
-     * picker UI). False by default; enable via the `[Experimental] ColorOverride` INI key. When false, none of the
-     * hooks are installed and the picker UI is hidden -- the mod behaves as it did before the ColorOverride port
-     * landed.
+     * @brief Master gate for the ColorOverride subsystem.
+     * @details It covers the publisher hook, the setter substitute, the host-scope owner-vfunc midhooks and the
+     *          picker UI. False by default. The `[Experimental] ColorOverride` INI key enables it. When false, LT
+     *          installs none of those hooks and hides the picker UI.
      */
     std::atomic<bool> &flag_color_override();
 
     /**
-     * Master gate for the helm voice-unmuffle filter. False by default; enable via the `[Experimental]
-     * UnmuffleHelmVoice` INI key to remove the engine's stock plate/heavy-helm voice muffle. When false, the
-     * passive-skill registrar inline hook is not installed and the muffle behaves as it does in vanilla. Toggle is read
-     * once at startup; takes effect on the next game launch.
+     * @brief Master gate for the helm voice-unmuffle filter.
+     * @details False by default. The `[Experimental] UnmuffleHelmVoice` INI key enables it and removes the engine's
+     *          stock plate and heavy-helm voice muffle. When false, LT installs no passive-skill registrar inline
+     *          hook and the muffle behaves as it does in vanilla. The toggle is read once at startup and takes effect
+     *          on the next game launch.
      */
     std::atomic<bool> &flag_helm_audio_unmuffle();
 
     /**
-     * One-shot diagnostic dumps gated by `[Diagnostics]` INI section. Off by default. When true the corresponding TSV
-     * is written next to the plugin once ItemNameTable::build() returns Ok.
+     * @brief One-shot diagnostic dumps gated by the `[Diagnostics]` INI section.
+     * @details Off by default. When true, LT writes the matching TSV next to the plugin once ItemNameTable::build()
+     *          returns Ok.
      */
     std::atomic<bool> &flag_dump_item_prefabs();
     std::atomic<bool> &flag_dump_item_catalog();
 
     /**
-     * When the user has the dropdown pinned to a non-controlled character and this flag is set, overlay-UI edits
-     * (dropdown switch, picker change, slot toggle, preset cycle, manual buttons) apply to the editing character's body
-     * instead of cross-applying onto the controlled body. Engine-triggered equip events still target the controlled
-     * body so the controlled character's transmog stays visible across their own gear changes. When false, every apply
-     * targets the controlled body (legacy cross-body behaviour).
+     * @brief Routes overlay-UI edits to the editing character's own body.
+     * @details When the user pins the dropdown to a non-controlled character and this flag is set, overlay-UI edits
+     *          (dropdown switch, picker change, slot toggle, preset cycle, manual buttons) apply to the editing
+     *          character's body rather than cross-apply onto the controlled body. Engine-triggered equip events still
+     *          target the controlled body, so the controlled character's transmog survives their own gear changes.
+     *          When false, every apply targets the controlled body, which is the legacy cross-body behavior.
      */
     std::atomic<bool> &flag_apply_to_editing();
 
     // Trampoline typedefs
 
-    // sub_14076C960: Populates slot visual data + calls VisualEquipChange. This is the KEY function for transmog -- it
-    // loads meshes and transitions.
+    // Populates slot visual data and calls VisualEquipChange. This is the key entry point for transmog: it loads
+    // meshes and drives the transition.
     using SlotPopulatorFn = __int64(__fastcall *)(__int64 a1, unsigned __int16 *a2_itemData, __int64 a3_swapEntry);
     SlotPopulatorFn &slot_populator_fn();
 
-    // Rebuilds a single slot's visual. f(a1, slotA, slotB, swapEntry) -- BOTH slot arguments must name the slot to
+    // Rebuilds a single slot's visual. f(a1, slotA, slotB, swapEntry) - BOTH slot arguments must name the slot to
     // refresh. SlotPopulator passes the item-derived slot for the first, which collapses the two halves of a paired
     // slot onto one. Null when the AOB scan missed.
     using PartSlotRefreshFn = __int64(__fastcall *)(__int64 a1, __int16 slotA, __int16 slotB, __int64 a4_swapEntry);
@@ -255,7 +261,7 @@ namespace Transmog
     using ItemToSlotResolveFn = std::int64_t(__fastcall *)(std::int64_t a1, std::int16_t itemId);
     ItemToSlotResolveFn &item_to_slot_resolve_fn();
 
-    // sub_141D451B0: Initializes a swap entry to defaults (all -1/zeros).
+    // Initializes a swap entry to defaults (all -1 and zeros).
     using InitSwapEntryFn = __int64(__fastcall *)(__int64 dest);
     InitSwapEntryFn &init_swap_entry_fn();
 
@@ -269,71 +275,78 @@ namespace Transmog
      */
     std::atomic<bool> &in_transmog();
 
-    /// Last known player a1 (resolved lazily, and stored by the load-detect thread each poll).
+    /// Last known player a1, resolved lazily and stored by the load-detect thread on each poll.
     std::atomic<__int64> &player_a1();
 
     /**
-     * Returns the currently-controlled character name ("Kliff", "Damiane", "Oongka"). Delegates to the shared Core
-     * resolver which walks the static actor chain and classifies the CCOIA by appearance-config asset path. Returns an
-     * empty string if the chain is not yet resolved or the classifier failed. Safe to call from any thread.
+     * @brief Returns the currently-controlled character name ("Kliff", "Damiane", "Oongka").
+     * @return The character name, or an empty string when the chain is unresolved or the classifier failed.
+     * @details It delegates to the shared Core resolver, which walks the static actor chain and classifies the CCOIA
+     *          by appearance-config asset path. Safe to call from any thread.
      */
     std::string current_controlled_character_name() noexcept;
 
     /**
-     * WorldSystem base pointer (game_base + RVA). Atomic because x64 qword stores are naturally atomic on aligned data
-     * but the compiler needs the explicit fence for correct ordering.
+     * @brief WorldSystem base pointer (game_base + RVA).
+     * @details It is atomic because x64 qword stores are naturally atomic on aligned data, but the compiler still
+     *          needs the explicit fence for correct ordering.
      */
     std::atomic<uintptr_t> &world_system_ptr();
 
     /**
-     * Per-slot "real item damaged" flag. Set when phase B tears down the real item. Once set, the fake==real skip path
-     * falls through to SlotPopulator so the mesh gets restored. Cleared on full clear.
+     * @brief Per-slot "real item damaged" flag.
+     * @details Phase B sets it when it tears down the real item. Once set, the fake==real skip path falls through to
+     *          SlotPopulator so the engine restores the mesh. A full clear resets it.
      */
     std::array<bool, k_slotCount> &real_damaged();
 
     /**
-     * Snapshot of auth-table real itemId per slot at last apply, indexed by TransmogSlot enum (0..k_slotCount-1).
-     * Compared against live auth state to detect real-item swaps. Covers every supported slot so real-item changes on
-     * accessories and weapon slots (e.g. tool vs. 2H sword sharing engine slot tag 0x0D) trigger re-apply. Slots LT
-     * does not actively manage stay zeroed.
+     * @brief Snapshot of the auth-table real itemId per slot at the last apply, indexed by TransmogSlot.
+     * @details The dispatcher compares it against live auth state to detect real-item swaps. It covers every
+     *          supported slot, so a real-item change on an accessory or a weapon slot (e.g. the tool and the 2H sword
+     *          that share engine slot tag 0x0D) triggers a re-apply. Slots LT does not manage stay zeroed.
      */
     std::array<std::uint16_t, k_slotCount> &last_applied_real_ids();
 
     /**
-     * Carrier itemIds used in the last apply, indexed by TransmogSlot. 0 means no carrier was used (direct apply). Used
-     * by tear-down
-     * Phase A to find the correct scene-graph identity.
+     * @brief Carrier itemIds used in the last apply, indexed by TransmogSlot.
+     * @details 0 means the apply used no carrier (direct apply). Tear-down Phase A reads it to find the correct
+     *          scene-graph identity.
      */
     std::array<std::uint16_t, k_slotCount> &last_applied_carrier_ids();
 
     /**
-     * Per-slot one-shot "force apply" flag. When true the next apply for that slot bypasses the `targetId == prevId`
-     * early-out and forces slotNeedsWork in apply_all_transmog, while leaving last_applied_ids[i] intact so Phase A
-     * `tear_down_fake` still runs against the prior carrier. Used by the body-mesh picker when re-picking a prefab on
-     * the same carrier (e.g. 0x1521 -> 0x1521 with a different src->tgt wrapper map): without this the dispatcher would
-     * skip Phase A entirely and the prior body-mesh target wrapper would never get cleaned up by the engine's
-     * natural-pipeline hook. Cleared by the dispatcher after read.
+     * @brief Per-slot one-shot "force apply" flag.
+     * @details When true, the next apply for that slot bypasses the `targetId == prevId` early-out and forces
+     *          slotNeedsWork in apply_all_transmog. It leaves last_applied_ids[i] intact, so Phase A
+     *          `tear_down_fake` still runs against the prior carrier. The body-mesh picker sets it when it re-picks a
+     *          prefab on the same carrier (e.g. 0x1521 -> 0x1521 with a different src to tgt wrapper map). Without
+     *          it, the dispatcher skips Phase A entirely and the engine's natural-pipeline hook never cleans up the
+     *          prior body-mesh target wrapper. The dispatcher clears it after the read.
      */
     std::array<bool, k_slotCount> &force_apply_pending();
 
     /**
-     * When true the debounce worker runs clear instead of apply. Set by manual_clear, consumed by the worker.
+     * @brief When true, the debounce worker runs a clear in place of an apply.
+     * @details manual_clear sets it and the worker consumes it.
      */
     std::atomic<bool> &clear_pending();
 
     /**
-     * True iff the active preset's dye state has been edited via the picker since the last save / preset switch / file
-     * load. Drives the Save button's "Save *" pending indicator. Set by the dye picker; cleared by
-     * `PresetManager::save()` and on preset switch / load. Dye edits write directly to the active preset (no staging
-     * area like slot_mappings has for items), so this flag is the only signal that something needs persisting.
+     * @brief True while the active preset carries a dye edit that no save, preset switch or file load has consumed.
+     * @details It drives the Save button's "Save *" pending indicator. The dye picker sets it.
+     *          `PresetManager::save()`, a preset switch and a load clear it. A dye edit writes directly to the active
+     *          preset, with no staging area of the kind slot_mappings gives items, so this flag is the only signal
+     *          that something needs persisting.
      */
     std::atomic<bool> &dye_dirty();
 
     /**
-     * Slot index for single-slot hover-apply. k_slotCount means "apply all" (the default). Values 0..4 scope the next
-     * debounced apply to one slot only, avoiding full-gear flicker.
-     * Last-writer-wins: if manual_apply (full) and manual_apply_slot race before the worker wakes, only the latest
-     * store takes effect. This is acceptable -- the user's most recent action wins.
+     * @brief Slot index for a single-slot hover-apply.
+     * @details k_slotCount means "apply all", which is the default. A slot index scopes the next debounced apply to
+     *          that one slot and avoids full-gear flicker. The last writer wins: when manual_apply and
+     *          manual_apply_slot race before the worker wakes, only the latest store takes effect, so the user's most
+     *          recent action decides.
      */
     std::atomic<std::size_t> &pending_slot_index();
 
@@ -348,9 +361,12 @@ namespace Transmog
     }
 
     /**
-     * Convert the wide runtime directory to a UTF-8 string with a trailing path separator. Returns empty on failure.
-     * Used by init and deferred-scan paths to locate sidecar data files.
+     * @brief Converts the wide runtime directory to a UTF-8 string with a trailing path separator.
+     * @return The directory, or an empty string on failure.
+     * @details The init and deferred-scan paths use it to locate sidecar data files.
      */
     std::string runtime_dir_utf8();
 
 } // namespace Transmog
+
+#endif // TRANSMOG_SHARED_STATE_HPP

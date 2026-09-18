@@ -1,4 +1,5 @@
-#pragma once
+#ifndef TRANSMOG_TRANSMOG_HPP
+#define TRANSMOG_TRANSMOG_HPP
 
 #include <DetourModKit/abi/wheel_host.h>
 #include <DetourModKit/error.hpp>
@@ -31,33 +32,48 @@ namespace Transmog
      */
     [[nodiscard]] bool shutdown();
 
+    /** @brief Schedule a full transmog apply across every active slot via the debounce worker. */
     void manual_apply();
 
     /**
      * @brief Schedule a single-slot transmog apply via the debounce worker.
-     * @param slotIdx TransmogSlot index (0..4). Only this slot is torn down and re-applied; other slots are untouched.
+     * @param slotIdx TransmogSlot index in [0, k_slotCount). The call tears down and re-applies only this slot. Every
+     *        other slot stays untouched.
      */
     void manual_apply_slot(std::size_t slotIdx);
 
+    /** @brief Schedule a transmog clear across every slot via the debounce worker. */
     void manual_clear();
+
+    /**
+     * @brief Snapshot the character's equipped items into slot_mappings and their live dye into the active preset.
+     * @details Clears every session-only prefab pick first, so the captured carrier item IDs become the visible
+     *          state. Skips disabled slots.
+     */
     void capture_outfit();
 
     /// Capture current real equipment into slot_mappings (from entry table, not transmog state).
     void capture_real_equipment();
 
     /**
-     * Read the engine's live dye records for the auth-table entry whose gameTag maps to `slotIdx` and write them into
-     * the active preset's per-slot dye[] array (replacing whatever was stored). Sets `dyeSparse=true` and
-     * `dye_dirty()=true` on success. Used by the per-slot "sync from live" button when the user has applied in-game dye
-     * to a fake-bound slot's underlying real item and wants those bytes saved into the active preset. Returns true if
-     * at least one channel was captured. No-op when no active preset, slot disabled, or auth-table entry missing.
+     * @brief Copy the engine's live dye records for `slotIdx` into the active preset's per-slot dye[] array.
+     * @param slotIdx TransmogSlot index in [0, k_slotCount). The call finds the auth-table entry whose gameTag maps
+     *        to it.
+     * @return true when the call captured at least one channel.
+     * @details The copy replaces whatever the preset stored. On success it sets `dyeSparse=true` and
+     *          `dye_dirty()=true`. The per-slot "sync from live" button calls this when the user applies in-game dye
+     *          to a fake-bound slot's underlying real item and wants those bytes saved into the active preset. The
+     *          call does nothing when no preset is active, the slot is disabled, or the auth-table entry is missing.
      */
-    bool sync_live_dye_for_slot(std::size_t slotIdx) noexcept;
+    [[nodiscard]] bool sync_live_dye_for_slot(std::size_t slotIdx) noexcept;
 
     /**
-     * Returns true once the WorldSystem chain resolves to a live player component. Overlay buttons should gate on this
-     * to avoid spamming "player not found" before the first world load.
+     * @brief True once the WorldSystem chain resolves to a live player component.
+     * @details An overlay button must gate on this call. The gate stops the log filling with "player not found"
+     *          before the first world load.
      */
-    bool is_world_ready() noexcept;
+    [[nodiscard]] bool is_world_ready() noexcept;
 
 } // namespace Transmog
+
+#endif // TRANSMOG_TRANSMOG_HPP

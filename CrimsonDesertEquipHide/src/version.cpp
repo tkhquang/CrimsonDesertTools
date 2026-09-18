@@ -7,12 +7,10 @@ namespace EquipHide::Version
     void log_version_info()
     {
         auto &logger = DMK::log();
-        logger.info("----------------------------------------------------------");
         logger.info("{} {} ({} {})", MOD_NAME, TAG, BUILD_DATE, BUILD_TIME);
         logger.info("Author: {}", AUTHOR);
         logger.info("Source: {}", REPOSITORY);
         logger.info("Nexus:  {}", NEXUS_URL);
-        logger.info("----------------------------------------------------------");
     }
 
 } // namespace EquipHide::Version

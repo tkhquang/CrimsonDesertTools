@@ -5,8 +5,8 @@
 // The variadic Text/TextDisabled/TextColored helpers are decl-in-header, def-in-cpp on purpose: reshade_overlay.hpp's
 // namespace-ImGui inline thunks for `Text(fmt, ...)` etc. are inline-variadic, MSVC cannot COMDAT-fold inline variadic
 // bodies, and the resulting strong copy collides at link time with imgui_widgets.obj's strong definition (LNK2005).
-// Centralising them as plain extern functions sidesteps the surface entirely: each TU sees the declaration only, no
-// per-TU inline-variadic emission, no duplicate strong symbol.
+// One set of plain extern functions sidesteps the surface entirely: each TU sees the declaration only, so there is no
+// per-TU inline-variadic emission and no duplicate strong symbol.
 
 #ifndef TRANSMOG_OVERLAY_UI_HELPERS_HPP
 #define TRANSMOG_OVERLAY_UI_HELPERS_HPP
@@ -23,72 +23,121 @@ struct ImVec4;
 namespace Transmog
 {
 
-    // Variadic text helpers. Each forwards to ImGui's *V counterpart so formatting and (for the styled variants)
-    // push/pop StyleColor stays inside the upstream non-C-variadic implementation.
+    /**
+     * @brief Formats one line of overlay text.
+     * @param fmt printf-style format string.
+     * @details Forwards to ImGui's TextV, so the format step stays inside the upstream non-C-variadic implementation.
+     */
     void ui_text(const char *fmt, ...);
+
+    /**
+     * @brief Formats one line of dimmed overlay text.
+     * @param fmt printf-style format string.
+     * @details Forwards to ImGui's TextDisabledV, so the format step stays inside the upstream implementation.
+     */
     void ui_text_disabled(const char *fmt, ...);
+
+    /**
+     * @brief Formats one line of overlay text in @p col.
+     * @param col Text color.
+     * @param fmt printf-style format string.
+     * @details Forwards to ImGui's TextColoredV, so the format step and the StyleColor push/pop pair both stay
+     *          inside the upstream implementation.
+     */
     void ui_text_colored(const ImVec4 &col, const char *fmt, ...);
 
-    // Multi-call tooltip wrapper. ImGui v1.92.5 does not expose SetTooltipUnformatted as a function-table slot, so the
-    // three-call sequence (BeginTooltip / TextUnformatted / EndTooltip) is the cheapest available path.
+    /**
+     * @brief Shows @p text as a tooltip on the item just drawn.
+     * @param text Tooltip body, drawn unformatted.
+     * @details ImGui v1.92.5 exposes no SetTooltipUnformatted function-table slot, so the three-call sequence
+     *          (BeginTooltip, TextUnformatted, EndTooltip) is the cheapest path available.
+     */
     void ui_tooltip(const char *text);
 
-    // Case-insensitive substring search. Returns true if `needle` is empty or found anywhere in `hay`.
+    /**
+     * @brief Case-insensitive substring search over an ASCII name.
+     * @param hay The string to search.
+     * @param needle The substring to find. An empty or null needle matches everything.
+     * @return True when @p needle is empty or occurs anywhere in @p hay.
+     * @note The fold is ASCII-only and locale-independent, which is what the rest of the catalog assumes.
+     */
     [[nodiscard]] bool name_contains_ci(const std::string &hay, const char *needle) noexcept;
 
-    // Mirror a picker-committed override into PendingOverrides so the slot-agnostic substitute path in
-    // color_override/setter_substitute.cpp picks up the user's edit on the next engine write.
-    //
-    // Caller passes the picker's slot index + row index. The helper reads `submesh_name` from the row's
-    // `SwatchOverride` and `token_id` from the row's `SwatchEntry`, then writes to PendingOverrides. Silently no-ops if
-    // either field is missing.
+    /**
+     * @brief Mirrors a picker-committed override into PendingOverrides.
+     * @param slot Picker slot index.
+     * @param idx Row index inside that slot.
+     * @param r Red component of the picked color.
+     * @param g Green component of the picked color.
+     * @param b Blue component of the picked color.
+     * @details The slot-agnostic substitute path in color_override/setter_substitute.cpp reads PendingOverrides on
+     *          the next engine write, so the mirror is what makes the edit reach the renderer. The helper reads
+     *          `submesh_name` from the row's SwatchOverride and `token_id` from its SwatchEntry.
+     * @note A missing field makes this a silent no-op.
+     */
     void mirror_override_to_pending(int slot, std::size_t idx, std::uint8_t r, std::uint8_t g, std::uint8_t b) noexcept;
 
-    // Erase any pending entry matching this row's (submesh, token). Called when the user reverts a row to engine
-    // default or un-ticks the override checkbox.
+    /**
+     * @brief Erases the pending entry that matches this row's (submesh, token) pair.
+     * @param slot Picker slot index.
+     * @param idx Row index inside that slot.
+     * @details The user reverts a row to the engine default, or un-ticks its override checkbox, and this drops the
+     *          matching pending entry.
+     */
     void erase_override_from_pending(int slot, std::size_t idx) noexcept;
 
-    // Compare staged slot_mappings vs last_applied_ids to detect unsaved picker/checkbox edits. Returns true if ANY
-    // slot's effective target differs from what's currently committed to the game (or has the force-apply flag set
-    // after a re-pick on the same carrier id).
+    /**
+     * @brief Reports whether the overlay holds picker or checkbox edits that no apply pass committed yet.
+     * @return True when any slot's effective target differs from what the game currently holds, or when a re-pick on
+     *         the same carrier id set that slot's force-apply flag.
+     * @details Compares staged slot_mappings against last_applied_ids.
+     */
     [[nodiscard]] bool has_pending_changes() noexcept;
 
-    // Returns true when slot_mappings differs from the active preset's persisted slots, i.e. the user edited rows in
-    // the overlay but has not committed the change back into the JSON preset via Save. Used to tint the Save button so
-    // unsaved work is visible. Prefab picks are session-only and require special-case comparison via
-    // SlotUIState::priorCarrierActive / priorCarrierItemId.
+    /**
+     * @brief Reports whether the overlay holds edits that no Save wrote back into the JSON preset.
+     * @return True when slot_mappings differs from the active preset's persisted slots.
+     * @details The Save button tints on true, so unsaved work stays visible. Prefab picks are session-only, so the
+     *          comparison reads SlotUIState::priorCarrierActive and priorCarrierItemId for a slot that holds one.
+     */
     [[nodiscard]] bool has_pending_save() noexcept;
 
-    // Force the carrier item for each slot that has a session-only prefab pick to the active character's default
-    // carrier (from carrier_defaults.hpp). PWS swaps are keyed by the source wrapper that THAT character's body emits,
-    // so the matching carrier must be resident at apply time or the swap silently no-ops.
+    /**
+     * @brief Forces every slot that holds a session-only prefab pick onto the active character's default carrier.
+     * @details The defaults come from carrier_defaults.hpp. PWS swaps key on the source wrapper that THAT
+     *          character's body emits, so the matching carrier must be resident at apply time or the swap silently
+     *          no-ops.
+     */
     void force_active_character_carrier_for_picked_slots();
 
-    // Clear all picked-prefab UI state and deactivate the body-mesh hook. Called BEFORE preset switches (so the swap is
-    // torn down before the new preset's items are equipped, otherwise the hook would still substitute against the old
-    // src wrappers) and on Capture Outfit (which replaces the current state with the live equipped outfit, so
-    // session-only prefab picks must surrender too).
-    //
-    // Returns a per-slot mask indicating which slots had a prefab pick. The caller is responsible for
-    // post-apply_to_state lastIds reconciliation: for each cleared slot, if the new preset's carrier equals lastIds[i],
-    // zero lastIds[i] so the apply pass tears down the prior body-mesh fake (the natural-pipeline cleanup hook would
-    // not fire otherwise). When carriers differ, lastIds stays intact and the regular tear_down_fake path runs.
+    /**
+     * @brief Clears all picked-prefab UI state and deactivates the body-mesh hook.
+     * @return A per-slot mask naming the slots that held a prefab pick.
+     * @details A preset switch calls this BEFORE it equips the new preset's items, so the tear-down lands before the
+     *          equip and the hook cannot substitute against the old src wrappers. Capture Outfit calls it too,
+     *          because it replaces the current state with the live equipped outfit and session-only prefab picks
+     *          must surrender to that.
+     * @note The caller owns the post-apply_to_state lastIds reconciliation. For each cleared slot whose new preset
+     *       carrier equals lastIds[i], zero lastIds[i] so the apply pass tears down the prior body-mesh fake,
+     *       because the natural-pipeline cleanup hook does not fire for it. When the carriers differ, lastIds stays
+     *       intact and the regular tear_down_fake path runs.
+     */
     std::array<bool, k_slotCount> clear_all_picked_prefabs_and_deactivate();
 
-    // Audit a submesh's dye-property channel coverage and emit a tooltip body listing gaps. Used by the dye picker to
-    // render a (!) next to submeshes whose shader doesn't expose the full RGB triple for one or more dye families.
-    //
-    // `present[layer][channel]`: 1 if a SwatchEntry exists for that (layer, channel) on the submesh, 0 otherwise.
-    //   layer 0 = _tintColor
-    //   layer 1 = _dyeingColorMask
-    //   layer 2 = _dyeingDetailLayerColorMask
-    //   channel 0 = R, 1 = G, 2 = B
-    //
-    // Hair (layer 3) is intentionally excluded -- its presence is context-dependent. Detail-mask absence is also
-    // silenced because many assets simply don't use that family; only partial coverage of detail-mask is flagged
-    // (genuine baked-channel lock).
-    //
-    // Returns true if at least one gap was found. On true, `out` holds bullet lines.
+    /**
+     * @brief Audits a submesh's dye-property channel coverage and writes a tooltip body that lists the gaps.
+     * @param present [layer][channel] map: 1 when a SwatchEntry exists for that pair on the submesh, 0 otherwise.
+     *        Layer 0 is _tintColor, layer 1 is _dyeingColorMask, layer 2 is _dyeingDetailLayerColorMask. Channel 0
+     *        is R, 1 is G, 2 is B.
+     * @param out Destination buffer for the bullet lines.
+     * @param cap Capacity of @p out in bytes.
+     * @return True when the audit found at least one gap. Only then does @p out hold bullet lines.
+     * @details The dye picker draws a (!) next to a submesh whose shader does not expose the full RGB triple for one
+     *          or more dye families.
+     * @note Hair (layer 3) is excluded on purpose, because its presence depends on context. A wholly absent
+     *       detail-mask family is silent too, because many assets do not use that family. Only partial detail-mask
+     *       coverage is flagged, which is a genuine baked-channel lock.
+     */
     [[nodiscard]] bool dye_picker_compute_channel_gap_tip(const int present[3][3], char *out, std::size_t cap);
 
 } // namespace Transmog

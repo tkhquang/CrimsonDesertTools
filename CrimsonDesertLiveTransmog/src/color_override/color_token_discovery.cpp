@@ -1,19 +1,22 @@
 #include "color_token_discovery.hpp"
 
 #include "../aob_resolver.hpp"
+#include "color_state.hpp"
 
 #include <DetourModKit.hpp>
+#include <DetourModKit/memory.hpp>
 #include <DetourModKit/region.hpp>
 #include <DetourModKit/scan.hpp>
-
-#include <Windows.h>
 
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cstddef>
+#include <cstdio>
 #include <cstring>
 #include <mutex>
 #include <optional>
+#include <span>
 #include <stop_token>
 #include <vector>
 
@@ -23,9 +26,9 @@ namespace Transmog::ColorOverride::TokenSlotDiscovery
     {
         struct KnownProp
         {
-            const char *name;
-            int layer;
-            int channel;
+            const char *name{};
+            int layer{};
+            int channel{};
         };
         constexpr KnownProp k_known[] = {
             {"_tintColorR", 0, 0},
@@ -50,10 +53,10 @@ namespace Transmog::ColorOverride::TokenSlotDiscovery
 
         struct DiscoveredSlot
         {
-            std::uintptr_t slot_addr;
-            const char *name;
-            int layer;
-            int channel;
+            std::uintptr_t slot_addr{};
+            const char *name{};
+            int layer{};
+            int channel{};
         };
         std::vector<DiscoveredSlot> g_slots;
 
@@ -75,78 +78,54 @@ namespace Transmog::ColorOverride::TokenSlotDiscovery
         std::atomic<std::size_t> g_lastCount{0};
         std::once_flag g_runOnce;
 
-        bool name_matches(std::uintptr_t addr, const char *name) noexcept
+        // The longest entry in k_known is 30 characters, so a 32-byte window always contains the terminator and a
+        // name longer than the window can never compare equal to an allow-list entry.
+        constexpr std::size_t k_name_window = 32;
+
+        // Copy a candidate property name out of the host image. One guarded read per hit replaces a per-known-name
+        // walk over foreign memory, and the forced terminator makes std::strcmp over the copy the exact comparison
+        // the allow-list needs.
+        bool read_foreign_name(std::uintptr_t addr, char (&out)[k_name_window]) noexcept
         {
-            __try
-            {
-                const char *src = reinterpret_cast<const char *>(addr);
-                std::size_t i = 0;
-                while (true)
-                {
-                    const char c = src[i];
-                    const char n = name[i];
-                    if (c != n)
-                        return false;
-                    if (n == '\0')
-                        return true;
-                    ++i;
-                    if (i > 128)
-                        return false;
-                }
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
+            out[0] = '\0';
+            std::array<std::byte, k_name_window> raw{};
+            // read_into fails the WHOLE span on a fault anywhere inside it, so a name that ends within the window of
+            // an unmapped page would reject a candidate the byte-at-a-time predecessor accepted. Walk the window down
+            // to its readable prefix and terminate there. A normal candidate reads in one pass.
+            std::size_t readable = k_name_window;
+            while (readable > 0 && !DMK::memory::read_into(DMK::Address{addr}, std::span{raw.data(), readable}))
+                readable /= 2;
+            if (readable == 0)
                 return false;
-            }
+            std::memcpy(out, raw.data(), readable);
+            out[readable - 1] = '\0';
+            return true;
         }
 
-        // SEH-guarded helper to read a name-string preview from a resolved descriptor address. `out` is a fixed-size
-        // buffer filled with up-to-32 printable chars + NUL. Non-printable bytes are replaced with '?'. Returns true on
-        // any read.
+        // Read a printable preview of a candidate name for the diagnostic trace. `out` takes up to 32 printable
+        // characters plus a terminator. A non-printable byte prints as '?'.
         bool peek_name_preview(std::uintptr_t addr, char *out, std::size_t out_cap) noexcept
         {
             if (out == nullptr || out_cap == 0)
                 return false;
             out[0] = '\0';
-            __try
-            {
-                const char *sp = reinterpret_cast<const char *>(addr);
-                std::size_t i = 0;
-                const std::size_t limit = (out_cap - 1 < 32) ? out_cap - 1 : 32;
-                for (; i < limit; ++i)
-                {
-                    const char c = sp[i];
-                    if (c == '\0')
-                        break;
-                    const auto uc = static_cast<unsigned char>(c);
-                    out[i] = (uc >= 0x20 && uc <= 0x7E) ? c : '?';
-                }
-                out[i] = '\0';
-                return true;
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
+            const std::size_t limit = (out_cap - 1 < k_name_window) ? out_cap - 1 : k_name_window;
+            std::array<std::byte, k_name_window> raw{};
+            if (!DMK::memory::read_into(DMK::Address{addr}, std::span{raw.data(), limit}))
             {
                 std::snprintf(out, out_cap, "<fault>");
                 return false;
             }
-        }
-
-        // Try to decode a `lea r,[rip+disp32]` instruction at `p`, expecting opcode prefix `prefix[0..2]`. Returns the
-        // resolved target or 0 on prefix mismatch.
-        std::uintptr_t decode_lea_rip(const std::byte *p, std::uint8_t b0, std::uint8_t b1, std::uint8_t b2) noexcept
-        {
-            __try
+            std::size_t i = 0;
+            for (; i < limit; ++i)
             {
-                if (static_cast<std::uint8_t>(p[0]) != b0 || static_cast<std::uint8_t>(p[1]) != b1 ||
-                    static_cast<std::uint8_t>(p[2]) != b2)
-                    return 0;
-                const std::int32_t disp = *reinterpret_cast<const std::int32_t *>(p + 3);
-                return reinterpret_cast<std::uintptr_t>(p + 7) + static_cast<std::intptr_t>(disp);
+                const auto uc = std::to_integer<unsigned char>(raw[i]);
+                if (uc == 0)
+                    break;
+                out[i] = (uc >= 0x20 && uc <= 0x7E) ? static_cast<char>(uc) : '?';
             }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                return 0;
-            }
+            out[i] = '\0';
+            return true;
         }
 
         void do_run()
@@ -154,7 +133,8 @@ namespace Transmog::ColorOverride::TokenSlotDiscovery
             using clock = std::chrono::steady_clock;
             const auto t0 = clock::now();
 
-            // Get module base + image size from DMK's cached host-module range (single atomic load on the warm path).
+            // Module base and image size, resolved once per sweep. Region::host() is loader-backed and re-walks the
+            // PE headers on every call, so it stays out of the per-hit loop below.
             const auto range = DMK::Region::host();
             if (range.size == 0)
             {
@@ -163,8 +143,8 @@ namespace Transmog::ColorOverride::TokenSlotDiscovery
                 return;
             }
 
-            // Walk every property-registration call site emitted by the two TLS-guarded registrars (sub_14274A3C0 and
-            // sub_142749F10). The pattern matches the 17-byte run:
+            // Walk every property-registration call site emitted by the two TLS-guarded property registrars. The
+            // pattern matches the 17-byte run:
             //
             //   <zero-write>               6 or 7 bytes; decoded
             //                              backward to get slot addr
@@ -188,7 +168,7 @@ namespace Transmog::ColorOverride::TokenSlotDiscovery
             // always `_dyeingColorMaskR` and matters because the live game emits its token id (0x2FCE).
             //
             // The pattern is intentionally non-unique: there is one match per registered property across the entire
-            // module (~2k hits on v1.06). The name-allow-list filter below accepts only the entries whose strings
+            // module. The name-allow-list filter below accepts only the entries whose strings
             // appear in k_known, so over-scanning is a performance concern rather than a correctness one. Compile all 3
             // walk patterns up front. We try each in turn over the module range; the inner accept logic dedups by
             // slot_addr so a site matched by multiple patterns is recorded only once. Walking the union gives
@@ -198,39 +178,35 @@ namespace Transmog::ColorOverride::TokenSlotDiscovery
             const auto &patterns = Transmog::k_colorTokenRegistrarCallAobs;
             constexpr std::size_t compiledCount = Transmog::k_colorTokenRegistrarCallAobCount;
 
-            // SEH-guarded zero-write decode. The instruction immediately preceding the matched `mov r9d, 0x2FFFF`
-            // anchor is one of:
+            // Zero-write decode. The instruction immediately preceding the matched `mov r9d, 0x2FFFF` anchor is one
+            // of:
             //   `89 3D disp32`       (6B) - mov [rip+d], edi
             //   `44 89 2D disp32`    (7B) - mov [rip+d], r13d
-            // Both encode the table slot address as RIP-relative disp32 (resolved against the next-instruction RIP,
-            // which is the anchor's start).
+            // Both encode the table slot address as RIP-relative disp32, resolved against the next-instruction RIP,
+            // which is the anchor start. Each form is discriminated on its own guarded read of exactly the bytes that
+            // form needs, so a 6-byte site one byte past a page boundary still decodes.
             auto decode_zero_write_slot = [](const std::byte *anchor) -> std::uintptr_t
             {
-                __try
+                // 6-byte form: `89 3D` at anchor-6
+                std::array<std::byte, 2> head6{};
+                if (DMK::memory::read_into(DMK::Address{anchor - 6}, std::span{head6}) &&
+                    std::to_integer<std::uint8_t>(head6[0]) == 0x89 && std::to_integer<std::uint8_t>(head6[1]) == 0x3D)
                 {
-                    // 6-byte form: `89 3D` at anchor-6
-                    const auto b6_0 = static_cast<std::uint8_t>(anchor[-6]);
-                    const auto b6_1 = static_cast<std::uint8_t>(anchor[-5]);
-                    if (b6_0 == 0x89 && b6_1 == 0x3D)
-                    {
-                        const std::int32_t disp = *reinterpret_cast<const std::int32_t *>(anchor - 4);
-                        return reinterpret_cast<std::uintptr_t>(anchor) + static_cast<std::intptr_t>(disp);
-                    }
-                    // 7-byte form: `44 89 2D` at anchor-7
-                    const auto b7_0 = static_cast<std::uint8_t>(anchor[-7]);
-                    const auto b7_1 = static_cast<std::uint8_t>(anchor[-6]);
-                    const auto b7_2 = static_cast<std::uint8_t>(anchor[-5]);
-                    if (b7_0 == 0x44 && b7_1 == 0x89 && b7_2 == 0x2D)
-                    {
-                        const std::int32_t disp = *reinterpret_cast<const std::int32_t *>(anchor - 4);
-                        return reinterpret_cast<std::uintptr_t>(anchor) + static_cast<std::intptr_t>(disp);
-                    }
-                    return 0;
+                    return DMK::scan::resolve_rip_relative(DMK::Address{anchor - 6}, 2, 6)
+                        .value_or(DMK::Address{})
+                        .raw();
                 }
-                __except (EXCEPTION_EXECUTE_HANDLER)
+                // 7-byte form: `44 89 2D` at anchor-7
+                std::array<std::byte, 3> head7{};
+                if (DMK::memory::read_into(DMK::Address{anchor - 7}, std::span{head7}) &&
+                    std::to_integer<std::uint8_t>(head7[0]) == 0x44 &&
+                    std::to_integer<std::uint8_t>(head7[1]) == 0x89 && std::to_integer<std::uint8_t>(head7[2]) == 0x2D)
                 {
-                    return 0;
+                    return DMK::scan::resolve_rip_relative(DMK::Address{anchor - 7}, 3, 7)
+                        .value_or(DMK::Address{})
+                        .raw();
                 }
+                return 0;
             };
 
             // Linear walk through the module per pattern: for each compiled candidate, find_pattern returns the first
@@ -270,7 +246,7 @@ namespace Transmog::ColorOverride::TokenSlotDiscovery
 
                 // unchecked::find_pattern, not scan(): this sweep takes thousands of hits per pattern, and scan()
                 // walks the OS page map on every call, which is a startup-time cost its own note warns against
-                // paying in a loop. The raw twin does no page filtering, so the caller owns readability -- and the
+                // paying in a loop. The raw twin does no page filtering, so the caller owns readability - and the
                 // scope here IS one mapped PE image, every byte of it committed. Page gating also buys nothing at
                 // this site: the query bytes live in this DLL's own .rdata, outside the scanned image, so a match
                 // can never be the query finding itself.
@@ -290,8 +266,7 @@ namespace Transmog::ColorOverride::TokenSlotDiscovery
                     if (clock::now() - t0 > k_timeBudget)
                     {
                         DMK::log().warning(
-                            "[token-discovery] time budget exceeded "
-                            "at pattern={} iter={} hits={} (bailing)",
+                            "[token-discovery] time budget exceeded at pattern={} iter={} hits={} (bailing)",
                             pi,
                             iter,
                             patternHits
@@ -310,14 +285,15 @@ namespace Transmog::ColorOverride::TokenSlotDiscovery
 
                     const auto matchAddr = reinterpret_cast<std::uintptr_t>(hit);
 
-                    // Decode the `lea rdx, [rip+disp32]` target that closes the matched head; the disp32 sits 3
-                    // bytes into the lea.
-                    const auto strAddr = decode_lea_rip(hit + k_nameLeaOffset, 0x48, 0x8D, 0x15);
-                    if (strAddr == 0)
+                    // Decode the `lea rdx, [rip+disp32]` target that closes the matched head. The disp32 sits 3
+                    // bytes into the 7-byte lea, so the target resolves against the byte after the instruction.
+                    const auto nameTarget = DMK::scan::resolve_rip_relative(DMK::Address{hit + k_nameLeaOffset}, 3, 7);
+                    if (!nameTarget)
                     {
                         cursor = hit + 1;
                         continue;
                     }
+                    const auto strAddr = nameTarget->raw();
 
                     // Diagnostic trace: log first 5 match decodes across all patterns (with a peek at the first 32
                     // bytes of the candidate name string) so we can sanity-check the decode pipeline.
@@ -329,9 +305,7 @@ namespace Transmog::ColorOverride::TokenSlotDiscovery
                             char preview[33] = {0};
                             peek_name_preview(strAddr, preview, sizeof(preview));
                             DMK::log().trace(
-                                "[token-discovery] trace: P{} "
-                                "site=0x{:X} strAddr=0x{:X} "
-                                "preview='{}'",
+                                "[token-discovery] trace: P{} site=0x{:X} strAddr=0x{:X} preview='{}'",
                                 pi + 1,
                                 matchAddr,
                                 strAddr,
@@ -340,12 +314,18 @@ namespace Transmog::ColorOverride::TokenSlotDiscovery
                         }
                     }
 
-                    // Match against known names; only proceed on a hit. Names are short (<32 chars) so the linear scan
-                    // is cheap.
+                    // Match against known names and proceed only on a hit. One guarded copy of the candidate feeds
+                    // all 18 comparisons, and the names are short so the linear scan is cheap.
+                    char candidate[k_name_window] = {0};
+                    if (!read_foreign_name(strAddr, candidate))
+                    {
+                        cursor = hit + 1;
+                        continue;
+                    }
                     const KnownProp *matched_kp = nullptr;
                     for (const auto &kp : k_known)
                     {
-                        if (name_matches(strAddr, kp.name))
+                        if (std::strcmp(candidate, kp.name) == 0)
                         {
                             matched_kp = &kp;
                             break;
@@ -371,18 +351,19 @@ namespace Transmog::ColorOverride::TokenSlotDiscovery
                                 }
                                 if (!dup)
                                 {
-                                    g_slots.push_back(
-                                        {slotAddr, matched_kp->name, matched_kp->layer, matched_kp->channel}
-                                    );
+                                    g_slots.push_back({
+                                        slotAddr,
+                                        matched_kp->name,
+                                        matched_kp->layer,
+                                        matched_kp->channel,
+                                    });
                                 }
                             }
                             if (!dup)
                             {
                                 ++accepted;
                                 DMK::log().trace(
-                                    "[token-discovery] slot=0x{:X} "
-                                    "'{}' layer={} channel={} "
-                                    "site=0x{:X} via P{}",
+                                    "[token-discovery] slot=0x{:X} '{}' layer={} channel={} site=0x{:X} via P{}",
                                     slotAddr,
                                     matched_kp->name,
                                     matched_kp->layer,
@@ -403,7 +384,7 @@ namespace Transmog::ColorOverride::TokenSlotDiscovery
                 if (iter >= k_maxItersPerPattern)
                 {
                     DMK::log().warning(
-                        "[token-discovery] pattern={} hit the {} iteration cap with {} hit(s) -- its sweep was "
+                        "[token-discovery] pattern={} hit the {} iteration cap with {} hit(s) - its sweep was "
                         "TRUNCATED and later slots were not seen; raise k_maxItersPerPattern",
                         pi,
                         k_maxItersPerPattern,
@@ -417,8 +398,7 @@ namespace Transmog::ColorOverride::TokenSlotDiscovery
 
             const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(clock::now() - t0).count();
             DMK::log().info(
-                "[token-discovery] scan complete: patterns={} "
-                "iter={} hits={} slots={} elapsed_ms={}",
+                "[token-discovery] scan complete: patterns={} iter={} hits={} slots={} elapsed_ms={}",
                 compiledCount,
                 totalIter,
                 totalHits,
@@ -439,15 +419,15 @@ namespace Transmog::ColorOverride::TokenSlotDiscovery
         return g_complete.load(std::memory_order_acquire);
     }
 
-    // Re-run the AOB scan when the live capture looks underpopulated. Cold start can miss registrar call sites whose
-    // code pages haven't been committed yet (Windows lazy commit); the engine also lazy-loads materials, so registrars
-    // that live in material-specific shader-glue routines can land in memory long after our initial init pass.
+    // Re-run the AOB scan when the live capture looks underpopulated. Cold start misses registrar call sites whose
+    // code pages have not been committed yet (Windows lazy commit). The engine also lazy-loads materials, so
+    // registrars that live in material-specific shader-glue routines land in memory long after the initial init pass.
     //
     // No hard attempt cap. Mirroring the item_name_table catalog stability check: keep re-scanning on the hot path
-    // until two consecutive scans produce the same slot count -- THAT means the engine has stopped adding new
-    // registrars and our table has settled. After settle, this becomes a permanent no-op for the rest of the session.
+    // until two consecutive scans produce the same slot count. THAT means the engine stopped adding new registrars
+    // and the table settled. After settle, this becomes a permanent no-op for the rest of the session.
     //
-    // Throttled to ~1.5 s between attempts so we don't hammer the 600-800 ms scan in a hot loop. do_run() dedups
+    // Throttled to ~1.5 s between attempts so the 600-800 ms scan never runs in a hot loop. do_run() dedups
     // against g_slots, so an interrupted re-scan is safe.
     namespace
     {
@@ -476,9 +456,9 @@ namespace Transmog::ColorOverride::TokenSlotDiscovery
                     expectedMin
                 );
             }
-            // Settle = two consecutive scans returned the same count AND we've met the expected baseline. Without the
-            // baseline gate, an early scan that finds 0 slots could "settle" immediately on the next 0-slot scan and
-            // freeze the retry permanently. A sweep abandoned by teardown must not settle on its short count.
+            // Settle = two consecutive scans returned the same count AND the expected baseline is met. Without the
+            // baseline gate, an early scan that finds 0 slots settles immediately on the next 0-slot scan and freezes
+            // the retry permanently. A sweep abandoned by teardown must not settle on its short count.
             if (after == prev && after >= expectedMin && !g_stopping.load(std::memory_order_acquire))
             {
                 g_settled.store(true, std::memory_order_release);
@@ -490,25 +470,25 @@ namespace Transmog::ColorOverride::TokenSlotDiscovery
 
     void retry_if_underpopulated(std::size_t expectedMin) noexcept
     {
-        static std::atomic<long long> s_lastMs{0};
+        static std::atomic<std::int64_t> s_last_ms{0};
 
         if (g_settled.load(std::memory_order_acquire) || g_stopping.load(std::memory_order_acquire))
             return;
-        using clock = std::chrono::steady_clock;
-        const auto nowMs =
-            std::chrono::duration_cast<std::chrono::milliseconds>(clock::now().time_since_epoch()).count();
-        auto last = s_lastMs.load(std::memory_order_acquire);
-        if (last != 0 && (nowMs - last) < 1500)
+        // One clock owner for the whole module, so the apply window, the reinit deadlines and this throttle share a
+        // time base by construction.
+        const auto now = State::now_ms();
+        const auto last = s_last_ms.load(std::memory_order_acquire);
+        if (last != 0 && (now - last) < 1500)
             return;
         // Single-flight guard: only one worker runs at a time. Other concurrent callers see the flag and bail.
         bool expected = false;
         if (!g_rescanBusy.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
             return;
-        s_lastMs.store(nowMs, std::memory_order_release);
+        s_last_ms.store(now, std::memory_order_release);
 
         // Dispatch rather than run. The caller is a detour on the engine's property setter, so the game thread must
         // leave here in microseconds; the sweep itself is half a second of work. Nothing downstream needs the result
-        // this frame -- an unclassified token still substitutes, it is only bucketed under "misc" in the UI until a
+        // this frame - an unclassified token still substitutes, it is only bucketed under "misc" in the UI until a
         // later scan names it.
         try
         {
@@ -538,9 +518,17 @@ namespace Transmog::ColorOverride::TokenSlotDiscovery
     void stop_and_join_rescan() noexcept
     {
         g_stopping.store(true, std::memory_order_release);
-        std::lock_guard<std::mutex> lk(g_rescanThreadMtx);
-        // ~StoppableWorker requests stop and joins, so the reset IS the join.
-        g_rescanWorker.reset();
+        // The declaration is noexcept and std::mutex::lock throws std::system_error, so contain it here. The stop flag
+        // is already set, so a failed join still leaves the worker on its way out.
+        try
+        {
+            std::lock_guard<std::mutex> lk(g_rescanThreadMtx);
+            // ~StoppableWorker requests stop and joins, so the reset IS the join.
+            g_rescanWorker.reset();
+        }
+        catch (...)
+        {
+        }
     }
 
     int classify_layer(std::uint32_t tok) noexcept

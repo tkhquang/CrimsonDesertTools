@@ -58,17 +58,17 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
     {
     case DLL_PROCESS_ATTACH:
     {
-        DMK::AsyncLoggerConfig asyncCfg;
+        DMK::AsyncLoggerConfig async_cfg;
         // Fall back to synchronous logging if the async queue overflows, so no diagnostic line is lost during a burst
         // (startup or teardown).
-        asyncCfg.overflow_policy = DMK::OverflowPolicy::SyncFallback;
+        async_cfg.overflow_policy = DMK::OverflowPolicy::SyncFallback;
 
         const DMK::ModInfo info{
             .name = Transmog::MOD_NAME,
             .log_file = Transmog::LOG_FILE,
             .game_process_name = Transmog::GAME_PROCESS_NAME,
             .instance_mutex_prefix = Transmog::INSTANCE_MUTEX_PREFIX,
-            .log = asyncCfg,
+            .log = async_cfg,
             // Single DLL, one Session per run, so the default Truncate gives one log per game launch. The dev loader
             // needs Append instead, because it keeps every generation's teardown records in one file.
             .log_open_mode = DMK::LogOpenMode::Truncate,

@@ -1,8 +1,5 @@
-#pragma once
-
-// Thin EquipHide-flavored wrapper over CDCore::scan_indexed_string_table. Preserves the existing free-function
-// signature so call sites in background_threads.cpp / equip_hide.cpp don't need to change; the implementation delegates
-// to CDCore with an EquipHide-specific unresolved-names callback (wide-scan fallback over categories.hpp).
+#ifndef EQUIPHIDE_INDEXED_STRING_TABLE_HPP
+#define EQUIPHIDE_INDEXED_STRING_TABLE_HPP
 
 #include <cstdint>
 #include <string>
@@ -11,15 +8,14 @@
 namespace EquipHide
 {
     /**
-     * @brief Scan the IndexedStringA table for "CD_"-prefixed name -> hash mappings, with an EquipHide-specific
-     *        wide-scan fallback for any part names declared in categories.hpp that didn't land in the primary bucket
-     *        range.
-     *
-     * Table layout:
-     *   globalPtr   = *(qword*)(mapLookupFunc + rip-anchor target)
-     *   tableArray  = *(qword*)(globalPtr + 0x58)
-     *   entry[hash] = tableArray + hash * 16 entry[hash]+0 = pointer to null-terminated string (or 0)
+     * @brief Scan the IndexedStringA table for "CD_"-prefixed name to hash mappings under the EquipHide log label.
+     * @details Delegates to CDCore::scan_indexed_string_table, which owns the table layout and the SEH-guarded reads.
+     * @param map_lookup_func Address of the engine map-lookup function that carries the RIP anchor to the table.
+     * @return The resolved name to hash map, empty when the table is not reachable yet.
      */
-    std::unordered_map<std::string, std::uint32_t> scan_indexed_string_table(std::uintptr_t mapLookupFunc);
+    [[nodiscard]] std::unordered_map<std::string, std::uint32_t>
+    scan_indexed_string_table(std::uintptr_t map_lookup_func);
 
 } // namespace EquipHide
+
+#endif // EQUIPHIDE_INDEXED_STRING_TABLE_HPP

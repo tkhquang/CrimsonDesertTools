@@ -1,4 +1,5 @@
-#pragma once
+#ifndef EQUIPHIDE_INPUT_HANDLER_HPP
+#define EQUIPHIDE_INPUT_HANDLER_HPP
 
 #include <DetourModKit/input.hpp>
 
@@ -21,3 +22,5 @@ namespace EquipHide
     void flush_visibility() noexcept;
 
 } // namespace EquipHide
+
+#endif // EQUIPHIDE_INPUT_HANDLER_HPP

@@ -12,10 +12,7 @@
 
 #include <atomic>
 #include <cstddef>
-#include <functional>
 #include <string>
-#include <string_view>
-#include <utility>
 
 namespace EquipHide
 {
@@ -33,17 +30,16 @@ namespace EquipHide
             ps.armorInjected[i].store(false, std::memory_order_relaxed);
 
         inject_armor_entries();
-        /* Publish the request before attempting the write inline. If apply_direct_vis_write loses the lock race against
-           the mid-hook or resolve poll, the next mid-hook tick clears the flag and re-runs the write -- the toggle is
-           no longer silently dropped on contention. The inline call below still executes on the common (uncontended)
-           path so single-shot hotkey latency is unchanged. */
+        // Publish the request before the inline write attempt. When apply_direct_vis_write loses the lock race against
+        // the mid-hook or the resolve poll, the next mid-hook tick clears the flag and re-runs the write, so the toggle
+        // survives contention. The inline call below still runs on the common uncontended path, so single-shot hotkey
+        // latency is unchanged.
         needs_direct_write().store(true, std::memory_order_release);
         apply_direct_vis_write();
     }
 
     void register_hotkeys(DMK::input::Scope &scope)
     {
-        auto &logger = DMK::log();
         // 2 globals + 3 bindings per category.
         const auto before = scope.size();
 
@@ -51,17 +47,16 @@ namespace EquipHide
         // per-category loop below builds its own binder per iteration for the same reason.
         const DMK::config::SectionBinder general = DMK::config::section("General");
 
-        // Every binding passes false as press_combo's trailing `consume`, which registers a "<ini_key>.Consume"
-        // bool defaulting OFF. Registering it costs nothing at runtime -- the input engine only installs its XInput
-        // interception once some binding is actually set true -- and withholding it would hide the option entirely,
-        // because an INI key that was never registered is ignored without a warning. Whether a binding can USE
-        // suppression is not fixed here either: the combo is user-editable, so any binding can become a gamepad
-        // binding. Suppression is honored for digital gamepad buttons and the mouse wheel only, masks just the
-        // TRIGGER (never the modifier), and never affects a keyboard combo.
+        // Every binding passes false as press_combo's trailing `consume`, which registers a "<ini_key>.Consume" bool
+        // defaulting OFF. Registration costs nothing at runtime, because the input engine installs its XInput
+        // interception only once some binding is set true, and an unregistered INI key is ignored without a warning.
+        // Whether a binding can USE suppression is not fixed here either: the combo is user-editable, so any binding
+        // can become a gamepad binding. Suppression is honored for digital gamepad buttons and the mouse wheel only,
+        // masks the TRIGGER alone (never the modifier), and never affects a keyboard combo.
         //
-        // An empty default and the literal "NONE" are opt-out sentinels: press_combo registers an unbound but
-        // addressable binding silently, so a later non-empty INI value attaches a real combo on a live reload
-        // without re-registering.
+        // An empty default and the literal "NONE" are opt-out sentinels. press_combo registers an unbound but
+        // addressable binding silently, so a later non-empty INI value attaches a real combo on a live reload without
+        // re-registering.
 
         scope.add(general.press_combo(
             "ShowAllHotkey",
@@ -106,38 +101,38 @@ namespace EquipHide
             // Default toggle binding: shields/helm/mask are active by default with the literal "V" combo that produces
             // an empty press_combo (no key bound, INI value editable to taste).
             const bool active = (cat == Category::Shields || cat == Category::Helm || cat == Category::Mask);
-            const char *defaultToggle = active ? "V" : "";
+            const char *default_toggle = active ? "V" : "";
 
-            const std::string toggleName = "ToggleEquip_" + section;
-            const std::string showName = "ShowEquip_" + section;
-            const std::string hideName = "HideEquip_" + section;
+            const std::string toggle_name = "ToggleEquip_" + section;
+            const std::string show_name = "ShowEquip_" + section;
+            const std::string hide_name = "HideEquip_" + section;
 
             scope.add(category.press_combo(
                 "ToggleHotkey",
                 section + " Toggle Hotkey",
-                toggleName,
+                toggle_name,
                 [i, section]()
                 {
                     auto &st = category_states();
                     auto &log = DMK::log();
 
                     // The IndependentToggle flag is effectively always on: each binding flips only its own slot,
-                    // because DMK::config::press_combo treats every binding independently. For a synchronised
+                    // because DMK::config::press_combo treats every binding independently. For a synchronized
                     // toggle, bind the same combo to ShowAll/HideAll.
-                    const bool newHidden = !st[i].hidden.load(std::memory_order_relaxed);
-                    st[i].hidden.store(newHidden, std::memory_order_relaxed);
+                    const bool new_hidden = !st[i].hidden.load(std::memory_order_relaxed);
+                    st[i].hidden.store(new_hidden, std::memory_order_relaxed);
 
-                    log.info("Equip hide [{}]: {}", section, newHidden ? "HIDDEN" : "VISIBLE");
+                    log.info("Equip hide [{}]: {}", section, new_hidden ? "HIDDEN" : "VISIBLE");
                     flush_visibility();
                 },
-                defaultToggle,
+                default_toggle,
                 false
             ));
 
             scope.add(category.press_combo(
                 "ShowHotkey",
                 section + " Show Hotkey",
-                showName,
+                show_name,
                 [i, section]()
                 {
                     category_states()[i].hidden.store(false, std::memory_order_relaxed);
@@ -151,7 +146,7 @@ namespace EquipHide
             scope.add(category.press_combo(
                 "HideHotkey",
                 section + " Hide Hotkey",
-                hideName,
+                hide_name,
                 [i, section]()
                 {
                     category_states()[i].hidden.store(true, std::memory_order_relaxed);
@@ -163,7 +158,7 @@ namespace EquipHide
             ));
         }
 
-        logger.info("Hotkeys registered: {} binding(s)", scope.size() - before);
+        DMK::log().info("Hotkeys registered: {} binding(s)", scope.size() - before);
     }
 
 } // namespace EquipHide

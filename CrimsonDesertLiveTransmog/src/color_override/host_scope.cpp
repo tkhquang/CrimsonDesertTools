@@ -6,8 +6,7 @@
 #include <DetourModKit/hook.hpp>
 #include <DetourModKit/logger.hpp>
 #include <DetourModKit/memory.hpp>
-
-#include <Windows.h>
+#include <DetourModKit/region.hpp>
 
 #include <array>
 #include <atomic>
@@ -18,14 +17,14 @@ namespace Transmog::ColorOverride::HostScope
     namespace
     {
         // Per-host owner-container vfuncs. Each is a vtable slot on the per-host matInst-container; at entry RCX IS the
-        // owner container (no `[+0x10]` deref). They internally call sub_141026640's matInst-list copy loop, which
+        // owner container (no `[+0x10]` deref). They internally call the matInst-list copy loop, which
         // dispatches the publisher, which eventually invokes the 4-byte property setter that
         // ColorOverride::SetterSubstitute hooks. Both targets are resolved live via the AOB cascade in
         // `aob_resolver.hpp` so they survive function relocation across patches.
 
-        // Per-thread RSP-tagged owner state. x64 RSP grows DOWNWARD, so setter_rsp < tl_ownerRsp means setter is inside
-        // the iter (live owner); setter_rsp >= tl_ownerRsp means iter has returned (stale -- gate falls back to
-        // permissive since the setter's call frame isn't covered by an iter at all).
+        // Per-thread RSP-tagged owner state. x64 RSP grows DOWNWARD, so setter_rsp < tl_ownerRsp puts the setter
+        // inside the iter and names a live owner. setter_rsp >= tl_ownerRsp means the iter returned and the tag is
+        // stale, so the gate falls back to permissive because no iter covers the setter call frame at all.
         thread_local std::uintptr_t tl_ownerParent = 0;
         thread_local std::uintptr_t tl_ownerRsp = 0;
 
@@ -49,11 +48,13 @@ namespace Transmog::ColorOverride::HostScope
 
         std::atomic<bool> g_initDone{false};
 
-        // Tests whether @p p lies inside the host EXE's mapped range. `Region::host()` is cached, so
-        // the warm path is a single atomic load plus the constexpr point-in-range comparison performed by `contains`.
+        // Tests whether @p p lies inside the host EXE mapped range. `Region::host()` is loader-backed and re-walks
+        // the PE headers on every call, so the span is captured once and `contains` is then pure constexpr
+        // arithmetic. This runs once per owner-container vfunc fire.
         bool ptr_in_text_or_rdata(std::uintptr_t p) noexcept
         {
-            return DMK::Region::host().contains(DMK::Address{p});
+            static const DMK::Region s_hostImage = DMK::Region::host();
+            return s_hostImage.contains(DMK::Address{p});
         }
 
         bool looks_like_live_host(std::uintptr_t parent) noexcept
@@ -61,7 +62,8 @@ namespace Transmog::ColorOverride::HostScope
             if (parent == 0)
                 return false;
             // Heap range sanity: container parents land in 0x4xxxxxxxxx on this engine. Anything below the 4 GiB
-            // boundary is either a small int or stack/junk -- reject.
+            // boundary is either a small int or stack junk, so reject it. This floor is deliberately stricter than
+            // `memory::is_plausible_ptr`, whose 0x10000 floor lets four orders of magnitude more through.
             if (parent < 0x100000000ull)
                 return false;
             const auto vtbl = DMK::memory::read<std::uintptr_t>(DMK::Address{parent}).value_or(0);
@@ -108,7 +110,7 @@ namespace Transmog::ColorOverride::HostScope
         }
 
         // True when the cluster has enough hits for an election to be meaningful. Below floor the gate stays permissive
-        // so the first ~5 vfunc calls of an apply don't lock the substitute out before the cluster has any data.
+        // so the first ~5 vfunc calls of an apply do not lock the substitute out before the cluster has any data.
         bool election_ready() noexcept
         {
             std::uint32_t topHits = 0;
@@ -178,7 +180,7 @@ namespace Transmog::ColorOverride::HostScope
 
     bool is_current_host_player_owned(std::uintptr_t setter_rsp) noexcept
     {
-        // Cold start: no iter has ever pushed an owner. Permissive so DLL-load and pre-first-apply renders aren't
+        // Cold start: no iter has ever pushed an owner. Permissive so DLL-load and pre-first-apply renders are not
         // dropped.
         if (tl_ownerRsp == 0)
             return true;
@@ -196,7 +198,7 @@ namespace Transmog::ColorOverride::HostScope
         if (tl_ownerParent == 0)
             return false;
 
-        // Inside an iter with a live host, but the cluster hasn't built up enough signal yet. Permissive so we don't
+        // Inside an iter with a live host, but the cluster has not built up enough signal yet. Permissive so we do not
         // reject legitimate first-apply writes that fire before any NPC host has been seen.
         if (!election_ready())
             return true;
@@ -226,8 +228,13 @@ namespace Transmog::ColorOverride::HostScope
             if (addr == 0)
                 return false;
 
-            auto hook =
-                DMK::hook::mid_at(DMK::hook::MidRequest{.name = name, .target = DMK::Address{addr}}, &on_iter_entry);
+            auto hook = DMK::hook::mid_at(
+                DMK::hook::MidRequest{
+                    .name = name,
+                    .target = DMK::Address{addr},
+                },
+                &on_iter_entry
+            );
             if (!hook)
             {
                 log.warning("[dye-host-scope] {} hook FAILED at {:#x}: {}", name, addr, hook.error().message());

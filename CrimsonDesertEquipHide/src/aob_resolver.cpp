@@ -4,7 +4,7 @@
  *
  * The candidate ladders in aob_resolver.hpp and cdcore/anchors.hpp enter a DetourModKit anchor registry as
  * RipGlobal entries. resolve_all_anchors() grades the signatures offline, resolves the whole table in a single
- * parallel pass at startup, and records each address; anchor_address() hands the resolved address, or 0 on a ladder
+ * parallel pass at startup, and records each address. anchor_address() hands the resolved address, or 0 on a ladder
  * miss, to the call sites.
  */
 
@@ -30,10 +30,10 @@ namespace EquipHide
         using DMK::anchor::AnchorKind;
         using DMK::scan::Pages;
 
-        constexpr std::size_t k_anchorCount = static_cast<std::size_t>(AnchorId::Count);
+        constexpr std::size_t ANCHOR_COUNT = static_cast<std::size_t>(AnchorId::Count);
 
         /// The host image every anchor resolves against, filled before the sweep and handed to each validator.
-        DMK::Region s_hostImage{};
+        DMK::Region s_host_image{};
 
         /**
          * @brief Post-resolve validator: the resolved value must land inside CrimsonDesert.exe.
@@ -54,13 +54,15 @@ namespace EquipHide
         }
 
         /**
-         * @brief Post-resolve validator for a code target: inside the image AND on a byte that can begin a function.
-         * @details Several ladders here reach the entry through a negative walk-back measured against one build's
-         *          prologue length. Nothing in the resolver re-checks that distance, so a prologue that gains or
-         *          loses bytes leaves the pattern matching its unchanged body while the walk-back lands short, on an
-         *          alignment pad or mid-instruction. A hook installed there writes its jump across an instruction
-         *          boundary and the process dies somewhere unrelated later. Rejecting here turns that silent failure
-         *          into a logged miss and a disabled feature.
+         * @brief Post-resolve validator for a code target: inside the image AND not on a byte that can never open a
+         *        function body.
+         * @details Rejects a site whose first byte is zero fill, INT3 padding, or a near return. Several ladders here
+         *          reach the entry through a negative walk-back measured against one build's prologue length. Nothing
+         *          in the resolver re-checks that distance, so a prologue that gains or loses bytes still matches its
+         *          unchanged body while the walk-back lands short, on an alignment pad or mid-instruction. A hook
+         *          installed there writes its jump across an instruction boundary and the process dies somewhere
+         *          unrelated later. A rejection here turns that silent failure into a logged miss and a disabled
+         *          feature.
          */
         [[nodiscard]] bool code_site(std::int64_t value, const void *context) noexcept
         {
@@ -76,15 +78,15 @@ namespace EquipHide
         // each byte sweep to code pages so a signature that must land on an instruction cannot alias an identical run
         // in .rdata or .data.
         // Every row sets require_validator: an anchor that reaches a backend without a post-resolve predicate then
-        // fails CLOSED instead of publishing an unchecked address. It is a no-op for the rows below, which all carry
-        // one; it is there so a row ADDED later cannot quietly skip verification.
-        const Anchor k_anchors[] = {
+        // fails CLOSED and never publishes an unchecked address. It is a no-op for the rows below, which all carry
+        // one. It is there so a row ADDED later cannot quietly skip verification.
+        const Anchor ANCHORS[] = {
             {
                 .label = "WorldSystem",
                 .kind = AnchorKind::RipGlobal,
                 .site = CDCore::Anchors::k_worldSystemCandidates,
                 .validator = in_host_image,
-                .validator_context = &s_hostImage,
+                .validator_context = &s_host_image,
                 .require_validator = true,
                 .pages = Pages::Executable,
             },
@@ -93,7 +95,7 @@ namespace EquipHide
                 .kind = AnchorKind::RipGlobal,
                 .site = k_childActorVtblCandidates,
                 .validator = in_host_image,
-                .validator_context = &s_hostImage,
+                .validator_context = &s_host_image,
                 .require_validator = true,
                 .pages = Pages::Executable,
             },
@@ -102,7 +104,7 @@ namespace EquipHide
                 .kind = AnchorKind::RipGlobal,
                 .site = CDCore::Anchors::k_mapLookupCandidates,
                 .validator = code_site,
-                .validator_context = &s_hostImage,
+                .validator_context = &s_host_image,
                 .require_validator = true,
                 .pages = Pages::Executable,
             },
@@ -111,7 +113,7 @@ namespace EquipHide
                 .kind = AnchorKind::RipGlobal,
                 .site = k_mapInsertCandidates,
                 .validator = code_site,
-                .validator_context = &s_hostImage,
+                .validator_context = &s_host_image,
                 .require_validator = true,
                 .pages = Pages::Executable,
             },
@@ -120,7 +122,7 @@ namespace EquipHide
                 .kind = AnchorKind::RipGlobal,
                 .site = k_equipVisCheckCandidates,
                 .validator = code_site,
-                .validator_context = &s_hostImage,
+                .validator_context = &s_host_image,
                 .require_validator = true,
                 .pages = Pages::Executable,
             },
@@ -129,7 +131,7 @@ namespace EquipHide
                 .kind = AnchorKind::RipGlobal,
                 .site = CDCore::Anchors::k_partAddShowCandidates,
                 .validator = code_site,
-                .validator_context = &s_hostImage,
+                .validator_context = &s_host_image,
                 .require_validator = true,
                 .pages = Pages::Executable,
             },
@@ -138,7 +140,7 @@ namespace EquipHide
                 .kind = AnchorKind::RipGlobal,
                 .site = k_postfixEvalCandidates,
                 .validator = code_site,
-                .validator_context = &s_hostImage,
+                .validator_context = &s_host_image,
                 .require_validator = true,
                 .pages = Pages::Executable,
             },
@@ -149,7 +151,7 @@ namespace EquipHide
                 // A return address points at the instruction AFTER a call, not at a function entry, so the
                 // entry-plausibility screen does not apply. In-image is the whole contract here.
                 .validator = in_host_image,
-                .validator_context = &s_hostImage,
+                .validator_context = &s_host_image,
                 .require_validator = true,
                 .pages = Pages::Executable,
             },
@@ -158,7 +160,7 @@ namespace EquipHide
                 .kind = AnchorKind::RipGlobal,
                 .site = CDCore::Anchors::k_visualEquipChangeCandidates,
                 .validator = code_site,
-                .validator_context = &s_hostImage,
+                .validator_context = &s_host_image,
                 .require_validator = true,
                 .pages = Pages::Executable,
             },
@@ -168,21 +170,19 @@ namespace EquipHide
                 // BatchEquip is the same engine function this mod calls VisualEquipSwap.
                 .site = CDCore::Anchors::k_batchEquipCandidates,
                 .validator = code_site,
-                .validator_context = &s_hostImage,
+                .validator_context = &s_host_image,
                 .require_validator = true,
                 .pages = Pages::Executable,
             },
         };
-        static_assert(std::size(k_anchors) == k_anchorCount, "k_anchors must hold one entry per AnchorId.");
+        static_assert(std::size(ANCHORS) == ANCHOR_COUNT, "ANCHORS must hold one entry per AnchorId.");
 
-        // Resolved absolute addresses, indexed by AnchorId; 0 means unresolved. Written once by resolve_all_anchors()
-        // on the init thread before any consumer reads, then read-only, so no synchronization is required.
-        std::array<std::uintptr_t, k_anchorCount> s_resolved{};
-
-        // The per-anchor report, kept under the same write-once discipline so the startup summary and the shutdown
-        // diagnostics snapshot can roll it up instead of recomputing it.
-        std::array<DMK::anchor::ResolvedAnchor, k_anchorCount> s_report{};
-        std::size_t s_reportCount = 0;
+        // The per-anchor report, indexed by AnchorId and the one store of every resolved address. Written once by
+        // resolve_all_anchors() on the init thread before any consumer reads, then read-only, so no synchronization
+        // is required. The startup summary and the shutdown diagnostics snapshot roll it up, so neither recomputes
+        // it.
+        std::array<DMK::anchor::ResolvedAnchor, ANCHOR_COUNT> s_report{};
+        std::size_t s_report_count = 0;
 
         /**
          * @brief Grades every candidate pattern in the table and reports the weak ones.
@@ -190,7 +190,7 @@ namespace EquipHide
          *          atom rarity, byte entropy, and expected ambiguity. It touches no process memory and never gates
          *          resolution, so it runs before the sweep and only reports. Its value is on patch day: a ladder that
          *          stops resolving is usually one whose rungs were already weakly selective, and this says which,
-         *          without a disassembler. RTTI candidates carry no byte pattern and are skipped.
+         *          without a disassembler. An RTTI candidate carries no byte pattern, so the walk skips it.
          */
         void report_signature_health(std::span<const Anchor> anchors)
         {
@@ -224,7 +224,7 @@ namespace EquipHide
                     }
                     (health.grade == DMK::sighealth::Grade::Unusable ? ++unusable : ++fragile);
                     logger.debug(
-                        "Signature health: {}/{} {} -- {}",
+                        "Signature health: {}/{} {} - {}",
                         entry.label,
                         candidate.name(),
                         DMK::sighealth::to_string(health.grade),
@@ -236,8 +236,8 @@ namespace EquipHide
             if (unusable > 0)
             {
                 logger.warning(
-                    "Signature health: {} candidate(s) grade Unusable and {} Fragile; re-author them before the next "
-                    "game patch (details at Debug level)",
+                    "Signature health: {} candidate(s) grade Unusable and {} Fragile. Re-author them before the "
+                    "next game patch (details at Debug level)",
                     unusable,
                     fragile
                 );
@@ -254,59 +254,95 @@ namespace EquipHide
         auto &logger = DMK::log();
 
         // Every Crimson Desert target lives in the host EXE, so the scan scope is that image: faster than a
-        // whole-process walk, and immune to a generic-shaped candidate first-matching inside a sibling mod or an
-        // overlay. The same region validates each resolved value.
-        s_hostImage = DMK::Region::host();
+        // whole-process walk, and a generic-shaped candidate cannot first-match inside a sibling mod or an overlay.
+        // The same region validates each resolved value.
+        s_host_image = DMK::Region::host();
+
+        // The build fingerprint separates "the mod is stale for a new game build" from "a sibling mod patched the
+        // site" when it is read next to each anchor's own image identity below. It reads the PE header only.
+        const DMK::scan::ImageIdentity host_identity = DMK::scan::image_identity(s_host_image);
+        if (host_identity.present())
+        {
+            logger.info(
+                "Host image identity: {} (timestamp {}, size {})",
+                DMK::format::format_hex(host_identity.token()),
+                DMK::format::format_hex(host_identity.timestamp),
+                DMK::format::format_hex(host_identity.size_of_image)
+            );
+        }
+        else
+        {
+            logger.warning("Host image identity unavailable: the PE headers did not validate");
+        }
 
         // Offline grading first: it needs no game memory and says which rungs are structurally weak BEFORE the sweep
         // says which ones missed, so the two lines read together on a patch-day log.
-        report_signature_health(k_anchors);
+        report_signature_health(ANCHORS);
 
-        s_reportCount = DMK::anchor::resolve_all_parallel(k_anchors, s_report, s_hostImage);
+        s_report_count = DMK::anchor::resolve_all_parallel(ANCHORS, s_report, s_host_image);
 
-        // resolve_all_parallel writes s_report[i] for k_anchors[i], so the report index IS the AnchorId.
-        for (std::size_t i = 0; i < s_reportCount; ++i)
+        // resolve_all_parallel writes s_report[i] for ANCHORS[i], so the report index IS the AnchorId.
+        for (std::size_t i = 0; i < s_report_count; ++i)
         {
             const DMK::anchor::ResolvedAnchor &entry = s_report[i];
-            if (entry.status == DMK::anchor::AnchorStatus::Resolved)
+            if (entry.status != DMK::anchor::AnchorStatus::Resolved)
             {
-                s_resolved[i] = static_cast<std::uintptr_t>(entry.value);
-                logger.debug("Anchor {} -> {}", entry.label, DMK::format::format_address(s_resolved[i]));
-            }
-            else
-            {
-                s_resolved[i] = 0;
                 logger.warning(
                     "Anchor {} unresolved ({})",
                     entry.label,
                     DMK::anchor::anchor_status_to_string(entry.status)
                 );
+                continue;
             }
+
+            // The witness names which backend won the row, whether the sweep saw a complete authoritative view, and
+            // which image owns the value. On a patch day that separates a stale signature from a patched site.
+            logger.debug(
+                "Anchor {} -> {} [{} via {}, image {}, {}, {} witness byte(s)]",
+                entry.label,
+                DMK::format::format_address(static_cast<std::uintptr_t>(entry.value)),
+                DMK::anchor::result_domain_to_string(entry.domain),
+                DMK::anchor::physical_source_to_string(entry.witness.source),
+                DMK::format::format_hex(entry.witness.image.token()),
+                entry.witness.completeness == DMK::anchor::WitnessCompleteness::Complete ? "complete" : "partial",
+                entry.witness.evidence.span().size()
+            );
         }
 
         const DMK::anchor::AnchorQuality quality = DMK::anchor::assess_quality(anchor_report());
+        const DMK::anchor::GateVerdict verdict = DMK::anchor::evaluate_gate(quality);
         logger.info(
-            "Anchor resolution: {}/{} resolved, {} failed, {} unsupported",
+            "Anchor resolution: {}/{} resolved, {} failed, {} unsupported, gate {}",
             quality.resolved,
             quality.total,
             quality.failed,
-            quality.unsupported
+            quality.unsupported,
+            DMK::anchor::gate_verdict_to_string(verdict)
         );
+        if (verdict == DMK::anchor::GateVerdict::Fail)
+        {
+            // B-51: drift telemetry must not be followed by an unconditional arm. The verdict rates the WHOLE table,
+            // so it does not by itself disable anything. Each feature gates on its own anchor, which reads 0 when
+            // that row failed, and stays off at its own install site.
+            logger.warning(
+                "Anchor resolution: the gate rejects this table, so every feature whose own anchor failed stays off"
+            );
+        }
     }
 
     std::uintptr_t anchor_address(AnchorId id) noexcept
     {
         const auto index = static_cast<std::size_t>(id);
-        if (index >= k_anchorCount)
+        if (index >= ANCHOR_COUNT || s_report[index].status != DMK::anchor::AnchorStatus::Resolved)
         {
             return 0;
         }
-        return s_resolved[index];
+        return static_cast<std::uintptr_t>(s_report[index].value);
     }
 
     std::span<const DMK::anchor::ResolvedAnchor> anchor_report() noexcept
     {
-        return std::span<const DMK::anchor::ResolvedAnchor>(s_report.data(), s_reportCount);
+        return std::span<const DMK::anchor::ResolvedAnchor>(s_report.data(), s_report_count);
     }
 
 } // namespace EquipHide

@@ -53,7 +53,7 @@ namespace Transmog::HelmAudioFilter
         // Resolved at init via AOB on the vtable header (RTTI metadata ptr + first few vfuncs).
         std::uintptr_t g_gameAudioEffectVtable = 0;
 
-        // Engine player static -- root of the chain that reaches the currently-controlled protagonist's Server CCOIA.
+        // Engine player static - root of the chain that reaches the currently-controlled protagonist's Server CCOIA.
         // Used as a Kliff identity fallback during the save-load init race window, where Kliff's CharacterAssets struct
         // is not wired up yet but he IS the controlled actor at that moment (Kliff is always the first-spawned
         // protagonist).
@@ -168,7 +168,7 @@ namespace Transmog::HelmAudioFilter
         constexpr std::size_t k_maxStringRead = 96;
 
         // Chain-walk reads route through DMK's fault-guarded primitives (`memory::read<T>` / `memory::walk`).
-        // They handle the low-address sentinel (<0x10000) internally and report a fault as an empty optional / `false`
+        // They screen an implausible address internally and report a fault as an empty optional / `false`
         // return. The chain collapses to "not muffle" on any intermediate fault, because each step propagates the empty
         // optional via `value_or(0)`, and a 0 base terminates the next step at the sentinel check. The audio-classifier
         // tag pointer (`a3`) is a heap-allocated 8-byte record from the engine's iteminfo / skillinfo metadata. In
@@ -236,7 +236,7 @@ namespace Transmog::HelmAudioFilter
             {
                 return false;
             }
-            if (record < 0x10000)
+            if (!DMK::memory::is_plausible_ptr(DMK::Address{static_cast<std::uintptr_t>(record)}))
                 return false;
 
             // record +0x18 -> +0x0 -> +0x0 -> +0x0 dereferences the per-level table, first inner ptr, level-1
@@ -257,7 +257,7 @@ namespace Transmog::HelmAudioFilter
         // mirrors the C-string semantics the asset-path classifier expects.
         std::size_t copy_ascii_safe(std::uintptr_t src, std::size_t len, char *out, std::size_t cap) noexcept
         {
-            if (src < 0x10000 || out == nullptr || cap == 0)
+            if (!DMK::memory::is_plausible_ptr(DMK::Address{src}) || out == nullptr || cap == 0)
                 return 0;
             const std::size_t limit = len < (cap - 1) ? len : (cap - 1);
             if (limit == 0)
@@ -321,7 +321,7 @@ namespace Transmog::HelmAudioFilter
         {
             if (outMatchedAsset != nullptr && outCap > 0)
                 outMatchedAsset[0] = '\0';
-            if (host < 0x10000)
+            if (!DMK::memory::is_plausible_ptr(DMK::Address{host}))
                 return CDCore::ControlledCharacter::Unknown;
 
             // host +0x68 -> +0x40 -> +0x40 -> +0x38 dereferences the component table, character-controller slot, inner
@@ -332,7 +332,7 @@ namespace Transmog::HelmAudioFilter
                 {{k_offComponentTable}, {k_offCharCtlSlot}, {k_offCharCtlToInner}, {k_offInnerToAssets}, {0}};
             const auto assetsAddr = DMK::memory::walk(DMK::Address{host}, k_hostToAssets);
             const auto assets = assetsAddr ? assetsAddr->raw() : std::uintptr_t{0};
-            if (assets < 0x10000)
+            if (!DMK::memory::is_plausible_ptr(DMK::Address{assets}))
                 return CDCore::ControlledCharacter::Unknown;
 
             // Capture slot[0] (the appearance .app_xml) as the canonical diagnostic asset, shown in logs for every hit
@@ -390,7 +390,7 @@ namespace Transmog::HelmAudioFilter
             static constexpr DMK::memory::ChainStep k_playerStaticToHost[] = {{0x0}, {0x18}, {0xA0}, {0xD0}};
             const auto hostSlot = DMK::memory::walk(DMK::Address{g_playerStatic}, k_playerStaticToHost);
             const auto host = hostSlot ? DMK::memory::read<std::uintptr_t>(*hostSlot).value_or(0) : std::uintptr_t{0};
-            if (host < 0x10000)
+            if (!DMK::memory::is_plausible_ptr(DMK::Address{host}))
                 return 0;
             return host;
         }
@@ -412,7 +412,7 @@ namespace Transmog::HelmAudioFilter
         {
             if (outMatchedAsset != nullptr && outCap > 0)
                 outMatchedAsset[0] = '\0';
-            if (host < 0x10000)
+            if (!DMK::memory::is_plausible_ptr(DMK::Address{host}))
                 return CDCore::ControlledCharacter::Unknown;
             {
                 std::lock_guard<std::mutex> lk(g_hostCacheMutex);
@@ -482,7 +482,8 @@ namespace Transmog::HelmAudioFilter
             // through to the trampoline immediately. The is_audio_classifier check is cheap (4 SEH-wrapped u16 reads),
             // so it sits at the entry rather than after the protagonist walk, which keeps the unhooked-call cost
             // minimal.
-            if (a3 == nullptr || a1 < 0x10000 || !is_audio_classifier_call(a3, a4, a7))
+            if (a3 == nullptr || !DMK::memory::is_plausible_ptr(DMK::Address{static_cast<std::uintptr_t>(a1)}) ||
+                !is_audio_classifier_call(a3, a4, a7))
             {
                 return g_trampoline(a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12);
             }
@@ -494,7 +495,7 @@ namespace Transmog::HelmAudioFilter
                 DMK::memory::read<std::uint16_t>(DMK::Address{reinterpret_cast<std::uintptr_t>(a3)}).value_or(0);
             if (!is_audio_muffle_class(a3))
             {
-                DMK::log().trace("[helm-audio] non-muffle tag=0x{:X} lvl={}", tag, a4);
+                (void)DMK::log().try_log(DMK::LogLevel::Trace, "[helm-audio] non-muffle tag=0x{:X} lvl={}", tag, a4);
                 return g_trampoline(a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12);
             }
 
@@ -521,15 +522,24 @@ namespace Transmog::HelmAudioFilter
             const std::string_view actorSv = actorName.empty() ? std::string_view{"?"} : actorName;
             const std::string_view assetSv{matchedAsset};
 
-            constexpr auto k_fmt = "[helm-audio] {} tag=0x{:X} lvl={} a1=0x{:X} "
-                                   "host=0x{:X} actor='{}' asset='{}'";
+            constexpr auto k_fmt = "[helm-audio] {} tag=0x{:X} lvl={} a1=0x{:X} host=0x{:X} actor='{}' asset='{}'";
             auto &log = DMK::log();
 
             if (!isProtagonist)
             {
                 // Muffle path, but no protagonist codename was found in the actor's CharacterAssets entries. Pass
                 // through (NPCs, generic humanoids, pre-init).
-                log.trace(k_fmt, "non-protagonist", tag, a4, static_cast<std::uintptr_t>(a1), host, actorSv, assetSv);
+                (void)log.try_log(
+                    DMK::LogLevel::Trace,
+                    k_fmt,
+                    "non-protagonist",
+                    tag,
+                    a4,
+                    static_cast<std::uintptr_t>(a1),
+                    host,
+                    actorSv,
+                    assetSv
+                );
                 return g_trampoline(a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12);
             }
 
@@ -537,7 +547,17 @@ namespace Transmog::HelmAudioFilter
             // muffle gets published for the protagonist. The single virtual call that the trampoline-skip leaves
             // un-invoked is rate-limited, role-gated, and refcount-balanced inside its own body (see header
             // bypass-safety analysis), so the skip is a no-op for the only role the protagonist ever has.
-            log.info(k_fmt, "suppress", tag, a4, static_cast<std::uintptr_t>(a1), host, actorSv, assetSv);
+            (void)log.try_log(
+                DMK::LogLevel::Info,
+                k_fmt,
+                "suppress",
+                tag,
+                a4,
+                static_cast<std::uintptr_t>(a1),
+                host,
+                actorSv,
+                assetSv
+            );
             if (a2 != nullptr)
                 *a2 = 0;
             return a2;
@@ -561,8 +581,8 @@ namespace Transmog::HelmAudioFilter
         {
             auto &log = DMK::log();
 
-            // The two signature inputs -- the resolver's opcode body shape (every movable operand wildcarded) and the
-            // target manager's decorated RTTI name -- live in aob_resolver.hpp (k_skillTagResolverBodyAob /
+            // The two signature inputs - the resolver's opcode body shape (every movable operand wildcarded) and the
+            // target manager's decorated RTTI name - live in aob_resolver.hpp (k_skillTagResolverBodyAob /
             // k_skillInfoManagerRttiName), next to the other candidate cascades, so all of this mod's signatures stay
             // in one place. This target has no fallback cascade: the RTTI pick is the only path. The body anchors at
             // function entry+0x12, and the offsets used below to read the manager disp32 and walk back to the entry are
@@ -575,7 +595,7 @@ namespace Transmog::HelmAudioFilter
 
             // unchecked::find_pattern, not scan(): this sweep visits every member of the body-shape family, and
             // scan() walks the OS page map on every call, which is a startup-time cost its own note warns against
-            // paying in a loop. The raw twin does no page filtering, so the caller owns readability -- and the scope
+            // paying in a loop. The raw twin does no page filtering, so the caller owns readability - and the scope
             // here IS one mapped PE image, every byte of it committed. Page gating also buys nothing at this site:
             // the query bytes live in this DLL's own .rdata, outside the scanned image, so a match can never be the
             // query finding itself.
@@ -596,18 +616,21 @@ namespace Transmog::HelmAudioFilter
                 const auto match = reinterpret_cast<std::uintptr_t>(hit);
 
                 // mov rbx,[rip+disp32]: the 3-byte movzx, then 48 8B 1D + disp32. disp32 sits at body offset
-                // +DispOffset. The mov ends at +InstrEnd, which is the RIP base for it.
-                const auto disp =
-                    DMK::memory::read<std::int32_t>(DMK::Address{match + ::Transmog::k_skillTagResolverDispOffset});
-                if (disp.has_value())
+                // +DispOffset. The mov ends at +InstrEnd, which is the RIP base for it. resolve_rip_relative adds
+                // the base and the displacement exactly the same way, reads the disp32 under the fault guard, and
+                // rejects an implausible target before it reaches the host-image screen below.
+                const auto mgrGlobal = DMK::scan::resolve_rip_relative(
+                    DMK::Address{match},
+                    static_cast<std::size_t>(::Transmog::k_skillTagResolverDispOffset),
+                    static_cast<std::size_t>(::Transmog::k_skillTagResolverInstrEnd)
+                );
+                if (mgrGlobal.has_value())
                 {
-                    const auto mgrGlobal =
-                        match + ::Transmog::k_skillTagResolverInstrEnd + static_cast<std::int64_t>(*disp);
                     // The pointer SLOT lives in the EXE image (.data/.bss). The manager object it points at is on the
                     // heap, and that object's vtable is back inside the image.
-                    if (range.contains(DMK::Address{mgrGlobal}))
+                    if (range.contains(*mgrGlobal))
                     {
-                        const auto mgrObj = DMK::memory::read<std::uintptr_t>(DMK::Address{mgrGlobal}).value_or(0);
+                        const auto mgrObj = DMK::memory::read<std::uintptr_t>(*mgrGlobal).value_or(0);
                         const auto vtbl = DMK::memory::read<std::uintptr_t>(DMK::Address{mgrObj}).value_or(0);
                         if (DMK::rtti::vtable_is_type(DMK::Address{vtbl}, ::Transmog::k_skillInfoManagerRttiName))
                         {
@@ -615,9 +638,8 @@ namespace Transmog::HelmAudioFilter
                             if (DMK::scan::is_likely_function_prologue(DMK::Address{entry}))
                             {
                                 log.info(
-                                    "[helm-audio] skill-tag resolver resolved "
-                                    "via RTTI '{}' at 0x{:X} (hit #{} of "
-                                    "body-shape family)",
+                                    "[helm-audio] skill-tag resolver resolved via RTTI '{}' at 0x{:X} "
+                                    "(hit #{} of body-shape family)",
                                     ::Transmog::k_skillInfoManagerRttiName,
                                     entry,
                                     scanned
@@ -628,14 +650,13 @@ namespace Transmog::HelmAudioFilter
                     }
                 }
 
-                cur = hit + 1; // resume the sweep just past this hit
+                cur = hit + 1;
             }
 
             // Expected while the SkillInfoManager singleton is still constructing. ensure_skill_tag_resolver re-scans
             // on later calls, so a missing hit here is a trace, not a warning.
             log.trace(
-                "[helm-audio] RTTI scan: no SkillInfoManager resolver among "
-                "{} body-shape matches (will retry)",
+                "[helm-audio] RTTI scan: no SkillInfoManager resolver among {} body-shape matches (will retry)",
                 scanned
             );
             return 0;
@@ -653,14 +674,11 @@ namespace Transmog::HelmAudioFilter
         // rows reach the entry through a negative walk-back: a prologue that gains bytes resolves them short while
         // the pattern still matches, which places the detour inside the function, so the trampoline path skips the
         // entry's register spill and the epilogue restores from stack that was never written. The registry's
-        // code_site validator is the backstop -- a rejected anchor arrives here as 0.
+        // code_site validator is the backstop - a rejected anchor arrives here as 0.
         const auto target = anchor_address(AnchorId::HelmAudioRegistrar);
         if (target == 0)
         {
-            log.warning(
-                "[helm-audio] registrar AOB resolve failed; "
-                "feature disabled"
-            );
+            log.warning("[helm-audio] registrar AOB resolve failed; feature disabled");
             return false;
         }
 
@@ -678,14 +696,13 @@ namespace Transmog::HelmAudioFilter
         if (vtableAddr == 0)
         {
             log.warning(
-                "[helm-audio] GameAudioEffectBuffData vtable resolve failed "
-                "(RTTI name + AOB); feature disabled"
+                "[helm-audio] GameAudioEffectBuffData vtable resolve failed (RTTI name + AOB); feature disabled"
             );
             return false;
         }
         g_gameAudioEffectVtable = vtableAddr;
 
-        // Engine player static -- needed by the Kliff init-race fallback. On AOB failure we still install the hook. The
+        // Engine player static - needed by the Kliff init-race fallback. On AOB failure we still install the hook. The
         // fallback then does not fire (the asset-string scan still works for Damiane/Oongka, and for Kliff once his
         // assets wire up).
         const auto playerStatic = anchor_address(AnchorId::PlayerStatic);
@@ -694,8 +711,7 @@ namespace Transmog::HelmAudioFilter
         else
             log.warning(
                 "[helm-audio] player-static AOB resolve failed; "
-                "Kliff init-race fallback disabled (asset-string "
-                "scan still active)"
+                "Kliff init-race fallback disabled (asset-string scan still active)"
             );
 
         // Install the inline hook on the registrar.
@@ -722,8 +738,7 @@ namespace Transmog::HelmAudioFilter
 
         log.info(
             "[helm-audio] inline-hook installed at 0x{:X} "
-            "(audio-vtable=0x{:X}, player-static=0x{:X}); "
-            "skill-tag resolver bound on first use",
+            "(audio-vtable=0x{:X}, player-static=0x{:X}); skill-tag resolver bound on first use",
             target,
             vtableAddr,
             g_playerStatic

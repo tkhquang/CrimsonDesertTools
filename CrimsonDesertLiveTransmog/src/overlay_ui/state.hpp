@@ -2,13 +2,13 @@
 //
 // Module-scope state shared between the overlay UI translation units.
 //
-// Declared as inline namespace-scope variables (C++17) so every TU that includes this header observes the same storage.
-// Types live alongside state because the per-slot SlotUIState struct is consumed by multiple section files and exposing
-// it here avoids forward-declaration churn.
+// These are inline namespace-scope variables (C++17), so every TU that includes this header observes the same
+// storage. The types live next to the state because several section files consume the per-slot SlotUIState struct,
+// and one definition here spares them the forward-declaration churn.
 //
-// State naming uses the `s_` prefix to mark it as module-internal even though it lives in `namespace Transmog` (no
-// anonymous namespace -- a single shared anonymous namespace across translation units is not possible; inline vars +
-// Transmog scope provide equivalent linkage while making cross-TU access explicit).
+// The `s_` prefix marks a name as module-internal even though it lives in `namespace Transmog`. An anonymous
+// namespace cannot span translation units, so it is not an option here. An inline variable at Transmog scope gives
+// equivalent linkage and makes each cross-TU access explicit.
 
 #ifndef TRANSMOG_OVERLAY_UI_STATE_HPP
 #define TRANSMOG_OVERLAY_UI_STATE_HPP
@@ -23,130 +23,152 @@
 namespace Transmog
 {
 
-    // Window title for the standalone host wrapper. ### gives ImGui a stable ID so renaming the visible title later
-    // won't lose window state.
+    /**
+     * @brief Window title for the standalone host wrapper.
+     * @details The ### separator gives ImGui a stable id, so a later change to the visible title keeps window state.
+     */
     inline constexpr const char *k_windowTitle = "Transmog###TransmogMain";
 
-    // Minimum time (ms) the cursor must rest on a picker item before hover-apply fires. Prevents rapid apply cycles
-    // while scrolling.
+    /**
+     * @brief Minimum time in milliseconds the cursor must rest on a picker item before hover-apply fires.
+     * @details This is the one debounce invariant for the picker. It stops a scroll through the list from firing an
+     *          apply cycle per row.
+     */
     inline constexpr std::int64_t k_hoverDebounceMs = 300;
 
-    // Set by the host wrapper before draw_overlay_content runs.
-    // true  = standalone overlay (wider layout for high-DPI)
-    // false = ReShade addon tab  (compact layout)
-    // Cannot use FontGlobalScale to detect this because ReShade at 4K also sets FontGlobalScale > 1.
+    /**
+     * @brief True in the standalone overlay, false in the ReShade addon tab.
+     * @details The host wrapper sets this before draw_overlay_content runs. The standalone overlay uses a wider
+     *          layout for high DPI and the addon tab a compact one. FontGlobalScale cannot stand in for this flag,
+     *          because ReShade at 4K also sets FontGlobalScale above 1.
+     */
     inline bool s_standaloneMode = false;
 
-    // Session-only UI-scale multiplier applied on top of the init-time auto-DPI scale (see dx_overlay.cpp). 1.0 = no
-    // override; the user picks 1.25/1.5/etc. from the header combo. Only used in the standalone overlay; ReShade has
-    // its own scaling. Not persisted -- re-pick on next launch.
+    /**
+     * @brief Session-only UI-scale multiplier on top of the init-time auto-DPI scale.
+     * @details dx_overlay.cpp owns the auto-DPI scale. A value of 1.0 means no override, and the user picks 1.25,
+     *          1.5 and so on from the header combo. Only the standalone overlay reads this, because ReShade does its
+     *          own scaling. Nothing persists it, so the user re-picks on the next launch.
+     */
     inline float s_uiScale = 1.0f;
 
-    // Instant Apply mode: applies transmog immediately on hover, pick, slot toggle, and clear -- no Apply All click
-    // needed. Off by default because each action triggers a tear-down + SlotPopulator cycle. Prefab-mode (cross-slot
-    // prefab browser) does NOT honour this -- hover-apply on prefabs needs additional carrier-borrow plumbing that's
-    // not yet shipped. Click-to-pick still works in prefab mode.
+    /**
+     * @brief Instant Apply mode: a hover, pick, slot toggle or clear applies at once, with no Apply All click.
+     * @details Off by default, because each action drives a tear-down and SlotPopulator cycle. The cross-slot prefab
+     *          browser ignores this flag, because hover-apply on a prefab needs carrier-borrow plumbing the mod does
+     *          not have. Click-to-pick still works in prefab mode.
+     */
     inline bool s_autoApply = false;
 
-    // When true, preserve the search text between picker opens so the user can re-open the same slot and keep browsing
-    // where they left off. Off by default to match legacy behaviour (clear on open).
+    /**
+     * @brief True to keep the picker search text across opens.
+     * @details The user re-opens the same slot and carries on from the same filter. False clears the box on open.
+     */
     inline bool s_keepSearchText = true;
 
-    // Dye picker region UI state: per-submesh collapse + per-layer R/G/B link toggle. Each unique submesh stable_id has
-    // its own entry in the slot's regionUI map.
+    /**
+     * @brief Dye picker region UI state: per-submesh collapse plus the per-layer R/G/B link toggle.
+     * @details Each unique submesh stable_id owns one entry in the slot's regionUI map.
+     */
     struct RegionUIState
     {
         bool collapsed = false;
-        // Per-layer "link R/G/B" toggle. Index 0..4 = tint/mask/detail/hair/scratch. When true (default), editing any
-        // of the three R/G/B-suffix swatches in this layer cascades to the other two; mirrors merchant "Pure X"
-        // semantics. Untick to split into independent per-channel control.
+        // Per-layer "link R/G/B" toggle. Index 0..4 = tint/mask/detail/hair/scratch. When true, the default, an edit
+        // to any of the three R/G/B-suffix swatches in this layer cascades to the other two, which mirrors the
+        // merchant "Pure X" semantics. Untick it to split the layer into independent per-channel control.
         std::array<bool, 5> linkRgb{{true, true, true, true, true}};
     };
 
+    /**
+     * @brief Per-slot overlay UI state: picker filters, hover-debounce bookkeeping and dye view preferences.
+     */
     struct SlotUIState
     {
         char hexBuf[8]{"0000"};
         bool editing = false;
         char searchBuf[64]{};
-        // "Exact" means: only list items whose auto-detected category matches THIS slot. Defaults to ON so the dropdown
-        // shows ~350 relevant items instead of all 6024.
+        // "Exact" lists only items whose auto-detected category matches THIS slot. On by default, so the dropdown
+        // shows roughly 350 relevant items instead of all 6024.
         bool exactFilter = true;
         bool hideIncompatible = true; // hide crash-risk + non-equipment
         bool hideVariants = false;    // hide NPC variants (carrier items)
-        bool hideBodyMismatch = true; // hide items whose body type doesn't
+        bool hideBodyMismatch = true; // hide items whose body type does not
                                       // match the active character's
-        // Prefab-only mode. When true the picker hides the items list and its filters and shows ALL body-mesh prefabs
-        // across every slot, labeled with their native slot. Picking a prefab applies it to the prefab's native slot
-        // (not necessarily the popup slot) so the user can browse the full prefab catalog from any slot's picker.
+        // Prefab-only mode. When true the picker hides the items list and its filters and shows ALL body-mesh
+        // prefabs across every slot, each labeled with its native slot. A pick applies to the prefab's native slot,
+        // which is not always the popup slot, so the user can browse the whole prefab catalog from any slot.
         bool prefabMode = false;
-        // Prefab-mode-only Exact filter: when true, the prefab-mode list only shows prefabs whose derived slot
-        // (slot_for_prefab_name) matches the popup's slot category. Defaults true so opening
-        // Helm's picker in prefab mode shows only Helm-family prefabs; user can untick to see the full cross-slot
-        // catalog.
+        // Prefab-mode-only Exact filter. When true the prefab-mode list shows only prefabs whose derived slot
+        // (slot_for_prefab_name) matches the popup's slot category. On by default, so Helm's picker in prefab mode
+        // opens on Helm-family prefabs alone. Untick it to see the full cross-slot catalog.
         bool prefabExactFilter = true;
-        // Prefab-mode-only "keep open after pick" toggle. When true the picker stays open after committing a prefab so
-        // the user can quickly try alternatives without re-opening the popup. Defaults on for the cross-slot browser
-        // since users typically iterate through several candidates per slot.
+        // Prefab-mode-only "keep open after pick" toggle. When true the picker stays open after a prefab commit, so
+        // the user can try alternatives without a re-open. On by default for the cross-slot browser, because most
+        // users step through several candidates per slot.
         bool prefabKeepOpenOnPick = true;
-        // Hover-apply debounce state. We track which item the cursor is on and when it first landed there. Apply fires
-        // only after the cursor has settled on the same item for k_hoverDebounceMs, preventing rapid-fire apply cycles
-        // when scrolling the list.
+        // Hover-apply debounce state: which item the cursor sits on, and when it first landed there. The apply fires
+        // only after the cursor rests on the same item for k_hoverDebounceMs, which states the debounce invariant.
         std::uint16_t hoverPendingId = 0;
         std::uint16_t hoverAppliedId = 0;
         std::int64_t hoverStartMs = 0;
-        // Prefab-mode mirror of the hover-apply debounce above. Keyed by prefab name (cd_phm_* / cd_phw_*) since the
-        // prefab catalog has no compact integer id like items do. Only the Up/Down nav cursor (GUI buttons or arrow
-        // keys) feeds this debounce. Mouse hover is intentionally NOT wired: a body-mesh preview fans out to a full
-        // multi-actor manual_apply, which is too disruptive to chain off casual cursor motion. The apply fires via
-        // commit_prefab_at(previewOnly=true) so the popup stays open across re-equips.
+        // Prefab-mode mirror of the hover-apply debounce above, keyed by prefab name (cd_phm_* / cd_phw_*), because
+        // the prefab catalog carries no compact integer id. Only the Up/Down nav cursor (GUI buttons or arrow keys)
+        // feeds this debounce. Mouse hover stays unwired on purpose: a body-mesh preview fans out to a full
+        // multi-actor manual_apply, which is too disruptive to chain off casual cursor motion. The apply runs through
+        // commit_prefab_at(previewOnly=true), so the popup survives the re-equips.
         //
-        // Naming kept as `hover*` (rather than `nav*`) for cross-reading parity with items-mode
-        // hoverPendingId/hoverAppliedId/hoverStartMs above. Both serve the same debounce role; the trigger source
-        // differs (hover+nav for items, nav-only for prefabs).
+        // The `hover*` spelling stays, rather than `nav*`, for cross-reading parity with the items-mode
+        // hoverPendingId/hoverAppliedId/hoverStartMs above. Both serve the same debounce role. Only the trigger
+        // source differs: hover plus nav for items, nav alone for prefabs.
         std::string hoverPendingPrefab;
         std::string hoverAppliedPrefab;
         std::int64_t hoverPrefabStartMs = 0;
-        // Button-driven navigation index into the visible (filtered) list. -1 = no highlight. Up/Down buttons move
-        // this; Enter commits the highlighted item. lastVisibleCount stores the previous frame's visible count for
-        // clamping.
+        // Button-driven navigation index into the visible (filtered) list. -1 means no highlight. The Up and Down
+        // buttons move it and Enter commits the highlighted item. lastVisibleCount holds the previous frame's
+        // visible count, which clamps the index.
         int navIndex = -1;
         int lastVisibleCount = 0;
         bool navMoved = false; // true only on the frame a nav button was pressed
-        // When the user picks a prefab from this slot's picker, we surface the prefab name on the slot button so the UI
-        // shows "[prefab] cd_nhw_no_ub_20027" instead of the carrier item's display name. Empty string == no prefab
-        // picked. Session-only (matches prefab-wrapper-swap selections; no JSON persistence).
+        // A prefab pick from this slot's picker surfaces the prefab name on the slot button, so the UI reads
+        // "[prefab] cd_nhw_no_ub_20027" rather than the carrier item's display name. An empty string means no prefab
+        // pick. This is session-only, matching prefab-wrapper-swap selections, and nothing writes it to JSON.
         std::string pickedPrefabName;
 
-        // Snapshot of the slot's carrier state BEFORE the first prefab pick auto-borrowed Kliff's plate item. Captured
-        // on first pick
-        // (priorCarrierSaved -> true) and restored when the user picks
-        // the "(no body-mesh override)" entry to clear the prefab. Restoring the original Wellsknight (or whatever the
-        // user's active preset had) lets the slot revert visually instead of staying stuck on the Kliff plate carrier
-        // after a clear.
+        // Snapshot of the slot's carrier state BEFORE the first prefab pick auto-borrowed Kliff's plate item. The
+        // first pick captures it and sets priorCarrierSaved. The "(no body-mesh override)" entry restores it when the
+        // user clears the prefab. That restore puts back the original Wellsknight, or whatever the active preset
+        // held, so the slot reverts visually instead of staying stuck on the Kliff plate carrier.
         bool priorCarrierSaved = false;
         bool priorCarrierActive = false;
         std::uint16_t priorCarrierItemId = 0;
 
-        // Dye UI: per-region collapse state + per-layer R/G/B link toggles, keyed by submesh stable_id. Session-only;
-        // reset on slot-target change. `std::map` for stable iteration without hashing a u64 we don't own.
+        // Dye UI: per-region collapse state plus the per-layer R/G/B link toggles, keyed by submesh stable_id. This
+        // is session-only and resets on a slot-target change. `std::map` gives stable iteration and hashes no u64
+        // that this code does not own.
         std::map<std::uint64_t, RegionUIState> regionUI{};
 
-        // Dye UI: "Show only modified" filter. When true, the picker hides clusters / regions whose rows are all at
-        // their captured engine default (`override_active == false`). Lets users with many swatches focus on what
-        // they've already touched. Session-only -- the filter is a viewing preference, not preset state.
+        // Dye UI: "Show only modified" filter. When true the picker hides every cluster or region whose rows all sit
+        // at their captured engine default (`override_active == false`), so a user with many swatches sees only the
+        // rows they touched. This is session-only, because the filter is a viewing preference, not preset state.
         bool showOnlyModified = false;
     };
 
+    /** @brief Per-slot overlay UI state, indexed by the slot loop index. */
     inline SlotUIState s_slotUI[k_slotCount]{};
 
-    // One-shot auto-trigger for the per-slot Color Override reinit. When the popup opens on a slot whose swatch grid is
-    // empty (detected == 0) and no reinit is currently running, we fire a single-pass reinit so the user does not have
-    // to click Re-init. Re-armed each time the popup closes (set false in overlay_ui.cpp's popup-closed branch).
+    /**
+     * @brief One-shot auto-trigger for the per-slot Color Override reinit.
+     * @details A popup that opens on a slot with an empty swatch grid (detected == 0), while no reinit runs, fires a
+     *          single-pass reinit, so the user never has to click Re-init. The popup-closed branch in overlay_ui.cpp
+     *          clears the flag, which re-arms it.
+     */
     inline bool s_coAutoTriggered[k_slotCount] = {};
 
-    // Preset rename dialog scratch buffers.
+    /** @brief Scratch buffer holding the text the preset rename dialog edits. */
     inline char s_renamePresetBuf[64]{};
+    /** @brief True while the preset rename dialog is open. */
     inline bool s_renameActive = false;
+    /** @brief Index of the preset the rename dialog edits, or -1 when none. */
     inline int s_renameIndex = -1;
 
 } // namespace Transmog

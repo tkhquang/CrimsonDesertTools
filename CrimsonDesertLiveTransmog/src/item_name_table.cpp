@@ -7,7 +7,6 @@
 #include <Windows.h>
 
 #include <algorithm>
-#include <atomic>
 #include <cctype>
 #include <chrono>
 #include <fstream>
@@ -20,12 +19,12 @@
 namespace Transmog
 {
     // Sensible upper bound on item descriptor catalog size. The game ships several thousand entries. Guard generously.
-    static constexpr uint32_t k_maxCatalogSize = 0x20000;
+    static constexpr uint32_t MAX_CATALOG_SIZE = 0x20000;
 
-    static constexpr std::size_t k_maxNameLen = 96;
+    static constexpr std::size_t MAX_NAME_LEN = 96;
 
     // Variant-metadata detection (see item_name_table.hpp::has_variant_meta). Clean base items have `*(desc+<offset>)
-    // == <sentinel>`, where <sentinel> is a shared empty-object pointer -- an IRefCounted vtable in the exe's .data
+    // == <sentinel>`, where <sentinel> is a shared empty-object pointer - an IRefCounted vtable in the exe's .data
     // section. Non-sentinel values point to a per-item metadata struct threaded through a catalog-wide linked list.
     // Members of that list do not render via runtime transmog.
     //
@@ -37,76 +36,59 @@ namespace Transmog
     // Re-derive the offset like this. Probe every descriptor qword across a 0x380..0x480 window, then correlate
     // "value != mode" for each candidate offset against the Variant column of the previous game version's item dump,
     // matched BY NAME. The correct offset produces no false positives. No other offset in the window comes close, so
-    // the result is unambiguous. Note that at least one other descriptor offset also holds a sentinel on every item,
-    // so "most items share this value" alone does NOT identify the field. The distinguishing constraint is: sentinel
-    // for direct-wear items, per-item heap pointer for carrier-required items.
+    // the result is unambiguous. At least one other descriptor offset also holds a sentinel on every item, so "most
+    // items share this value" alone does NOT identify the field. The deciding constraint is: sentinel for direct-wear
+    // items, per-item heap pointer for carrier-required items.
     //
-    // The sentinel value itself is also unstable, because any .data reshuffle moves it. Rather than hardcoding either
-    // the offset or the sentinel address, the builder resolves the sentinel statistically at catalog-build time. It
-    // scans every valid descriptor's qword at this offset, and the value that appears in the clear majority of items
-    // IS the sentinel. This self-heals across future game updates as long as the catalog stays statistically dominated
-    // by base items.
-    static constexpr std::ptrdiff_t k_descVariantMetaOffset = 0x3B0;
+    // The sentinel value itself is also unstable, because any .data reshuffle moves it. The builder hardcodes neither
+    // the offset nor the sentinel address. It resolves the sentinel statistically at catalog-build time. It scans
+    // every valid descriptor's qword at this offset, and the value that appears in the clear majority of items IS the
+    // sentinel. This self-heals across future game updates as long as base items keep their statistical dominance of
+    // the catalog.
+    static constexpr std::ptrdiff_t DESC_VARIANT_META_OFFSET = 0x3B0;
 
     // Item-type code, u16. This is the engine's own equip-slot key: SlotPopulator reads it out of the descriptor to
     // index its EquipTypeInfo table.
     //
-    // LT does NOT interpret the VALUE. The value is a row index and renumbers whenever that table gains an entry,
-    // which is exactly what made the old static switch rot. It is used only as a JOIN KEY: items the group taxonomy
-    // already classified vote for their type code, and the winning slot then classifies every other item sharing that
-    // code (see `learn` in build()).
+    // LT does NOT interpret the VALUE. The value is a row index and renumbers whenever that table gains an entry, so
+    // it is a JOIN KEY and never a slot key. Items the group taxonomy already classified vote for their type code,
+    // and the winning slot then classifies every other item that shares that code (see the learned pass in build()).
     //
-    // That join is what recovers NPC and boss gear. The engine files it under ItemGroup_Equip_Armor_Mon, which names
-    // a family but no slot, so groups alone leave it unclassified -- yet it shares its type code with the player armor
-    // of the same slot. It also keeps pet, horse, WarRobot and dragon gear OUT with no exclusion list: no player item
-    // shares their codes, so nothing ever votes for them.
+    // That join recovers NPC and boss gear. The engine files it under ItemGroup_Equip_Armor_Mon, which names a family
+    // but no slot, so groups alone leave it unclassified - yet it shares its type code with the player armor of the
+    // same slot. It also keeps pet, horse, WarRobot and dragon gear OUT with no exclusion list: no player item shares
+    // their codes, so nothing ever votes for them.
     //
     // The offset moves when the descriptor head changes width. A wrong value no longer mis-slots items silently: it
     // yields scattered keys that nothing votes for twice, so the learned table collapses and the [catalog-slots]
     // histogram drops to the group-only counts.
-    static constexpr std::ptrdiff_t k_descTypeCodeOffset = 0x42;
-    static constexpr uint16_t k_typeCodeNone = 0xFFFF; // arrows, quest items, anything with no equip slot
+    static constexpr std::ptrdiff_t DESC_TYPE_CODE_OFFSET = 0x42;
+    /// Arrows, quest items, anything with no equip slot.
+    static constexpr uint16_t TYPE_CODE_NONE = 0xFFFF;
 
     // iteminfo container layout
     // These are runtime data offsets, not code, so they cannot be AOB-scanned. If a future patch reshapes the struct,
     // the catalog walk produces an implausible count or ptrArray and bails at the sanity checks below. Read the live
     // values off the `mov rax,[rbx+<offset>]` that ItemAccessor uses to reach the array.
     //
-    // WARNING -- the sanity checks do NOT catch a small shift of the array offset. The offset moves when the
-    // pa::StaticInfoManager2 base that iteminfo derives from changes width. Both the old and the new holder offsets
-    // dereference to valid-looking heap pointers, so the `ptrArray < 0x10000` guard stays silent and the walk emits
-    // garbage item names instead of failing. The StringInfo registry rides the same base and moves with it (see
-    // prefab_wrapper_swap.cpp), but a change to that base does NOT move every member by the same amount, and it does
-    // not always move them in the same direction. The count offset and the array offset move independently. Verify
-    // each one against live memory on patch day rather than trusting the guards.
-    static constexpr std::ptrdiff_t k_iteminfoCountOffset = 0x08;    // dword entry count
-    static constexpr std::ptrdiff_t k_iteminfoPtrArrayOffset = 0x58; // qword base of descriptor ptr array
-
-    // Resolved sentinel, cached after the first successful build(). 0 means "not yet resolved". Until the next
-    // build() populates it, has_variant_meta() falls back to false. That lets a bad item through instead of
-    // mis-flagging a clean one.
-    static std::atomic<uintptr_t> s_variantMetaSentinel{0};
+    // WARNING - the sanity checks do NOT catch a small shift of the array offset. The offset moves when the
+    // pa::StaticInfoManager2 base that iteminfo derives from changes width. A shifted offset still dereferences to a
+    // valid-looking heap pointer, so the is_plausible_ptr guard stays silent and the walk emits garbage item names
+    // instead of failing. The StringInfo registry rides the same base and moves with it (see prefab_wrapper_swap.cpp),
+    // but a change to that base does NOT move every member by the same amount, and it does not always move them in the
+    // same direction. The count offset and the array offset move independently. Verify each one against live memory on
+    // patch day. Do not trust the guards.
+    /// Dword entry count.
+    static constexpr std::ptrdiff_t ITEMINFO_COUNT_OFFSET = 0x08;
+    /// Qword base of the descriptor pointer array.
+    static constexpr std::ptrdiff_t ITEMINFO_PTR_ARRAY_OFFSET = 0x58;
 
     // Safe memory helpers
     //
     // The `(value, bool& ok)` shape distinguishes a faulted read from a legitimate zero result, which matters at call
     // sites where 0 is a valid value (e.g. slot index 0 versus unread slot field). `memory::read<T>` is the
-    // underlying SEH-protected primitive. These adapters fold its `std::optional<T>` return into the local shape used
-    // by the rest of this translation unit.
-
-    static uint8_t read_u8_safe(uintptr_t addr, bool &ok) noexcept
-    {
-        const auto v = DMK::memory::read<uint8_t>(DMK::Address{addr});
-        ok = v.has_value();
-        return v.value_or(0);
-    }
-
-    static int32_t read_i32_safe(uintptr_t addr, bool &ok) noexcept
-    {
-        const auto v = DMK::memory::read<int32_t>(DMK::Address{addr});
-        ok = v.has_value();
-        return v.value_or(0);
-    }
+    // underlying SEH-protected primitive. These adapters fold its `Result<T>` return into the local shape used by the
+    // rest of this translation unit.
 
     static uintptr_t read_qword_safe(uintptr_t addr, bool &ok) noexcept
     {
@@ -129,43 +111,7 @@ namespace Transmog
         return v.value_or(0);
     }
 
-    /**
-     * Decode a relative-call instruction ( `E8 disp32` ) at the given address and return its target. Returns 0 on
-     * failure.
-     */
-    static uintptr_t decode_rel_call(uintptr_t callSite) noexcept
-    {
-        bool ok = false;
-        auto opcode = read_u8_safe(callSite, ok);
-        if (!ok || opcode != 0xE8)
-            return 0;
-        auto disp = read_i32_safe(callSite + 1, ok);
-        if (!ok)
-            return 0;
-        return callSite + 5 + static_cast<intptr_t>(disp);
-    }
-
-    /**
-     * Scan the first `scanBytes` of a function for the first `E8 disp32` call and return its target. Returns 0 on
-     * failure.
-     */
-    static uintptr_t first_rel_call_target(uintptr_t funcStart, std::size_t scanBytes) noexcept
-    {
-        for (std::size_t off = 0; off + 5 <= scanBytes; ++off)
-        {
-            bool ok = false;
-            auto opcode = read_u8_safe(funcStart + off, ok);
-            if (!ok)
-                return 0;
-            if (opcode == 0xE8)
-                return decode_rel_call(funcStart + off);
-        }
-        return 0;
-    }
-
-    /**
-     * Read a null-terminated ASCII string from `strPtr` into `buf`.
-     */
+    /// Read a null-terminated ASCII string from `strPtr` into `buf`.
     static std::size_t read_cstring_safe(uintptr_t strPtr, char *buf, std::size_t bufSize) noexcept
     {
         __try
@@ -175,7 +121,7 @@ namespace Transmog
             while (len < bufSize - 1 && src[len] != '\0')
             {
                 const auto c = src[len];
-                // Reject control bytes (0x01..0x1F) -- they signal a misaligned heap read. Accept 0x80..0xFF: some
+                // Reject control bytes (0x01..0x1F) - they signal a misaligned heap read. Accept 0x80..0xFF: some
                 // legitimate string_keys are UTF-8 encoded (e.g. Roman numerals in Goblin_Merchant_Fabric_Armor_* use
                 // the sequence `E2 85 A2..A5`), and a printable-ASCII-only filter silently drops them.
                 if (static_cast<unsigned char>(c) < 0x20)
@@ -205,49 +151,48 @@ namespace Transmog
     //     ..._Equip_Weapon_OneHand / _Shield / _TwoHand / _Range / _OneHandDagger
     //     ..._Equip_Tool / _Tool_NPC
     //
-    // The taxonomy is stated twice, once as `ItemGroup_SubCategory_<tail>` and once as `ItemGroup_<tail>`, so the
-    // rules match on the tail and cover both. Every item has at most ONE sub-category, but the two statements do NOT
-    // always agree -- a knuckledrill sub-categorizes as Tool while its family row is Weapon_OneHand. Where they
+    // The engine states the taxonomy twice, once as `ItemGroup_SubCategory_<tail>` and once as `ItemGroup_<tail>`, so
+    // the rules match on the tail and cover both. Every item has at most ONE sub-category, but the two statements do
+    // NOT always agree - a knuckledrill sub-categorizes as Tool while its family row is Weapon_OneHand. Where they
     // disagree the family row wins, through the priority band below.
     //
-    // Keying on the NAME is the point. The previous classifier read a u16 type code out of the descriptor and mapped
-    // it through a static switch, but that code is a ROW INDEX into an engine table: inserting one row renumbers
+    // The NAME is the key, because a type code is a ROW INDEX into an engine table. One inserted row renumbers
     // everything above it, and the accessory band moved in both directions across past patches. A stale index table
-    // does not fail loudly -- the codes the band vacates belong to WarRobot parts, so mech parts appear in the Glasses
+    // does not fail loudly: the codes the band vacates belong to WarRobot parts, so mech parts appear in the Glasses
     // and Mask pickers while real masks fall through to unmapped. Group names do not renumber.
     //
-    // Non-player families (pet, horse, riding, vehicle) carry their own sub-categories and simply do not appear in the
-    // table, so they classify as Count and stay out of every picker without needing an exclusion list.
+    // Non-player families (pet, horse, riding, vehicle) carry their own sub-categories and do not appear in the table,
+    // so they classify as Count and stay out of every picker with no exclusion list.
     //
-    // Classification runs in three priority bands, lowest number winning: a short slot-name tail (Specific), a
+    // Classification runs in three priority bands, and the lowest number wins: a short slot-name tail (Specific), a
     // taxonomy family tail (Taxonomy), and either of those matched on an `ItemGroup_SubCategory_*` row
-    // (SubCategory). A tiered qualifier such as `_Tier3` is stripped before matching, since it sits exactly where a
+    // (SubCategory). The matcher strips a tiered qualifier such as `_Tier3` first, because it sits exactly where a
     // tail expects the group name to end.
     //
-    // Several slots have no single covering taxonomy row and are recovered from a more specific group the item also
-    // belongs to. The engine spreads them across per-promotion rows (Equip_Tool_Lantern,
+    // Several slots have no single covering taxonomy row. The classifier recovers each one from a more specific group
+    // the item also belongs to. The engine spreads them across per-promotion rows (Equip_Tool_Lantern,
     // Equip_Twitch_Special_Lantern, Accessory_Special_Necklace_Tier4, ...), so they match a short suffix instead:
     //
-    //     *_Earring    -- earrings have no taxonomy row at all
-    //     *_Necklace   -- also reached through an Earring sub-category, which the priority band demotes
-    //     *_Ring       -- same, and it cannot collide with *_Earring (see k_groupSuffixRules)
-    //     *_Glasses    -- tiered and Special variants carry an extra path component
-    //     *_Mask       -- same
-    //     *_Lantern    -- lanterns are filed under Equip_Tool
-    //     *_Band       -- bracelets sub-categorize as Control
+    //     *_Earring    - earrings have no taxonomy row at all
+    //     *_Necklace   - also reached through an Earring sub-category, which the priority band demotes
+    //     *_Ring       - same, and it cannot collide with *_Earring (see GROUP_SUFFIX_RULES)
+    //     *_Glasses    - tiered and Special variants carry an extra path component
+    //     *_Mask       - same
+    //     *_Lantern    - lanterns are filed under Equip_Tool
+    //     *_Band       - bracelets sub-categorize as Control
     //
     // These outrank the taxonomy rules, which is what keeps lanterns out of the Tool picker.
     //
-    // Name-parsing of the ITEM name is still not used: it produces false positives on anything whose name contains
-    // tokens like "_Armor_" (horse armor, shields, quest treasure maps). Only group names are parsed, and those are
-    // the engine's own classification rather than a display string.
+    // The classifier never parses the ITEM name: that produces false positives on anything whose name contains
+    // tokens like "_Armor_" (horse armor, shields, quest treasure maps). It parses only group names, which carry the
+    // engine's own classification rather than a display string.
 
     // Priority band for a group -> slot rule. Lower wins, so a specific-slot match beats the broad taxonomy: a lantern
     // is in a `*_Lantern` group AND in `Equip_Tool`, and it belongs in the Lantern picker.
     enum : std::uint8_t
     {
-        k_groupPrioritySpecific = 0,
-        k_groupPriorityTaxonomy = 1,
+        GROUP_PRIORITY_SPECIFIC = 0,
+        GROUP_PRIORITY_TAXONOMY = 1,
         // An `ItemGroup_SubCategory_*` row is the engine's COARSE bucket for an item, and it does not always agree
         // with the item's own family row: a necklace sits in `ItemGroup_SubCategory_Equip_accessory_Earring` while
         // also sitting in `ItemGroup_equip_accessory_Necklace`, and a knuckledrill sits in
@@ -258,14 +203,14 @@ namespace Transmog
         // and a family row name different slots, the FAMILY row wins: a necklace stops resolving to Earring1, a
         // knuckledrill files under MainHand rather than Tool, and a robe whose sub-category says Helm files under
         // Chest. An item carrying nothing but a sub-category row still classifies, one band lower.
-        k_groupPrioritySubCategory = 2,
-        k_groupPriorityNone = 0xFF,
+        GROUP_PRIORITY_SUB_CATEGORY = 2,
+        GROUP_PRIORITY_NONE = 0xFF,
     };
 
     struct GroupSlot
     {
         TransmogSlot slot = TransmogSlot::Count;
-        std::uint8_t priority = k_groupPriorityNone;
+        std::uint8_t priority = GROUP_PRIORITY_NONE;
     };
 
     struct GroupRule
@@ -279,14 +224,14 @@ namespace Transmog
     // Suffix rather than whole-name, because the engine states the same taxonomy twice: once as the item's
     // sub-category (`ItemGroup_SubCategory_Equip_Weapon_OneHand`) and once as a plain family row
     // (`ItemGroup_Equip_Weapon_OneHand`). They differ only by the `_SubCategory` infix, so one tail matches both. That
-    // second layer is not redundant -- NPC props carry only the family row, which is how the boss knuckles reach
+    // second layer is not redundant - NPC props carry only the family row, which is how the boss knuckles reach
     // MainHand and the NPC torch, saw, drum, stick, priest wand and crutch reach Tool.
     //
     // Casing in the game data is inconsistent ("equip_accessory_Ring" vs "Equip_Accessory_Mask"), so every comparison
     // is case-insensitive. Tails are specific enough not to over-match: `_Equip_BackPack` does not catch
     // `Equip_SpecialBackPack` or `Equip_BackPack_Normal`, and `_Equip_Weapon_OneHand` does not catch
     // `Equip_Weapon_OneHandDagger`.
-    static constexpr GroupRule k_taxonomyTailRules[] = {
+    static constexpr GroupRule TAXONOMY_TAIL_RULES[] = {
         {"_Equip_Armor_Player_Helm", TransmogSlot::Helm},
         {"_Equip_Armor_Player_Armor", TransmogSlot::Chest},
         {"_Equip_Armor_Player_Cloak", TransmogSlot::Cloak},
@@ -303,19 +248,19 @@ namespace Transmog
     };
 
     // Suffix matches for the slots the sub-category layer does not separate, scanned BEFORE the taxonomy tails and
-    // scored one band higher. Paired slots resolve to the lower-indexed half; the picker shares its list across the
+    // scored one band higher. Paired slots resolve to the lower-indexed half. The picker shares its list across the
     // pair via `slots_share_picker`, and the half actually written is whichever row the user committed against.
     //
     // The accessory tails are deliberately just the slot name. The engine spreads one accessory slot across several
     // path shapes (`..._Equip_Accessory_Necklace`, `..._Accessory_Special_Necklace_Tier4`), and a tail long enough
     // to name the family misses every variant that carries an extra path component. Anything longer than the slot
-    // name belongs in k_taxonomyTailRules, and a tail that appears in both tables makes the taxonomy row dead --
+    // name belongs in TAXONOMY_TAIL_RULES, and a tail that appears in both tables makes the taxonomy row dead -
     // the scan here returns first.
     //
-    // `_Earring` precedes `_Ring` for clarity only; they cannot collide, since an earring group ends "arring" and
+    // `_Earring` precedes `_Ring` for clarity only. They cannot collide, because an earring group ends "arring" and
     // the ring tail requires the leading underscore.
-    static constexpr GroupRule k_groupSuffixRules[] = {
-        // Accessory slots, matched after the tier qualifier is stripped (see strip_tier_suffix).
+    static constexpr GroupRule GROUP_SUFFIX_RULES[] = {
+        // Accessory slots, matched after strip_tier_suffix drops the tier qualifier.
         {"_Earring", TransmogSlot::Earring1},
         {"_Necklace", TransmogSlot::Necklace},
         {"_Ring", TransmogSlot::Ring1},
@@ -360,12 +305,12 @@ namespace Transmog
     /**
      * @brief Drop a trailing `_Tier<digits>` qualifier from a group name.
      *
-     * @details Accessory groups are tiered -- `ItemGroup_Equip_Accessory_Necklace_Tier3`,
+     * @details Accessory groups are tiered - `ItemGroup_Equip_Accessory_Necklace_Tier3`,
      *          `..._Accessory_Special_Ring_Tier4`. Every rule matches with `iends_with`, so a tiered name matches
      *          NOTHING: the tier sits exactly where a rule expects the group to end. The failure is silent and total
-     *          for the affected slot -- its bucket classifies zero items, and those items then inherit whatever slot
-     *          their type code was learned as from some other group that did match. That is how necklaces ended up
-     *          filed as earrings.
+     *          for the affected slot. Its bucket classifies zero items, and those items then inherit whatever slot
+     *          the learned pass took from some other group that did match. That is how necklaces reach the earring
+     *          bucket.
      *
      *          Strips one exact `_Tier` + digits tail and nothing else, so a group that genuinely ends in something
      *          else is untouched. Returns the name unchanged when there is no such tail.
@@ -376,7 +321,7 @@ namespace Transmog
         while (end > 0 && name[end - 1] >= '0' && name[end - 1] <= '9')
             --end;
         if (end == name.size())
-            return name; // no trailing digits -- nothing to strip
+            return name; // no trailing digits - nothing to strip
         constexpr std::string_view k_tier = "_Tier";
         if (end < k_tier.size() || !iequals(name.substr(end - k_tier.size(), k_tier.size()), k_tier))
             return name;
@@ -385,19 +330,19 @@ namespace Transmog
 
     static GroupSlot slot_from_group_name(std::string_view name) noexcept
     {
-        // The raw name is tried first so a rule that deliberately ends in digits still wins on an exact match; the
+        // Try the raw name first so a rule that deliberately ends in digits still wins on an exact match. The
         // tier-stripped form is the fallback.
         const auto base = strip_tier_suffix(name);
         const bool subCategory = icontains(name, "_SubCategory_");
-        for (const auto &rule : k_groupSuffixRules)
+        for (const auto &rule : GROUP_SUFFIX_RULES)
         {
             if (iends_with(name, rule.name) || iends_with(base, rule.name))
-                return {rule.slot, subCategory ? k_groupPrioritySubCategory : k_groupPrioritySpecific};
+                return {rule.slot, subCategory ? GROUP_PRIORITY_SUB_CATEGORY : GROUP_PRIORITY_SPECIFIC};
         }
-        for (const auto &rule : k_taxonomyTailRules)
+        for (const auto &rule : TAXONOMY_TAIL_RULES)
         {
             if (iends_with(name, rule.name) || iends_with(base, rule.name))
-                return {rule.slot, subCategory ? k_groupPrioritySubCategory : k_groupPriorityTaxonomy};
+                return {rule.slot, subCategory ? GROUP_PRIORITY_SUB_CATEGORY : GROUP_PRIORITY_TAXONOMY};
         }
         return {};
     }
@@ -409,68 +354,73 @@ namespace Transmog
     // "key not found" (every item carries one such 0). So the def-array index is `value - 1`.
     // The vector is {qword data, dword size, dword capacity}. Size and capacity hold the same value on a loaded
     // descriptor, so reading the pair as one qword yields a huge number rather than a wrong-but-plausible count.
-    static constexpr std::ptrdiff_t k_descItemGroupDataOffset = 0x350;  // qword, base of the u16 array
-    static constexpr std::ptrdiff_t k_descItemGroupCountOffset = 0x358; // dword element count
-    static constexpr std::size_t k_maxItemGroupsPerItem = 64;
+    /// Qword, base of the u16 group-value array.
+    static constexpr std::ptrdiff_t DESC_ITEM_GROUP_DATA_OFFSET = 0x350;
+    /// Dword element count.
+    static constexpr std::ptrdiff_t DESC_ITEM_GROUP_COUNT_OFFSET = 0x358;
+    static constexpr std::size_t MAX_ITEM_GROUPS_PER_ITEM = 64;
 
-    // The registry is a pa::StaticInfoManager2 like iteminfo -- same count and def-array offsets -- and its holder
+    // The registry is a pa::StaticInfoManager2 like iteminfo - same count and def-array offsets - and its holder
     // sits in the same block of globals. The holder is FOUND rather than hardcoded: probe the neighboring qwords and
     // keep the first whose rows carry "ItemGroup..." names. Exactly one candidate in the window qualifies, so the
     // probe self-heals when a patch reorders that block.
-    static constexpr std::ptrdiff_t k_groupHolderProbeLow = -0x80;
-    static constexpr std::ptrdiff_t k_groupHolderProbeHigh = 0x100;
-    static constexpr std::size_t k_groupHolderProbeRows = 16; // rows sampled per candidate before rejecting it
+    static constexpr std::ptrdiff_t GROUP_HOLDER_PROBE_LOW = -0x80;
+    static constexpr std::ptrdiff_t GROUP_HOLDER_PROBE_HIGH = 0x100;
+    /// Rows sampled per candidate before the probe rejects it.
+    static constexpr std::size_t GROUP_HOLDER_PROBE_ROWS = 16;
 
-    static constexpr std::ptrdiff_t k_groupRowDefOffset = 0x18; // registry row -> group-def object
+    /// Registry row -> group-def object.
+    static constexpr std::ptrdiff_t GROUP_ROW_DEF_OFFSET = 0x18;
 
     // The name's {ptr,len} wrapper sits at a VARIABLE offset inside the def object: a name short enough to live in the
     // object's inline buffer pushes the wrapper past it, and the neighboring member is a variable-length u16 array of
     // member item ids. Scan a bounded window for a pair that resolves to a string of exactly the stated length whose
-    // prefix is "ItemGroup". A wrong pair fails all three checks, so the scan cannot silently pick up a neighbour.
-    static constexpr std::ptrdiff_t k_groupNameScanBegin = 0x18;
-    static constexpr std::ptrdiff_t k_groupNameScanEnd = 0x60;
-    static constexpr std::size_t k_maxGroupNameLen = 160;
-    static constexpr std::string_view k_groupNamePrefix = "ItemGroup";
+    // prefix is "ItemGroup". A wrong pair fails all three checks, so the scan cannot silently pick up a neighbor.
+    static constexpr std::ptrdiff_t GROUP_NAME_SCAN_BEGIN = 0x18;
+    static constexpr std::ptrdiff_t GROUP_NAME_SCAN_END = 0x60;
+    static constexpr std::size_t MAX_GROUP_NAME_LEN = 160;
+    static constexpr std::string_view GROUP_NAME_PREFIX = "ItemGroup";
 
-    static constexpr uint32_t k_maxGroupCount = 0x20000;
+    static constexpr uint32_t MAX_GROUP_COUNT = 0x20000;
 
     /**
-     * Read one group row's name. Returns an empty string when the row does not resolve to an "ItemGroup..." name.
+     * @brief Read one group row's name.
+     * @return The name, or an empty string when the row does not resolve to an "ItemGroup..." name.
      */
     static std::string read_group_name(uintptr_t row) noexcept
     {
         bool ok = false;
-        const uintptr_t def = read_qword_safe(row + k_groupRowDefOffset, ok);
+        const uintptr_t def = read_qword_safe(row + GROUP_ROW_DEF_OFFSET, ok);
         if (!ok || !DMK::memory::is_plausible_ptr(DMK::Address{def}))
             return {};
 
-        char buf[k_maxGroupNameLen + 1];
-        for (std::ptrdiff_t off = k_groupNameScanBegin; off <= k_groupNameScanEnd; off += 4)
+        char buf[MAX_GROUP_NAME_LEN + 1];
+        for (std::ptrdiff_t off = GROUP_NAME_SCAN_BEGIN; off <= GROUP_NAME_SCAN_END; off += 4)
         {
             const uintptr_t strPtr = read_qword_safe(def + off, ok);
             if (!ok || !DMK::memory::is_plausible_ptr(DMK::Address{strPtr}))
                 continue;
             const uint32_t len = read_u32_safe(def + off + 8, ok);
-            if (!ok || len < k_groupNamePrefix.size() || len > k_maxGroupNameLen)
+            if (!ok || len < GROUP_NAME_PREFIX.size() || len > MAX_GROUP_NAME_LEN)
                 continue;
             const auto got = read_cstring_safe(strPtr, buf, sizeof(buf));
             if (got != len)
                 continue;
             const std::string_view name(buf, got);
-            if (name.substr(0, k_groupNamePrefix.size()) == k_groupNamePrefix)
+            if (name.substr(0, GROUP_NAME_PREFIX.size()) == GROUP_NAME_PREFIX)
                 return std::string(name);
         }
         return {};
     }
 
     /**
-     * Locate the ItemGroupInfo registry holder by probing the globals around the iteminfo holder. Returns 0 when no
-     * candidate in the window exposes "ItemGroup..." rows. Cached by the caller, because the answer is an address of a
-     * global and does not change within a process lifetime.
+     * @brief Locate the ItemGroupInfo registry holder in the globals around the iteminfo holder.
+     * @return The holder address, or 0 when no candidate in the window exposes "ItemGroup..." rows.
+     * @note The caller caches the answer: it is the address of a global and stays fixed for the process.
      */
     static uintptr_t probe_group_registry_holder(uintptr_t iteminfoHolder) noexcept
     {
-        for (std::ptrdiff_t off = k_groupHolderProbeLow; off <= k_groupHolderProbeHigh; off += 8)
+        for (std::ptrdiff_t off = GROUP_HOLDER_PROBE_LOW; off <= GROUP_HOLDER_PROBE_HIGH; off += 8)
         {
             const uintptr_t holder = iteminfoHolder + off;
             bool ok = false;
@@ -478,14 +428,14 @@ namespace Transmog
             if (!ok || !DMK::memory::is_plausible_ptr(DMK::Address{mgr}))
                 continue;
 
-            const uint32_t count = read_u32_safe(mgr + k_iteminfoCountOffset, ok);
-            if (!ok || count == 0 || count > k_maxGroupCount)
+            const uint32_t count = read_u32_safe(mgr + ITEMINFO_COUNT_OFFSET, ok);
+            if (!ok || count == 0 || count > MAX_GROUP_COUNT)
                 continue;
-            const uintptr_t rows = read_qword_safe(mgr + k_iteminfoPtrArrayOffset, ok);
+            const uintptr_t rows = read_qword_safe(mgr + ITEMINFO_PTR_ARRAY_OFFSET, ok);
             if (!ok || !DMK::memory::is_plausible_ptr(DMK::Address{rows}))
                 continue;
 
-            const auto sample = (std::min)(static_cast<std::size_t>(count), k_groupHolderProbeRows);
+            const auto sample = (std::min)(static_cast<std::size_t>(count), GROUP_HOLDER_PROBE_ROWS);
             for (std::size_t i = 0; i < sample; ++i)
             {
                 const uintptr_t row = read_qword_safe(rows + i * 8ull, ok);
@@ -499,11 +449,12 @@ namespace Transmog
     }
 
     /// Upper bound on the unmatched-accessory-group names named in one report line.
-    static constexpr std::size_t k_unmatchedGroupReportCap = 24;
+    static constexpr std::size_t UNMATCHED_GROUP_REPORT_CAP = 24;
 
     /**
-     * Build `defIndex -> GroupSlot` for the whole registry. An empty result means the registry did not resolve, which
-     * the caller treats as "defer and retry" rather than publishing an unclassified catalog.
+     * @brief Build `defIndex -> GroupSlot` for the whole registry.
+     * @return One entry per registry row. An empty result means the registry did not resolve, and the caller then
+     *         defers and retries rather than publishing an unclassified catalog.
      */
     static std::vector<GroupSlot> build_group_slot_table(uintptr_t groupHolder, std::size_t &mappedOut) noexcept
     {
@@ -514,20 +465,19 @@ namespace Transmog
         const uintptr_t mgr = read_qword_safe(groupHolder, ok);
         if (!ok || !DMK::memory::is_plausible_ptr(DMK::Address{mgr}))
             return table;
-        const uint32_t count = read_u32_safe(mgr + k_iteminfoCountOffset, ok);
-        if (!ok || count == 0 || count > k_maxGroupCount)
+        const uint32_t count = read_u32_safe(mgr + ITEMINFO_COUNT_OFFSET, ok);
+        if (!ok || count == 0 || count > MAX_GROUP_COUNT)
             return table;
-        const uintptr_t rows = read_qword_safe(mgr + k_iteminfoPtrArrayOffset, ok);
+        const uintptr_t rows = read_qword_safe(mgr + ITEMINFO_PTR_ARRAY_OFFSET, ok);
         if (!ok || !DMK::memory::is_plausible_ptr(DMK::Address{rows}))
             return table;
 
         // Accessory groups no rule claimed, collected for the report below. Reserved up front so the loop's
-        // emplace_back cannot allocate: this function is noexcept, and a throw from inside the walk would take the
-        // process down rather than lose a diagnostic.
+        // emplace_back cannot allocate: this function is noexcept, and a throw from inside the walk kills the process.
         std::vector<std::string> unmatched;
         try
         {
-            unmatched.reserve(k_unmatchedGroupReportCap);
+            unmatched.reserve(UNMATCHED_GROUP_REPORT_CAP);
             table.resize(count);
         }
         catch (...)
@@ -543,15 +493,15 @@ namespace Transmog
             if (name.empty())
                 continue;
             const auto mapped = slot_from_group_name(name);
-            if (mapped.priority == k_groupPriorityNone)
+            if (mapped.priority == GROUP_PRIORITY_NONE)
             {
                 // Report the accessory groups no rule claimed. When a patch renames or re-tiers a group, the only
                 // visible symptom is a slot bucket that quietly classifies zero items and whose items then inherit
-                // some other slot's type code -- which is how necklaces end up filed as earrings. Guessing at the new
-                // name from strings found elsewhere in memory does not work; the registry the classifier actually
+                // some other slot's type code - which is how necklaces reach the earring bucket. A guess at the new
+                // name from strings found elsewhere in memory does not work. The registry the classifier actually
                 // reads is the only authority, so print what it holds. Accessory groups only, deduped and capped:
-                // the unmapped set is dominated by consumables and quest items that are SUPPOSED to be unmapped.
-                if (unmatched.size() < k_unmatchedGroupReportCap && icontains(name, "Accessor") &&
+                // consumables and quest items that are SUPPOSED to be unmapped dominate the unmapped set.
+                if (unmatched.size() < UNMATCHED_GROUP_REPORT_CAP && icontains(name, "Accessor") &&
                     std::find(unmatched.begin(), unmatched.end(), name) == unmatched.end())
                     unmatched.emplace_back(name);
                 continue;
@@ -570,8 +520,8 @@ namespace Transmog
                     joined += (joined.empty() ? "" : ", ") + n;
                 (void)DMK::log().try_log(
                     DMK::LogLevel::Warning,
-                    "[catalog-slots] {} accessory group(s) matched NO rule -- items in them fall back to another "
-                    "slot's type code. Add tails to k_taxonomyTailRules/k_groupSuffixRules for: {}",
+                    "[catalog-slots] {} accessory group(s) matched NO rule - items in them fall back to another "
+                    "slot's type code. Add tails to TAXONOMY_TAIL_RULES/GROUP_SUFFIX_RULES for: {}",
                     unmatched.size(),
                     joined
                 );
@@ -584,17 +534,18 @@ namespace Transmog
     }
 
     /**
-     * Classify one item from its group membership. Returns Count when the item belongs to no mapped group, which is
-     * the normal answer for consumables, quest items and non-player equipment.
+     * @brief Classify one item from its group membership.
+     * @return The slot, or Count when the item belongs to no mapped group. Count is the normal answer for
+     *         consumables, quest items and non-player equipment.
      */
     static TransmogSlot slot_from_item_groups(uintptr_t descPtr, const std::vector<GroupSlot> &groupSlots) noexcept
     {
         bool ok = false;
-        const uintptr_t data = read_qword_safe(descPtr + k_descItemGroupDataOffset, ok);
+        const uintptr_t data = read_qword_safe(descPtr + DESC_ITEM_GROUP_DATA_OFFSET, ok);
         if (!ok || !DMK::memory::is_plausible_ptr(DMK::Address{data}))
             return TransmogSlot::Count;
-        const uint32_t count = read_u32_safe(descPtr + k_descItemGroupCountOffset, ok);
-        if (!ok || count == 0 || count > k_maxItemGroupsPerItem)
+        const uint32_t count = read_u32_safe(descPtr + DESC_ITEM_GROUP_COUNT_OFFSET, ok);
+        if (!ok || count == 0 || count > MAX_ITEM_GROUPS_PER_ITEM)
             return TransmogSlot::Count;
 
         GroupSlot best;
@@ -621,18 +572,13 @@ namespace Transmog
         return s;
     }
 
-    // Mutex guarding writes to m_idToName/m_nameToId/m_sortedCache during a background-thread publish. Readers
-    // (name_of/id_of/sorted_entries) take a shared-ish view via the same mutex. Contention is limited to the handful
-    // of picker-popup calls per frame, so a plain std::mutex is fine.
-    static std::mutex s_tableMtx;
-
     // Cached intermediate addresses from the 4-hop chain, resolved once in the first build() call. Keeps retry cost to
     // just the catalog walk (and the null-check on the global holder).
     struct ResolvedChain
     {
         bool resolved = false;
         uintptr_t globalHolder = 0; // address of the iteminfo global pointer holder
-        uintptr_t itemAccessor = 0; // ItemAccessor -- IndexedStringA short->hash
+        uintptr_t itemAccessor = 0; // ItemAccessor - IndexedStringA short->hash
     };
 
     static ResolvedChain &cached_chain()
@@ -641,9 +587,13 @@ namespace Transmog
         return c;
     }
 
-    // Walk SubTranslator -> ... -> iteminfo global pointer holder once and cache the result.
-    // Returns false on fatal decoder mismatch (do not retry). On success it fills cached_chain().globalHolder.
-    static bool resolve_chain(uintptr_t subTranslatorAddr) noexcept
+    /**
+     * @brief Walk SubTranslator to the iteminfo global pointer holder once and cache the result.
+     * @return True on success, which fills cached_chain().globalHolder and cached_chain().itemAccessor. False on a
+     *         fatal decoder mismatch, which the caller must not retry.
+     * @note Setup/control-plane only: it scans code pages and formats log lines.
+     */
+    static bool resolve_chain(uintptr_t subTranslatorAddr)
     {
         auto &logger = DMK::log();
         auto &chain = cached_chain();
@@ -652,15 +602,15 @@ namespace Transmog
 
         if (!subTranslatorAddr)
         {
-            logger.warning("[nametable] SubTranslator not resolved -- skipping");
+            (void)logger.try_log(DMK::LogLevel::Warning, "[nametable] SubTranslator not resolved - skipping");
             return false;
         }
 
-        // Step 1: locate the call to the item descriptor initializer inside SubTranslator. A fixed offset into the
-        // function is not reliable, because compiler prologue reshuffles drift that offset between patches. Scan a
-        // bounded 0x80-byte window of the function instead.
+        // Locate the call to the item descriptor initializer inside SubTranslator. A fixed offset into the function
+        // is not reliable, because a compiler prologue reshuffle drifts that offset between patches. Scan a bounded
+        // 0x80-byte window of the function instead.
         //
-        // Two anchor variants are tried, current encoding first:
+        // The scan tries two anchor encodings, current first:
         //   k_nametableSubTxV105Anchor: 41 B8 01 00 00 00 48 8D 55 ?? 48 8D 4C 24 ??
         //             (mov r8d,1 / lea rdx,[rbp+disp8] / lea rcx,[rsp+disp8])
         //             The second lea is rsp-relative, so it carries a SIB
@@ -669,7 +619,7 @@ namespace Transmog
         //             (mov r8d,1 / lea rdx,[rbp+disp8] / lea rcx,[rbp+disp8])
         //             The second lea is rbp-relative and has no SIB byte.
         //
-        // Both disp8 slots are wildcarded so a future stack-frame shift inside the same function does not require
+        // Both disp8 slots carry a wildcard so a future stack-frame shift inside the same function does not require
         // another anchor variant. The 0x80-byte window keeps a stray match elsewhere in .text from leaking in.
         // The window is this function's prologue, so the sweep is bounded to it and global uniqueness never
         // matters. Pages::Executable keeps a byte twin in a data page from being considered at all.
@@ -684,21 +634,21 @@ namespace Transmog
         }
         if (!match1)
         {
-            logger.warning(
-                "[nametable] descriptor-initializer call anchor not found within the SubTranslator "
-                "prologue: {}",
+            (void)logger.try_log(
+                DMK::LogLevel::Warning,
+                "[nametable] descriptor-initializer call anchor not found within the SubTranslator prologue: {}",
                 match1.error().message()
             );
             return false;
         }
 
         // The `|` marker points at the `E8`, so the match IS the call instruction: disp32 at +1, total length 5.
-        // resolve_rip_relative reads the displacement under a fault guard and rejects an implausible target, which
-        // is what the hand-rolled read plus add used to leave to the caller.
+        // resolve_rip_relative reads the displacement under a fault guard and rejects an implausible target.
         const auto descInitAddr = DMK::scan::resolve_rip_relative(*match1, 1, 5);
         if (!descInitAddr)
         {
-            logger.warning(
+            (void)logger.try_log(
+                DMK::LogLevel::Warning,
                 "[nametable] descriptor-initializer call at 0x{:X} did not resolve: {}",
                 match1->raw(),
                 descInitAddr.error().message()
@@ -707,20 +657,31 @@ namespace Transmog
         }
         const uintptr_t descInit = descInitAddr->raw();
 
-        // Step 2: first `E8` call inside the item descriptor initializer -> ItemAccessor.
-        const uintptr_t itemAccessor = first_rel_call_target(descInit, 0x180);
-        if (!itemAccessor)
+        // The first `E8` call inside the item descriptor initializer targets ItemAccessor. The DMK sweep skips a
+        // coincidental 0xE8 whose disp32 lands on an implausible or unreadable target, then continues the sweep, and
+        // it names the concrete failure rather than a silent zero for every miss.
+        const auto accessorAddr = DMK::scan::find_and_resolve_rip_relative(
+            DMK::Region{DMK::Address{descInit}, 0x180},
+            DMK::scan::PREFIX_CALL_REL32,
+            5
+        );
+        if (!accessorAddr)
         {
-            logger.warning("[nametable] no rel-call found inside the descriptor initializer");
+            (void)logger.try_log(
+                DMK::LogLevel::Warning,
+                "[nametable] no rel-call found inside the descriptor initializer: {}",
+                accessorAddr.error().message()
+            );
             return false;
         }
+        const uintptr_t itemAccessor = accessorAddr->raw();
 
-        // Step 3: locate the `mov rbx, cs:<iteminfo holder>` inside ItemAccessor. A fixed offset is not reliable here
-        // either, so scan instead. The `48 8B 1D disp32` is preceded by a distinctive 9-byte prologue-tail anchor
+        // Locate the `mov rbx, cs:<iteminfo holder>` inside ItemAccessor. A fixed offset is not reliable here either,
+        // so scan instead. A distinctive 9-byte prologue-tail anchor precedes the `48 8B 1D disp32`
         //   41 56 48 83 EC ?? 0F B7 39
         // (push r14 / sub rsp,imm8 / movzx edi,word ptr [rcx]) which pins the specific call site inside a bounded
         // 0x40-byte scan of THIS function. Global uniqueness does not matter, because the scan is locally bounded.
-        // The stack-alloc imm8 is wildcarded, because it changes with the frame size (see
+        // The stack-alloc imm8 carries a wildcard, because it changes with the frame size (see
         // k_nametableItemAccessorAnchor).
         const auto match3 = DMK::scan::scan(
             Transmog::k_nametableItemAccessorAnchor,
@@ -730,7 +691,8 @@ namespace Transmog
         );
         if (!match3)
         {
-            logger.warning(
+            (void)logger.try_log(
+                DMK::LogLevel::Warning,
                 "[nametable] mov-rbx anchor not found within the ItemAccessor prologue: {}",
                 match3.error().message()
             );
@@ -740,16 +702,19 @@ namespace Transmog
         const auto holder = DMK::scan::resolve_rip_relative(*match3, 3, 7);
         if (!holder)
         {
-            logger
-                .warning("[nametable] mov-rbx at 0x{:X} did not resolve: {}", match3->raw(), holder.error().message());
+            (void)logger.try_log(
+                DMK::LogLevel::Warning,
+                "[nametable] mov-rbx at 0x{:X} did not resolve: {}",
+                match3->raw(),
+                holder.error().message()
+            );
             return false;
         }
         chain.globalHolder = holder->raw();
         chain.itemAccessor = itemAccessor;
         chain.resolved = true;
         logger.info(
-            "[nametable] chain resolved: iteminfo holder = 0x{:X}, "
-            "ItemAccessor = 0x{:X}",
+            "[nametable] chain resolved: iteminfo holder = 0x{:X}, ItemAccessor = 0x{:X}",
             chain.globalHolder,
             chain.itemAccessor
         );
@@ -774,16 +739,16 @@ namespace Transmog
             return info;
         bool ok = false;
         const uintptr_t globalPtr = read_qword_safe(chain.globalHolder, ok);
-        if (!ok || globalPtr < 0x10000)
+        if (!ok || !DMK::memory::is_plausible_ptr(DMK::Address{globalPtr}))
             return info;
-        info.count = read_u32_safe(globalPtr + k_iteminfoCountOffset, ok);
-        if (!ok || info.count == 0 || info.count > k_maxCatalogSize)
+        info.count = read_u32_safe(globalPtr + ITEMINFO_COUNT_OFFSET, ok);
+        if (!ok || info.count == 0 || info.count > MAX_CATALOG_SIZE)
         {
             info.count = 0;
             return info;
         }
-        info.ptrArray = read_qword_safe(globalPtr + k_iteminfoPtrArrayOffset, ok);
-        if (!ok || info.ptrArray < 0x10000)
+        info.ptrArray = read_qword_safe(globalPtr + ITEMINFO_PTR_ARRAY_OFFSET, ok);
+        if (!ok || !DMK::memory::is_plausible_ptr(DMK::Address{info.ptrArray}))
         {
             info.ptrArray = 0;
             info.count = 0;
@@ -798,61 +763,53 @@ namespace Transmog
             return 0;
         bool ok = false;
         const uintptr_t desc = read_qword_safe(ci.ptrArray + static_cast<uint64_t>(itemId) * 8, ok);
-        return (ok && desc > 0x10000) ? desc : 0;
+        return (ok && DMK::memory::is_plausible_ptr(DMK::Address{desc})) ? desc : 0;
     }
 
     ItemNameTable::BuildResult ItemNameTable::build(uintptr_t subTranslatorAddr)
     {
         auto &logger = DMK::log();
 
-        // Step A: resolve and cache the address chain. Fatal on decoder mismatch, because retries do not help.
+        // Resolve and cache the address chain. A decoder mismatch is fatal, because retries do not help.
         if (!resolve_chain(subTranslatorAddr))
             return BuildResult::Fatal;
 
         const uintptr_t globalHolder = cached_chain().globalHolder;
 
-        // Step B: dereference the holder. Deferred when null, because the game can still be initializing the iteminfo
-        // container.
+        // Dereference the holder. A null value defers, because the game can still build the iteminfo container.
         bool ok = false;
         const uintptr_t globalPtr = read_qword_safe(globalHolder, ok);
-        if (!ok || globalPtr < 0x10000)
+        if (!ok || !DMK::memory::is_plausible_ptr(DMK::Address{globalPtr}))
         {
             logger.trace(
-                "[nametable] iteminfo global not initialized "
-                "(holder=0x{:X} value=0x{:X}) -- deferring",
+                "[nametable] iteminfo global not initialized (holder=0x{:X} value=0x{:X}) - deferring",
                 globalHolder,
                 globalPtr
             );
             return BuildResult::Deferred;
         }
 
-        const uint32_t count = read_u32_safe(globalPtr + k_iteminfoCountOffset, ok);
-        if (!ok || count == 0 || count > k_maxCatalogSize)
+        const uint32_t count = read_u32_safe(globalPtr + ITEMINFO_COUNT_OFFSET, ok);
+        if (!ok || count == 0 || count > MAX_CATALOG_SIZE)
         {
-            logger.trace(
-                "[nametable] catalog count implausible: {} "
-                "(globalPtr=0x{:X}) -- deferring",
-                count,
-                globalPtr
-            );
+            logger.trace("[nametable] catalog count implausible: {} (globalPtr=0x{:X}) - deferring", count, globalPtr);
             return BuildResult::Deferred;
         }
 
-        const uintptr_t ptrArray = read_qword_safe(globalPtr + k_iteminfoPtrArrayOffset, ok);
-        if (!ok || ptrArray < 0x10000)
+        const uintptr_t ptrArray = read_qword_safe(globalPtr + ITEMINFO_PTR_ARRAY_OFFSET, ok);
+        if (!ok || !DMK::memory::is_plausible_ptr(DMK::Address{ptrArray}))
         {
             logger.trace(
-                "[nametable] iteminfo ptrArray null "
-                "(globalPtr=0x{:X} ptrArray=0x{:X}) -- deferring",
+                "[nametable] iteminfo ptrArray null (globalPtr=0x{:X} ptrArray=0x{:X}) - deferring",
                 globalPtr,
                 ptrArray
             );
             return BuildResult::Deferred;
         }
 
-        // Step C: resolve the ItemGroupInfo registry and turn it into `defIndex -> slot`. Slot classification depends
-        // on it entirely, so a miss defers rather than publishing a catalog in which every item reads as
-        // non-equipment. The holder address is stable for the process, so it is probed once.
+        // Resolve the ItemGroupInfo registry and turn it into `defIndex -> slot`. Slot classification depends on it
+        // entirely, so a miss defers rather than publishes a catalog in which every item reads as non-equipment. The
+        // holder address stays fixed for the process, so the probe runs once.
         static uintptr_t s_groupHolder = 0;
         if (s_groupHolder == 0)
         {
@@ -860,8 +817,7 @@ namespace Transmog
             if (s_groupHolder == 0)
             {
                 logger.trace(
-                    "[nametable] ItemGroupInfo registry not found near the iteminfo holder "
-                    "(0x{:X}) -- deferring",
+                    "[nametable] ItemGroupInfo registry not found near the iteminfo holder (0x{:X}) - deferring",
                     globalHolder
                 );
                 return BuildResult::Deferred;
@@ -878,8 +834,7 @@ namespace Transmog
         if (groupSlots.empty() || mappedGroups == 0)
         {
             logger.trace(
-                "[nametable] ItemGroupInfo registry empty or unnamed "
-                "({} rows, {} mapped) -- deferring",
+                "[nametable] ItemGroupInfo registry empty or unnamed ({} rows, {} mapped) - deferring",
                 groupSlots.size(),
                 mappedGroups
             );
@@ -888,8 +843,7 @@ namespace Transmog
 
         logger.info(
             "[nametable] scanning item catalog: count={} "
-            "globalPtr=0x{:X} ptrArray=0x{:X} "
-            "(item groups: {} rows, {} mapped to slots)",
+            "globalPtr=0x{:X} ptrArray=0x{:X} (item groups: {} rows, {} mapped to slots)",
             count,
             globalPtr,
             ptrArray,
@@ -910,9 +864,9 @@ namespace Transmog
         variantFlag.reserve(count);
         slotMap.reserve(count);
 
-        // Pass 1: walk the catalog and collect the name, the variant-meta pointer and the transmog slot for every
-        // valid descriptor. The variant flag cannot be resolved yet, because pass 2 derives the sentinel
-        // statistically from the values this pass collects.
+        // Walk the catalog and collect the name, the variant-meta pointer and the transmog slot for every valid
+        // descriptor. The variant flag cannot resolve yet, because the sentinel derives statistically from the values
+        // this walk collects.
         struct ScratchEntry
         {
             uint16_t id;
@@ -926,7 +880,7 @@ namespace Transmog
 
         std::size_t valid = 0;
         std::size_t collisions = 0;
-        char buf[k_maxNameLen + 1];
+        char buf[MAX_NAME_LEN + 1];
 
         for (uint32_t id = 0; id < count; ++id)
         {
@@ -946,17 +900,17 @@ namespace Transmog
             const uintptr_t strPtr = *strPtrOpt;
 
             const auto len = read_cstring_safe(strPtr, buf, sizeof(buf));
-            if (len == 0 || len >= k_maxNameLen)
+            if (len == 0 || len >= MAX_NAME_LEN)
                 continue;
 
             const auto id16 = static_cast<uint16_t>(id);
-            const uintptr_t metaPtr = read_qword_safe(descPtr + k_descVariantMetaOffset, ok);
+            const uintptr_t metaPtr = read_qword_safe(descPtr + DESC_VARIANT_META_OFFSET, ok);
 
-            // Wearer-body classification is NOT read here. A game update re-keyed the descriptor rule-classifier body
-            // tokens, so the rule list at desc+0x248 no longer yields a usable body class. Body comes from the
-            // equip-eligibility ("Male"/"Female") column of the display_names TSV (see load_display_names /
-            // m_bodyByName), applied at query time in sorted_entries and is_player_compatible. The body-table
-            // generator (kept out of tree) fills that column from the packed gamedata.
+            // The walk does NOT read wearer-body classification. The rule list at desc+0x248 carries no usable body
+            // class, because a game update re-keyed those tokens. Body comes from the equip-eligibility
+            // ("Male"/"Female") column of the display_names TSV (see
+            // load_display_names / m_bodyByName), applied at query time in sorted_entries and is_player_compatible.
+            // The body-table generator (kept out of tree) fills that column from the packed gamedata.
             //
             // Transmog slot from the item's own group membership. See the slot-classification block at the top of this
             // file: the item names the ItemGroupInfo rows it belongs to, and those rows carry the engine's equipment
@@ -967,23 +921,22 @@ namespace Transmog
             const TransmogSlot slot = slot_from_item_groups(descPtr, groupSlots);
 
             bool tcOk = false;
-            const uint16_t typeCode = read_u16_safe(descPtr + k_descTypeCodeOffset, tcOk);
+            const uint16_t typeCode = read_u16_safe(descPtr + DESC_TYPE_CODE_OFFSET, tcOk);
 
             scratch.push_back({
                 id16,
                 std::string(buf, len),
                 ok ? metaPtr : 0,
                 slot,
-                tcOk ? typeCode : k_typeCodeNone,
+                tcOk ? typeCode : TYPE_CODE_NONE,
             });
             ++valid;
         }
 
-        // Pass 2 -- statistically derive the variant-meta sentinel. The sentinel is the value that appears at
-        // desc+k_descVariantMetaOffset in the clear majority of items. Any other pointer at that slot is per-item
-        // variant metadata and gates the item out of runtime transmog.
-        //
-        // Tally the non-zero metaPtr values. The mode is the sentinel.
+        // Derive the variant-meta sentinel statistically. The sentinel is the value that appears at
+        // desc+DESC_VARIANT_META_OFFSET in the clear majority of items. Any other pointer at that slot is per-item
+        // variant metadata and gates the item out of runtime transmog. Tally the non-zero metaPtr values, and the
+        // mode is the sentinel.
         uintptr_t resolvedSentinel = 0;
         std::size_t sentinelCount = 0;
         {
@@ -1002,14 +955,13 @@ namespace Transmog
                     resolvedSentinel = kv.first;
                 }
             }
-            // Require the mode to dominate -- at least 1/3 of valid items must point at it. Below that threshold the
+            // Require the mode to dominate - at least 1/3 of valid items must point at it. Below that threshold the
             // data is garbage, and the builder must not flag anything as variant.
             if (valid == 0 || sentinelCount * 3 < valid)
             {
                 logger.debug(
                     "[nametable] variant sentinel not dominant "
-                    "(best=0x{:X} count={}/{}) -- disabling "
-                    "variant-meta filter",
+                    "(best=0x{:X} count={}/{}) - disabling variant-meta filter",
                     resolvedSentinel,
                     sentinelCount,
                     valid
@@ -1019,17 +971,15 @@ namespace Transmog
             else
             {
                 logger.info(
-                    "[nametable] variant-meta sentinel resolved: "
-                    "0x{:X} ({} of {} items)",
+                    "[nametable] variant-meta sentinel resolved: 0x{:X} ({} of {} items)",
                     resolvedSentinel,
                     sentinelCount,
                     valid
                 );
-                s_variantMetaSentinel.store(resolvedSentinel, std::memory_order_release);
             }
         }
 
-        // Pass 2b -- learn `typeCode -> slot` from the items the group taxonomy classified.
+        // Learn `typeCode -> slot` from the items the group taxonomy classified.
         //
         // The group names carry the slot only for PLAYER equipment. NPC and boss gear sits in families like
         // ItemGroup_Equip_Armor_Mon that name no slot, so groups alone leave roughly two thirds of the wearable
@@ -1037,14 +987,14 @@ namespace Transmog
         //
         // Majority vote rather than first-wins, because a handful of items carry a sub-category that disagrees with
         // their code (one item votes Helm for the chest code). Those lose by two orders of magnitude. A contested code
-        // is logged, not suppressed -- a code that starts splitting evenly means the join stopped being sound.
+        // reaches the log rather than the floor: a code that splits evenly means the join is no longer sound.
         std::unordered_map<uint16_t, TransmogSlot> learnedSlot;
         std::size_t contestedCodes = 0;
         {
             std::unordered_map<uint16_t, std::unordered_map<TransmogSlot, uint32_t>> votes;
             for (const auto &e : scratch)
             {
-                if (e.slot != TransmogSlot::Count && e.typeCode != k_typeCodeNone)
+                if (e.slot != TransmogSlot::Count && e.typeCode != TYPE_CODE_NONE)
                     ++votes[e.typeCode][e.slot];
             }
 
@@ -1078,18 +1028,17 @@ namespace Transmog
             }
         }
 
-        // Pass 3 -- publish the scratch rows into the maps and flag variants against the resolved sentinel.
+        // Publish the scratch rows into the maps and flag variants against the resolved sentinel.
         std::size_t variantCount = 0;
         for (auto &e : scratch)
         {
-            // Item "has variant" (picker shows carrier-color) when desc+k_descVariantMetaOffset is non-sentinel. That
-            // value is a per-item variant-meta record threaded through the catalog list. Predicting variant as
-            // "meta != sentinel" produces no false positives against the previous version's dump, matched BY NAME.
+            // Item "has variant" (picker shows carrier-color) when desc+DESC_VARIANT_META_OFFSET is non-sentinel. That
+            // value is a per-item variant-meta record threaded through the catalog list.
             //
             // A ">= 2 body-bearing classifier rules" heuristic does NOT work as a substitute. The reshaped rule struct
-            // gives nearly every item the same large rule count, so that heuristic over-flags and drives the dump
-            // correlation from zero false positives to hundreds. The variant-meta pointer alone is the reliable
-            // signal. See k_descVariantMetaOffset for how to re-derive the offset.
+            // gives nearly every item the same large rule count, so that heuristic over-flags and yields hundreds of
+            // false positives. The variant-meta pointer alone is the reliable signal. See DESC_VARIANT_META_OFFSET for
+            // how to re-derive the offset.
             const bool hasVariant = (resolvedSentinel != 0) && (e.metaPtr != 0) && (e.metaPtr != resolvedSentinel);
             if (hasVariant)
                 ++variantCount;
@@ -1101,7 +1050,7 @@ namespace Transmog
             variantFlag.emplace(e.id, hasVariant ? uint8_t{1} : uint8_t{0});
 
             TransmogSlot slot = e.slot;
-            if (slot == TransmogSlot::Count && e.typeCode != k_typeCodeNone)
+            if (slot == TransmogSlot::Count && e.typeCode != TYPE_CODE_NONE)
             {
                 if (auto lit = learnedSlot.find(e.typeCode); lit != learnedSlot.end())
                     slot = lit->second;
@@ -1116,26 +1065,21 @@ namespace Transmog
         // array stopped growing. This self-adapts to any catalog size and any game version.
         if (valid == 0)
         {
-            logger.trace("[nametable] no valid descriptors -- deferring");
+            logger.trace("[nametable] no valid descriptors - deferring");
             m_lastBuildValid = 0;
             return BuildResult::Deferred;
         }
         if (valid != m_lastBuildValid)
         {
-            logger.trace(
-                "[nametable] catalog still loading "
-                "({} -> {} valid) -- deferring",
-                m_lastBuildValid,
-                valid
-            );
+            logger.trace("[nametable] catalog still loading ({} -> {} valid) - deferring", m_lastBuildValid, valid);
             m_lastBuildValid = static_cast<uint32_t>(valid);
             return BuildResult::Deferred;
         }
         // valid > 0 && valid == m_lastBuildValid -> catalog stabilized.
 
         // Per-slot histogram of the classification, with sample names. A patch that reshapes the group registry or
-        // renames a sub-category shows up here as a slot that went to zero, which is the failure this classifier is
-        // meant to make visible: the old type-code table failed silently by listing the WRONG items instead.
+        // renames a sub-category shows up here as a slot that went to zero, which is the failure this classifier
+        // makes visible. A type-code table fails silently instead, by listing the WRONG items.
         {
             std::unordered_map<TransmogSlot, std::vector<std::uint16_t>> bucket;
             bucket.reserve(static_cast<std::size_t>(TransmogSlot::Count));
@@ -1178,7 +1122,7 @@ namespace Transmog
         }
 
         {
-            std::lock_guard<std::mutex> lk(s_tableMtx);
+            std::lock_guard<std::mutex> lk(m_mutex);
             m_idToName = std::move(idToName);
             m_nameToId = std::move(nameToId);
             m_variantFlag = std::move(variantFlag);
@@ -1190,8 +1134,7 @@ namespace Transmog
         const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
 
         logger.info(
-            "[nametable] built: {}/{} entries ({} name collisions, "
-            "{} variant-meta) in {}ms",
+            "[nametable] built: {}/{} entries ({} name collisions, {} variant-meta) in {}ms",
             valid,
             count,
             collisions,
@@ -1203,7 +1146,7 @@ namespace Transmog
 
     std::string ItemNameTable::name_of(uint16_t itemId) const
     {
-        std::lock_guard<std::mutex> lk(s_tableMtx);
+        std::lock_guard<std::mutex> lk(m_mutex);
         auto it = m_idToName.find(itemId);
         if (it == m_idToName.end())
             return {};
@@ -1212,7 +1155,7 @@ namespace Transmog
 
     std::optional<uint16_t> ItemNameTable::id_of(const std::string &name) const
     {
-        std::lock_guard<std::mutex> lk(s_tableMtx);
+        std::lock_guard<std::mutex> lk(m_mutex);
         auto it = m_nameToId.find(name);
         if (it == m_nameToId.end())
             return std::nullopt;
@@ -1221,14 +1164,14 @@ namespace Transmog
 
     bool ItemNameTable::has_variant_meta(uint16_t itemId) const
     {
-        std::lock_guard<std::mutex> lk(s_tableMtx);
+        std::lock_guard<std::mutex> lk(m_mutex);
         auto it = m_variantFlag.find(itemId);
         return it != m_variantFlag.end() && it->second != 0;
     }
 
     bool ItemNameTable::is_player_compatible(uint16_t itemId) const
     {
-        std::lock_guard<std::mutex> lk(s_tableMtx);
+        std::lock_guard<std::mutex> lk(m_mutex);
         // Kliff-centric: safe to bind on the (male) player unless the item is restricted to the female body. Body is
         // sourced from the display_names equip-eligibility column (m_bodyByName, keyed by lowercase internal name).
         auto nit = m_idToName.find(itemId);
@@ -1243,7 +1186,7 @@ namespace Transmog
 
     ItemNameTable::BodyKind ItemNameTable::body_kind_for_item(uint16_t itemId) const
     {
-        std::lock_guard<std::mutex> lk(s_tableMtx);
+        std::lock_guard<std::mutex> lk(m_mutex);
         // Lowercase the internal name to match m_bodyByName's keys. An item wearable by both bodies (or
         // unrestricted) is absent from the map and resolves to BodyKind::Generic.
         auto nit = m_idToName.find(itemId);
@@ -1258,7 +1201,7 @@ namespace Transmog
 
     TransmogSlot ItemNameTable::category_of(uint16_t itemId) const noexcept
     {
-        std::lock_guard<std::mutex> lk(s_tableMtx);
+        std::lock_guard<std::mutex> lk(m_mutex);
         // Runtime-observed binding wins. If the engine actually equipped this itemId in a slot, that is ground truth
         // and beats the catalog classification.
         if (auto obs = m_observedSlot.find(itemId); obs != m_observedSlot.end())
@@ -1270,14 +1213,14 @@ namespace Transmog
 
     TransmogSlot ItemNameTable::catalog_category_of(uint16_t itemId) const noexcept
     {
-        std::lock_guard<std::mutex> lk(s_tableMtx);
+        std::lock_guard<std::mutex> lk(m_mutex);
         auto it = m_slotById.find(itemId);
         return (it != m_slotById.end()) ? it->second : TransmogSlot::Count;
     }
 
     void ItemNameTable::record_observed_slot(std::uint16_t itemId, TransmogSlot slot) noexcept
     {
-        std::lock_guard<std::mutex> lk(s_tableMtx);
+        std::lock_guard<std::mutex> lk(m_mutex);
         if (slot == TransmogSlot::Count)
         {
             m_observedSlot.erase(itemId);
@@ -1288,7 +1231,7 @@ namespace Transmog
 
     std::size_t ItemNameTable::observed_slot_count() const noexcept
     {
-        std::lock_guard<std::mutex> lk(s_tableMtx);
+        std::lock_guard<std::mutex> lk(m_mutex);
         return m_observedSlot.size();
     }
 
@@ -1306,7 +1249,7 @@ namespace Transmog
 
     const std::vector<ItemNameTable::Entry> &ItemNameTable::sorted_entries() const
     {
-        std::lock_guard<std::mutex> lk(s_tableMtx);
+        std::lock_guard<std::mutex> lk(m_mutex);
         if (!m_sortedCache.empty() || m_idToName.empty())
             return m_sortedCache;
 
@@ -1324,9 +1267,8 @@ namespace Transmog
 
             // Wearer-body classification comes from the equip-eligibility column of the display_names TSV
             // (m_bodyByName). Only single-body-restricted items are listed. Anything wearable by both bodies (or
-            // unrestricted) is absent -> BodyKind::Generic, shown on every character. This replaces the
-            // rule-classifier token machinery, which a game update re-keyed. The body-table generator (kept out of
-            // tree) is what fills the column.
+            // unrestricted) is absent -> BodyKind::Generic, shown on every character. The body-table generator (kept
+            // out of tree) fills the column.
             auto brit = m_bodyByName.find(lowerName);
             const BodyKind kind = (brit != m_bodyByName.end()) ? brit->second : BodyKind::Generic;
             // Kliff-centric "PlayerSafe": an item is player-safe unless it is restricted to the female body.
@@ -1434,30 +1376,29 @@ namespace Transmog
         {
             if (line.empty())
                 continue;
-            if (line.back() == '\r')
-                line.pop_back();
 
             const auto t1 = line.find('\t');
             if (t1 == std::string::npos || t1 == 0)
                 continue;
 
-            std::string key = line.substr(0, t1);
+            // string::trim strips the line terminator and any stray padding from every field, so a TSV written with a
+            // trailing space cannot produce a key that never matches or a body column that reads as unrestricted.
+            std::string key = DMK::string::trim(std::string_view{line}.substr(0, t1));
             for (auto &c : key)
                 c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
 
             // Columns: <internal name> \t <display name> [\t <wearer body: "Male"|"Female">]. The optional 3rd column
             // carries the equip-eligibility body restriction (the body-table generator, kept out of tree, fills it
-            // from the packed gamedata) and is only present for single-body-restricted items, so an older 2-column
-            // TSV still loads --
-            // absent body just means "unrestricted / shown on every character".
+            // from the packed gamedata) and is only present for single-body-restricted items, so an older 2-column TSV
+            // still loads. An absent body means "unrestricted / shown on every character".
             std::string display, body;
             const auto t2 = line.find('\t', t1 + 1);
             if (t2 == std::string::npos)
-                display = line.substr(t1 + 1);
+                display = DMK::string::trim(std::string_view{line}.substr(t1 + 1));
             else
             {
-                display = line.substr(t1 + 1, t2 - (t1 + 1));
-                body = line.substr(t2 + 1);
+                display = DMK::string::trim(std::string_view{line}.substr(t1 + 1, t2 - (t1 + 1)));
+                body = DMK::string::trim(std::string_view{line}.substr(t2 + 1));
             }
             if (body == "Male")
                 bodyByName.emplace(key, BodyKind::Male);
@@ -1468,11 +1409,11 @@ namespace Transmog
         }
 
         {
-            std::lock_guard<std::mutex> lk(s_tableMtx);
+            std::lock_guard<std::mutex> lk(m_mutex);
             m_displayNames = std::move(names);
             m_bodyByName = std::move(bodyByName);
             // Callers must invoke load_display_names() before any sorted_entries() access (i.e. before
-            // dump_catalog_tsv) so the cache is still empty here -- no re-sort needed.
+            // dump_catalog_tsv) so the cache is still empty here - no re-sort needed.
             m_sortedCache.clear();
         }
 
@@ -1487,7 +1428,7 @@ namespace Transmog
     std::string ItemNameTable::display_name_of(std::string_view internalName) const
     {
         // Lowercase into a stack buffer to avoid heap allocation. Item names in the catalog are bounded by
-        // k_maxNameLen, which is smaller than this buffer, and the copy is clamped to the buffer size anyway.
+        // MAX_NAME_LEN, which is smaller than this buffer, and the copy is clamped to the buffer size anyway.
         char buf[256];
         const auto len = (std::min)(internalName.size(), sizeof(buf) - 1);
         for (std::size_t i = 0; i < len; ++i)
@@ -1495,7 +1436,7 @@ namespace Transmog
         buf[len] = '\0';
         const std::string key{buf, len};
 
-        std::lock_guard<std::mutex> lk(s_tableMtx);
+        std::lock_guard<std::mutex> lk(m_mutex);
         const auto it = m_displayNames.find(key);
         if (it == m_displayNames.end())
             return {};

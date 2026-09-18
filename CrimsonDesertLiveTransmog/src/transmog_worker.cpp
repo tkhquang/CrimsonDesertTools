@@ -28,10 +28,22 @@
 
 namespace Transmog
 {
+    // Sleeps @p ms in 100 ms slices and returns early on a stop request or on shutdown. Every worker body in this TU
+    // waits through it, so one stop signal ends a wait within 100 ms wherever it lands.
+    static void sleep_interruptible(std::stop_token stop, int ms)
+    {
+        for (int i = 0; i < ms / 100; ++i)
+        {
+            if (stop.stop_requested() || shutdown_requested().load(std::memory_order_relaxed))
+                return;
+            Sleep(100);
+        }
+    }
+
     // Deferred item-name catalog scan
     //
-    // The game populates the iteminfo global (`qword_145CEF370`) some time after our DLL init runs -- exactly when
-    // depends on world load order, so we can't reliably build the catalog in init(). Mirror EquipHide's pattern: a
+    // The game populates the iteminfo global some time after the LT init runs - exactly when that lands
+    // depends on world load order, so init() cannot build the catalog reliably. Mirror EquipHide's pattern: a
     // single background thread that sleeps an initial grace period, then retries `ItemNameTable::build` until
     // `BuildResult::Ok` or the attempt budget is exhausted.
     //
@@ -53,13 +65,10 @@ namespace Transmog
 
         using BR = ItemNameTable::BuildResult;
 
-        // Initial grace period -- lets the game finish loading its iteminfo container before we start polling.
-        for (int slept = 0; slept < k_nametableInitialDelayMs; slept += 250)
-        {
-            if (stop.stop_requested() || shutdown_requested().load(std::memory_order_relaxed))
-                return;
-            std::this_thread::sleep_for(std::chrono::milliseconds(250));
-        }
+        // Initial grace period - lets the game finish its iteminfo container load before the poll loop starts.
+        sleep_interruptible(stop, k_nametableInitialDelayMs);
+        if (stop.stop_requested() || shutdown_requested().load(std::memory_order_relaxed))
+            return;
 
         int attempt = 0;
         for (;;)
@@ -71,12 +80,7 @@ namespace Transmog
             if (result == BR::Ok)
             {
                 const auto size = ItemNameTable::instance().size();
-                logger.info(
-                    "[nametable] deferred scan succeeded on attempt {} "
-                    "({} entries)",
-                    attempt + 1,
-                    size
-                );
+                logger.info("[nametable] deferred scan succeeded on attempt {} ({} entries)", attempt + 1, size);
                 // Load display names before dump so the sorted cache built by the dump already contains them.
                 {
                     const auto dir = runtime_dir_utf8();
@@ -99,15 +103,14 @@ namespace Transmog
                 pm.apply_to_state();
 
                 // Push the corrected state through the apply pipeline so the visible transmog reflects whatever the
-                // deferred resolution just fixed.
+                // deferred resolution repaired.
                 manual_apply();
                 return;
             }
             if (result == BR::Fatal)
             {
                 logger.error(
-                    "[nametable] deferred scan hit fatal chain error -- "
-                    "item catalog unavailable, mod disabled"
+                    "[nametable] deferred scan hit fatal chain error - item catalog unavailable, mod disabled"
                 );
                 flag_enabled().store(false, std::memory_order_release);
                 return;
@@ -118,12 +121,9 @@ namespace Transmog
             if (attempt % 50 == 0)
                 logger.debug("[nametable] still waiting after {} attempts", attempt);
 
-            for (int slept = 0; slept < k_nametableRetryMs; slept += 250)
-            {
-                if (stop.stop_requested() || shutdown_requested().load(std::memory_order_relaxed))
-                    return;
-                std::this_thread::sleep_for(std::chrono::milliseconds(250));
-            }
+            sleep_interruptible(stop, k_nametableRetryMs);
+            if (stop.stop_requested() || shutdown_requested().load(std::memory_order_relaxed))
+                return;
         }
     }
 
@@ -146,7 +146,7 @@ namespace Transmog
     // Deferred PartShowSuppress slot-hash scan
     //
     // Mirrors deferred_nametable_scan_fn but for the IndexedStringA entries PartShowSuppress keys on. A synchronous
-    // scan at LT init would observe a small / empty table on cold-launch (LT loaded before main-menu wiring finishes),
+    // scan at LT init observes a small or empty table on cold-launch (LT loaded before main-menu wiring finishes),
     // leaving PartShowSuppress inert for the entire session. The deferred worker gates on
     // Transmog::is_world_ready() and waits until every expected partShowHashKey resolves, then commits once.
     static std::mutex s_slotHashThreadMtx;
@@ -175,42 +175,32 @@ namespace Transmog
         auto &logger = DMK::log();
         const auto mapLookupAddr = resolved_addrs().mapLookup;
         if (!mapLookupAddr)
-            return; // MapLookup unresolved -- already warned at init.
+            return; // MapLookup unresolved - already warned at init.
 
         const auto expectedCount = expected_slot_hash_count();
         if (expectedCount == 0)
             return; // Nothing to resolve (no partShowHashKey rows).
 
-        // Initial grace period before the first scan; mirrors the nametable worker's initial delay so we don't waste
-        // polls while the engine is still in pre-main-menu state.
-        for (int slept = 0; slept < k_slotHashInitialDelayMs; slept += 250)
-        {
-            if (stop.stop_requested() || shutdown_requested().load(std::memory_order_relaxed))
-                return;
-            std::this_thread::sleep_for(std::chrono::milliseconds(250));
-        }
+        // Initial grace period before the first scan. It mirrors the nametable worker's initial delay, so the loop
+        // does not waste polls while the engine is still in pre-main-menu state.
+        sleep_interruptible(stop, k_slotHashInitialDelayMs);
+        if (stop.stop_requested() || shutdown_requested().load(std::memory_order_relaxed))
+            return;
 
         std::size_t prevResolvable = 0;
 
         for (int attempt = 1;; ++attempt)
         {
-            for (int slept = 0; slept < k_slotHashRetryMs; slept += 250)
-            {
-                if (stop.stop_requested() || shutdown_requested().load(std::memory_order_relaxed))
-                    return;
-                std::this_thread::sleep_for(std::chrono::milliseconds(250));
-            }
+            sleep_interruptible(stop, k_slotHashRetryMs);
+            if (stop.stop_requested() || shutdown_requested().load(std::memory_order_relaxed))
+                return;
 
             // World-ready gate. Without a live world the IndexedStringA table carries only a few engine-internal seed
             // entries and the CD_* part names are not yet registered.
             if (!Transmog::is_world_ready())
             {
                 if (attempt % 50 == 0)
-                    logger.debug(
-                        "[dispatch] slot-hash deferred scan: waiting "
-                        "for world after {} attempts",
-                        attempt
-                    );
+                    logger.debug("[dispatch] slot-hash deferred scan: waiting for world after {} attempts", attempt);
                 continue;
             }
 
@@ -219,15 +209,13 @@ namespace Transmog
             {
                 if (attempt % 50 == 0)
                     logger.debug(
-                        "[dispatch] slot-hash deferred scan: "
-                        "IndexedStringA empty after world-ready "
-                        "({} attempts)",
+                        "[dispatch] slot-hash deferred scan: IndexedStringA empty after world-ready ({} attempts)",
                         attempt
                     );
                 continue;
             }
 
-            // Probe how many of our target keys are present without mutating PartShowSuppress yet. Keeps the publish
+            // Probe how many target keys are present without mutating PartShowSuppress yet. Keeps the publish
             // path single-shot so the hook sees one atomic transition from "inert" to "fully ready".
             std::size_t resolvable = 0;
             for (std::size_t i = 0; i < k_slotCount; ++i)
@@ -243,8 +231,7 @@ namespace Transmog
             {
                 const auto resolved = PartShowSuppress::init_slot_hashes(nameToHash);
                 logger.info(
-                    "[dispatch] slot hashes resolved via deferred "
-                    "scan: {}/{} slots ({} attempts)",
+                    "[dispatch] slot hashes resolved via deferred scan: {}/{} slots ({} attempts)",
                     resolved,
                     expectedCount,
                     attempt
@@ -255,8 +242,7 @@ namespace Transmog
             if (resolvable > prevResolvable)
             {
                 logger.debug(
-                    "[dispatch] slot-hash deferred scan: {}/{} "
-                    "resolvable (attempt {})",
+                    "[dispatch] slot-hash deferred scan: {}/{} resolvable (attempt {})",
                     resolvable,
                     expectedCount,
                     attempt
@@ -265,11 +251,10 @@ namespace Transmog
                 continue;
             }
 
-            // Plateaued -- sleep and retry indefinitely until every expected key registers or shutdown is requested.
+            // Plateaued - sleep and retry indefinitely until every expected key registers or shutdown is requested.
             if (attempt % 50 == 0)
                 logger.debug(
-                    "[dispatch] slot-hash deferred scan: still "
-                    "waiting after {} attempts ({}/{} resolvable)",
+                    "[dispatch] slot-hash deferred scan: still waiting after {} attempts ({}/{} resolvable)",
                     attempt,
                     resolvable,
                     expectedCount
@@ -298,38 +283,35 @@ namespace Transmog
     // WorldSystem -> ClientActorManager -> ClientUserActor chain
     // offsets. The same pa::ClientActorManager singleton is reached via the WorldSystem holder here and via the
     // published ClientActorManagerGlobal in CDCore's controlled_char.cpp. The layout offsets are owned by CDCore
-    // (ActorChainOffsets, controlled_char.hpp) so a struct re-layout is a single edit there; these aliases keep the
+    // (ActorChainOffsets, controlled_char.hpp) so a struct re-layout is a single edit there. These aliases keep the
     // local names the consumers below use.
     constexpr std::ptrdiff_t k_wsToActorManager = CDCore::ActorChainOffsets::k_worldSystemToActorManager;
     constexpr std::ptrdiff_t k_actorManagerToUser = CDCore::ActorChainOffsets::k_actorManagerToUserActor;
     constexpr std::ptrdiff_t k_userToControlled = CDCore::ActorChainOffsets::k_userActorToControlled;
 
-    // SEH-isolated walk WorldSystem -> ActorManager -> UserActor.
-    // Returns the validated (>0x10000) pa::ClientUserActor pointer, or 0 on a null WorldSystem holder or any
-    // torn/faulting intermediate. Single source of truth for resolve_player_component(), read_user_actor_ptr_seh() and
-    // read_controlled_actor_ptr_seh(), which would otherwise each repeat this exact three-link walk.
-    static std::uintptr_t walk_ws_to_user_actor_seh() noexcept
+    // Structural plausibility screen for an engine pointer. The apply entry points carry the engine's signed __int64
+    // argument, and a negative value widens to a non-canonical address that the canonical upper bound rejects. The
+    // cast back to std::uintptr_t is bit-preserving, so one overload serves both the signed and unsigned call sites.
+    static bool plausible_engine_ptr(__int64 value) noexcept
+    {
+        return DMK::memory::is_plausible_ptr(DMK::Address{static_cast<std::uintptr_t>(value)});
+    }
+
+    // Guarded walk WorldSystem -> ActorManager -> UserActor.
+    // Returns the validated pa::ClientUserActor pointer, or 0 on a null WorldSystem holder or any torn/faulting
+    // intermediate. Single source of truth for resolve_player_component(), read_user_actor_ptr() and
+    // read_controlled_actor_ptr(), which otherwise each repeat this exact three-link walk.
+    static std::uintptr_t walk_ws_to_user_actor() noexcept
     {
         const auto wsBase = world_system_ptr().load(std::memory_order_acquire);
         if (!wsBase)
             return 0;
-        __try
-        {
-            const auto ws = *reinterpret_cast<uintptr_t *>(wsBase);
-            if (ws < 0x10000)
-                return 0;
-            const auto am = *reinterpret_cast<uintptr_t *>(ws + k_wsToActorManager);
-            if (am < 0x10000)
-                return 0;
-            const auto user = *reinterpret_cast<uintptr_t *>(am + k_actorManagerToUser);
-            if (user < 0x10000)
-                return 0;
-            return user;
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER)
-        {
-            return 0;
-        }
+
+        // The walk screens every dereferenced link into the canonical user-mode window, so a torn link fails closed.
+        // The trailing 0 makes the UserActor pointer the leaf: the last offset is added without a dereference.
+        static constexpr std::ptrdiff_t k_chain[] = {0, k_wsToActorManager, k_actorManagerToUser, 0};
+        const auto user = DMK::memory::walk(DMK::Address{wsBase}, k_chain);
+        return user ? user->raw() : 0;
     }
 
     // Actor-side hops from pa::ClientUserActor down to the equip-slot component that the apply pipeline treats as a1.
@@ -345,40 +327,33 @@ namespace Transmog
 
     __int64 resolve_player_component() noexcept
     {
-        const auto user = walk_ws_to_user_actor_seh();
-        if (user < 0x10000)
+        const auto user = walk_ws_to_user_actor();
+        if (!plausible_engine_ptr(static_cast<__int64>(user)))
             return 0;
-        __try
-        {
-            // user+0xD8 holds the currently-controlled character's ClientChildOnlyInGameActor. It coincides with
-            // user+0xD0 (the "primary" slot, always Kliff) when Kliff is the active character, and rotates to Damiane's
-            // or Oongka's actor when one of them is controlled. Reading +0xD0 unconditionally would land all companion
-            // applies on Kliff's actor, which is why the apply pipeline always walks +0xD8.
-            auto actor = *reinterpret_cast<uintptr_t *>(user + k_userToControlled);
-            if (actor < 0x10000)
-                return 0;
 
-            // Pointer-validity check on the typeEntry slot. The byte at typeEntry+1 is role-based (controlled against
-            // backgrounded) and is not stable per character, so it cannot gate the chain walk. Rejecting on it would
-            // silently drop companion applies. A readable typeEntry pointer is sufficient structural evidence that the
-            // actor is alive.
-            auto te = *reinterpret_cast<uintptr_t *>(actor + k_actorTypeEntryOffset);
-            if (te < 0x10000)
-                return 0;
+        // user+0xD8 holds the currently-controlled character's ClientChildOnlyInGameActor. It coincides with user+0xD0
+        // (the "primary" slot, always Kliff) when Kliff is the active character, and rotates to Damiane's or Oongka's
+        // actor when one of them is controlled. A read of +0xD0 lands every companion apply on Kliff's actor, so the
+        // apply pipeline always walks +0xD8.
+        constexpr std::size_t k_chainHops = 4;
+        static constexpr std::ptrdiff_t k_chain[k_chainHops] =
+            {k_userToControlled, k_actorToComponentHolder, k_componentHolderToComponent, 0};
 
-            auto componentHolder = *reinterpret_cast<uintptr_t *>(actor + k_actorToComponentHolder);
-            if (componentHolder < 0x10000)
-                return 0;
-            auto component = *reinterpret_cast<uintptr_t *>(componentHolder + k_componentHolderToComponent);
-            if (component < 0x10000)
-                return 0;
-
-            return static_cast<__int64>(component);
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER)
-        {
+        // trace[0] captures the controlled actor, which the liveness probe below needs.
+        DMK::Address trace[k_chainHops]{};
+        const auto component = DMK::memory::walk(DMK::Address{user}, k_chain, trace);
+        if (!component)
             return 0;
-        }
+
+        // Pointer-validity check on the typeEntry slot. The byte at typeEntry+1 is role-based (controlled against
+        // backgrounded) and is not stable per character, so it cannot gate the chain walk. A reject on it silently
+        // drops companion applies. A readable typeEntry pointer is sufficient structural evidence that the actor is
+        // alive.
+        const auto typeEntry = DMK::memory::read<std::uintptr_t>(trace[0].offset(k_actorTypeEntryOffset)).value_or(0);
+        if (!plausible_engine_ptr(static_cast<__int64>(typeEntry)))
+            return 0;
+
+        return static_cast<__int64>(component->raw());
     }
 
     // Debounced apply scheduling
@@ -390,10 +365,10 @@ namespace Transmog
     static std::atomic<bool> s_applyPending{false};
 
     // Tick of the previous apply REQUEST (not of the previous apply). Zero until the first request. This is what
-    // decides whether an incoming request belongs to a burst -- see schedule_transmog_ms and k_burstCoalesceMs.
+    // decides whether an incoming request belongs to a burst - see schedule_transmog_ms and k_burstCoalesceMs.
     static std::atomic<std::uint64_t> s_lastRequestTick{0};
 
-    // One-shot redirect: the editing character's 1-based idx that the next scheduled apply should target instead of the
+    // One-shot redirect: the editing character's 1-based idx that the next scheduled apply targets instead of the
     // controlled body. Set by overlay-UI entry points via set_targeted_apply_char_idx() and exchange-consumed by
     // run_debounced_apply. Engine-triggered hook paths never touch this atomic, so the controlled body remains the
     // default target for VEC / BatchEquip events even while the user is editing a non-controlled character.
@@ -407,17 +382,17 @@ namespace Transmog
     // committed. The settle-window branch is the authoritative committer: it flips pm.active_character() and schedules
     // the apply once the candidate identity holds for k_charSwapSettleMs.
     //
-    // Without this gate, sync_active_char_to_live() would flip inline the moment the controlled-char probe returns the
+    // Without this gate, sync_active_char_to_live() flips inline the moment the controlled-char probe returns the
     // new identity, but the engine may not have rotated user+0xD8 to the new actor yet. A hook-driven apply that races
-    // into run_debounced_apply during that window would resolve a1 to the previous body and paint the new character's
+    // into run_debounced_apply during that window resolves a1 to the previous body and paints the new character's
     // preset onto it (e.g. save-load on
     // Kliff that auto-toggles to Oongka leaving Kliff wearing
-    // Oongka's preset). sync_active_char_to_live consults this flag and returns false to defer; the caller re-arms the
+    // Oongka's preset). sync_active_char_to_live consults this flag and returns false to defer. The caller re-arms the
     // debounce until the settle commits.
     static std::atomic<bool> s_charSwapPending{false};
 
     // Multi-character auto-apply request, set by the load-detect thread when CDCore::world_generation() bumps (engine
-    // has reallocated Kliff's CCOIA: cold-load or save-load). Consumed at the top of run_debounced_apply -- the worker
+    // has reallocated Kliff's CCOIA: cold-load or save-load). Consumed at the top of run_debounced_apply - the worker
     // walks CDCore::snapshot_body_cache(), then for each of the 1-3 player CCOIAs swaps PresetManager's active
     // character to that char, resolves its equip-slot via CDCore::equip_slot_for_ccoia(), and invokes
     // apply_all_transmog so every protagonist gets its saved preset on world entry without needing the user to cycle to
@@ -431,8 +406,8 @@ namespace Transmog
 
     // Apply ALWAYS targets the currently-controlled character. This helper re-reads the live character via the Core
     // resolver and, when PresetManager has a different controlled character cached, switches to the live one and
-    // rebuilds slot_mappings from its preset. Holds no __try block so std::string usage is fine; called from
-    // run_debounced_apply (which cannot mix __try with C++ objects).
+    // rebuilds slot_mappings from its preset. It holds no __try block, so std::string use is fine. Its caller is
+    // run_debounced_apply, which cannot mix __try with C++ objects.
     //
     // The editing axis is left untouched here: if the user has the overlay dropdown pinned to a different character,
     // that pin persists across in-game character swaps and the cross-body apply remains in effect.
@@ -450,16 +425,16 @@ namespace Transmog
             return true;
 
         // Defer when load_detect_thread_fn has a pending swap in flight. Convergence is bounded by the settle window
-        // (k_charSwapSettleMs); the caller re-arms via a 200ms schedule_transmog_ms() until then.
+        // (k_charSwapSettleMs). The caller re-arms via a 200ms schedule_transmog_ms() until then.
         if (s_charSwapPending.load(std::memory_order_acquire))
             return false;
 
         pm.set_active_character(live);
         // Release a stale dropdown pin when the new controlled character is a third protagonist (not the previously
         // controlled, not the pinned). set_active_character only auto-clears the pin when the new controlled IS the
-        // pinned char; the third-character case (user pins Damiane while controlling Kliff, then swaps to Oongka
-        // in-game) used to keep the pin engaged, so apply_to_state below would populate slot_mappings from Damiane's
-        // preset and the next apply would land Damiane's outfit on Oongka. Treat the dropdown selection as transient
+        // pinned char. In the third-character case (user pins Damiane while controlling Kliff, then swaps to Oongka
+        // in-game) an engaged pin makes apply_to_state below populate slot_mappings from Damiane's preset, and the
+        // next apply lands Damiane's outfit on Oongka. Treat the dropdown selection as transient
         // across real controlled-character swaps: in-game swap releases the pin so editing follows the new body.
         if (pm.editing_pinned() && pm.editing_character() != live)
         {
@@ -479,8 +454,8 @@ namespace Transmog
     }
 
     // Per-character applied-CCOIA accessors. The backing state and definitions live with the tracking block further
-    // down (just above rebind_preset_to_controlled); forward-declared here because apply_for_one_char consults them to
-    // decide whether the target body was reallocated since its last successful apply.
+    // down, immediately above rebind_preset_to_controlled. The forward declaration is here because apply_for_one_char
+    // consults them to decide whether the target body was reallocated since its last successful apply.
     [[nodiscard]] static std::uintptr_t applied_ccoia_for_char(std::uint32_t idx) noexcept;
     static void set_applied_ccoia_for_char(std::uint32_t idx, std::uintptr_t ccoia) noexcept;
 
@@ -491,40 +466,38 @@ namespace Transmog
     // last_applied_*) that the single-char path does, so the caller must invoke it from the apply worker thread only
     // (no concurrent writer). Logs failures at debug level since idle (non-controlled) protagonists have engine-zeroed
     // component fields that cause expected chain faults. Returns true if the apply ran (regardless of outcome), false
-    // if the body was not yet ready and the caller should re-arm the multi-apply pending flag to retry later.
+    // if the body was not yet ready and the caller must re-arm the multi-apply pending flag to retry later.
     [[nodiscard]] static bool apply_for_one_char(const std::string &name, std::uintptr_t ccoia) noexcept
     {
         auto &logger = DMK::log();
         if (name.empty() || ccoia == 0)
-            return true; // nothing to do; caller should not retry
+            return true; // nothing to do, the caller must not retry
 
         const auto equipSlot = CDCore::equip_slot_for_ccoia(ccoia);
         if (equipSlot == 0)
         {
             logger.debug(
-                "[multi-apply] {} (ccoia=0x{:X}): equip-slot walk "
-                "failed -- skipping",
+                "[multi-apply] {} (ccoia=0x{:X}): equip-slot walk failed - skipping",
                 name,
                 static_cast<std::uint64_t>(ccoia)
             );
             return true; // CCOIA likely invalid; do not retry
         }
 
-        // Gate on RealPartTearDown::is_actor_apply_ready. Idle / freshly-summoned bodies have partially-initialised
+        // Gate on RealPartTearDown::is_actor_apply_ready. Idle / freshly-summoned bodies have partially-initialized
         // mesh containers: tear_down's SEH wrapper catches per-slot faults, but the post-apply pipeline downstream of
         // the first carrier write reads from the same container and throws on the unwired entries. Symptom:
-        // ourWrittenCount increases to 1 then apply_all_transmog raises out of the outer __try, leaving the body
-        // half-applied. The existing load-detect path (transmog_worker.cpp ~1357) gates the controlled-char apply on
-        // this same predicate, so reusing it here keeps the policy consistent.
+        // ourWrittenCount increases to 1, then apply_all_transmog raises out of the outer __try and leaves the body
+        // half-applied. The load-detect thread's readiness gate uses this same predicate, so one policy covers both
+        // entry points.
         if (!RealPartTearDown::is_actor_apply_ready(reinterpret_cast<void *>(equipSlot)))
         {
             logger.debug(
-                "[multi-apply] {} a1=0x{:X}: body not yet ready "
-                "(container chain incomplete) -- will retry",
+                "[multi-apply] {} a1=0x{:X}: body not yet ready (container chain incomplete) - will retry",
                 name,
                 static_cast<std::uint64_t>(equipSlot)
             );
-            return false; // caller should re-arm
+            return false; // the caller must re-arm
         }
 
         // Swap PresetManager onto this character's axis. Mirrors the sync_active_char_to_live() body so slot_mappings
@@ -538,17 +511,17 @@ namespace Transmog
         }
         pm.apply_to_state();
 
-        // Hydrate the globals from this character's snapshot -- but ONLY when re-applying against the SAME body
-        // we last applied to. The four applied-state globals describe the fakes currently installed on a body; they are
-        // the truth source apply_all_transmog's no-change early-out and Phase A teardown consult.
+        // Hydrate the globals from this character's snapshot, but ONLY when the re-apply runs against the SAME body
+        // the last apply targeted. The four applied-state globals describe the fakes currently installed on a body.
+        // They are the truth source apply_all_transmog's no-change early-out and Phase A teardown consult.
         //
-        // When this character's CCOIA pointer differs from the one we last successfully applied against, the engine has
+        // When this character's CCOIA pointer differs from the one the last successful apply used, the engine has
         // reallocated the body (off-screen stream-out + return, follower injury cooldown + recall, or an NPC re-spawned
-        // by a game event). Every fake we installed lives on the now-freed body and is GONE; the freshly-streamed body
-        // wears vanilla gear. Rehydrating the stale snapshot here would make apply_all_transmog see preset==lastIds and
+        // by a game event). Every installed fake lives on the now-freed body and is GONE. The freshly-streamed body
+        // wears vanilla gear. A rehydrate of the stale snapshot here makes apply_all_transmog see preset==lastIds and
         // real==lastReal, fire its "no state change, skipping" early-out, and leave the body un-transmogged. Wipe the
-        // snapshot instead so the re-apply runs from a clean slate -- mirrors the load-detect "scene graph is fresh
-        // after reload" reset in load_detect_thread_fn (old fake meshes are gone even though the IDs haven't changed).
+        // snapshot instead so the re-apply runs from a clean slate - mirrors the load-detect "scene graph is fresh
+        // after reload" reset in load_detect_thread_fn (old fake meshes are gone even though the IDs do not change).
         const auto idx = CDCore::character_idx_from_name(name);
         const auto prevCcoia = applied_ccoia_for_char(idx);
         const bool bodyReallocated = (ccoia != prevCcoia);
@@ -557,8 +530,7 @@ namespace Transmog
             if (prevCcoia != 0)
                 logger.info(
                     "[multi-apply] {} body reallocated (ccoia 0x{:X} -> "
-                    "0x{:X}); wiping stale apply-cache and re-applying "
-                    "from clean slate",
+                    "0x{:X}); wiping stale apply-cache and re-applying from clean slate",
                     name,
                     static_cast<std::uint64_t>(prevCcoia),
                     static_cast<std::uint64_t>(ccoia)
@@ -581,20 +553,19 @@ namespace Transmog
         }
         if (faulted)
         {
-            // SEH during apply_all_transmog -- the carrier byte patches may have landed but the mesh-rebuild path hit a
+            // SEH during apply_all_transmog - the carrier byte patches may have landed but the mesh-rebuild path hit a
             // torn deref on a freshly-summoned body. Report as deferred so the bounded retry catches the next attempt
             // once the body has fully settled.
             logger.debug(
-                "[multi-apply] {} a1=0x{:X}: exception during "
-                "apply_all_transmog -- deferring retry",
+                "[multi-apply] {} a1=0x{:X}: exception during apply_all_transmog - deferring retry",
                 name,
                 static_cast<std::uint64_t>(equipSlot)
             );
             return false;
         }
         capture_applied_state_for_char(idx);
-        // Record the body we just applied to. A later roster-grew pass that observes this same pointer for this char
-        // skips the work (already applied); a pointer change marks the body reallocated and forces a clean re-apply.
+        // Record the body this apply targeted. A later roster-grew pass that observes this same pointer for this char
+        // skips the work (already applied). A pointer change marks the body reallocated and forces a clean re-apply.
         set_applied_ccoia_for_char(idx, ccoia);
         logger.debug("[multi-apply] {} a1=0x{:X}", name, static_cast<std::uint64_t>(equipSlot));
         return true;
@@ -605,12 +576,12 @@ namespace Transmog
     // controlled axis (which the editing UI and subsequent single-char applies key on). Bounded retry counter for
     // partial-chain re-arms. The world_generation() bump fires when the engine reallocates
     // Kliff's CCOIA, but the ChildContainer / actor-list chain used to enumerate Damiane and Oongka is wired separately
-    // and lags by a few hundred ms during cold-load. Our first debounced attempt can therefore observe Kliff present
+    // and lags by a few hundred ms during cold-load. The first debounced attempt can therefore observe Kliff present
     // but the actor list still empty (snapshot_body_cache returns only Kliff), and on a save genuinely loaded between
     // save points Kliff itself may transiently re-null between the generation bump and the worker firing. In both cases
-    // we re-arm the schedule for another attempt; this counter caps the loop to ~30 s of retries (k_multiCharRetryMs *
-    // k_multiCharMaxRetries) so a save that genuinely never publishes Damiane or Oongka cannot pin the apply worker
-    // forever.
+    // the worker re-arms the schedule for another attempt. This counter caps the loop to ~30 s of retries
+    // (k_multiCharRetryMs * k_multiCharMaxRetries) so a save that never publishes Damiane or Oongka cannot pin the
+    // apply worker forever.
     static std::atomic<int> s_multiCharRetryCount{0};
     static constexpr int k_multiCharMaxRetries = 30;
     static constexpr std::uint64_t k_multiCharRetryMs = 1000;
@@ -618,15 +589,15 @@ namespace Transmog
     // Per-world-generation, per-character applied-CCOIA tracking. Cold-load and save-load bump world_generation(), at
     // which point the tracking resets and every visible player gets re-applied. In-session snapshot-grew triggers (a
     // follower summoned mid-session) only re-apply for a character whose CURRENT body pointer differs from the one
-    // we last successfully applied against -- this avoids re-running apply_all_transmog on the controlled char (who was
-    // already applied at cold-load) just because the user summoned a companion.
+    // the last successful apply used - that skips a second apply_all_transmog on the controlled char (who was
+    // already applied at cold-load) after the user summons a companion.
     //
     // Keyed by character index (1=Kliff, 2=Damiane, 3=Oongka), not a flat set of applied pointers. Indexing by
     // character is what makes a body reallocation observable: when a companion despawns (off-screen stream-out, injury
     // cooldown) and respawns, the engine hands its CCOIA back at a NEW pointer. Comparing the live pointer against the
     // per-character record distinguishes "same body, already applied" (skip) from "body reallocated, needs re-apply"
-    // (wipe the stale snapshot in apply_for_one_char and re-run). A flat append-keyed pointer set could not tell those
-    // apart, and had no per-generation bound on distinct pointers, so a respawn could push a fourth entry past the
+    // (wipe the stale snapshot in apply_for_one_char and re-run). A flat append-keyed pointer set cannot tell those
+    // apart, and has no per-generation bound on distinct pointers, so a respawn pushes a fourth entry past the
     // three-slot array.
     static std::uint64_t s_lastAppliedWorldGen = 0;
     static std::array<std::uintptr_t, 3> s_appliedCcoiaForChar{};
@@ -646,14 +617,14 @@ namespace Transmog
     }
 
     // Move the PresetManager axis back to the controlled character WITHOUT running apply_all_transmog. Used after the
-    // idle pass when the controlled char was already applied earlier (so we need to restore the editing/UI axis but not
+    // idle pass when the controlled char was already applied earlier (so the pass restores the editing/UI axis but not
     // redo the work).
     //
     // The applied-state globals MUST be rehydrated from the controlled char's per-body snapshot, not wiped. The prior
     // multi-apply pass captured the controlled char's applied ids into its bucket, and the UI's pending-changes diff
-    // compares slot_mappings (just reloaded from the preset) against last_applied_ids. Zeroing here would leave staged
-    // != lastIds for every populated slot, surfacing a stale "[PENDING -- click Apply All]" badge for transmog that is
-    // in fact already on the body.
+    // compares slot_mappings (reloaded from the preset) against last_applied_ids. A zero here leaves staged !=
+    // lastIds for every populated slot, which surfaces a stale "[PENDING - click Apply All]" badge for transmog that
+    // is in fact already on the body.
     static void rebind_preset_to_controlled(const std::string &controlledName) noexcept
     {
         if (controlledName.empty())
@@ -679,20 +650,17 @@ namespace Transmog
         // Gate on item-catalog readiness. Cold-load completes the CCOIA chain (~500 ms after world_generation bumps)
         // well before the iteminfo background scan finishes the catalog (~3 s on cold-load). Running apply_all_transmog
         // while the catalog is still empty produces slot_mappings with targetItemId=0 across the board, so
-        // `apply_all_transmog` writes nothing -- silently dropping every protagonist's saved preset. Hold the schedule
+        // `apply_all_transmog` writes nothing - silently dropping every protagonist's saved preset. Hold the schedule
         // here without consuming the retry budget so a slow catalog build does not exhaust the attempt cap.
         if (!ItemNameTable::instance().ready())
         {
-            logger.info(
-                "[multi-apply] catalog not ready -- re-arming "
-                "(retry budget preserved)"
-            );
+            logger.info("[multi-apply] catalog not ready - re-arming (retry budget preserved)");
             s_multiCharApplyPending.store(true, std::memory_order_release);
             schedule_transmog_ms(k_multiCharRetryMs);
             return;
         }
 
-        // Diagnostic dump of the raw actor list. Logged at trace so a default-level config is silent; the structured
+        // Diagnostic dump of the raw actor list. Logged at trace so a default-level config is silent. The structured
         // `summary` is ALSO consumed by the retry oracle below (summary.actorList distinguishes "chain not yet wired
         // through to the actor list" from "chain reached the list, save only has Kliff").
         CDCore::ActorListDebugSummary summary{};
@@ -701,8 +669,7 @@ namespace Transmog
             summary = CDCore::debug_enumerate_actor_list(rawEntries.data(), rawEntries.size());
             logger.trace(
                 "[multi-apply-diag] chain mgr=0x{:X} ua=0x{:X} "
-                "sub=0x{:X} kliff=0x{:X} ctrl=0x{:X} vec=0x{:X} "
-                "child=0x{:X} list=0x{:X} rawEntries={}",
+                "sub=0x{:X} kliff=0x{:X} ctrl=0x{:X} vec=0x{:X} child=0x{:X} list=0x{:X} rawEntries={}",
                 static_cast<std::uint64_t>(summary.mgr),
                 static_cast<std::uint64_t>(summary.userActor),
                 static_cast<std::uint64_t>(summary.subMgr),
@@ -722,25 +689,23 @@ namespace Transmog
 
         // Two partial-chain races to retry past:
         //   (1) sub-manager exists but its +0x30 (Kliff) / +0x38
-        //       (controlled) slots are still NULL -- snapshot returns 0.
+        //       (controlled) slots are still NULL - snapshot returns 0.
         //   (2) Kliff/controlled wired but ClientUserActor+0x90 (vec)
-        //       / ChildContainer / actor-list chain hasn't been
-        //       populated yet -- snapshot returns 1 (Kliff via sub-
+        //       / ChildContainer / actor-list chain is not
+        //       populated yet - snapshot returns 1 (Kliff via sub-
         //       manager+0x30), but Damiane/Oongka cannot be found.
         //
-        // For case (2) we cannot tell apart "actor list not yet wired" from "save genuinely only has Kliff loaded"
-        // without another signal, so we retry up to the cap and let k_multiCharMaxRetries time out cheaply for
+        // For case (2) the pass cannot tell apart "actor list not yet wired" from "save genuinely only has Kliff"
+        // without another signal, so the loop retries up to the cap and lets k_multiCharMaxRetries time out for
         // Kliff-only saves.
-        const bool chainIncomplete = (n == 0) || (summary.actorList < 0x10000);
+        const bool chainIncomplete = (n == 0) || !plausible_engine_ptr(static_cast<__int64>(summary.actorList));
         if (chainIncomplete)
         {
             const auto attempt = s_multiCharRetryCount.fetch_add(1, std::memory_order_acq_rel) + 1;
             if (attempt <= k_multiCharMaxRetries)
             {
                 logger.info(
-                    "[multi-apply] partial chain "
-                    "(snapshot={}, actorList=0x{:X}); retrying in "
-                    "{} ms (attempt {}/{})",
+                    "[multi-apply] partial chain (snapshot={}, actorList=0x{:X}); retrying in {} ms (attempt {}/{})",
                     n,
                     static_cast<std::uint64_t>(summary.actorList),
                     k_multiCharRetryMs,
@@ -752,28 +717,23 @@ namespace Transmog
                 return;
             }
             logger.warning(
-                "[multi-apply] gave up after {} attempts -- "
-                "chain never finished wiring (snapshot={}, "
-                "actorList=0x{:X}); applying what we have",
+                "[multi-apply] gave up after {} attempts - "
+                "chain never finished wiring (snapshot={}, actorList=0x{:X}); applying what we have",
                 k_multiCharMaxRetries,
                 n,
                 static_cast<std::uint64_t>(summary.actorList)
             );
             s_multiCharRetryCount.store(0, std::memory_order_release);
-            // Fall through and apply whatever we have (Kliff only, typically) so we at least don't drop the controlled
+            // Fall through and apply whatever resolved (Kliff only, typically) so the pass does not drop the controlled
             // char's transmog.
         }
         else
         {
-            // Full chain reached -- reset retry counter so the next world bump (save-load) starts fresh.
+            // Full chain reached - reset retry counter so the next world bump (save-load) starts fresh.
             //
-            // FIXME: this zeroes the counter that the deferred-body branch at the end of this function then reads,
-            // so that branch always computes attempt 1 and its k_multiCharMaxRetries cap never trips. Whenever the
-            // chain is complete but a body is not ready, the re-arm therefore repeats indefinitely at
-            // k_multiCharRetryMs instead of stopping after the intended budget. It currently self-limits because the
-            // body does become ready, but a save where one never does would keep the worker re-arming for the whole
-            // session. The two paths need separate counters: this one bounds "chain never wired", that one bounds
-            // "body never ready", and they are not the same failure.
+            // FIXME: k_multiCharMaxRetries does not bound the deferred-body re-arm. This store zeroes the counter
+            // that branch reads, so a body that never becomes ready re-arms at k_multiCharRetryMs forever. The two
+            // failures need separate counters.
             s_multiCharRetryCount.store(0, std::memory_order_release);
         }
         if (n == 0)
@@ -782,8 +742,7 @@ namespace Transmog
         for (std::size_t i = 0; i < n; ++i)
         {
             logger.trace(
-                "[multi-apply-diag] snapshot[{}] ccoia=0x{:X} "
-                "charIdx={}",
+                "[multi-apply-diag] snapshot[{}] ccoia=0x{:X} charIdx={}",
                 i,
                 static_cast<std::uint64_t>(entries[i].body),
                 entries[i].charIdx
@@ -793,7 +752,7 @@ namespace Transmog
         const auto controlledCcoia = CDCore::current_controlled_ccoia();
 
         // Reset the applied-CCOIA set whenever the world generation changes (cold-load / save-load) so the next pass
-        // re-applies every player. On snapshot-grew triggers within the same generation we preserve the set so
+        // re-applies every player. On snapshot-grew triggers within the same generation the pass preserves the set so
         // already-applied chars are skipped.
         const auto curWorldGen = CDCore::world_generation();
         if (curWorldGen != s_lastAppliedWorldGen)
@@ -829,9 +788,9 @@ namespace Transmog
         }
 
         // Second pass: controlled character. Two cases:
-        //   - First multi-apply of this world generation: controlled hasn't been applied yet, so apply now and mark.
+        //   - First multi-apply of this world generation: no apply landed on controlled yet, so apply now and mark.
         //   - Subsequent re-fire (e.g., snapshot grew because of a summon): controlled was already applied at
-        //     cold-load. Skip the apply entirely; just rebind the PresetManager axis back to controlled so the editing
+        //     cold-load. Skip the apply entirely and rebind the PresetManager axis back to controlled so the editing
         //     UI / next hook-driven apply observe the correct character.
         std::string controlledName;
         if (controlledCcoia != 0)
@@ -857,26 +816,24 @@ namespace Transmog
         }
 
         logger.info(
-            "[multi-apply] world-entry auto-apply complete: "
-            "applied {} of {} player CCOIAs "
-            "(deferred={} skipped={})",
+            "[multi-apply] world-entry auto-apply complete: applied {} of {} player CCOIAs (deferred={} skipped={})",
             applied,
             n,
             deferred,
             skipped
         );
 
-        // If any char's body wasn't ready, re-arm with a bounded retry. Freshly-summoned companions take ~1-3 seconds
-        // to wire up their mesh container; re-firing the apply on a 1 s cadence catches them once is_actor_apply_ready
-        // returns true. Cap at k_multiCharMaxRetries so a body that never becomes ready cannot pin the worker forever.
+        // If any char's body was not ready, re-arm with a bounded retry. Freshly-summoned companions take ~1-3 seconds
+        // to wire up their mesh container. A re-fire of the apply on a 1 s cadence catches them once
+        // is_actor_apply_ready returns true. Cap at k_multiCharMaxRetries so a body that never becomes ready cannot
+        // pin the worker forever.
         if (deferred > 0)
         {
             const auto attempt = s_multiCharRetryCount.fetch_add(1, std::memory_order_acq_rel) + 1;
             if (attempt <= k_multiCharMaxRetries)
             {
                 logger.info(
-                    "[multi-apply] {} char(s) not yet ready; "
-                    "re-arming in {} ms (attempt {}/{})",
+                    "[multi-apply] {} char(s) not yet ready; re-arming in {} ms (attempt {}/{})",
                     deferred,
                     k_multiCharRetryMs,
                     attempt,
@@ -889,8 +846,7 @@ namespace Transmog
             {
                 logger.warning(
                     "[multi-apply] {} char(s) never became ready "
-                    "after {} attempts -- giving up until next "
-                    "world-gen / roster-grew event",
+                    "after {} attempts - giving up until next world-gen / roster-grew event",
                     deferred,
                     k_multiCharMaxRetries
                 );
@@ -899,7 +855,7 @@ namespace Transmog
         }
         else
         {
-            // Everyone applied -- reset the counter so the next world transition starts with a fresh budget.
+            // Everyone applied - reset the counter so the next world transition starts with a fresh budget.
             s_multiCharRetryCount.store(0, std::memory_order_release);
         }
     }
@@ -922,12 +878,12 @@ namespace Transmog
             return;
         }
 
-        // Consume the clear flag before resolving a1 so a racing manual_clear call doesn't get lost.
+        // Consume the clear flag before resolving a1 so a racing manual_clear call is not lost.
         const bool do_clear = clear_pending().exchange(false, std::memory_order_acq_rel);
 
         // Targeted-apply redirect (overlay-UI initiated). When the user has the dropdown pinned to a non-controlled
         // character and `flag_apply_to_editing` is on, the overlay entry points stash that character's 1-based idx
-        // here. We re-resolve the CCOIA from the live snapshot at apply time (the body may have been dismissed between
+        // here. The apply path re-resolves the CCOIA from the live snapshot (the body may have been dismissed between
         // schedule and run) and apply the editing character's preset to it. Engine-triggered hooks never set this idx,
         // so VEC / BatchEquip events continue to land on the controlled body via the default path below.
         const auto targetedIdx = s_targetedApplyCharIdx.exchange(0, std::memory_order_acq_rel);
@@ -949,11 +905,7 @@ namespace Transmog
                 // Editing character is no longer live (follower dismissed between schedule and run, or never was
                 // loaded). The user opted out of cross-body apply via the flag, so skip silently rather than render
                 // their preset on the controlled body.
-                logger.info(
-                    "[targeted-apply] editing char idx={} not in live "
-                    "snapshot -- skipping apply",
-                    targetedIdx
-                );
+                logger.info("[targeted-apply] editing char idx={} not in live snapshot - skipping apply", targetedIdx);
                 s_lastApplyOk.store(true, std::memory_order_release);
                 return;
             }
@@ -962,8 +914,7 @@ namespace Transmog
             {
                 logger.info(
                     "[targeted-apply] editing char idx={} ccoia=0x{:X} "
-                    "has no equip-slot yet (body still wiring) -- "
-                    "re-arming",
+                    "has no equip-slot yet (body still wiring) - re-arming",
                     targetedIdx,
                     static_cast<std::uint64_t>(targetCcoia)
                 );
@@ -975,7 +926,7 @@ namespace Transmog
             // Per-body state hydrate. Loads this character's last-applied snapshot into the globals so Phase A's
             // teardown decisions ("for slots inactive in the new preset but active in the previous, tear down the
             // installed fake") are made against the items currently on THIS body, not whichever body was applied last.
-            // Without this, a preset swap on a non-controlled char would either leak old items (no teardown) or fault
+            // Without this, a preset swap on a non-controlled char either leaks old items (no teardown) or faults
             // (teardown against the wrong body).
             rehydrate_applied_state_for_char(targetedIdx);
 
@@ -1006,8 +957,7 @@ namespace Transmog
             {
                 s_lastApplyOk.store(false, std::memory_order_release);
                 logger.debug(
-                    "[targeted-apply] exception during {} on idx={} "
-                    "a1=0x{:X}",
+                    "[targeted-apply] exception during {} on idx={} a1=0x{:X}",
                     do_clear ? "clear" : "apply",
                     targetedIdx,
                     static_cast<std::uint64_t>(targetA1)
@@ -1032,7 +982,7 @@ namespace Transmog
             return;
         }
 
-        // Prefer the hook-captured a1 from player_a1() -- it identifies the character whose equip event triggered this
+        // Prefer the hook-captured a1 from player_a1() - it identifies the character whose equip event triggered this
         // apply. Fall back to resolve_player_component() only when player_a1 is empty or unreadable (post-reload /
         // loading screen). The SEH-guarded actor deref below catches a stale wrapper after world reload by dropping the
         // apply.
@@ -1040,12 +990,12 @@ namespace Transmog
         // Apply ALWAYS targets the controlled character's body. The helper below syncs PresetManager's controlled axis
         // + slot_mappings to the live character. It lives outside this __try-containing function so std::string
         // destructors do not trip MSVC C2712. When the user has the overlay dropdown pinned to a different editing
-        // character, the controlled body still drives carriers and the live source wrappers; the editing character only
+        // character, the controlled body still drives carriers and the live source wrappers. The editing character only
         // supplies preset itemIds (cross-body apply).
         //
         // The helper returns false while load-detect has an unfired char swap parked in its settle window. In that case
-        // the engine has not yet rotated user+0xD8 to the new body, so applying here would paint the incoming preset
-        // onto the previous body. Re-arm the debounce; the load-detect commit will flip the controlled axis once the
+        // the engine has not yet rotated user+0xD8 to the new body, so an apply here paints the incoming preset
+        // onto the previous body. Re-arm the debounce. The load-detect commit flips the controlled axis once the
         // candidate settles.
         if (!sync_active_char_to_live())
         {
@@ -1053,29 +1003,22 @@ namespace Transmog
             return;
         }
         __int64 a1 = player_a1().load(std::memory_order_acquire);
-        if (a1 <= 0x10000)
+        if (!plausible_engine_ptr(a1))
         {
             a1 = resolve_player_component();
-            if (a1 <= 0x10000)
+            if (!plausible_engine_ptr(a1))
                 return;
         }
 
         // Verify the wrapper still points to a live actor. If the world reloaded after the last hook capture, *(a1+8)
-        // may fault or yield garbage -- fall back to the WS chain in that case.
-        __try
-        {
-            const auto actor = *reinterpret_cast<uintptr_t *>(a1 + 8);
-            if (actor < 0x10000)
-            {
-                a1 = resolve_player_component();
-                if (a1 <= 0x10000)
-                    return;
-            }
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER)
+        // faults or yields garbage - fall back to the WS chain in that case. The guarded read reports the fault as a
+        // zero, so one branch covers both a torn read and an implausible actor pointer.
+        const auto liveActor =
+            DMK::memory::read<std::uintptr_t>(DMK::Address{static_cast<std::uintptr_t>(a1)}.offset(8)).value_or(0);
+        if (!plausible_engine_ptr(static_cast<__int64>(liveActor)))
         {
             a1 = resolve_player_component();
-            if (a1 <= 0x10000)
+            if (!plausible_engine_ptr(a1))
                 return;
         }
 
@@ -1170,7 +1113,7 @@ namespace Transmog
             //
             // Every new request pushes the deadline out (see schedule_transmog_ms), so during a run of fast preset
             // switches this loop keeps re-waiting and never reaches the apply. Once the switching stops, ONE apply
-            // runs and it reads live state -- so the preset finally landed on is the only one built.
+            // runs and it reads live state - so the preset finally landed on is the only one built.
             for (;;)
             {
                 const std::uint64_t deadline = s_applyDeadlineTick.load(std::memory_order_acquire);
@@ -1206,11 +1149,11 @@ namespace Transmog
         const std::uint64_t now = GetTickCount64();
 
         // Widen the window when this request lands close behind the previous one. A lone action keeps its short
-        // debounce and applies right away; a run of them (clicking down a preset list) keeps pushing the deadline out
+        // debounce and applies right away. A run of them (a click down a preset list) keeps the deadline moving out
         // by the wider window, so nothing is built until the clicking stops and only the final selection applies.
         //
         // Keyed off the previous REQUEST, not the previous apply: during a burst no apply is running, so an
-        // apply-based test would decide the burst had ended and fire mid-run -- which is what let every preset
+        // apply-based test decides the burst ended and fires mid-run - which is what let every preset
         // through before.
         const std::uint64_t prevRequest = s_lastRequestTick.exchange(now, std::memory_order_acq_rel);
         const bool inBurst = prevRequest != 0 && now - prevRequest < k_burstCoalesceMs;
@@ -1269,67 +1212,47 @@ namespace Transmog
 
     static std::optional<DMK::StoppableWorker> s_loadDetectWorker;
 
-    static void sleep_interruptible(std::stop_token stop, int ms)
-    {
-        for (int i = 0; i < ms / 100; ++i)
-        {
-            if (stop.stop_requested() || shutdown_requested().load(std::memory_order_relaxed))
-                return;
-            Sleep(100);
-        }
-    }
-
-    // SEH-isolated walk of WorldSystem -> ActorManager -> UserActor. The UserActor pointer is stable for the lifetime
-    // of a save: the singleton itself is never swapped when the player changes which body they control (only user+0xD8
+    // Guarded walk of WorldSystem -> ActorManager -> UserActor. The UserActor pointer is stable for the lifetime of a
+    // save: the singleton itself is never swapped when the player changes which body they control (only user+0xD8
     // rotates between actor slots). A change of the UserActor pointer is therefore a reliable signal for "new world
-    // loaded" -- distinct from an in-session character swap, which does NOT reallocate this singleton.
+    // loaded" - distinct from an in-session character swap, which does NOT reallocate this singleton.
     //
-    // Returns 0 on any fault or on an unresolved chain; callers treat 0 as "chain not yet ready" and defer the
+    // Returns 0 on any fault or on an unresolved chain. Callers treat 0 as "chain not yet ready" and defer the
     // save-load branch.
-    static std::uintptr_t read_user_actor_ptr_seh() noexcept
+    static std::uintptr_t read_user_actor_ptr() noexcept
     {
-        // Named entry point over the shared walker (see walk_ws_to_user_actor_seh). Kept distinct because callers read
-        // it specifically as the world-reload signal documented above (UserActor pointer change == new world loaded).
-        return walk_ws_to_user_actor_seh();
+        // Named entry point over the shared walker (see walk_ws_to_user_actor). Kept distinct because callers read it
+        // specifically as the world-reload signal documented above (UserActor pointer change == new world loaded).
+        return walk_ws_to_user_actor();
     }
 
     /**
-     * @brief SEH-isolated read of `user+0xD8` (the rotating CLIENT body pointer that EH watches as its save-load
-     *        signal).
-     * @details Mirrors EH/player_detection.cpp:226 so LT can detect the same X->0->Y / atomic-swap save-load
-     *          transitions EH does and clear preset_manager.active_character() on the wipe paths. Returns 0 on any
-     *          fault, on an unresolved chain, or when the controlled body has been published as null (engine
-     *          mid-transition).
+     * @brief Guarded read of `user+0xD8` (the rotating CLIENT body pointer that EH watches as its save-load signal).
+     * @details Mirrors the EquipHide player-detection probe so LT detects the same X->0->Y and atomic-swap save-load
+     *          transitions EH does and clears preset_manager.active_character() on the wipe paths. Returns 0 on any
+     *          fault, on an unresolved chain, or when the engine publishes the controlled body as null during a
+     *          transition.
      */
-    static std::uintptr_t read_controlled_actor_ptr_seh() noexcept
+    static std::uintptr_t read_controlled_actor_ptr() noexcept
     {
-        const auto user = walk_ws_to_user_actor_seh();
-        if (user < 0x10000)
+        const auto user = walk_ws_to_user_actor();
+        if (!plausible_engine_ptr(static_cast<__int64>(user)))
             return 0;
-        __try
-        {
-            // user+0xD8 is the CLIENT body pointer (rotates per radial swap or save-load arena allocation). Unlike the
-            // chain reads in the shared walker, we DO NOT reject 0 here because an X->0 transition is the save-load
-            // signal we want to detect.
-            auto controlled = *reinterpret_cast<uintptr_t *>(user + k_userToControlled);
-            return controlled;
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER)
-        {
-            return 0;
-        }
+
+        // user+0xD8 is the CLIENT body pointer (rotates per radial swap or save-load arena allocation). Unlike the
+        // chain reads in the shared walker, this path DOES NOT reject 0, because an X->0 transition is the save-load
+        // signal the detector wants.
+        return DMK::memory::read<std::uintptr_t>(DMK::Address{user}.offset(k_userToControlled)).value_or(0);
     }
 
     /**
      * @brief Settle window for the character-swap detector.
-     * @details During world load the engine rotates `user+0xD8` through the party members as it wires each actor (e.g.
-     *          Kliff ->
-     *           Oongka -> Damiane on a Damiane save). Each rotation is a
-     *           genuine engine state, so the resolver reports the transient identities; firing the swap immediately
-     *           would apply the wrong character's preset and incur ~3x wasted apply work plus a brief visual flicker.
-     *           Requiring the new identity to remain stable across this window before committing the swap collapses the
-     *           load-time churn into a single transition while still propagating real user-initiated swaps after a 1s
-     *           delay.
+     * @details During world load the engine rotates `user+0xD8` through the party members as it wires each actor
+     *           (e.g. Kliff -> Oongka -> Damiane on a Damiane save). Each rotation is a genuine engine state, so the
+     *           resolver reports the transient identities. An immediate swap applies the
+     *           wrong character's preset and costs ~3x wasted apply work plus a brief visual flicker. The window holds
+     *           the new identity until it stays stable, which collapses the load-time churn into a single transition
+     *           and still propagates a real user-initiated swap after a 1s delay.
      */
     static constexpr std::uint64_t k_charSwapSettleMs = 1000;
 
@@ -1341,7 +1264,7 @@ namespace Transmog
      *          through here as well as the steady-state tick.
      *
      *          The snapshot is split into parallel arrays because shared_state.hpp deliberately carries no CDCore
-     *          include; see @ref publish_body_owner_table.
+     *          include. See @ref publish_body_owner_table.
      * @return Number of protagonists the snapshot found, which doubles as the roster sample the caller compares
      *         against to detect a companion arriving.
      */
@@ -1368,26 +1291,26 @@ namespace Transmog
         std::uintptr_t prevUser = 0;
         std::string prevCharName;
 
-        // Settle-window state for the swap detector below. pendingCharName is empty when no candidate is in flight;
+        // Settle-window state for the swap detector below. pendingCharName is empty when no candidate is in flight.
         // otherwise it holds the candidate name observed since pendingFirstSeenTick. The swap commits only when (now -
         // pendingFirstSeenTick) >= settle window.
         std::string pendingCharName;
         std::uint64_t pendingFirstSeenTick = 0;
 
         // Save-load detection state. Tracks the CLIENT body pointer (user+0xD8) across ticks. An X->0 transition
-        // latches pendingReloadInvalidation; the following 0->Y (with the flag set) OR a non-zero atomic X->Y
+        // latches pendingReloadInvalidation. The following 0->Y (with the flag set) OR a non-zero atomic X->Y
         // (disambiguated below via CDCore::world_generation()) triggers the wipe.
         std::uintptr_t prevControlledActor = 0;
         bool pendingReloadInvalidation = false;
         // CDCore world-generation tracking: bumps when the engine reallocates Kliff's CCOIA (cold-load or save-load).
         // Drives two consumers in this loop:
         //   1. atomic-X->Y disambiguation in the controlled-actor block below (in-session radial swap leaves Kliff's
-        //      CCOIA pointer unchanged, so the generation stays flat);
-        //   2. multi-character world-entry auto-apply at the top of every loop iteration -- on any bump the load thread
+        //      CCOIA pointer unchanged, so the generation stays flat).
+        //   2. multi-character world-entry auto-apply at the top of every loop iteration - on any bump the load thread
         //      arms s_multiCharApplyPending so the apply worker iterates snapshot_body_cache() and stamps each
         //      protagonist's preset against its own equip-slot.
         //
-        // Initialised to 0 so the very first observation reads as a bump and fires the multi-char auto-apply without
+        // It starts at 0 so the very first observation reads as a bump and fires the multi-char auto-apply without
         // needing a save-load to bootstrap.
         std::uint64_t prevWorldGen = 0;
 
@@ -1401,28 +1324,22 @@ namespace Transmog
             //
             // Two independent signals re-arm the multi-apply path:
             //
-            //   (1) CDCore::world_generation() bumps when the engine
-            //       reallocates Kliff's CCOIA (cold-load or save-
-            //       load). Initialised to 0 so the very first
-            //       iteration after thread start fires (cold-load /
-            //       LT-loaded-into-live-world).
+            //   (1) CDCore::world_generation() bumps when the engine reallocates Kliff's CCOIA (cold-load or
+            //       save-load). It starts at 0 so the very first iteration after thread start fires (cold-load or
+            //       LT loaded into a live world).
             //
-            //   (2) Player snapshot grew. Kliff's CCOIA is stable
-            //       across mid-session "summons" (e.g., user
-            //       triggers a UI action that spawns Damiane or
-            //       Oongka), so world_generation alone misses these.
-            //       We poll snapshot_body_cache each tick; when it
-            //       returns more player CCOIAs than before, re-arm.
-            //       Guard with prevSnapshotCount > 0 so a fresh world
-            //       (0 -> N) does not double-fire alongside the world-
-            //       gen path.
+            //   (2) Player snapshot grew. Kliff's CCOIA is stable across mid-session "summons" (e.g. a UI action
+            //       that spawns Damiane or Oongka), so world_generation alone misses these. The tick polls
+            //       snapshot_body_cache. When it returns more player CCOIAs than before, the path re-arms. The
+            //       prevSnapshotCount guard keeps a fresh world (0 -> N) from a double-fire alongside the
+            //       world-gen path.
             //
             // prevWorldGen is updated by the controlled-actor block below (which also reads curWorldGen for its
-            // atomic-X->Y disambiguation), so we do not write it here.
+            // atomic-X->Y disambiguation), so this path does not write it.
             //
-            // The snapshot-count sentinel uses static_cast<size_t>(-1) to mean "uninitialised" (never observed). This
+            // The snapshot-count sentinel uses static_cast<size_t>(-1) to mean "uninitialized" (never observed). This
             // is semantically distinct from "observed 0", which the previous `> 0` guard conflated. The world-gen path
-            // resets it to uninitialised so the first post-bump iteration just records the snapshot count without
+            // resets it to uninitialized so the first post-bump iteration records the snapshot count without
             // re-firing (world-gen already armed the apply).
             static constexpr std::size_t kSnapshotCountUninit = static_cast<std::size_t>(-1);
             static std::size_t s_prevSnapshotCount = kSnapshotCountUninit;
@@ -1436,15 +1353,14 @@ namespace Transmog
                 if (curWorldGen != prevWorldGen)
                 {
                     logger.info(
-                        "World generation {} -> {}; arming multi-char "
-                        "auto-apply (500 ms debounce)",
+                        "World generation {} -> {}; arming multi-char auto-apply (500 ms debounce)",
                         prevWorldGen,
                         curWorldGen
                     );
                     s_multiCharApplyPending.store(true, std::memory_order_release);
                     // Tight first-shot: apply_for_one_char treats a mesh-walk fault as a deferred retry (re-arms
                     // s_multiCharApplyPending and returns false) so the bounded retry below picks it up if the body
-                    // isn't fully wired yet. Net cost of an early miss is one extra retry tick; net gain when the body
+                    // is not fully wired yet. Net cost of an early miss is one extra retry tick. Net gain when the body
                     // IS ready is 1.5s faster apply.
                     schedule_transmog_ms(500);
                     s_prevSnapshotCount = kSnapshotCountUninit;
@@ -1454,13 +1370,12 @@ namespace Transmog
                     if (s_prevSnapshotCount != kSnapshotCountUninit && n > s_prevSnapshotCount)
                     {
                         logger.info(
-                            "Player roster grew {} -> {}; arming "
-                            "multi-char auto-apply (500 ms debounce)",
+                            "Player roster grew {} -> {}; arming multi-char auto-apply (500 ms debounce)",
                             s_prevSnapshotCount,
                             n
                         );
                         s_multiCharApplyPending.store(true, std::memory_order_release);
-                        // Match the world-gen debounce; the deferred-retry path covers the "newly-summoned but
+                        // Match the world-gen debounce. The deferred-retry path covers the "newly-summoned but
                         // not-yet-wired" window.
                         schedule_transmog_ms(500);
                     }
@@ -1471,26 +1386,25 @@ namespace Transmog
             // Save-load invalidation
             //
             // The Core controlled-character resolver caches the most recent known identity key. On a save load the
-            // previous world's actor pool is freed and reallocated; without invalidation the resolver could keep
+            // previous world's actor pool is freed and reallocated. Without invalidation the resolver keeps
             // returning the prior save's character until the chain walk first observes the new actor's identity u32s.
             //
             // Use the UserActor pointer as the save-load signal: the ActorManager rewrites it on world load but leaves
             // it alone during in-session character swaps (only user+0xD8 rotates on swap). Invalidating on every comp
-            // change would wipe the cache during normal swaps and add a full 1s tick of latency before the char-swap
-            // detector below could confirm the new name.
+            // change wipes the cache during normal swaps and adds a full 1s tick of latency before the char-swap
+            // detector below confirms the new name.
             //
             // Runs BEFORE the char-swap block so a save-load event routes through the retry loop further down instead
             // of firing a spurious "swap detected" log against a stale cached name.
             {
-                const auto curUser = read_user_actor_ptr_seh();
+                const auto curUser = read_user_actor_ptr();
                 if (curUser != 0 && curUser != prevUser)
                 {
                     if (prevUser != 0)
                     {
                         logger.info(
                             "Load detect: UserActor swapped "
-                            "({:#x} -> {:#x}); invalidating controlled-"
-                            "char cache for save-load transition",
+                            "({:#x} -> {:#x}); invalidating controlled-char cache for save-load transition",
                             static_cast<uint64_t>(prevUser),
                             static_cast<uint64_t>(curUser)
                         );
@@ -1505,7 +1419,7 @@ namespace Transmog
                         // Re-populate the body-mesh prefab catalog. Save loads can rotate the AppearanceTableLoader
                         // registry's resident wrapper set as zone-/ archetype-specific assets stream in/out, and the
                         // picker dropdown otherwise stays pinned to the boot snapshot until the user clicks "Refresh
-                        // Catalog" manually. Idempotent and cheap (~5ms StringInfo walk + ~10ms registry enum); fires
+                        // Catalog" manually. Idempotent and cheap (~5ms StringInfo walk + ~10ms registry enum). Fires
                         // once per save-load tick.
                         PrefabWrapperSwap::populate_slot_catalogs();
                     }
@@ -1519,17 +1433,16 @@ namespace Transmog
             // disambiguates three transitions:
             //   1. X->0 : engine published null -> latch deferred wipe
             //   2. 0->Y with flag set : world live again -> wipe
-            //   3. X->Y atomic : CDCore::world_generation() bump = the engine reallocated Kliff's CCOIA (save-load);
+            //   3. X->Y atomic : CDCore::world_generation() bump = the engine reallocated Kliff's CCOIA (save-load).
             //      unchanged generation = in-session radial swap.
             //
-            // On every wipe path we ALSO clear LT-local state that would otherwise route through the previously-active
+            // Every wipe path ALSO clears LT-local state that otherwise routes through the previously-active
             // character's preset (preset_manager.active_character() and the prevCharName/pendingCharName settle
-            // window). This is the "On save load detected, should clear current char of LT" requirement: empty
-            // active_character()
-            // resolves to no preset -> engine vanilla items show
-            // until the next chain walk observes the correct identity.
+            // window). This is the "On save load detected, clear the current char of LT" requirement. An empty
+            // active_character() resolves to no preset, so the engine's vanilla items show until the next chain walk
+            // observes the correct identity.
             {
-                const auto controlledActor = read_controlled_actor_ptr_seh();
+                const auto controlledActor = read_controlled_actor_ptr();
                 const auto curWorldGen = CDCore::world_generation();
                 if (controlledActor != prevControlledActor)
                 {
@@ -1551,8 +1464,7 @@ namespace Transmog
                     {
                         logger.info(
                             "Save-load detected: controlled actor "
-                            "(0x{:X} -> 0x0); deferring full cache wipe "
-                            "until new world is live",
+                            "(0x{:X} -> 0x0); deferring full cache wipe until new world is live",
                             static_cast<uint64_t>(prevControlledActor)
                         );
                         pendingReloadInvalidation = true;
@@ -1561,8 +1473,7 @@ namespace Transmog
                     {
                         logger.info(
                             "Save-load complete: new controlled actor "
-                            "0x{:X} -- clearing LT preset_manager "
-                            "active character + swap-scope state",
+                            "0x{:X} - clearing LT preset_manager active character + swap-scope state",
                             static_cast<uint64_t>(controlledActor)
                         );
                         wipe_lt_state();
@@ -1571,7 +1482,7 @@ namespace Transmog
                     else if (prevControlledActor != 0 && controlledActor != 0)
                     {
                         // Atomic X->Y. World-generation bump = the engine reallocated Kliff's CCOIA during save-load.
-                        // No bump = in-session radial swap; preserve LT state.
+                        // No bump = in-session radial swap. Preserve LT state.
                         const bool atomicSaveLoad = curWorldGen != prevWorldGen;
 
                         if (atomicSaveLoad)
@@ -1580,8 +1491,7 @@ namespace Transmog
                                 "Save-load detected (atomic swap): "
                                 "controlled actor (0x{:X} -> 0x{:X}); "
                                 "world_generation {} -> {}; clearing "
-                                "LT preset_manager active character + "
-                                "swap-scope state",
+                                "LT preset_manager active character + swap-scope state",
                                 static_cast<uint64_t>(prevControlledActor),
                                 static_cast<uint64_t>(controlledActor),
                                 prevWorldGen,
@@ -1590,7 +1500,7 @@ namespace Transmog
                             wipe_lt_state();
                             pendingReloadInvalidation = false;
                         }
-                        // else: normal char swap -- LT's existing char-swap auto-detect block (below) picks up the
+                        // else: normal char swap - LT's existing char-swap auto-detect block (below) picks up the
                         // identity change via the live chain walk and calls set_active_character.
                     }
                     prevControlledActor = controlledActor;
@@ -1600,7 +1510,7 @@ namespace Transmog
 
             // Character-swap auto-detect
             //
-            // Reads the controlled-character name every tick; when it changes AND remains stable for
+            // Reads the controlled-character name every tick. When it changes AND stays stable for
             // k_charSwapSettleMs, switches the UI preset list to the new character and schedules an apply. The apply
             // path re-walks the WS chain through user+0xD8 so it always resolves the correct per-character wrapper
             // without needing a BatchEquip event.
@@ -1613,11 +1523,11 @@ namespace Transmog
                 auto &pm = PresetManager::instance();
 
                 // Branch on three states:
-                //   1. liveName empty / matches prevCharName -- no transition; clear any pending candidate so a
+                //   1. liveName empty / matches prevCharName - no transition. Clear any pending candidate so a
                 //      back-and-forth (A -> B -> A within settle window)
                 //      does not commit a phantom swap to B.
-                //   2. liveName differs from pendingCharName -- new candidate; restart the settle clock.
-                //   3. liveName matches pendingCharName -- candidate held; commit when the elapsed time crosses the
+                //   2. liveName differs from pendingCharName - new candidate. Restart the settle clock.
+                //   3. liveName matches pendingCharName - candidate held. Commit when the elapsed time crosses the
                 //      settle threshold.
                 if (liveName.empty() || liveName == prevCharName)
                 {
@@ -1644,12 +1554,12 @@ namespace Transmog
                         pm.set_active_character(liveName);
                         // An in-game controlled-character change to a body different from any prior dropdown "pin" must
                         // release that pin: the dropdown selection is treated as transient across real
-                        // controlled-character swaps. Without this release, the worker would feed the pinned
-                        // character's preset into slot_mappings via apply_to_state below and schedule_transmog would
-                        // apply it to the newly-controlled body (e.g. user pins
-                        // Damiane while controlling Kliff, then swaps to Oongka -- without release, Damiane's outfit
+                        // controlled-character swaps. Without this release, the worker feeds the pinned character's
+                        // preset into slot_mappings via apply_to_state below and schedule_transmog applies it to the
+                        // newly-controlled body (e.g. user pins
+                        // Damiane while controlling Kliff, then swaps to Oongka - without release, Damiane's outfit
                         // lands on Oongka). set_active_character already auto-clears the pin when the new controlled
-                        // char IS the pinned char; this handles the third-character case.
+                        // char IS the pinned char. This handles the third-character case.
                         if (pm.editing_pinned() && pm.editing_character() != liveName)
                         {
                             pm.clear_editing_pin();
@@ -1678,11 +1588,11 @@ namespace Transmog
             auto comp = resolve_player_component();
 
             // Detect change: new component appeared or address changed.
-            if (comp > 0x10000 && comp != prevComp)
+            if (plausible_engine_ptr(comp) && comp != prevComp)
             {
                 // Resolve identity WITHOUT invalidating any CDCore cache. The focus-broadcast resolver stamps Tier-0 on
                 // every engine focus event, so a stale read here is self-correcting within one tick. Calling
-                // invalidate_controlled_character() inline would force an Unknown window on saves whose first broadcast
+                // an inline invalidate_controlled_character() forces an Unknown window on saves whose first broadcast
                 // has not arrived yet (Prologue / post-cutscene resume), gating the auto-apply indefinitely.
                 const std::string liveChar = current_controlled_character_name();
 
@@ -1690,8 +1600,7 @@ namespace Transmog
                 // every tick while the world is still loading. prevComp tracks the most recent observed value, not the
                 // most recent successfully-applied one.
                 logger.info(
-                    "Load detect: player component changed "
-                    "({:#x} -> {:#x}); controlled = {}",
+                    "Load detect: player component changed ({:#x} -> {:#x}); controlled = {}",
                     static_cast<uint64_t>(prevComp),
                     static_cast<uint64_t>(comp),
                     liveChar.empty() ? std::string_view{"<unresolved>"} : std::string_view{liveChar}
@@ -1702,23 +1611,20 @@ namespace Transmog
                 // is closed regardless of whether the char-swap auto-detect block above has finished its settle window.
                 // Without this clear, the retry loop below blocks the load-detect thread for several seconds, the
                 // auto-detect block never re-ticks during that span, and sync_active_char_to_live keeps deferring every
-                // scheduled apply -- the visible symptom is "scheduled apply (attempt N)" loglines with no apply ever
+                // scheduled apply - the visible symptom is "scheduled apply (attempt N)" loglines with no apply ever
                 // landing after a save-load or radial swap.
                 s_charSwapPending.store(false, std::memory_order_release);
 
                 if (liveChar.empty())
                 {
-                    logger.trace(
-                        "Load detect: holding auto-apply -- controlled "
-                        "char unresolved (waiting for world)"
-                    );
+                    logger.trace("Load detect: holding auto-apply - controlled char unresolved (waiting for world)");
                     continue;
                 }
 
                 player_a1().store(comp, std::memory_order_release);
 
-                // Reset cached apply state so the early-out in apply_all_transmog doesn't suppress the re-apply. The
-                // scene graph is fresh after reload -- old fake meshes are gone even though the IDs haven't changed.
+                // Reset cached apply state so the early-out in apply_all_transmog does not suppress the re-apply. The
+                // scene graph is fresh after reload - old fake meshes are gone even though the IDs do not change.
                 //
                 // Held under s_applyCvMtx to prevent racing with an in-flight apply on the worker thread, which reads
                 // and writes these same non-atomic arrays.
@@ -1733,23 +1639,23 @@ namespace Transmog
                 if (!flag_enabled().load(std::memory_order_relaxed))
                     continue;
 
-                // Retry through the debounce worker. The game's visual state isn't ready immediately after load detect
-                // -- the first attempt often faults because the PartDef array and scene graph are still being
-                // populated. We retry with exponential backoff up to ~90s total, exiting early once the apply succeeds
+                // Retry through the debounce worker. The game's visual state is not ready immediately after load detect
+                // - the first attempt often faults because the PartDef array and scene graph are still being
+                // populated. The loop retries with exponential backoff up to ~90s total and exits once the apply lands
                 // (no SEH fault).
                 //
                 // Backoff schedule: 2s, 2s, 3s, 4s, 5s, 5s, 5s, ... This gives fast feedback when the game loads
-                // quickly but doesn't burn CPU during longer load screens.
+                // quickly but does not burn CPU during longer load screens.
                 //
                 // Each iteration runs a cheap actor-readiness probe (RealPartTearDown::is_actor_apply_ready) before
                 // scheduling a full apply. The probe walks the same container chain that tear_down dereferences but
-                // performs no engine calls; on a placeholder wrapper (engine still wiring during world load) the probe
+                // performs no engine calls. On a placeholder wrapper (engine still wiring during world load) the probe
                 // returns false at microsecond cost and the iteration skips the full apply, avoiding ~5 SEH-faulted
                 // tear_down log lines plus an apply fault per attempt. The 20-attempt budget is preserved for low-end
-                // PCs where wiring legitimately takes >60s; the probe just makes the wait silent and cheap.
+                // PCs where wiring legitimately takes >60s. The probe makes the wait silent and cheap.
                 //
-                // The probe is suppressed on attempt 0 so first-load fast-paths (e.g. the engine warmed before we got
-                // scheduled) still fire an apply immediately without an extra delay.
+                // The probe is suppressed on attempt 0 so first-load fast-paths (e.g. the engine warmed before the
+                // thread was scheduled) still fire an apply immediately without an extra delay.
                 static constexpr int k_maxAutoApplyAttempts = 20;
                 s_lastApplyOk.store(false, std::memory_order_release);
 
@@ -1771,18 +1677,17 @@ namespace Transmog
 
                     // Mid-retry wrapper-change abort. The engine sometimes parks user+0xD8 on a placeholder wrapper for
                     // 60+ seconds before deallocating it and allocating the real character actor at a different
-                    // address. Without this check the retry loop would burn the rest of its budget on the dead
+                    // address. Without this check the retry loop burns the rest of its budget on the dead
                     // placeholder and only notice the new wrapper when the outer load-detect tick runs again post-loop.
-                    // Re-resolving the component here lets us bail within one attempt's delay of the swap; the outer
+                    // A re-resolve of the component here bails within one attempt's delay of the swap. The outer
                     // loop's next iteration will see comp != prevComp and start a fresh retry budget against the new
                     // wrapper.
                     {
                         const auto curComp = resolve_player_component();
-                        if (curComp > 0x10000 && curComp != comp)
+                        if (plausible_engine_ptr(curComp) && curComp != comp)
                         {
                             logger.info(
-                                "Load detect: wrapper changed mid-retry "
-                                "({:#x} -> {:#x}), aborting current budget",
+                                "Load detect: wrapper changed mid-retry ({:#x} -> {:#x}), aborting current budget",
                                 static_cast<uint64_t>(comp),
                                 static_cast<uint64_t>(curComp)
                             );
@@ -1792,18 +1697,17 @@ namespace Transmog
                     }
 
                     // Gate on item-catalog readiness. On hot reload the game is already mid-session with real equipment
-                    // populated, so the "real armor changed" branch in apply_all_transmog would fire tear_down before
+                    // populated, so the "real armor changed" branch in apply_all_transmog fires tear_down before
                     // the preset has any resolved item IDs (names still pending background-thread catalog build). That
                     // strips the character and leaves slots in a state where the deferred post-resolve re-apply
-                    // crashes. Hold the retry budget here until the catalog publishes; the attempt counter does not
+                    // crashes. Hold the retry budget here until the catalog publishes. The attempt counter does not
                     // advance during the wait so a slow catalog build does not exhaust attempts. The outer
                     // wrapper-change check above still runs each tick.
                     if (!ItemNameTable::instance().ready())
                     {
                         if (catalogWaitStreak == 0)
                             logger.debug(
-                                "Load detect: catalog not ready -- "
-                                "holding auto-apply (attempt {})",
+                                "Load detect: catalog not ready - holding auto-apply (attempt {})",
                                 attempt + 1
                             );
                         ++catalogWaitStreak;
@@ -1812,11 +1716,7 @@ namespace Transmog
                     }
                     if (catalogWaitStreak > 0)
                     {
-                        logger.debug(
-                            "Load detect: catalog became ready after "
-                            "{} deferred ticks",
-                            catalogWaitStreak
-                        );
+                        logger.debug("Load detect: catalog became ready after {} deferred ticks", catalogWaitStreak);
                         catalogWaitStreak = 0;
                     }
 
@@ -1826,22 +1726,14 @@ namespace Transmog
                         // streak resets when a probe finally passes or when the wrapper changes (next outer-loop
                         // iteration).
                         if (notReadyStreak == 0)
-                            logger.debug(
-                                "Load detect: actor not ready -- deferring "
-                                "apply (attempt {})",
-                                attempt + 1
-                            );
+                            logger.debug("Load detect: actor not ready - deferring apply (attempt {})", attempt + 1);
                         ++notReadyStreak;
                         continue;
                     }
 
                     if (notReadyStreak > 0)
                     {
-                        logger.debug(
-                            "Load detect: actor became ready after {} "
-                            "deferred attempts",
-                            notReadyStreak
-                        );
+                        logger.debug("Load detect: actor became ready after {} deferred attempts", notReadyStreak);
                         notReadyStreak = 0;
                     }
 
@@ -1856,12 +1748,12 @@ namespace Transmog
                         break;
                     }
                 }
-                // Suppress the failure warning when we aborted because the wrapper changed -- that path is a planned
-                // hand-off to the outer loop, not a failure.
+                // Suppress the failure warning when the loop aborted because the wrapper changed - that path is a
+                // planned hand-off to the outer loop, not a failure.
                 if (!wrapperChanged && !s_lastApplyOk.load(std::memory_order_acquire))
                     logger.warning("Load detect: auto-apply failed after {} attempts", k_maxAutoApplyAttempts);
             }
-            else if (comp > 0x10000)
+            else if (plausible_engine_ptr(comp))
             {
                 prevComp = comp;
             }

@@ -9,10 +9,7 @@
 #include "../shared_state.hpp"
 
 #include <DetourModKit.hpp>
-
 #include <DetourModKit/hook.hpp>
-
-#include <Windows.h>
 
 #include <atomic>
 #include <cstddef>
@@ -81,7 +78,7 @@ namespace Transmog::ColorOverride::PublisherHook
         {
             g_entries.fetch_add(1, std::memory_order_relaxed);
 
-            // The apply slot is asserted by mark_apply_begin and remains set even after mark_apply_end -- the publisher
+            // The apply slot is asserted by mark_apply_begin and remains set even after mark_apply_end - the publisher
             // fires per-frame asynchronously after the synchronous slotPop returns, so a 3-second deadline gates the
             // tail rather than clearing the slot.
             const int slot = State::active_apply_slot().load(std::memory_order_acquire);
@@ -95,7 +92,7 @@ namespace Transmog::ColorOverride::PublisherHook
                 return;
             }
 
-            // Publisher-insert block (wipe_slot sets a ~500 ms cool-down so the new slot's first fires don't race the
+            // Publisher-insert block (wipe_slot sets a ~500 ms cool-down so the new slot's first fires do not race the
             // wipe).
             const auto block = State::block_publisher_inserts_until_ms().load(std::memory_order_acquire);
             if (block != 0 && State::now_ms() < block)
@@ -104,7 +101,7 @@ namespace Transmog::ColorOverride::PublisherHook
                 return;
             }
 
-            // Capture both dst and src matInsts. No host-scope gate here -- host scope is only meaningful for the
+            // Capture both dst and src matInsts. No host-scope gate here - host scope is only meaningful for the
             // setter call frame; the publisher fires per-matInst inside the matInst-list copy loop, not from an actor's
             // render frame.
             try_insert(DMK::hook::gpr(ctx, DMK::hook::Gpr::Rcx), slot);
@@ -123,7 +120,10 @@ namespace Transmog::ColorOverride::PublisherHook
             return false;
 
         auto hook = DMK::hook::mid_at(
-            DMK::hook::MidRequest{.name = "ColorPublisher", .target = DMK::Address{addr}},
+            DMK::hook::MidRequest{
+                .name = "ColorPublisher",
+                .target = DMK::Address{addr},
+            },
             &on_publisher_mid
         );
         if (!hook)

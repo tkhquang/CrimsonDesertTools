@@ -61,27 +61,33 @@
 
 namespace
 {
-    constexpr const char *k_mod_name = CDCORE_LOADER_MOD_NAME;
-    constexpr const char *k_process_name = CDCORE_LOADER_PROCESS_NAME;
-    /// Staged generations are "<mod>.genNNNN.logic.dll", so ".logic.dll" stays a stable suffix and one glob covers the
-    /// build output and every staged copy.
-    constexpr const char *k_generation_suffix = ".logic.dll";
-    constexpr const char *k_staging_subdir = "staging";
+    constexpr const char *MOD_NAME = CDCORE_LOADER_MOD_NAME;
+    constexpr const char *PROCESS_NAME = CDCORE_LOADER_PROCESS_NAME;
+    /**
+     * @brief Stable suffix of a staged generation image.
+     * @details Staged generations are "<mod>.genNNNN.logic.dll", so one glob covers the build output and every
+     *          staged copy.
+     */
+    constexpr const char *GENERATION_SUFFIX = ".logic.dll";
+    constexpr const char *STAGING_SUBDIR = "staging";
 
-    constexpr int k_reload_vk = VK_NUMPAD0;
-    constexpr DWORD k_control_poll_ms = 100;
+    constexpr int RELOAD_VK = VK_NUMPAD0;
+    constexpr DWORD CONTROL_POLL_MS = 100;
     /// Quiescence so an in-flight per-frame detour body returns before FreeLibrary.
-    constexpr DWORD k_post_shutdown_ms = 100;
-    constexpr DWORD k_unmap_poll_ms = 10;
-    /// A release can complete slightly after FreeLibrary returns, so the unmap check polls rather than sampling once.
-    /// A single sample reports a healthy generation as pinned.
-    constexpr DWORD k_unmap_timeout_ms = 2000;
+    constexpr DWORD POST_SHUTDOWN_MS = 100;
+    constexpr DWORD UNMAP_POLL_MS = 10;
+    /**
+     * @brief Deadline for the post-FreeLibrary unmap poll.
+     * @details A release can complete slightly after FreeLibrary returns, so the check polls rather than samples
+     *          once. A single sample reports a healthy generation as pinned.
+     */
+    constexpr DWORD UNMAP_TIMEOUT_MS = 2000;
 
     /// Caps retained images before the loader stops reloading and asks for a restart.
-    constexpr unsigned k_max_retained_generations = 24;
+    constexpr unsigned MAX_RETAINED_GENERATIONS = 24;
 
     /// Loader-owned owner id for the probe lease: ASCII "CDPROBE_". Any value a generation never uses.
-    constexpr std::uint64_t k_lease_probe_owner = UINT64_C(0x434450524F42455F);
+    constexpr std::uint64_t LEASE_PROBE_OWNER = UINT64_C(0x434450524F42455F);
 
     std::atomic<bool> s_running{false};
     std::atomic<bool> s_reloading{false};
@@ -92,7 +98,7 @@ namespace
     std::uint64_t s_host_identity = 0;
     bool s_wheel_host_live = false;
 
-    /// Latched when a generation could not be proved gone. Further reloads would stack unknown state.
+    /// Latched when a generation cannot be proved gone. A further reload stacks unknown state.
     bool s_restart_required = false;
     unsigned s_generation_counter = 0;
     unsigned s_retained_generations = 0;
@@ -122,8 +128,9 @@ namespace
     std::string s_logic_pdb_name;
     std::string s_generation_prefix;
 
-    /* ---- logging ------------------------------------------------------------------------------ */
+    // Logging.
 
+    /// Writes one line to the debugger and to the loader's own log file.
     void log_msg(const char *msg) noexcept
     {
         char line[768];
@@ -174,6 +181,7 @@ namespace
         CloseHandle(file);
     }
 
+    /// Formats one line into a fixed stack buffer and forwards it to log_msg.
     template <class... Args> void logf(const char *fmt, Args... args) noexcept
     {
         char buffer[768];
@@ -183,10 +191,13 @@ namespace
         }
     }
 
-    /* ---- process gate -------------------------------------------------------------------------- */
+    // Process gate.
 
-    /// ASI hosts fan the loader out into every executable in the game directory, crash handlers and launcher stubs
-    /// included. Only the game process gets a control thread.
+    /**
+     * @brief Reports whether this process is the game the loader targets.
+     * @details ASI hosts fan the loader out into every executable in the game directory, crash handlers and
+     *          launcher stubs included. Only the game process gets a control thread.
+     */
     [[nodiscard]] bool running_in_game_process() noexcept
     {
         char path[MAX_PATH]{};
@@ -197,11 +208,12 @@ namespace
         }
         const char *const slash = std::strrchr(path, '\\');
         const char *const exe = (slash != nullptr) ? slash + 1 : path;
-        return _stricmp(exe, k_process_name) == 0;
+        return _stricmp(exe, PROCESS_NAME) == 0;
     }
 
-    /* ---- paths -------------------------------------------------------------------------------- */
+    // Paths.
 
+    /// Returns the directory of module @p self, with a trailing separator, or an empty string on failure.
     std::string loader_dir(HMODULE self)
     {
         char path[MAX_PATH]{};
@@ -220,9 +232,9 @@ namespace
 
     /**
      * @brief Formats the size and last-write time of @p path as "bytes=N built=YYYY-MM-DD HH:MM:SS".
-     * @details This is the loader's own witness of what it mapped, taken from the file it just copied. It cannot go
-     *          stale the way a compiled-in __TIME__ can, because it is read from disk at load time rather than baked
-     *          into one translation unit at compile time.
+     * @details This is the loader's own witness of what it mapped, taken from the file it copied. It cannot go stale
+     *          the way a compiled-in __TIME__ can, because the loader reads it from disk at load time instead of
+     *          baking it into one translation unit at compile time.
      */
     std::string file_identity(const std::string &path)
     {
@@ -258,13 +270,15 @@ namespace
         return out;
     }
 
+    /// Returns the full path of staged generation number @p generation.
     std::string generation_path(unsigned generation)
     {
         char name[160];
-        std::snprintf(name, sizeof(name), "%s%04u%s", s_generation_prefix.c_str(), generation, k_generation_suffix);
+        std::snprintf(name, sizeof(name), "%s%04u%s", s_generation_prefix.c_str(), generation, GENERATION_SUFFIX);
         return s_loader_dir + name;
     }
 
+    /// Moves one staged file into the loader directory, and does nothing when the file is absent.
     void move_staged_file(const std::string &staging_dir, const std::string &filename)
     {
         const std::string src = staging_dir + filename;
@@ -279,7 +293,7 @@ namespace
     /// Promotes a freshly built logic DLL (and its PDB) out of the staging directory.
     void promote_from_staging()
     {
-        const std::string staging_dir = s_loader_dir + k_staging_subdir + "\\";
+        const std::string staging_dir = s_loader_dir + STAGING_SUBDIR + "\\";
         const std::string staged_dll = staging_dir + s_logic_dll_name;
         if (GetFileAttributesA(staged_dll.c_str()) == INVALID_FILE_ATTRIBUTES)
         {
@@ -303,7 +317,7 @@ namespace
     {
         unsigned removed = 0;
         WIN32_FIND_DATAA found{};
-        const std::string pattern = s_loader_dir + s_generation_prefix + "*" + k_generation_suffix;
+        const std::string pattern = s_loader_dir + s_generation_prefix + "*" + GENERATION_SUFFIX;
         const HANDLE search = FindFirstFileA(pattern.c_str(), &found);
         if (search == INVALID_HANDLE_VALUE)
         {
@@ -323,13 +337,13 @@ namespace
         }
     }
 
-    /* ---- release proofs ------------------------------------------------------------------------ */
+    // Release proofs.
 
     /**
      * @brief Waits for an address inside the retired image to stop belonging to any loaded module.
      * @details Address-based rather than name-based: it asks the loader the exact question that matters, and
      *          UNCHANGED_REFCOUNT keeps the probe from perturbing the count it measures. Probing a freed address is
-     *          safe - the call simply fails, which IS the answer.
+     *          safe: the call fails, which IS the answer.
      */
     [[nodiscard]] bool wait_for_unmap(const void *address) noexcept
     {
@@ -337,7 +351,7 @@ namespace
         {
             return false; // no probe address means no proof
         }
-        for (DWORD waited = 0; waited < k_unmap_timeout_ms; waited += k_unmap_poll_ms)
+        for (DWORD waited = 0; waited < UNMAP_TIMEOUT_MS; waited += UNMAP_POLL_MS)
         {
             HMODULE owner = nullptr;
             if (GetModuleHandleExW(
@@ -348,7 +362,7 @@ namespace
             {
                 return true;
             }
-            Sleep(k_unmap_poll_ms);
+            Sleep(UNMAP_POLL_MS);
         }
         return false;
     }
@@ -362,7 +376,7 @@ namespace
     {
         WheelHostLease probe = 0;
         const std::int32_t open_status =
-            s_wheel_host.open_lease(s_wheel_host.host_context, k_lease_probe_owner, generation_id, &probe);
+            s_wheel_host.open_lease(s_wheel_host.host_context, LEASE_PROBE_OWNER, generation_id, &probe);
         if (open_status != DMK_WHEELHOST_OK)
         {
             logf(
@@ -373,7 +387,7 @@ namespace
             return false;
         }
         const std::int32_t close_status =
-            s_wheel_host.close_lease(s_wheel_host.host_context, probe, k_lease_probe_owner, generation_id);
+            s_wheel_host.close_lease(s_wheel_host.host_context, probe, LEASE_PROBE_OWNER, generation_id);
         if (close_status != DMK_WHEELHOST_OK)
         {
             s_restart_required = true;
@@ -398,7 +412,7 @@ namespace
 
         // Shutdown removed every hook, so no NEW detour entry can occur. What it cannot drain is a game thread
         // already inside a per-frame detour body in this image. Those return in microseconds.
-        Sleep(k_post_shutdown_ms);
+        Sleep(POST_SHUTDOWN_MS);
 
         const HMODULE module = generation.module;
         const void *const address = generation.unmap_address;
@@ -421,7 +435,7 @@ namespace
         return true;
     }
 
-    /* ---- generation lifecycle ------------------------------------------------------------------- */
+    // Generation lifecycle.
 
     [[nodiscard]] CdReloadInitRequest make_request(std::uint64_t generation_id) noexcept
     {
@@ -482,12 +496,12 @@ namespace
 
         // Two identities, because they answer different questions and can disagree. file_identity is what this
         // loader mapped, read from the image on disk. revision is the logic DLL's self-reported source version, and
-        // its embedded build stamp only advances when mod_logic.cpp itself recompiles -- a build that changed any
+        // its embedded build stamp only advances when mod_logic.cpp itself recompiles - a build that changed any
         // other file relinks the DLL and leaves that stamp behind. Trust the file identity to tell new bytes from a
-        // replay; read revision as the version string it is.
+        // replay. Read revision as the version string it is.
         const char *const revision = generation.revision();
         logf(
-            "Generation %04u is live -- %s [%s]",
+            "Generation %04u is live - %s [%s]",
             s_generation_counter,
             revision != nullptr ? revision : "unknown",
             file_identity(generation.path).c_str()
@@ -534,9 +548,9 @@ namespace
                 "Generation %llu could not be proved gone; %u of %u retained images used",
                 static_cast<unsigned long long>(retiring.generation_id),
                 s_retained_generations,
-                k_max_retained_generations
+                MAX_RETAINED_GENERATIONS
             );
-            if (s_retained_generations >= k_max_retained_generations)
+            if (s_retained_generations >= MAX_RETAINED_GENERATIONS)
             {
                 s_restart_required = true;
                 log_msg("The retained-generation budget is exhausted; restart the game to reload again");
@@ -545,6 +559,11 @@ namespace
         return true;
     }
 
+    /**
+     * @brief Retires the live generation, promotes the staged build, and loads it.
+     * @details The order is fixed: the outgoing image must be proved gone before another maps over it. A refused
+     *          unload leaves the current generation live and returns without a load.
+     */
     void reload_once()
     {
         if (s_restart_required)
@@ -552,7 +571,7 @@ namespace
             log_msg("A previous reload could not be proved safe; restart the game");
             return;
         }
-        log_msg("Numpad 0 released -- reloading logic DLL...");
+        log_msg("Numpad 0 released - reloading logic DLL...");
         if (!unload_current())
         {
             return; // refused: the current generation stays live
@@ -560,19 +579,27 @@ namespace
         promote_from_staging();
         if (!load_generation())
         {
-            log_msg("Reload FAILED -- no generation is live");
+            log_msg("Reload FAILED - no generation is live");
         }
     }
 
+    /**
+     * @brief Control thread: sets the loader paths up, starts the wheel host, then polls the reload key.
+     * @details Runs the one-time setup in order (paths, logs, stale sweep, wheel host, first generation) before the
+     *          poll loop, so no generation maps before the resident host exists. On exit it calls the live
+     *          generation's Shutdown and never calls FreeLibrary.
+     * @param param The loader module handle, which names the directory every path derives from.
+     * @return Always 0. The thread exits when DLL_PROCESS_DETACH clears the run flag.
+     */
     DWORD WINAPI loader_thread(LPVOID param)
     {
         s_loader_dir = loader_dir(static_cast<HMODULE>(param));
-        s_log_prefix = std::string{"["} + k_mod_name + " Loader] ";
-        s_logic_dll_name = std::string{k_mod_name} + k_generation_suffix;
-        s_logic_pdb_name = std::string{k_mod_name} + ".logic.pdb";
-        s_generation_prefix = std::string{k_mod_name} + ".gen";
+        s_log_prefix = std::string{"["} + MOD_NAME + " Loader] ";
+        s_logic_dll_name = std::string{MOD_NAME} + GENERATION_SUFFIX;
+        s_logic_pdb_name = std::string{MOD_NAME} + ".logic.pdb";
+        s_generation_prefix = std::string{MOD_NAME} + ".gen";
 
-        const std::string loader_log = s_loader_dir + k_mod_name + "_Loader.log";
+        const std::string loader_log = s_loader_dir + MOD_NAME + "_Loader.log";
         std::snprintf(s_log_path, sizeof(s_log_path), "%s", loader_log.c_str());
         (void)DeleteFileA(s_log_path); // one log per game run, holding every generation
 
@@ -582,7 +609,7 @@ namespace
         // cannot tell "next generation" from "next game run", so owning the reset here gives one file per game run,
         // holding every generation within that run.
         {
-            const std::string mod_log = s_loader_dir + k_mod_name + ".log";
+            const std::string mod_log = s_loader_dir + MOD_NAME + ".log";
             (void)DeleteFileA(mod_log.c_str());
         }
 
@@ -616,14 +643,14 @@ namespace
         promote_from_staging();
         if (!load_generation())
         {
-            log_msg("Initial logic DLL load failed -- press Numpad 0 after rebuilding to retry");
+            log_msg("Initial logic DLL load failed - press Numpad 0 after rebuilding to retry");
         }
 
         bool was_key_down = false;
         while (s_running.load(std::memory_order_relaxed))
         {
-            Sleep(k_control_poll_ms);
-            const bool is_key_down = (GetAsyncKeyState(k_reload_vk) & 0x8000) != 0;
+            Sleep(CONTROL_POLL_MS);
+            const bool is_key_down = (GetAsyncKeyState(RELOAD_VK) & 0x8000) != 0;
             if (was_key_down && !is_key_down) // reload on the key-up edge so a held key cannot retrigger
             {
                 if (!s_reloading.exchange(true, std::memory_order_acq_rel))
@@ -635,9 +662,9 @@ namespace
             was_key_down = is_key_down;
         }
 
-        // Terminal path: the thread is exiting because s_running was cleared in DLL_PROCESS_DETACH. Only run the
-        // logic's Shutdown here; do NOT FreeLibrary. That path is joined by DllMain under the OS loader lock, which
-        // FreeLibrary also needs, so it would deadlock until the join times out.
+        // Terminal path: the thread exits because DLL_PROCESS_DETACH cleared s_running. Only run the logic's
+        // Shutdown here. Do NOT FreeLibrary. DllMain joins this thread under the OS loader lock, which FreeLibrary
+        // also needs, so that path deadlocks until the join times out.
         if (s_current.has_value() && s_current->shutdown != nullptr)
         {
             (void)s_current->shutdown();
@@ -646,6 +673,12 @@ namespace
     }
 } // namespace
 
+/**
+ * @brief Loader entry point: starts the control thread in the game process and joins it on detach.
+ * @param module This module's handle, forwarded to the control thread as its path root.
+ * @param reason The loader notification.
+ * @return Always TRUE. A sibling executable stays inert instead of failing its load.
+ */
 BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID)
 {
     if (reason == DLL_PROCESS_ATTACH)

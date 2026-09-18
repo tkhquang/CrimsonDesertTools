@@ -15,11 +15,13 @@ namespace Transmog::ColorOverride::PendingOverrides
         {
             std::string submesh_name;
             std::string token_name;
-            std::uint16_t token_id_cached = 0; // 0 means unresolved
-            std::uint8_t r = 0, g = 0, b = 0;
+            std::uint16_t token_id_cached{0}; // 0 means unresolved
+            std::uint8_t r{0};
+            std::uint8_t g{0};
+            std::uint8_t b{0};
         };
 
-        // Per-slot list. Linear scan on lookup -- entries per slot typically <= 30 (number of dyeable submesh-token
+        // Per-slot list. Linear scan on lookup - entries per slot typically <= 30 (number of dyeable submesh-token
         // pairs in an outfit), so a vector beats a hash map both for memory locality and code simplicity.
         std::array<std::vector<Entry>, k_slotCount> g_entries;
 
@@ -40,8 +42,13 @@ namespace Transmog::ColorOverride::PendingOverrides
         }
     } // namespace
 
-    void set(int slot, const std::string &submesh_name, const std::string &token_name, std::uint8_t r, std::uint8_t g,
-             std::uint8_t b) noexcept
+    void
+    set(int slot,
+        const std::string &submesh_name,
+        const std::string &token_name,
+        std::uint8_t r,
+        std::uint8_t g,
+        std::uint8_t b) noexcept
     {
         if (!valid_slot(slot))
             return;
@@ -49,7 +56,7 @@ namespace Transmog::ColorOverride::PendingOverrides
             return;
         std::lock_guard<std::mutex> lk(g_mtx);
         auto &vec = g_entries[static_cast<std::size_t>(slot)];
-        // Update-or-insert by (submesh, token_name) so a save + re-load of the same preset doesn't duplicate.
+        // Update-or-insert by (submesh, token_name) so a save + re-load of the same preset does not duplicate.
         for (auto &e : vec)
         {
             if (e.submesh_name == submesh_name && e.token_name == token_name)
@@ -71,8 +78,14 @@ namespace Transmog::ColorOverride::PendingOverrides
         g_slotHas[static_cast<std::size_t>(slot)].store(true, std::memory_order_release);
     }
 
-    bool lookup(int slot, const char *submesh_name, std::uint16_t token_id, std::uint8_t &r, std::uint8_t &g,
-                std::uint8_t &b) noexcept
+    bool lookup(
+        int slot,
+        const char *submesh_name,
+        std::uint16_t token_id,
+        std::uint8_t &r,
+        std::uint8_t &g,
+        std::uint8_t &b
+    ) noexcept
     {
         if (!valid_slot(slot) || submesh_name == nullptr || submesh_name[0] == '\0' || token_id == 0)
         {
@@ -88,14 +101,14 @@ namespace Transmog::ColorOverride::PendingOverrides
         auto &vec = g_entries[static_cast<std::size_t>(slot)];
         // One-shot semantics: the entry is erased on a successful match. The setter's substitute path calls
         // `set_override_active(true)` after a hit, so leaving the entry in place would re-enable override on every
-        // subsequent engine write -- making "Revert to default" and per-row un-tick impossible (the user toggles
+        // subsequent engine write - making "Revert to default" and per-row un-tick impossible (the user toggles
         // override off, the next engine write hits the same pending entry, and override flips back on). The user's RGB
         // lives in SwatchOverride after a successful apply; pending is the one-time bridge from JSON to live state, not
         // a permanent backing store.
         for (auto it = vec.begin(); it != vec.end(); ++it)
         {
             auto &e = *it;
-            // Lazy late-resolve of token id when the snapshot wasn't ready at insert time (early boot).
+            // Lazy late-resolve of token id when the snapshot was not ready at insert time (early boot).
             if (e.token_id_cached == 0)
                 e.token_id_cached = TokenTable::token_id_for_name(e.token_name.c_str());
             if (e.token_id_cached != token_id)
@@ -130,8 +143,13 @@ namespace Transmog::ColorOverride::PendingOverrides
         return false;
     }
 
-    bool lookup_any_slot(const char *submesh_name, std::uint16_t token_id, std::uint8_t &r, std::uint8_t &g,
-                         std::uint8_t &b) noexcept
+    bool lookup_any_slot(
+        const char *submesh_name,
+        std::uint16_t token_id,
+        std::uint8_t &r,
+        std::uint8_t &g,
+        std::uint8_t &b
+    ) noexcept
     {
         if (submesh_name == nullptr || submesh_name[0] == '\0' || token_id == 0)
         {
@@ -146,7 +164,7 @@ namespace Transmog::ColorOverride::PendingOverrides
             auto &vec = g_entries[s];
             for (auto &e : vec)
             {
-                // Lazy late-resolve of token id when the snapshot wasn't ready at insert time (early boot).
+                // Lazy late-resolve of token id when the snapshot was not ready at insert time (early boot).
                 if (e.token_id_cached == 0)
                     e.token_id_cached = TokenTable::token_id_for_name(e.token_name.c_str());
                 if (e.token_id_cached != token_id)
@@ -164,8 +182,14 @@ namespace Transmog::ColorOverride::PendingOverrides
         return false;
     }
 
-    void set_by_token_id(int slot, const std::string &submesh_name, std::uint16_t token_id, std::uint8_t r,
-                         std::uint8_t g, std::uint8_t b) noexcept
+    void set_by_token_id(
+        int slot,
+        const std::string &submesh_name,
+        std::uint16_t token_id,
+        std::uint8_t r,
+        std::uint8_t g,
+        std::uint8_t b
+    ) noexcept
     {
         if (!valid_slot(slot))
             return;
@@ -173,7 +197,7 @@ namespace Transmog::ColorOverride::PendingOverrides
             return;
         std::lock_guard<std::mutex> lk(g_mtx);
         auto &vec = g_entries[static_cast<std::size_t>(slot)];
-        // Update-or-insert by (submesh, token_id). Token name is left empty -- lookup_any_slot matches by
+        // Update-or-insert by (submesh, token_id). Token name is left empty - lookup_any_slot matches by
         // token_id_cached (already populated here), and save-to-JSON writes the token name from the picker's
         // SwatchEntry, so the round-trip stays consistent without us holding the name string here.
         for (auto &e : vec)

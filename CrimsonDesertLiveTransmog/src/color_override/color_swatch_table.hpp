@@ -1,4 +1,5 @@
-#pragma once
+#ifndef TRANSMOG_COLOR_OVERRIDE_COLOR_SWATCH_TABLE_HPP
+#define TRANSMOG_COLOR_OVERRIDE_COLOR_SWATCH_TABLE_HPP
 
 // Per-slot swatch table.
 //
@@ -20,7 +21,9 @@
 #include "color_override.hpp"
 #include "shared_state.hpp"
 
+#include <array>
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -51,8 +54,8 @@ namespace Transmog::ColorOverride::SwatchTable
         std::atomic<std::uint8_t> def_seen_mask{0}; // bit0=RGB, bit1=A
         std::atomic<bool> def_a_captured{false};
 
-        // Reinit-pruned ghost row. Set true by Reinit::Finalize on identities that didn't appear in all 3 capture
-        // passes. While true, the setter's substitute path bails on it.
+        // Reinit-pruned ghost row. Reinit::Finalize sets this true for an identity that the capture pass did not
+        // see. While it is true, the setter substitute path bails on the row.
         std::atomic<bool> frozen_hidden{false};
     };
 
@@ -65,8 +68,8 @@ namespace Transmog::ColorOverride::SwatchTable
      *
      * Layout is plain POD (no atomics) so picker code can read / write fields directly. The cross-thread races between
      * the game-thread setter and the UI thread are bounded:
-     *   * single-byte fields (r, g, b, override_active flags) -- hardware-atomic on x86, no tearing risk;
-     *   * multi-byte fields (token_id u16, submesh_stable_id u64, template_id u16) -- written once at row insertion and
+     *   * single-byte fields (r, g, b, override_active flags) - hardware-atomic on x86, no tearing risk;
+     *   * multi-byte fields (token_id u16, submesh_stable_id u64, template_id u16) - written once at row insertion and
      *     never mutated after, so reads cannot tear.
      */
     struct SwatchOverride
@@ -166,15 +169,13 @@ namespace Transmog::ColorOverride::SwatchTable
      * `submesh_name` + non-zero `token_id` + `override_active = true`. They are the authoritative "user wants this
      * slot's color on this submesh" record.
      *
-     * The publisher hook attributes matInsts to whichever slot's apply window is active when the engine re-binds them.
-     * The
-     * Chest carrier-hybrid byte-patch causes the engine to rebuild the entire character body mesh, so helm / boots /
-     * glove matInsts get re-bound DURING the Chest apply window and end up in `carrier_set[Chest]`. `resolve_slot()`
-     * would then return Chest for helm dye writes; the substitute path uses this helper to re-route to the slot the
-     * user actually saved the placeholder in.
+     * The publisher hook attributes a matInst to whichever slot apply window is open when the engine re-binds it. The
+     * engine rebuilds the character body mesh in one batch, so helm, boots and glove matInsts are re-bound DURING the
+     * Chest apply window and land in `carrier_set[Chest]`. `resolve_slot()` then answers Chest for a helm dye write.
+     * The substitute path uses this helper to re-route to the slot the user actually saved the placeholder in.
      *
      * Empty submesh_name bails, token_id 0 bails. Lowest-index slot wins on duplicates (deterministic). Linear scan,
-     * `k_slotCount * k_dyeSwatchesPerSlot` rows worst case -- cheap enough for the hot path.
+     * `k_slotCount * k_dyeSwatchesPerSlot` rows worst case - cheap enough for the hot path.
      */
     int find_placeholder_slot(const char *submesh_name, std::uint16_t token_id) noexcept;
 
@@ -186,10 +187,10 @@ namespace Transmog::ColorOverride::SwatchTable
      *
      * Best-effort: returns true if a placeholder was promoted, false if no matching placeholder exists (already
      * promoted, never seeded, or arguments invalid). The slot-agnostic pending-match path in the setter substitute
-     * calls this so its hits enrich the row's metadata as a side effect, even though the actual substitution doesn't
+     * calls this so its hits enrich the row's metadata as a side effect, even though the actual substitution does not
      * consult the row.
      *
-     * Safe to call concurrently from multiple setter threads -- all writes are atomic, and last-writer-wins is fine
+     * Safe to call concurrently from multiple setter threads - all writes are atomic, and last-writer-wins is fine
      * because every caller writes the same matInst's identity.
      */
     bool promote_placeholder_identity(
@@ -234,7 +235,7 @@ namespace Transmog::ColorOverride::SwatchTable
     // Reinit-aware accessors
 
     /**
-     * Wipe ALL rows + override choices for slot. Use when the transmog target item changes so stale identities don't
+     * Wipe ALL rows + override choices for slot. Use when the transmog target item changes so stale identities do not
      * bleed into the new item's capture set. Also clears the reinit lock
      * + capture-window state.
      */
@@ -249,7 +250,7 @@ namespace Transmog::ColorOverride::SwatchTable
 
     /**
      * Clear the explicit-wipe flag after the empty state has been persisted into the active preset. Called by the
-     * snapshot path so subsequent saves on the same slot don't keep re-flagging an already-empty preset.
+     * snapshot path so subsequent saves on the same slot do not keep re-flagging an already-empty preset.
      */
     void clear_explicit_wipe_flag(int slot) noexcept;
 
@@ -273,10 +274,10 @@ namespace Transmog::ColorOverride::SwatchTable
      */
     struct SwatchIdentity
     {
-        std::uint32_t hash;
-        std::uint64_t stable;
-        std::uint16_t tpl;
-        std::uint16_t token;
+        std::uint32_t hash{};
+        std::uint64_t stable{};
+        std::uint16_t tpl{};
+        std::uint16_t token{};
         bool operator==(const SwatchIdentity &o) const noexcept
         {
             return hash == o.hash && stable == o.stable && tpl == o.tpl && token == o.token;
@@ -287,7 +288,7 @@ namespace Transmog::ColorOverride::SwatchTable
 
     /**
      * Apply the keep-set computed by Reinit::Finalize. Rows whose identity matches an entry in `keep` get cleared of
-     * `frozen_hidden` + `active_this_apply=true`; rows that don't match get `frozen_hidden=true` +
+     * `frozen_hidden` + `active_this_apply=true`; rows that do not match get `frozen_hidden=true` +
      * `active_this_apply=false`. Returns (kept_count, hidden_count).
      */
     struct KeepResult
@@ -301,7 +302,7 @@ namespace Transmog::ColorOverride::SwatchTable
     // Identity is keyed by `(submesh_name, token_name)`, both of which survive engine token-id rebucketing and game
     // patches:
     //
-    //   * `submesh_name` is captured from `SkinnedMeshMaterialWrapper +0x28` -- a pac asset name, stable across game
+    //   * `submesh_name` is captured from `SkinnedMeshMaterialWrapper +0x28` - a pac asset name, stable across game
     //     sessions AND patches.
     //   * `token_name` is the shader-property reflection name (e.g. `_dyeingColorMaskR`); the engine's string interner
     //     re-buckets numeric ids each session, but the names are baked into engine code.
@@ -315,7 +316,7 @@ namespace Transmog::ColorOverride::SwatchTable
     //
     // Compact triple used by both the "user override" and "captured default" persistence paths. The semantic meaning of
     // r/g/b depends on which list the entry lives in:
-    //   * swatch_overrides: r/g/b is the user-picked colour; the substitute path writes this when override_active is
+    //   * swatch_overrides: r/g/b is the user-picked color; the substitute path writes this when override_active is
     //     true at load time.
     //   * swatch_defaults: r/g/b is the engine-captured default (the value the engine would have written naturally).
     struct PersistEntry
@@ -326,15 +327,15 @@ namespace Transmog::ColorOverride::SwatchTable
     };
 
     /**
-     * Snapshot every row the user has explicitly picked a colour for (override_active==true). Each entry's r/g/b is the
+     * Snapshot every row the user has explicitly picked a color for (override_active==true). Each entry's r/g/b is the
      * user's pick. Used to populate the "swatch_overrides" JSON section.
      */
     std::vector<PersistEntry> get_persistable_overrides(int slot) noexcept;
 
     /**
-     * Snapshot every row with a valid identity (submesh+token name resolvable). r/g/b is NOT populated -- the palette
+     * Snapshot every row with a valid identity (submesh+token name resolvable). r/g/b is NOT populated - the palette
      * captures only the (submesh, token) structure so the JSON section can be a flat list of token names per submesh.
-     * Used to populate the "swatch_palette" JSON section -- the per-slot list of rows the user has seen, used to
+     * Used to populate the "swatch_palette" JSON section - the per-slot list of rows the user has seen, used to
      * re-seed placeholder rows on preset switch back. Engine defaults are NOT persisted; they get re-captured live via
      * capture_default_if_unset.
      */
@@ -358,7 +359,7 @@ namespace Transmog::ColorOverride::SwatchTable
      *      `ovr.r/g/b` and `override_active = true`. If no matching palette row exists (an override was saved without a
      *      palette entry), allocate a new placeholder.
      *
-     * The slot is left LOCKED after seeding -- subsequent unrecognized submeshes still fall through; only matched
+     * The slot is left LOCKED after seeding - subsequent unrecognized submeshes still fall through; only matched
      * identities get promoted on engine writes. Returns the number of rows seeded.
      */
     std::size_t populate_from_persisted(
@@ -390,7 +391,7 @@ namespace Transmog::ColorOverride::SwatchTable
     void dump_all_slots() noexcept;
 
     /**
-     * Enforce the strict-init default: lock every slot so setter writes can't add rows outside an explicit Reinit
+     * Enforce the strict-init default: lock every slot so setter writes cannot add rows outside an explicit Reinit
      * cycle. Called once from `ColorOverride::init()` after construction, before PresetManager::load() runs.
      * Idempotent.
      */
@@ -398,13 +399,13 @@ namespace Transmog::ColorOverride::SwatchTable
 
     /**
      * Diagnostic counts for a slot:
-     *   total            -- live rows in g_table (count)
-     *   promoted         -- rows with non-zero content_hash (real
+     *   total            - live rows in g_table (count)
+     *   promoted         - rows with non-zero content_hash (real
      *                       live identity, substitute can fire)
-     *   placeholders     -- rows with content_hash == 0 (seeded by
+     *   placeholders     - rows with content_hash == 0 (seeded by
      *                       populate_from_persisted, waiting for the engine to write a matching (submesh, token) pair)
-     *   active_overrides -- rows where SwatchOverride::override_active
-     *                       is true (user has picked a colour)
+     *   active_overrides - rows where SwatchOverride::override_active
+     *                       is true (user has picked a color)
      */
     struct SlotCounts
     {
@@ -438,3 +439,5 @@ namespace Transmog::ColorOverride
     bool dye_advanced_view_get() noexcept;
     void dye_advanced_view_set(bool v) noexcept;
 } // namespace Transmog::ColorOverride
+
+#endif // TRANSMOG_COLOR_OVERRIDE_COLOR_SWATCH_TABLE_HPP

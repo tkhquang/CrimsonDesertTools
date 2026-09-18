@@ -1,4 +1,5 @@
-#pragma once
+#ifndef TRANSMOG_COLOR_OVERRIDE_ONE_SHOT_LOG_SET_HPP
+#define TRANSMOG_COLOR_OVERRIDE_ONE_SHOT_LOG_SET_HPP
 
 // Bounded-capacity lock-free dedup set for one-shot diagnostic logs.
 //
@@ -7,7 +8,7 @@
 //
 // Trade-offs (intentional, suit diagnostic logging only):
 //   * SCAN-then-RESERVE is NOT atomic. Two threads can both miss in the scan and both reserve a slot for the same value
-//     -- net effect is a duplicate log line, never a corruption. Acceptable for one-shot logs; do NOT use for state
+//     - net effect is a duplicate log line, never a corruption. Acceptable for one-shot logs; do NOT use for state
 //     that must be unique.
 //   * `compare_exchange_weak` is used for the reserve step (no `fetch_add + rollback-on-overflow` dance). Once
 //     saturated, all further inserts cleanly return false.
@@ -26,7 +27,7 @@ namespace Transmog::ColorOverride
     public:
         /**
          * Try to record `value` as a first-time sighting. Returns true only for the first caller per distinct value
-         * (modulo the scan-vs-reserve race noted above -- duplicates are possible but bounded).
+         * (modulo the scan-vs-reserve race noted above - duplicates are possible but bounded).
          */
         bool insert_unique(T value) noexcept
         {
@@ -66,7 +67,7 @@ namespace Transmog::ColorOverride
         }
 
         /**
-         * Current size (diagnostic only -- may transiently lag concurrent inserts).
+         * Current size (diagnostic only - may transiently lag concurrent inserts).
          */
         std::size_t size() const noexcept { return count_.load(std::memory_order_acquire); }
 
@@ -75,3 +76,5 @@ namespace Transmog::ColorOverride
         std::atomic<std::size_t> count_{0};
     };
 } // namespace Transmog::ColorOverride
+
+#endif // TRANSMOG_COLOR_OVERRIDE_ONE_SHOT_LOG_SET_HPP

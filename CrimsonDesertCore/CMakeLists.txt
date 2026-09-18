@@ -2,21 +2,15 @@ cmake_minimum_required(VERSION 3.28)
 
 project(CrimsonDesertCore VERSION 0.1.0 LANGUAGES CXX)
 
-# ---------------------------------------------------------------------------
-# Shared library for Crimson Desert mods.
-#
-# Consumers (CrimsonDesertEquipHide, CrimsonDesertLiveTransmog) pull this in
-# via add_subdirectory() from the monorepo root and link against the
-# CrimsonDesertCore::core target. Core owns DetourModKit as a submodule
-# under external/DetourModKit and re-exports it via PUBLIC link, so
-# consumers do not need their own DMK checkout.
-# ---------------------------------------------------------------------------
+# Shared library for Crimson Desert mods. Each mod adds this directory from its own CMakeLists and links
+# CrimsonDesertCore::core. Core owns DetourModKit as a submodule under external/DetourModKit and re-exports it via
+# PUBLIC link, so a consumer needs no DMK checkout of its own.
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# --- DetourModKit (submodule, owned by Core) ---
+# DetourModKit submodule, owned by Core.
 if(NOT TARGET DetourModKit)
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/external/DetourModKit/CMakeLists.txt")
         message(STATUS "CrimsonDesertCore: configuring DetourModKit from external/DetourModKit")
@@ -37,13 +31,11 @@ add_library(CrimsonDesertCore STATIC
     src/indexed_string_table.cpp
 )
 
-# Shared dev-build hot-reload loader. A consumer that builds the dev two-DLL
-# variant references the source directly from its own
-# add_library(..._loader SHARED ...) call, adds the dev directory to its
-# include path for protocol.h, and supplies the two CDCORE_LOADER_* macros via
-# target_compile_definitions. The loader links DetourModKit::WheelHost ONLY: a
-# second full-archive instance would give it its own hook ledger and pin the
-# logic DLL again, which is exactly the arrangement DMK's unload proofs exclude.
+# Shared dev-build hot-reload loader. A consumer that builds the dev two-DLL variant references the source directly
+# from its own add_library(..._loader SHARED ...) call, adds the dev directory to its include path for protocol.h, and
+# supplies the two CDCORE_LOADER_* macros via target_compile_definitions. The loader links DetourModKit::WheelHost
+# ONLY: a second full-archive instance gives the loader its own hook ledger and pins the logic DLL again, which is
+# exactly the arrangement DMK's unload proofs exclude.
 set(CDCORE_DEV_LOADER_SRC
     "${CMAKE_CURRENT_SOURCE_DIR}/dev/mod_loader.cpp"
     CACHE INTERNAL "Path to CrimsonDesertCore shared dev loader source")
@@ -59,13 +51,9 @@ target_include_directories(CrimsonDesertCore PUBLIC
 
 target_link_libraries(CrimsonDesertCore PUBLIC DetourModKit)
 
-# psapi is required by dmk_glue.cpp's EnumProcessModules /
-# GetModuleFileNameExW path used to detect sibling-mod presence.
-if(WIN32)
-    target_link_libraries(CrimsonDesertCore PRIVATE psapi)
-endif()
-
-target_compile_options(CrimsonDesertCore PRIVATE /W4)
+# Core objects land in a mod DLL that links with DetourModKit's exported /GUARD:CF, so they carry the matching
+# /guard:cf instrumentation.
+target_compile_options(CrimsonDesertCore PRIVATE /W4 /guard:cf)
 
 if(WIN32)
     target_compile_definitions(CrimsonDesertCore PRIVATE

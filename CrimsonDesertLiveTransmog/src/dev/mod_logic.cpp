@@ -8,8 +8,8 @@
  *
  *          Shutdown()'s return value is an UNMAP AUTHORIZATION, not a status. Returning success while a detour body
  *          in this image is still reachable is what turns a reload into a stale image and then a crash. The verdict
- *          follows DetourModKit's hot-reload guide: drain, clear hooks newest-first, drop the Session, then read
- *          module pins AS STATE.
+ *          follows the DetourModKit hot-reload guide: drain, clear hooks newest-first, drop the Session, then
+ *          read module pins AS STATE.
  *
  *          "As state" is the part that matters. A DELTA of diagnostics::total_intentional_leaks() across teardown
  *          reads zero for a wheel keepalive, because that pin is booked at install time, so it would authorize
@@ -29,6 +29,7 @@
 
 #include <DetourModKit/async_logger_config.hpp>
 #include <DetourModKit/diagnostics.hpp>
+#include <DetourModKit/filesystem.hpp>
 #include <DetourModKit/logger.hpp>
 #include <DetourModKit/session.hpp>
 
@@ -38,6 +39,7 @@
 #include <cstdio>
 #include <cstring>
 #include <optional>
+#include <string>
 #include <utility>
 
 namespace
@@ -50,36 +52,33 @@ namespace
 
     /**
      * @brief Appends one line to the LOADER's log, which outlives every generation.
-     * @details The unload verdict is computed after ~Session, so DMK::log() is gone by then. Sending it only to
-     *          OutputDebugStringA hides it from anyone without a debugger attached, which is exactly how a refusal
-     *          loop goes unexplained.
+     * @details The unload verdict is computed after ~Session, so DMK::log() is gone by then. A line sent only to
+     *          OutputDebugStringA stays hidden from anyone without a debugger attached, which is exactly how a
+     *          refusal loop goes unexplained.
+     * @note get_runtime_directory() allocates, and catch(...) handlers call this with an exception already in
+     *       flight, so the whole path build runs inside try/catch to hold the noexcept boundary.
      */
     void append_loader_log(const char *line) noexcept
     {
-        char module_path[MAX_PATH]{};
-        HMODULE self = nullptr;
-        if (GetModuleHandleExW(
-                GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                reinterpret_cast<LPCWSTR>(&append_loader_log),
-                &self
-            ) == 0 ||
-            GetModuleFileNameA(self, module_path, MAX_PATH) == 0)
+        std::wstring log_path;
+        try
+        {
+            log_path = DMK::filesystem::get_runtime_directory();
+            if (log_path.empty() || (log_path.back() != L'\\' && log_path.back() != L'/'))
+                log_path.push_back(L'\\');
+            // MOD_NAME is ASCII, so a widening copy keeps one spelling of the mod name in the project.
+            for (const char *ch = Transmog::MOD_NAME; *ch != '\0'; ++ch)
+                log_path.push_back(static_cast<wchar_t>(static_cast<unsigned char>(*ch)));
+            log_path += L"_Loader.log";
+        }
+        catch (...)
         {
             OutputDebugStringA(line);
             return;
         }
-        char *const slash = std::strrchr(module_path, '\\');
-        if (slash == nullptr)
-        {
-            OutputDebugStringA(line);
-            return;
-        }
-        slash[1] = '\0';
 
-        char log_path[MAX_PATH]{};
-        (void)std::snprintf(log_path, sizeof(log_path), "%s%s_Loader.log", module_path, Transmog::MOD_NAME);
-        const HANDLE file = CreateFileA(
-            log_path,
+        const HANDLE file = CreateFileW(
+            log_path.c_str(),
             FILE_APPEND_DATA,
             FILE_SHARE_READ | FILE_SHARE_WRITE,
             nullptr,
@@ -161,8 +160,8 @@ extern "C"
         // Guard the whole body and return zero on any failure.
         try
         {
-            DMK::AsyncLoggerConfig asyncCfg;
-            asyncCfg.overflow_policy = DMK::OverflowPolicy::SyncFallback;
+            DMK::AsyncLoggerConfig async_cfg;
+            async_cfg.overflow_policy = DMK::OverflowPolicy::SyncFallback;
 
             // LogOpenMode::Append is what keeps a reload diagnosable. Under the default Truncate, this generation's
             // first sink open erases the PREVIOUS generation's teardown records, which are the only lines that
@@ -173,7 +172,7 @@ extern "C"
                     .log_file = Transmog::LOG_FILE,
                     .game_process_name = Transmog::GAME_PROCESS_NAME,
                     .instance_mutex_prefix = Transmog::INSTANCE_MUTEX_PREFIX,
-                    .log = asyncCfg,
+                    .log = async_cfg,
                     .log_open_mode = DMK::LogOpenMode::Append,
                     .log_source_stamp_mode = DMK::LogSourceStampMode::at_or_below(DMK::LogLevel::Trace),
                 }
@@ -186,7 +185,7 @@ extern "C"
             s_session.emplace(std::move(*opened));
             s_hook_restore_failed = false;
 
-            DMK::log().info("[DEV] Init generation {} -- {}", request->generation_id, Revision());
+            DMK::log().info("[DEV] Init generation {} - {}", request->generation_id, Revision());
             Transmog::Version::log_version_info();
 
             if (auto ready = Transmog::init(*s_session, request->wheel_host); !ready)

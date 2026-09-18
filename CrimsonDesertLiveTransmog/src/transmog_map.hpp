@@ -1,4 +1,5 @@
-#pragma once
+#ifndef TRANSMOG_TRANSMOG_MAP_HPP
+#define TRANSMOG_TRANSMOG_MAP_HPP
 
 #include "shared_state.hpp"
 
@@ -9,35 +10,40 @@ namespace Transmog
 {
     // Equip type hashes (Jenkins hashlittle)
 
-    inline constexpr uint32_t k_hashHelm = 0x750BE4D5;
-    inline constexpr uint32_t k_hashUpperbody = 0x9EFCCE6C;
-    inline constexpr uint32_t k_hashHand = 0xD8434271;
-    inline constexpr uint32_t k_hashFoot = 0xCCEDA11E;
-    inline constexpr uint32_t k_hashLowerbody = 0xE77B2539;
-    inline constexpr uint32_t k_hashCloak = 0x4A02EE45;
+    inline constexpr std::uint32_t k_hashHelm = 0x750BE4D5;
+    inline constexpr std::uint32_t k_hashUpperbody = 0x9EFCCE6C;
+    inline constexpr std::uint32_t k_hashHand = 0xD8434271;
+    inline constexpr std::uint32_t k_hashFoot = 0xCCEDA11E;
+    inline constexpr std::uint32_t k_hashLowerbody = 0xE77B2539;
+    inline constexpr std::uint32_t k_hashCloak = 0x4A02EE45;
 
-    std::optional<TransmogSlot> slot_from_equip_hash(uint32_t hash);
-    const char *slot_name(TransmogSlot slot);
+    /** @brief Map an equip type hash to a TransmogSlot. Returns std::nullopt for an unmapped hash. */
+    [[nodiscard]] std::optional<TransmogSlot> slot_from_equip_hash(std::uint32_t hash) noexcept;
 
-    bool is_slot_active(TransmogSlot slot);
+    /** @brief Human-readable name for a TransmogSlot. Returns "Unknown" for an out-of-range slot. */
+    [[nodiscard]] const char *slot_name(TransmogSlot slot) noexcept;
+
+    /** @brief True when the slot carries a live transmog mapping. */
+    [[nodiscard]] bool is_slot_active(TransmogSlot slot) noexcept;
+
     /** @brief Look up target item ID for a given equip type hash. Returns 0 if no swap. */
-    uint16_t get_target_item_id(uint32_t equipTypeHash);
+    [[nodiscard]] std::uint16_t get_target_item_id(std::uint32_t equipTypeHash) noexcept;
 
     /** @brief Map game slot ID (from VisualEquipChange a2) to TransmogSlot. */
-    std::optional<TransmogSlot> slot_from_game_slot(int16_t gameSlotId);
+    [[nodiscard]] std::optional<TransmogSlot> slot_from_game_slot(std::int16_t gameSlotId) noexcept;
 
     /** @brief Human-readable name for a game slot ID. */
-    const char *game_slot_name(int16_t gameSlotId);
+    [[nodiscard]] const char *game_slot_name(std::int16_t gameSlotId) noexcept;
 
     /** @brief TransmogSlot -> game slot ID. Returns -1 if unmapped. */
-    int16_t game_slot_from_transmog(TransmogSlot slot);
+    [[nodiscard]] std::int16_t game_slot_from_transmog(TransmogSlot slot) noexcept;
 
     /** @brief Look up target item ID by game slot ID. Returns 0 if no swap. */
-    uint16_t get_target_item_id_by_slot(int16_t gameSlotId);
+    [[nodiscard]] std::uint16_t get_target_item_id_by_slot(std::int16_t gameSlotId) noexcept;
 
     /**
-     * @brief True iff two slots share an item picker -- they accept the same items and only differ in which auth-table
-     *        slot tag gets the visual.
+     * @brief True iff two slots share an item picker. Such slots accept the same items and only differ in which
+     *        auth-table slot tag gets the visual.
      *
      * Paired slots in Crimson Desert (engine descriptors share typeCode across both halves of each pair, see
      * ItemNameTable::category_of):
@@ -45,9 +51,11 @@ namespace Transmog
      *   - Ring1 + Ring2        (typeCode 0x0A)
      *   - MainHand + OffHand (typeCode 0x00)
      *
-     * Returns true for any (a, a) too -- a slot always shares with itself. Used by the item picker so e.g. opening the
-     * Ring2 popup shows every ring even though `category_of` returns Ring1 for them.
+     * Returns true for any (a, a) too. A slot always shares with itself. The item picker uses this so that opening
+     * the Ring2 popup shows every ring even though `category_of` returns Ring1 for them.
      */
-    bool slots_share_picker(TransmogSlot a, TransmogSlot b);
+    [[nodiscard]] bool slots_share_picker(TransmogSlot a, TransmogSlot b) noexcept;
 
 } // namespace Transmog
+
+#endif // TRANSMOG_TRANSMOG_MAP_HPP

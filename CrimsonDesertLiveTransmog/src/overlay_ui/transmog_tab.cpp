@@ -32,45 +32,46 @@ namespace Transmog
         ImGui::SameLine();
         ui_text_disabled("v%s", MOD_VERSION);
 
-        // Standalone-only UI scale combo. Stacks on the init-time auto-DPI baseline. Session-only -- not persisted.
+        // Standalone-only UI scale combo. Stacks on the init-time auto-DPI baseline. Session-only - not persisted.
         if (s_standaloneMode)
         {
-            static constexpr float kScales[] = {0.5f, 0.75f, 0.85f, 1.0f, 1.25f, 1.5f, 1.75f, 2.0f};
-            static constexpr const char *kLabels[] = {"0.5x",  "0.75x", "0.85x", "1.0x",
-                                                      "1.25x", "1.5x",  "1.75x", "2.0x"};
-            constexpr int kCount = static_cast<int>(sizeof(kScales) / sizeof(kScales[0]));
+            static constexpr float scale_values[] = {0.5f, 0.75f, 0.85f, 1.0f, 1.25f, 1.5f, 1.75f, 2.0f};
+            static constexpr const char *labels[] =
+                {"0.5x", "0.75x", "0.85x", "1.0x", "1.25x", "1.5x", "1.75x", "2.0x"};
+            constexpr int scale_count = static_cast<int>(sizeof(scale_values) / sizeof(scale_values[0]));
             int sel = 3; // default points at 1.0x
-            for (int i = 0; i < kCount; ++i)
-                if (s_uiScale == kScales[i])
+            for (int i = 0; i < scale_count; ++i)
+                if (s_uiScale == scale_values[i])
                 {
                     sel = i;
                     break;
                 }
             // Separate from the version/mod-title group with a gap + visible "UI Scale" label so users discover the
             // control. Combo width must accommodate the longest label ("1.75x") plus the arrow glyph; scales with font
-            // size so the value text isn't clipped at any UI-scale step.
+            // size so the value text is not clipped at any UI-scale step.
             ImGui::SameLine(0.0f, 24.0f);
             ui_text("UI Scale:");
             ImGui::SameLine();
             ImGui::SetNextItemWidth(ImGui::GetFontSize() * 6.0f);
-            if (ImGui::Combo("##uiScale", &sel, kLabels, kCount, -1))
-                s_uiScale = kScales[sel];
+            if (ImGui::Combo("##uiScale", &sel, labels, scale_count, -1))
+                s_uiScale = scale_values[sel];
             if (ImGui::IsItemHovered())
-                ui_tooltip("UI scale (standalone overlay).\n"
-                           "Stacks on top of the auto-resolution scale.\n"
-                           "Glyphs may blur at higher values.");
+                ui_tooltip(
+                    "UI scale (standalone overlay).\n"
+                    "Stacks on top of the auto-resolution scale.\nGlyphs may blur at higher values."
+                );
         }
 
         if (pending)
         {
             ImGui::SameLine();
-            ui_text_colored(ImVec4(1.0f, 0.85f, 0.2f, 1.0f), "  [PENDING -- click Apply All]");
+            ui_text_colored(ImVec4(1.0f, 0.85f, 0.2f, 1.0f), "  [PENDING - click Apply All]");
         }
 
         if (pendingSave)
         {
             ImGui::SameLine();
-            ui_text_colored(ImVec4(1.0f, 0.55f, 0.25f, 1.0f), "  [UNSAVED -- click Save]");
+            ui_text_colored(ImVec4(1.0f, 0.55f, 0.25f, 1.0f), "  [UNSAVED - click Save]");
         }
 
         ImGui::Separator();
@@ -90,22 +91,19 @@ namespace Transmog
 
         ImGui::Checkbox("Instant Apply", &s_autoApply);
         if (ImGui::IsItemHovered())
-            ui_tooltip("Apply changes immediately on hover, "
-                       "pick, toggle, and clear -- no Apply All "
-                       "needed");
+            ui_tooltip("Apply changes immediately on hover, pick, toggle, and clear - no Apply All needed");
         ImGui::SameLine();
         ui_text_disabled("(?)");
         if (ImGui::IsItemHovered())
-            ui_tooltip("Prefab picker (Prefabs checkbox inside the popup) "
-                       "does NOT honour Instant Apply this release. Click "
-                       "a prefab row to commit it; hover-preview is items-"
-                       "only for now.");
+            ui_tooltip(
+                "Prefab picker (Prefabs checkbox inside the popup) does not honor Instant Apply. Click a prefab "
+                "row to commit it. Hover-preview works on items only."
+            );
 
         ImGui::SameLine();
         ImGui::Checkbox("Keep Search Text", &s_keepSearchText);
         if (ImGui::IsItemHovered())
-            ui_tooltip("Preserve the search field when "
-                       "re-opening a slot picker");
+            ui_tooltip("Preserve the search field when re-opening a slot picker");
 
         ImGui::Separator();
     }
@@ -118,24 +116,24 @@ namespace Transmog
         //
         // The controlled character is auto-detected by CDCore's appearance-config classifier and the worker's
         // load-detect thread keeps the active preset bound to whoever the user controls in-game. This dropdown is
-        // therefore an editing override -- picking a non-controlled character pins the editor onto that character's
+        // therefore an editing override - picking a non-controlled character pins the editor onto that character's
         // preset list while the body on screen remains the controlled one (cross-body apply).
 
-        // Fixed stack buffer -- the game has a small, closed roster of playable characters (Kliff / Damiane / Oongka at
-        // time of writing). k_maxChars is oversized so adding a new playable character later doesn't need a code change
+        // Fixed stack buffer - the game has a small, closed roster of playable characters (Kliff / Damiane / Oongka at
+        // time of writing). max_chars is oversized so adding a new playable character later does not need a code change
         // here beyond adding its preset in the JSON.
-        constexpr std::size_t k_maxChars = 8;
+        constexpr std::size_t max_chars = 8;
         const auto names = pm.character_names();
-        const std::size_t n = (names.size() < k_maxChars) ? names.size() : k_maxChars;
+        const std::size_t n = (names.size() < max_chars) ? names.size() : max_chars;
         if (n > 0)
         {
-            const char *cstrs[k_maxChars]{};
-            int selectedIdx = 0;
+            const char *cstrs[max_chars]{};
+            int selected_idx = 0;
             for (std::size_t i = 0; i < n; ++i)
             {
                 cstrs[i] = names[i].c_str();
                 if (names[i] == pm.editing_character())
-                    selectedIdx = static_cast<int>(i);
+                    selected_idx = static_cast<int>(i);
             }
 
             // Dropdown writes the editing character only. The pin engages automatically when editing differs from
@@ -143,9 +141,9 @@ namespace Transmog
             // controlled body wears the editing character's preset items via PWS / carrier substitution. Gendered or
             // character-specific items may not have a renderable variant on the controlled body and silently no-op.
             ImGui::SetNextItemWidth(200.0f);
-            if (ImGui::Combo("Character##char_picker", &selectedIdx, cstrs, static_cast<int>(n), -1))
+            if (ImGui::Combo("Character##char_picker", &selected_idx, cstrs, static_cast<int>(n), -1))
             {
-                const auto &pick = names[static_cast<std::size_t>(selectedIdx)];
+                const auto &pick = names[static_cast<std::size_t>(selected_idx)];
                 if (pick != pm.editing_character())
                 {
                     pm.set_editing_character(pick);
@@ -167,18 +165,20 @@ namespace Transmog
             if (ImGui::IsItemHovered())
             {
                 if (pm.editing_pinned())
-                    ui_tooltip("Editing pinned: this character's preset is "
-                               "loaded into the slot rows, but the body on "
-                               "screen is whoever you control in-game. "
-                               "Cross-body apply -- some items (gender-"
-                               "specific, weapons) may not render. Pick "
-                               "the controlled character to unpin.");
+                    ui_tooltip(
+                        "Editing pinned: this character's preset is "
+                        "loaded into the slot rows, but the body on "
+                        "screen is whoever you control in-game. "
+                        "Cross-body apply - some items (gender-"
+                        "specific, weapons) may not render. Pick the controlled character to unpin."
+                    );
                 else
-                    ui_tooltip("Pick a different character to edit their "
-                               "preset while controlling someone else. "
-                               "The controlled body will wear the picked "
-                               "character's preset items (cross-body "
-                               "apply -- partial coverage expected).");
+                    ui_tooltip(
+                        "Pick a different character to edit their "
+                        "preset while controlling someone else. "
+                        "The controlled body will wear the picked "
+                        "character's preset items (cross-body apply - partial coverage expected)."
+                    );
             }
             if (pm.editing_pinned())
             {
@@ -198,62 +198,63 @@ namespace Transmog
                     pm.save();
                 }
                 if (ImGui::IsItemHovered())
-                    ui_tooltip("Drop the editing pin and follow the "
-                               "controlled character again.");
+                    ui_tooltip("Drop the editing pin and follow the controlled character again.");
             }
 
             // Body-kind override. Lets body-swap mod users mark e.g. Kliff as Female so the picker shows the
             // female-body-token pool. "Auto" defers to the hardcoded default (Kliff/Oongka = Male, Damiane = Female).
             //
-            // Saved per character in presets.json. Only affects the picker filter -- no effect on apply / render
-            // behaviour.
-            static constexpr const char *k_bodyItems[] = {
+            // Saved per character in presets.json. Only affects the picker filter - no effect on apply / render
+            // behavior.
+            static constexpr const char *body_items[] = {
                 "Auto",
                 "Male",
                 "Female",
                 "Both",
             };
-            constexpr int k_bodyCount = static_cast<int>(sizeof(k_bodyItems) / sizeof(k_bodyItems[0]));
+            constexpr int body_count = static_cast<int>(sizeof(body_items) / sizeof(body_items[0]));
 
-            const std::string currentBody = pm.body_kind_of(pm.editing_character());
-            int bodyIdx = 0;
-            for (int i = 0; i < k_bodyCount; ++i)
+            const std::string current_body = pm.body_kind_of(pm.editing_character());
+            int body_idx = 0;
+            for (int i = 0; i < body_count; ++i)
             {
-                if (currentBody == k_bodyItems[i])
+                if (current_body == body_items[i])
                 {
-                    bodyIdx = i;
+                    body_idx = i;
                     break;
                 }
             }
             ImGui::SameLine(0.0f, 24.0f);
             ImGui::SetNextItemWidth(140.0f);
-            if (ImGui::Combo("Body##body_kind", &bodyIdx, k_bodyItems, k_bodyCount, -1))
+            if (ImGui::Combo("Body##body_kind", &body_idx, body_items, body_count, -1))
             {
-                pm.set_body_kind_of(pm.editing_character(), k_bodyItems[bodyIdx]);
+                pm.set_body_kind_of(pm.editing_character(), body_items[body_idx]);
             }
             if (ImGui::IsItemHovered())
-                ui_tooltip("Override the body type used for picker "
-                           "filtering. Use if you run a body-swap "
-                           "mod that changes this character's "
-                           "skeleton (e.g. Kliff -> Female).");
+                ui_tooltip(
+                    "Override the body type used for picker "
+                    "filtering. Use if you run a body-swap "
+                    "mod that changes this character's skeleton (e.g. Kliff -> Female)."
+                );
 
             // Apply-to-selected-character toggle. Determines whether overlay-UI edits on a pinned non-controlled
             // character render on that character's body or cross-apply onto the controlled body. Persists via [General]
             // ApplyToSelectedCharacter in the INI.
-            bool applyToEditing = flag_apply_to_editing().load(std::memory_order_relaxed);
-            if (ImGui::Checkbox("Apply To Selected", &applyToEditing))
+            bool apply_to_editing = flag_apply_to_editing().load(std::memory_order_relaxed);
+            if (ImGui::Checkbox("Apply To Selected", &apply_to_editing))
             {
-                flag_apply_to_editing().store(applyToEditing, std::memory_order_relaxed);
+                flag_apply_to_editing().store(apply_to_editing, std::memory_order_relaxed);
             }
             if (ImGui::IsItemHovered())
-                ui_tooltip("When ticked, picking another character in the "
-                           "dropdown (and subsequent picker / slot edits while "
-                           "pinned) applies the preset to THAT character's "
-                           "body, if they're loaded. Engine equip events still "
-                           "render the controlled character's transmog as "
-                           "normal. Untick to restore the legacy cross-body "
-                           "behaviour where the controlled body wears the "
-                           "selected character's preset items.");
+                ui_tooltip(
+                    "When ticked, picking another character in the "
+                    "dropdown (and subsequent picker / slot edits while "
+                    "pinned) applies the preset to THAT character's "
+                    "body, if they are loaded. Engine equip events still "
+                    "render the controlled character's transmog as "
+                    "normal. Untick to restore the legacy cross-body "
+                    "behavior where the controlled body wears the selected character's preset items."
+                );
         }
 
         ImGui::Separator();
@@ -267,26 +268,32 @@ namespace Transmog
             return;
         }
 
-        auto &presetList = pm.presets();
-        const int activeIdx = pm.active_preset_index();
+        auto &preset_list = pm.presets();
+        const int active_index = pm.active_preset_index();
         const int count = pm.preset_count();
 
         for (int i = 0; i < count; ++i)
         {
             ImGui::PushID(i);
 
-            const bool isActive = (i == activeIdx);
+            const bool is_active = (i == active_index);
 
             if (s_renameActive && s_renameIndex == i)
             {
                 ImGui::SetNextItemWidth(140.0f);
-                if (ImGui::InputText("##rename", s_renamePresetBuf, sizeof(s_renamePresetBuf),
-                                     ImGuiInputTextFlags_EnterReturnsTrue, nullptr, nullptr))
+                if (ImGui::InputText(
+                        "##rename",
+                        s_renamePresetBuf,
+                        sizeof(s_renamePresetBuf),
+                        ImGuiInputTextFlags_EnterReturnsTrue,
+                        nullptr,
+                        nullptr
+                    ))
                 {
                     pm.set_active_preset(i);
                     if (auto *p = pm.active_preset_mut())
                         p->name = s_renamePresetBuf;
-                    pm.set_active_preset(activeIdx);
+                    pm.set_active_preset(active_index);
                     pm.save();
                     s_renameActive = false;
                     s_renameIndex = -1;
@@ -297,7 +304,7 @@ namespace Transmog
                     pm.set_active_preset(i);
                     if (auto *p = pm.active_preset_mut())
                         p->name = s_renamePresetBuf;
-                    pm.set_active_preset(activeIdx);
+                    pm.set_active_preset(active_index);
                     pm.save();
                     s_renameActive = false;
                     s_renameIndex = -1;
@@ -306,10 +313,15 @@ namespace Transmog
             else
             {
                 char label[128];
-                std::snprintf(label, sizeof(label), "%s [%d]##preset",
-                              presetList[static_cast<std::size_t>(i)].name.c_str(), i);
+                std::snprintf(
+                    label,
+                    sizeof(label),
+                    "%s [%d]##preset",
+                    preset_list[static_cast<std::size_t>(i)].name.c_str(),
+                    i
+                );
 
-                if (ImGui::Selectable(label, isActive, 0, ImVec2(0, 0)))
+                if (ImGui::Selectable(label, is_active, 0, ImVec2(0, 0)))
                 {
                     // Tear down any active body-mesh prefab picks BEFORE switching presets. Otherwise the hook keeps
                     // substituting the old src wrappers while the new preset's items are being equipped, which produces
@@ -340,8 +352,12 @@ namespace Transmog
                 {
                     s_renameActive = true;
                     s_renameIndex = i;
-                    std::snprintf(s_renamePresetBuf, sizeof(s_renamePresetBuf), "%s",
-                                  presetList[static_cast<std::size_t>(i)].name.c_str());
+                    std::snprintf(
+                        s_renamePresetBuf,
+                        sizeof(s_renamePresetBuf),
+                        "%s",
+                        preset_list[static_cast<std::size_t>(i)].name.c_str()
+                    );
                 }
             }
 
@@ -349,7 +365,7 @@ namespace Transmog
         }
 
         if (count == 0)
-            ui_text_disabled("No presets -- use Append to create one");
+            ui_text_disabled("No presets - use Append to create one");
 
         ImGui::Spacing();
 
@@ -359,10 +375,11 @@ namespace Transmog
             manual_apply();
         }
         if (ImGui::IsItemHovered())
-            ui_tooltip("Append a new preset with Helm/Chest/Cloak/Gloves/"
-                       "Boots ticked + none (hides those five armor pieces). "
-                       "Other slots stay unticked so items like the lantern "
-                       "still work. Then apply it.");
+            ui_tooltip(
+                "Append a new preset with Helm/Chest/Cloak/Gloves/"
+                "Boots ticked + none (hides those five armor pieces). "
+                "Other slots stay unticked so items like the lantern still work. Then apply it."
+            );
 
         ImGui::SameLine();
 
@@ -375,10 +392,11 @@ namespace Transmog
             manual_apply();
         }
         if (ImGui::IsItemHovered())
-            ui_tooltip("Clone the active preset's saved state into a "
-                       "new preset (pending edits are discarded). Use "
-                       "to start altering a clean copy without touching "
-                       "the source.");
+            ui_tooltip(
+                "Clone the active preset's saved state into a "
+                "new preset (pending edits are discarded). Use "
+                "to start altering a clean copy without touching the source."
+            );
 
         ImGui::SameLine();
 
@@ -391,9 +409,10 @@ namespace Transmog
             manual_apply();
         }
         if (ImGui::IsItemHovered())
-            ui_tooltip("Save the current pending state (including "
-                       "unsaved picks) as a new preset. The active "
-                       "preset's saved rows are left unchanged.");
+            ui_tooltip(
+                "Save the current pending state (including "
+                "unsaved picks) as a new preset. The active preset's saved rows are left unchanged."
+            );
 
         ImGui::SameLine();
 
@@ -425,7 +444,7 @@ namespace Transmog
         }
 
         if (count > 0)
-            ui_text("Active: %d / %d", activeIdx + 1, count);
+            ui_text("Active: %d / %d", active_index + 1, count);
 
         ImGui::Separator();
     }

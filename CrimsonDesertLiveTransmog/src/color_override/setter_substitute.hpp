@@ -1,4 +1,5 @@
-#pragma once
+#ifndef TRANSMOG_COLOR_OVERRIDE_SETTER_SUBSTITUTE_HPP
+#define TRANSMOG_COLOR_OVERRIDE_SETTER_SUBSTITUTE_HPP
 
 #include <DetourModKit/hook.hpp>
 
@@ -38,8 +39,10 @@ namespace Transmog::ColorOverride::SetterSubstitute
     /**
      * Stash the slot index currently being applied. Read by the setter's resolve_slot path as the primary ownership
      * source. Call BEFORE invoking apply_transmog for the slot; the value PERSISTS across calls and is overwritten by
-     * the next call. Do not pair with `set_active_slot(-1)` -- the engine queues property writes that fire
+     * the next call. Do not pair with `set_active_slot(-1)` - the engine queues property writes that fire
      * asynchronously during the apply-window tail, and clearing the slot too early would orphan those writes.
      */
     void set_active_slot(int slot) noexcept;
 } // namespace Transmog::ColorOverride::SetterSubstitute
+
+#endif // TRANSMOG_COLOR_OVERRIDE_SETTER_SUBSTITUTE_HPP

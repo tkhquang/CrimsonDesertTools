@@ -1,14 +1,16 @@
-#pragma once
+#ifndef TRANSMOG_COLOR_OVERRIDE_COLOR_TOKEN_TABLE_HPP
+#define TRANSMOG_COLOR_OVERRIDE_COLOR_TOKEN_TABLE_HPP
 
-// Engine shader-property token classification.
-//
-// The engine maintains per-property token ids in two registrar-owned tables (Table B at `dword_1461730E0`, Table A at
-// `dword_146173160`). Token IDs are re-bucketed by the engine's string interner every patch, so they cannot be
-// hardcoded.
-//
-// AOB-anchored slot discovery (see color_token_discovery.hpp) walks the loaded module at startup, finds every registrar
-// call site for our known dye-property names, and records the slot ADDRESSES. The classifier here reads those slots
-// live on every call -- patches that shift token ids are absorbed automatically.
+/**
+ * @file color_token_table.hpp
+ * @brief Engine shader-property token classification.
+ * @details The engine keeps per-property token ids in two registrar-owned tables. The engine string interner
+ *          re-buckets those ids on every patch, so no id can be hardcoded.
+ *
+ *          AOB-anchored slot discovery, in color_token_discovery.hpp, walks the loaded module at startup, finds every
+ *          registrar call site for the known dye-property names, and records the slot ADDRESSES. The classifier here
+ *          reads those slots live on every call, which absorbs a patch that shifts token ids.
+ */
 
 #include <cstddef>
 #include <cstdint>
@@ -70,7 +72,7 @@ namespace Transmog::ColorOverride::TokenTable
     // _permutations token (runtime-resolved via name-interner)
 
     /**
-     * Token id for "_permutations" -- used by the publisher hook to detect when the engine's interner re-hands out a
+     * Token id for "_permutations" - used by the publisher hook to detect when the engine's interner re-hands out a
      * different id this session. Returns 0 until set_permutations_token() is called for the first time.
      */
     std::uint16_t permutations_token() noexcept;
@@ -81,3 +83,5 @@ namespace Transmog::ColorOverride::TokenTable
      */
     void set_permutations_token(std::uint16_t tok) noexcept;
 } // namespace Transmog::ColorOverride::TokenTable
+
+#endif // TRANSMOG_COLOR_OVERRIDE_COLOR_TOKEN_TABLE_HPP

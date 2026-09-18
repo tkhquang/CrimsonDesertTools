@@ -1,4 +1,5 @@
-#pragma once
+#ifndef EQUIPHIDE_EQUIP_HIDE_HPP
+#define EQUIPHIDE_EQUIP_HIDE_HPP
 
 #include <DetourModKit/abi/wheel_host.h>
 #include <DetourModKit/error.hpp>
@@ -22,8 +23,8 @@ namespace EquipHide
 
     /**
      * @brief Drains the workers, restores the engine state this mod changed, and tears every hook down newest-first.
-     * @return true when every hooked prologue was proved restored. A false return is an unmap REFUSAL: a pinned
-     *         backend can still route a call into this image, so the dev loader must keep the DLL mapped.
+     * @return true when the teardown proves every hooked prologue restored. A false return is an unmap REFUSAL. A
+     *         pinned backend can still route a call into this image, so the dev loader must keep the DLL mapped.
      * @note Setup/control-plane only. Call it before the Session is destroyed, while this module's code pages are
      *       still mapped.
      */
@@ -33,3 +34,5 @@ namespace EquipHide
     void arm_flush_guard() noexcept;
 
 } // namespace EquipHide
+
+#endif // EQUIPHIDE_EQUIP_HIDE_HPP

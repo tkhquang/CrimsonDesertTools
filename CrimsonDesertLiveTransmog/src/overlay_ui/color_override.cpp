@@ -31,8 +31,6 @@
 #include "transmog_apply.hpp"
 #include "transmog_map.hpp"
 
-#include <DetourModKit.hpp>
-
 #pragma warning(push, 0)
 #include <imgui.h>
 #include <reshade.hpp>
@@ -101,10 +99,8 @@ namespace Transmog
         {
             ImGui::BeginTooltip();
             ImGui::TextUnformatted(
-                "No apply yet -- swatches unknown.\n"
-                "Run Re-init to capture the slot's dye\n"
-                "swatches before toggling the master Dye\n"
-                "switch."
+                "No apply yet - swatches unknown.\n"
+                "Run Re-init to capture the slot's dye\nswatches before toggling the master Dye\nswitch."
             );
             ImGui::EndTooltip();
         }
@@ -134,9 +130,7 @@ namespace Transmog
                     "Single clear + apply (~1.5s) to capture\n"
                     "the slot's swatches. Use when the list\n"
                     "looks empty or stale.\n\n"
-                    "Replaces the manual 'untick / retick'\n"
-                    "loop -- you can leave this slot alone\n"
-                    "while it runs."
+                    "Replaces the manual 'untick / retick'\nloop - you can leave this slot alone\nwhile it runs."
                 );
                 ImGui::EndTooltip();
             }
@@ -161,8 +155,7 @@ namespace Transmog
                     "rows, then trigger a fresh apply.\n\n"
                     "Use when the slot is stuck with stale rows\n"
                     "(e.g. JSON-restored entries that no longer\n"
-                    "match the current item) and Re-init can't\n"
-                    "make progress."
+                    "match the current item) and Re-init cannot\nmake progress."
                 );
                 ImGui::EndTooltip();
             }
@@ -170,15 +163,15 @@ namespace Transmog
             {
                 Transmog::ColorOverride::SwatchTable::wipe_swatch_table_for_slot(static_cast<int>(slot));
                 Transmog::ColorOverride::SwatchTable::clear_dye_state_for_slot(static_cast<int>(slot));
-                // Drop any persisted overrides for this slot that are queued via the setter's pending map -- otherwise
-                // the next engine write would re-substitute the saved colour on top of the freshly-wiped row.
+                // Drop any persisted overrides for this slot that are queued via the setter's pending map - otherwise
+                // the next engine write would re-substitute the saved color on top of the freshly-wiped row.
                 Transmog::ColorOverride::PendingOverrides::clear_slot(static_cast<int>(slot));
                 // Reset is a pending change: the JSON still has the old swatch rows. Flip dirty so the top "Save *"
-                // button surfaces, but don't auto-write JSON -- user commits explicitly.
+                // button surfaces, but do not auto-write JSON - user commits explicitly.
                 Transmog::dye_dirty().store(true, std::memory_order_release);
-                // Re-render the slot. Reset changes only COLOUR state -- the transmog target is untouched -- so a
+                // Re-render the slot. Reset changes only COLOR state and leaves the transmog target untouched, so a
                 // plain manual_apply_slot hits the `targetId == prevId` early-out in apply_single_slot_transmog and
-                // returns without rebuilding. That is what left a wiped slot still showing its old override colour.
+                // returns with no rebuild, which leaves a wiped slot on its old override color.
                 //
                 // force_apply_pending is the documented bypass for exactly this case (the dye popup sets it for the
                 // same reason). It is read-and-cleared by the apply, and it costs exactly ONE rebuild.
@@ -186,7 +179,7 @@ namespace Transmog
                 // Deliberately NOT schedule_color_commit_retick, which is what "Revert to default" uses: that is a
                 // two-phase cycle (TeardownApply unticks the slot, TeardownWait, then CarrierApply re-applies), so it
                 // empties the slot for over a second and reads as a double remount. Revert needs those phases to make
-                // the engine re-emit its natural colours; Reset does not, because the swatch table is wiped and the
+                // the engine re-emit its natural colors; Reset does not, because the swatch table is wiped and the
                 // single rebuild below re-captures it.
                 //
                 // Not gated on s_autoApply: this is an explicit button press, and re-capturing is the whole point of
@@ -202,36 +195,36 @@ namespace Transmog
         // Apply button down.
         if (detectedReady)
         {
-            // Collapse the per-slot swatch UI behind a CollapsingHeader so users who only want to swap items don't get
-            // a wall of dye controls pushing the Apply button down. Default-closed first time; ImGui remembers
-            // per-header state across frames after that. The body below is one indent level shallower than strict
-            // nesting would dictate to keep the wrap purely additive.
+            // Collapse the per-slot swatch UI behind a CollapsingHeader so users who only want to swap items do not get
+            // a wall of dye controls that push the Apply button down. ImGui remembers per-header state across
+            // frames. The body below sits one indent level shallower than strict nesting dictates, which keeps the
+            // wrap purely additive.
             char dyeHdrBuf[160];
-            // Count rows with a user-picked colour. The badge shows "M rows (N coloured)" where M is the full captured
-            // set and N is how many the user has explicitly picked a colour for.
-            std::size_t coloured = 0;
+            // Count rows with a user-picked color. The badge shows "M rows (N colored)" where M is the full captured
+            // set and N is how many the user has explicitly picked a color for.
+            std::size_t colored = 0;
             for (const auto &sw : dyeSlot.swatches)
             {
                 if (sw.override_active)
-                    ++coloured;
+                    ++colored;
             }
-            const bool hasOverride = coloured > 0;
-            // Mid-retick badge (b): show "(applying...)" while a colour-commit retick cycle is in-flight on this slot.
-            // The cycle takes ~1.9s; this badge tells the user the engine hasn't finished yet.
+            const bool hasOverride = colored > 0;
+            // Mid-retick badge (b): show "(applying...)" while a color-commit retick cycle is in-flight on this slot.
+            // The cycle takes ~1.9s; this badge tells the user the engine has not finished yet.
             const bool reticking =
                 Transmog::ColorOverride::Reinit::is_color_commit_retick_active(static_cast<int>(slot));
             // Master-disabled badge: if the user unticked the
             // Dye checkbox, the swatch list is inert. Surface that clearly in the closed header.
             const bool masterDisabled = !dyeSlot.slot_enabled;
-            // Plain text label -- the popup tab is the container, so there is no CollapsingHeader ID-stability concern.
-            if (coloured > 0)
+            // Plain text label - the popup tab is the container, so there is no CollapsingHeader ID-stability concern.
+            if (colored > 0)
             {
                 std::snprintf(
                     dyeHdrBuf,
                     sizeof(dyeHdrBuf),
-                    "%zu rows (%zu coloured)%s%s%s",
+                    "%zu rows (%zu colored)%s%s%s",
                     detected,
-                    coloured,
+                    colored,
                     hasOverride ? " *" : "",
                     reticking ? " (applying)" : "",
                     masterDisabled ? " (off)" : ""
@@ -264,11 +257,11 @@ namespace Transmog
                 // Layout:
                 //   - Group rows by (submesh_stable_id, template_id) into collapsible "Region N" cards.
                 //   - Within each region, group by layer (tint / mask / detail / hair / misc).
-                //   - For triplet layers (R/G/B suffix) show one colour picker by default with the R/G/B channels
+                //   - For triplet layers (R/G/B suffix) show one color picker by default with the R/G/B channels
                 //     linked, mirroring merchant "Pure X" semantics. Untick "link" to expose three independent
                 //     per-channel pickers.
                 //   - Each row is labelled, so no "Show all" noise-hiding filter is needed. Rows still waiting for
-                //     their first capture (default_captured == false) are skipped silently; they're inert until the
+                //     their first capture (default_captured == false) are skipped silently; they are inert until the
                 //     engine writes them.
 
                 // Pass 1: group swatch indices by submesh, then by layer. Each region's `layerSlot[layer][channel]`
@@ -285,7 +278,7 @@ namespace Transmog
                     std::vector<int> layerSingletons[5];
                     std::vector<int> miscIndices;
                 };
-                auto initRegion = [](RegionView &rv)
+                auto initRegion = [](RegionView &rv) -> void
                 {
                     for (int L = 0; L < 5; ++L)
                         for (int C = 0; C < 3; ++C)
@@ -300,7 +293,7 @@ namespace Transmog
                 for (std::size_t s = 0; s < detected; ++s)
                 {
                     auto &sw = dyeSlot.swatches[s];
-                    // Skip rows that haven't captured a default yet; picking on them would write zeros.
+                    // Skip rows that have not captured a default yet; picking on them would write zeros.
                     // (override_active rows always pass below.)
                     if (!sw.default_captured && !sw.override_active)
                         continue;
@@ -347,9 +340,10 @@ namespace Transmog
                 }
 
                 // Render swatch sub-block: override toggle, picker, tooltip. Reused for both linked and per-channel
-                // rendering. `cascadeIdx[]` lists the indices that should receive the colour edit; first index is the
-                // "primary" displayed.
-                auto renderSwatchControls = [&](const int *cascadeIdx, int cascadeCount, const char *channelLabel)
+                // rendering. `cascadeIdx[]` lists the indices that receive the color edit. The first index is the
+                // "primary" one that the row displays.
+                auto renderSwatchControls =
+                    [&](const int *cascadeIdx, int cascadeCount, const char *channelLabel) -> void
                 {
                     if (cascadeCount <= 0 || cascadeIdx[0] < 0)
                         return;
@@ -364,7 +358,7 @@ namespace Transmog
 
                     const bool prevActive = primary.override_active;
                     bool active = prevActive;
-                    // Bordered checkbox per UX request.
+                    // The border separates the override toggle from the swatch next to it.
                     ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.0f);
                     const bool toggled = ImGui::Checkbox("##sw_on", &active);
                     ImGui::PopStyleVar();
@@ -376,9 +370,9 @@ namespace Transmog
                             if (idx < 0)
                                 continue;
                             auto &row = dyeSlot.swatches[idx];
-                            // Skip tick-on for rows whose def was never captured -- otherwise we'd set row.r/g/b =
+                            // Skip tick-on for rows whose def was never captured - otherwise we'd set row.r/g/b =
                             // (0,0,0) and the substitute path would write black for that token, shifting the rendered
-                            // colour away from the engine's natural blend. Affects assets whose engine pipeline emits
+                            // color away from the engine's natural blend. Affects assets whose engine pipeline emits
                             // writes for only a subset of the 9-prop chord (e.g. orcumer armours ship _tintColor +
                             // _detail but no _dyeingColorMask). Tick-off (active=false) always runs so the user can
                             // always un-override.
@@ -405,7 +399,7 @@ namespace Transmog
                             else
                                 erase_override_from_pending(static_cast<int>(slot), static_cast<std::size_t>(idx));
                         }
-                        // Override-active checkbox toggle is a colour change (rows go default to user override or
+                        // Override-active checkbox toggle is a color change (rows go default to user override or
                         // vice-versa), so retick unconditionally with the same semantics as the picker commits below.
                         if (!Transmog::ColorOverride::Reinit::any_slot_reinit_active())
                         {
@@ -413,7 +407,7 @@ namespace Transmog
                             Transmog::ColorOverride::Reinit::schedule_color_commit_retick(static_cast<int>(slot));
                         }
                         // Tick toggle flips override_active, which also flips whether get_persistable_state includes
-                        // the row. The picker applies overrides live but does NOT write JSON -- dye_dirty lights up the
+                        // the row. The picker applies overrides live but does NOT write JSON - dye_dirty lights up the
                         // top-level "Save *" button so the user commits to disk explicitly. Preset switch with
                         // dirty=true discards pending edits.
                         Transmog::dye_dirty().store(true, std::memory_order_release);
@@ -459,9 +453,9 @@ namespace Transmog
                     sw_dl->AddCircleFilled(sw_center, sw_radius, sw_colU, 32);
                     sw_dl->AddCircle(sw_center, sw_radius, sw_borderU, 32, 1.0f);
 
-                    // Default-colour reference dot next to the active picker swatch. Shows the engine-captured default
-                    // (def_r/g/b) so the user has a quick visual anchor for "what was the asset's original colour?" --
-                    // useful when dialing in a custom colour or deciding whether to revert an override. Display-only,
+                    // Default-color reference dot next to the active picker swatch. Shows the engine-captured default
+                    // (def_r/g/b) so the user has a quick visual anchor for "what was the asset's original color?" -
+                    // useful when dialing in a custom color or deciding whether to revert an override. Display-only,
                     // non-interactive. Skipped if no default has been captured yet (placeholders pre-promote or rows
                     // never touched by the engine).
                     if (primary.default_captured)
@@ -469,7 +463,7 @@ namespace Transmog
                         ImGui::SameLine(0.0f, 4.0f);
                         const float refDiam = diameter * 0.70f;
                         const ImVec2 refCursor = ImGui::GetCursorScreenPos();
-                        // Centre the smaller circle vertically against the larger picker swatch.
+                        // Center the smaller circle vertically against the larger picker swatch.
                         const float yOff = (diameter - refDiam) * 0.5f;
                         const ImVec2 refCenter(refCursor.x + refDiam * 0.5f, refCursor.y + yOff + refDiam * 0.5f);
                         const float refRadius = refDiam * 0.5f - 1.0f;
@@ -508,7 +502,7 @@ namespace Transmog
                                     continue;
                                 auto &row = dyeSlot.swatches[idx];
                                 // Same gate as the checkbox path: rows without a captured def must stay un-overridden,
-                                // else substitute writes 0,0,0 and the rendered colour shifts.
+                                // else substitute writes 0,0,0 and the rendered color shifts.
                                 if (!row.default_captured)
                                     continue;
                                 row.override_active = true;
@@ -582,7 +576,7 @@ namespace Transmog
                             // dirty=true discards pending edits.
                             Transmog::dye_dirty().store(true, std::memory_order_release);
                             // Trigger a single-pass tear-down + reapply so the engine re-builds the carrier matInst
-                            // with the new colour. Fires unconditionally on every colour commit -- independent of the
+                            // with the new color. Fires unconditionally on every color commit - independent of the
                             // "Instant Apply" checkbox which governs hover/pick-apply only. Coalesces with any
                             // in-flight retick so a 60Hz drag fires ~1 retick per ~1.9s cycle, not 60.
                             if (!Transmog::ColorOverride::Reinit::any_slot_reinit_active())
@@ -613,8 +607,7 @@ namespace Transmog
                                 tipBuf,
                                 sizeof(tipBuf),
                                 "Linked R/G/B  %s\n"
-                                "submesh 0x%016llX  tpl 0x%04X\n"
-                                "asset def #%02X%02X%02X  blend=%u/255",
+                                "submesh 0x%016llX  tpl 0x%04X\nasset def #%02X%02X%02X  blend=%u/255",
                                 tokenBuf,
                                 static_cast<unsigned long long>(primary.submesh_stable_id),
                                 static_cast<unsigned>(primary.template_id),
@@ -629,9 +622,7 @@ namespace Transmog
                             std::snprintf(
                                 tipBuf,
                                 sizeof(tipBuf),
-                                "%s\n"
-                                "submesh 0x%016llX  tpl 0x%04X\n"
-                                "asset def #%02X%02X%02X  blend=%u/255",
+                                "%s\nsubmesh 0x%016llX  tpl 0x%04X\nasset def #%02X%02X%02X  blend=%u/255",
                                 tokenBuf,
                                 static_cast<unsigned long long>(primary.submesh_stable_id),
                                 static_cast<unsigned>(primary.template_id),
@@ -652,9 +643,9 @@ namespace Transmog
                 //
                 // displayColor is derived from cascade[0] each frame (current r/g/b if override active, else captured
                 // def). This is the same trick the per-swatch picker uses: writes propagate through cascade[0] to
-                // displayColor next frame, so picker drag stays smooth. If we re-seeded from a fixed colour (e.g. the
+                // displayColor next frame, so picker drag stays smooth. If we re-seeded from a fixed color (e.g. the
                 // cluster's def) each frame, the wheel would snap back every frame and drag would jitter.
-                auto recolorBatch = [&](const char *idTag, const std::vector<int> &cascade)
+                auto recolorBatch = [&](const char *idTag, const std::vector<int> &cascade) -> void
                 {
                     if (cascade.empty())
                         return;
@@ -718,7 +709,7 @@ namespace Transmog
                                 // picker semantics).
                                 Transmog::ColorOverride::Reinit::schedule_color_commit_retick(static_cast<int>(slot));
                             }
-                            // Mark dirty for the explicit Save commit -- see the matching call site in
+                            // Mark dirty for the explicit Save commit - see the matching call site in
                             // renderSwatchControls for the full rationale.
                             Transmog::dye_dirty().store(true, std::memory_order_release);
                         }
@@ -752,8 +743,7 @@ namespace Transmog
                         "rows from another transmog item (common with\n"
                         "Kairos and other shared-material sets).\n\n"
                         "Triggers a fresh apply on this slot, which\n"
-                        "re-captures cleanly. Loses any colours you've\n"
-                        "picked for this slot."
+                        "re-captures cleanly. Loses any colors you have\npicked for this slot."
                     );
                     ImGui::EndTooltip();
                 }
@@ -763,7 +753,7 @@ namespace Transmog
                     Transmog::ColorOverride::SwatchTable::clear_dye_state_for_slot(static_cast<int>(slot));
                     Transmog::ColorOverride::PendingOverrides::clear_slot(static_cast<int>(slot));
                     Transmog::dye_dirty().store(true, std::memory_order_release);
-                    // Same re-render path as the Reset slot button at the top of this panel -- see the comment there
+                    // Same re-render path as the Reset slot button at the top of this panel - see the comment there
                     // for why manual_apply_slot needs the force flag, and why the commit-retick is not used here.
                     force_apply_pending()[static_cast<std::size_t>(slot)] = true;
                     flag_enabled().store(true, std::memory_order_relaxed);
@@ -786,9 +776,8 @@ namespace Transmog
                         "captured swatch list intact (no Re-init\n"
                         "needed afterwards).\n\n"
                         "Use to compare your dye picks against\n"
-                        "the original asset colours, or to undo\n"
-                        "a slot's colour edits without losing\n"
-                        "the captured row structure."
+                        "the original asset colors, or to undo\n"
+                        "a slot's color edits without losing\nthe captured row structure."
                     );
                     ImGui::EndTooltip();
                 }
@@ -797,13 +786,13 @@ namespace Transmog
                     for (auto &sw : dyeSlot.swatches)
                         sw.override_active = false;
                     // Drop the slot's queued pending-overrides map. PendingOverrides holds the JSON-loaded user picks
-                    // and gets consulted on every successful lookup_or_insert -- when an engine write hits a matched
+                    // and gets consulted on every successful lookup_or_insert - when an engine write hits a matched
                     // row it calls set_override_active(true). Without clearing here, the schedule_color_commit_retick
                     // below would fire engine writes that immediately re-enable every JSON override we just cleared.
                     // With clearing, the retick
                     // sees empty pending -> override stays off
                     // -> substitute bails -> engine natural
-                    // colour flows. Re-loading the preset (or switching away without saving) restores PendingOverrides
+                    // color flows. Re-loading the preset (or switching away without saving) restores PendingOverrides
                     // from JSON, so the revert stays a pending change until Save commits.
                     Transmog::ColorOverride::PendingOverrides::clear_slot(static_cast<int>(slot));
                     if (!Transmog::ColorOverride::Reinit::any_slot_reinit_active())
@@ -815,10 +804,10 @@ namespace Transmog
                 }
 
                 // Auto-detected clusters: rows that share the same (layer, def_r, def_g, def_b). One picker drives all
-                // rows in the cluster. Wrapped in a collapsible tree node so users who don't want the suggestions can
+                // rows in the cluster. Wrapped in a collapsible tree node so users who do not want the suggestions can
                 // fold them away without us silently hiding them. Default-open since the suggestions are the whole
                 // point of the cluster bar. Advanced view toggle, per-character preference. Default off: render a
-                // merchant-like flat list, one picker per UNIQUE def colour (cluster of >=1 member). Tick to reveal
+                // merchant-like flat list, one picker per UNIQUE def color (cluster of >=1 member). Tick to reveal
                 // per-region per-token trees with full shader-property granularity.
                 bool advancedView = Transmog::ColorOverride::dye_advanced_view_get();
                 if (ImGui::Checkbox("Advanced view##dye_adv", &advancedView))
@@ -832,19 +821,17 @@ namespace Transmog
                         "Show per-region per-token trees with full\n"
                         "shader-property granularity beneath the\n"
                         "merchant-like flat picker list.\n\n"
-                        "Default off -- most users get the same UX\n"
+                        "Default off - most users get the same UX\n"
                         "as the merchant dye UI: one picker per\n"
-                        "distinct asset-default colour. Tick this\n"
-                        "only if you need to dye individual tokens\n"
-                        "(e.g. tint vs. mask vs. detail layers\n"
-                        "separately)."
+                        "distinct asset-default color. Tick this\n"
+                        "only if you need to dye individual tokens\n(e.g. tint vs. mask vs. detail layers\nseparately)."
                     );
                     ImGui::EndTooltip();
                 }
 
                 // "Show only modified" filter: per-slot session toggle that hides rows / clusters / regions whose
                 // `override_active` is false. Useful when an item exposes 30+ swatches and the user wants to revisit
-                // only the colours they actually changed.
+                // only the colors they actually changed.
                 {
                     auto &uiSlot = s_slotUI[slot];
                     ImGui::SameLine();
@@ -853,10 +840,9 @@ namespace Transmog
                     {
                         ImGui::BeginTooltip();
                         ImGui::TextUnformatted(
-                            "Hide rows / regions whose colour is\n"
+                            "Hide rows / regions whose color is\n"
                             "still at the captured engine default.\n"
-                            "Untick to see every swatch this slot\n"
-                            "exposed during apply."
+                            "Untick to see every swatch this slot\nexposed during apply."
                         );
                         ImGui::EndTooltip();
                     }
@@ -868,11 +854,11 @@ namespace Transmog
                 {
                     // Merchant-style region-channel picker. Per region: 1-3 ColorPicker3s, one per mask-texture channel
                     // suffix (R/G/B). Each picker cascade-writes its color to every captured swatch sharing that
-                    // channel-suffix family in this region -- mirroring the engine merchant's `sub_14274A3C0` chord (9
+                    // channel-suffix family in this region - mirroring the engine merchant's `sub_14274A3C0` chord (9
                     // token writes per channel: dyeingColorMask + detail layers + tintColor + 5 mask-overlay layers).
                     //
-                    // The R/G/B suffixes are NOT R/G/B colour components -- they're the engine's 3 mask-texture
-                    // channels, each holding a full RGB colour for one physical region of the mesh. Materials with
+                    // The R/G/B suffixes are NOT R/G/B color components - they are the engine's 3 mask-texture
+                    // channels, each holding a full RGB color for one physical region of the mesh. Materials with
                     // masks active on only some channels get fewer pickers (channels with no captured rows are hidden).
                     const bool filterMod = s_slotUI[slot].showOnlyModified;
                     for (auto &kv : regions)
@@ -884,12 +870,12 @@ namespace Transmog
                         //
                         // Layer iteration order matches the engine merchant function sub_14274A3C0. The merchant writes
                         // a 9-prop "chord" per channel in this priority order:
-                        //   0  _dyeingColorMask         <-- L=1
-                        //   1  _dyeingDetailLayerColorMask <-- L=2
+                        //   0  _dyeingColorMask         <- L=1
+                        //   1  _dyeingDetailLayerColorMask <- L=2
                         //   2..7 _detail* / _dyeingCustom* mask layers
-                        //   8  _tintColor              <-- L=0
+                        //   8  _tintColor              <- L=0
                         // `primary` in renderSwatchControls is cascadeIdx[0], so whatever lands first in chRows[ch]
-                        // drives the picker's displayed reference colour. PC armour ships _dyeingColorMask (L=1) so the
+                        // drives the picker's displayed reference color. PC armor ships _dyeingColorMask (L=1) so the
                         // picker shows the merchant's primary base; orcumer / mob assets ship only detail+tint, so the
                         // picker falls back to _dyeingDetailLayerColorMask (L=2).
                         //   L=1 (mask)    first
@@ -897,9 +883,9 @@ namespace Transmog
                         //   L=0 (tint)    third
                         //   L=4 (scratch) fourth
                         //   L=3 (hair)    fifth
-                        // Cascade still writes to every captured token sharing the channel suffix -- only the displayed
+                        // Cascade still writes to every captured token sharing the channel suffix - only the displayed
                         // reference changes. Per-layer singletons (ch=-1 tokens like `_dyeingDetailLayerColorBlend`)
-                        // never make it into the merchant chord -- they surface only in Advanced view.
+                        // never make it into the merchant chord - they surface only in Advanced view.
                         std::vector<int> chRows[3];
                         static const int k_layerOrder[5] = {1, 2, 0, 4, 3};
                         for (int Li = 0; Li < 5; ++Li)
@@ -914,7 +900,7 @@ namespace Transmog
                             }
                         }
 
-                        // Hair singletons surfaced in simple view too -- merchants don't ship a hair picker, but users
+                        // Hair singletons surfaced in simple view too - merchants do not ship a hair picker, but users
                         // want one-click hair recolor from the same panel as armor (no need to flip into Advanced).
                         const auto &hairRows = rv.layerSingletons[3];
                         const bool anyChannel =
@@ -945,7 +931,7 @@ namespace Transmog
                         }
 
                         // Region header: prefer captured submesh name; fall back to hair-aware label or "Region N"
-                        // exactly as the Advanced-mode header does (kept consistent so a user toggling views doesn't
+                        // exactly as the Advanced-mode header does (kept consistent so a user toggling views does not
                         // see different labels for the same region).
                         const char *sm = nullptr;
                         for (int L = 0; L < 5 && !sm; ++L)
@@ -977,27 +963,23 @@ namespace Transmog
                                 for (int C = 0; C < 3 && !hasHair; ++C)
                                     if (rv.layerSlot[3][C] >= 0)
                                         hasHair = true;
-                            std::snprintf(
-                                hdrBuf,
-                                sizeof(hdrBuf),
-                                hasHair ? "[Hair -- hidden under helm]" : "[Unnamed]"
-                            );
+                            std::snprintf(hdrBuf, sizeof(hdrBuf), hasHair ? "[Hair - hidden under helm]" : "[Unnamed]");
                         }
 
                         ImGui::PushID(static_cast<int>(rv.stable_id) ^ static_cast<int>(rv.stable_id >> 32) ^ 0xC0DE);
-                        // Collapsible region header. Closed by default to match Advanced mode -- users expand only the
+                        // Collapsible region header. Closed by default to match Advanced mode - users expand only the
                         // regions they want to touch. The header text matches the
                         // Advanced-mode `(tpl 0xXXXX)` format so toggling views keeps the same labels.
                         char treeBuf[160];
                         std::snprintf(treeBuf, sizeof(treeBuf), "%s  (tpl 0x%04X)", hdrBuf, rv.tpl);
-                        // Default-open: the Color Override tab is now the wrapper, so collapsing each submesh by
-                        // default just hides what the user came to see.
+                        // Default-open: the Color Override tab is the wrapper, so a submesh collapsed by default
+                        // hides what the user came to see.
                         const bool open = ImGui::TreeNodeEx(
                             treeBuf,
                             ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_DefaultOpen
                         );
-                        // Channel-coverage marker. Stays on the header row so it's visible whether the user expands the
-                        // region or not. See `dye_picker_compute_channel_gap_tip`.
+                        // Channel-coverage marker. It stays on the header row, so it is visible whether the user
+                        // expands the region or not. See `dye_picker_compute_channel_gap_tip`.
                         {
                             int present[3][3] = {{0}};
                             for (int L = 0; L < 3; ++L)
@@ -1014,15 +996,12 @@ namespace Transmog
                                     std::snprintf(
                                         fullTip,
                                         sizeof(fullTip),
-                                        "This submesh's shader doesn't "
+                                        "This submesh's shader does not "
                                         "expose all dye channels.\n"
                                         "You can still edit the channels "
                                         "that ARE present, but missing "
                                         "channels keep their baked default.\n"
-                                        "This limits how dark / bright you "
-                                        "can drive the rendered color.\n"
-                                        "\n"
-                                        "Gaps:\n%s",
+                                        "This limits how dark / bright you can drive the rendered color.\n\nGaps:\n%s",
                                         gapTip
                                     );
                                     ui_tooltip(fullTip);
@@ -1054,7 +1033,7 @@ namespace Transmog
                                 k_channelLabels[ch]
                             );
                         }
-                        // Hair singletons (any `_hair*` token -- `_hairDyeingColor`, `_hairDyeingScratch`, etc.). Each
+                        // Hair singletons (any `_hair*` token - `_hairDyeingColor`, `_hairDyeingScratch`, etc.). Each
                         // one gets its own row so the user can recolor hair / hair-overlay independently from a single
                         // cascade.
                         for (int idx : hairRows)
@@ -1076,7 +1055,7 @@ namespace Transmog
                         auto &rstate = ui.regionUI[rv.stable_id];
 
                         // "Show only modified" filter: skip region if no swatch inside it is user-overridden. Filter
-                        // runs BEFORE PushID -- continue does not need a matching PopID.
+                        // runs BEFORE PushID - continue does not need a matching PopID.
                         if (ui.showOnlyModified)
                         {
                             bool anyOverridden = false;
@@ -1144,15 +1123,15 @@ namespace Transmog
                         }
                         else
                         {
-                            // No submesh name captured -- the Material has no parent SkinnedMeshMaterialWrapper (or
+                            // No submesh name captured - the Material has no parent SkinnedMeshMaterialWrapper (or
                             // wrapper holds the empty-string module sentinel at +0x28). Most commonly this is the
                             // player's HAIR material:
                             // SkinnedMeshHair shader (tpl 0x3ADC on v1.06) is bound via a different parent path than
                             // armor materials. Hair re-renders every player frame so the setter captures it into every
                             // slot's carrier set during the 3-second apply window. Coloring has no visible effect under
-                            // full-face helms (hair occluded) -- visible on head/face slots without a helm.
+                            // full-face helms (hair occluded) - visible on head/face slots without a helm.
                             //
-                            // Detect via layer-3 tokens (hair family) and label clearly so users don't waste time
+                            // Detect via layer-3 tokens (hair family) and label clearly so users do not waste time
                             // picking colors on it.
                             bool hasHair = !rv.layerSingletons[3].empty();
                             if (!hasHair)
@@ -1164,7 +1143,7 @@ namespace Transmog
                                 std::snprintf(
                                     headerBuf,
                                     sizeof(headerBuf),
-                                    "[Hair -- hidden under helm]  (tpl 0x%04X)",
+                                    "[Hair - hidden under helm]  (tpl 0x%04X)",
                                     rv.tpl
                                 );
                             }
@@ -1174,7 +1153,7 @@ namespace Transmog
                             }
                         }
                         const bool open = ImGui::TreeNodeEx(headerBuf, flags);
-                        // Channel-coverage marker -- same audit as the simple-mode picker (see
+                        // Channel-coverage marker - same audit as the simple-mode picker (see
                         // `dye_picker_compute_channel_gap_tip`).
                         {
                             int present[3][3] = {{0}};
@@ -1192,15 +1171,12 @@ namespace Transmog
                                     std::snprintf(
                                         fullTip,
                                         sizeof(fullTip),
-                                        "This submesh's shader doesn't expose "
+                                        "This submesh's shader does not expose "
                                         "all dye channels.\n"
                                         "You can still edit the channels that "
                                         "ARE present, but missing channels "
-                                        "keep their baked default -- limiting "
-                                        "how dark / bright you can drive the "
-                                        "rendered color.\n"
-                                        "\n"
-                                        "Gaps:\n%s",
+                                        "keep their baked default - limiting "
+                                        "how dark / bright you can drive the rendered color.\n\nGaps:\n%s",
                                         gapTip
                                     );
                                     ui_tooltip(fullTip);
@@ -1257,7 +1233,7 @@ namespace Transmog
                                 else if (present >= 2)
                                 {
                                     // 2 or 3 channels present: show link toggle. Linked mode drives all PRESENT
-                                    // channels with one colour (merchant behaviour); unlinked exposes a per-channel row
+                                    // channels with one color (merchant behavior); unlinked exposes a per-channel row
                                     // for each present channel.
                                     char layerHdrBuf[48];
                                     char chList[8];
@@ -1296,11 +1272,10 @@ namespace Transmog
                                     {
                                         ImGui::BeginTooltip();
                                         ImGui::TextUnformatted(
-                                            "When ON: pick one colour, all "
+                                            "When ON: pick one color, all "
                                             "present R/G/B channel-suffix\n"
                                             "Properties get it (merchant "
-                                            "behaviour).\nUntick to edit "
-                                            "each channel independently."
+                                            "behavior).\nUntick to edit each channel independently."
                                         );
                                         ImGui::EndTooltip();
                                     }
@@ -1342,7 +1317,7 @@ namespace Transmog
                                 }
 
                                 // Family singletons: tokens classified into this layer but with no R/G/B suffix
-                                // (channel=-1). Show the actual shader-property name so it isn't confused with the
+                                // (channel=-1). Show the actual shader-property name so it is not confused with the
                                 // R/G/B triplet.
                                 for (int sIdx : singletons)
                                 {
@@ -1371,8 +1346,8 @@ namespace Transmog
                                     ImGui::NewLine();
                                 }
                             }
-                            // Tokens whose prefix didn't match any known family (layer == -1). Show the shader-property
-                            // name when the interner captured it -- only fall back to the "misc 0xXXXX" hex label when
+                            // Tokens whose prefix matched no known family (layer == -1). Show the shader-property
+                            // name when the interner captured it - only fall back to the "misc 0xXXXX" hex label when
                             // we have no name at all. A resolvable name is more useful than a bare hex blob.
                             for (int idx : rv.miscIndices)
                             {

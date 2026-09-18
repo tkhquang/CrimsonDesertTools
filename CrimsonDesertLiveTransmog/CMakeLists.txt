@@ -2,15 +2,15 @@ cmake_minimum_required(VERSION 3.28)
 
 project(CrimsonDesertLiveTransmog VERSION 0.4.0 LANGUAGES CXX)
 
-# --- Standard and Compiler Options ---
+# Language standard.
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# --- Compiler Flags ---
+# Warning level for every target in this directory.
 add_compile_options(/W4)
 
-# --- Windows Definitions ---
+# Windows SDK surface and macro environment.
 if(WIN32)
     add_compile_definitions(
         WINVER=0x0A00
@@ -21,7 +21,7 @@ if(WIN32)
     )
 endif()
 
-# --- nlohmann/json (header-only) ---
+# nlohmann/json, header-only.
 include(FetchContent)
 FetchContent_Declare(
     nlohmann_json
@@ -31,13 +31,12 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(nlohmann_json)
 
-# --- Dear ImGui (compiled from source -- no binary dependency) ---
-# Tag must match ReShade SDK's hardcoded function-table version
-# (imgui_function_table_19250 in external/reshade-sdk/include/reshade_overlay.hpp).
-# The SDK header is built against the upstream 'docking' branch and
-# declares slots for ImGuiDockNodeFlags / ImGuiViewport multi-window
-# APIs; the plain (non-docking) tag is missing those symbols and breaks
-# the function-table populator at compile time.
+# Dear ImGui, compiled from source so there is no binary dependency.
+#
+# The tag must match the ReShade SDK's hardcoded function-table version (imgui_function_table_19250 in
+# external/reshade-sdk/include/reshade_overlay.hpp). The SDK header builds against the upstream docking branch and
+# declares slots for the ImGuiDockNodeFlags and ImGuiViewport multi-window APIs. The plain (non-docking) tag lacks
+# those symbols and breaks the function-table populator at compile time.
 FetchContent_Declare(
     imgui
     GIT_REPOSITORY https://github.com/ocornut/imgui.git
@@ -61,10 +60,10 @@ target_include_directories(imgui_lib PUBLIC
 )
 target_compile_options(imgui_lib PRIVATE /W0)
 
-# --- CrimsonDesertCore (shared library, monorepo sibling) ---
-# Core owns DetourModKit as its own submodule and re-exports it via PUBLIC
-# link, so this target gets the DetourModKit target transitively -- no
-# separate add_subdirectory for DMK is needed at this level.
+# CrimsonDesertCore, the monorepo sibling shared library.
+#
+# Core owns DetourModKit as its own submodule and re-exports it through a PUBLIC link, so this target gets the
+# DetourModKit target transitively. DMK needs no separate add_subdirectory at this level.
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../CrimsonDesertCore/CMakeLists.txt")
     add_subdirectory(
         ${CMAKE_CURRENT_SOURCE_DIR}/../CrimsonDesertCore
@@ -77,10 +76,10 @@ else()
         "'git submodule update --init --recursive'.")
 endif()
 
-# --- Dev Build Option ---
+# Dev build option.
 option(TRANSMOG_DEV_BUILD "Build two-DLL hot-reload configuration for development" OFF)
 
-# --- Source Files ---
+# Source files shared by every configuration.
 set(COMMON_SOURCES
     src/aob_resolver.cpp
     src/dllmain.cpp
@@ -126,7 +125,7 @@ set(ASI_SOURCES
     ${COMMON_SOURCES}
 )
 
-# --- Include Directories ---
+# Include directories shared by every configuration.
 set(COMMON_INCLUDE_DIRS
     src
     # Lets src/imgui_function_table_populator.cpp find its vendored
@@ -134,18 +133,15 @@ set(COMMON_INCLUDE_DIRS
     external/reshade-sdk/source
 )
 
-# Overlay UI + lifecycle TU group.
+# Overlay UI and lifecycle TU group.
 #
-# overlay.cpp (lifecycle glue) and overlay_ui.cpp (the entire widget body)
-# both compile against the ReShade SDK's <imgui.h> + <reshade_overlay.hpp>,
-# so every ImGui:: call routes through imgui_function_table_instance().
-# That pointer is set by ReShade when our addon registers, or by our
-# populator (src/imgui_function_table_populator.cpp -- compiled in the
-# main target against imgui_lib) when running standalone.
+# overlay.cpp (lifecycle glue) and overlay_ui.cpp (the whole widget body) compile against the ReShade SDK's <imgui.h>
+# and <reshade_overlay.hpp>, so every ImGui:: call routes through imgui_function_table_instance(). ReShade sets that
+# pointer when our addon registers. In a standalone run our own populator sets it, built into the main target against
+# imgui_lib from src/imgui_function_table_populator.cpp.
 #
-# This OBJECT lib gets ONLY the ReShade SDK include path.  Adding
-# imgui_lib's include path here would let the real, non-thunk ImGui::
-# symbols leak in and produce LNK2005.
+# This OBJECT library gets ONLY the ReShade SDK include path. imgui_lib's include path here lets the real, non-thunk
+# ImGui:: symbols leak in and produce LNK2005.
 add_library(overlay_ui_obj OBJECT
     src/overlay.cpp
     src/overlay_ui.cpp
@@ -167,17 +163,15 @@ target_link_libraries(overlay_ui_obj PRIVATE
 )
 target_compile_options(overlay_ui_obj PRIVATE /W4)
 
-# --- Game Output Directory (dev builds) ---
+# Game output directory for dev builds.
 set(GAME_BIN_DIR "D:/Games/SteamLibrary/steamapps/common/Crimson Desert/bin64/plugins")
 
 if(TRANSMOG_DEV_BUILD)
-    # =====================================================================
-    # Dev Build: two-DLL hot-reload (loader + logic)
-    # =====================================================================
-    message(STATUS "DEV BUILD enabled -- building loader + logic DLL pair")
+    # Dev build: two-DLL hot-reload, a loader plus a logic DLL.
+    message(STATUS "DEV BUILD enabled: loader and logic DLL pair")
 
-    # --- Loader ASI (resident staged-generation loader) ---
-    # Sources live in CrimsonDesertCore; parameterized via CDCORE_LOADER_* macros.
+    # Loader ASI, the resident staged-generation loader. Its sources live in CrimsonDesertCore and take their
+    # parameters from the CDCORE_LOADER_* macros.
     add_library(transmog_loader SHARED ${CDCORE_DEV_LOADER_SRC})
 
     target_compile_definitions(transmog_loader PRIVATE
@@ -187,17 +181,17 @@ if(TRANSMOG_DEV_BUILD)
 
     target_include_directories(transmog_loader PRIVATE ${CDCORE_DEV_INCLUDE_DIR})
 
-    # The loader hosts wheel capture for the process, so a user-bound mouse-wheel
-    # combo books its permanent module keepalive HERE instead of in the logic DLL,
-    # which is what lets a generation unmap. It links the resident host ONLY.
+    # The loader hosts wheel capture for the process, so a user-bound mouse-wheel combo books its permanent module
+    # keepalive HERE instead of in the logic DLL, which is what lets a generation unmap. It links the resident host
+    # ONLY.
     target_link_libraries(transmog_loader PRIVATE
         DetourModKit::WheelHost
         kernel32
         user32
     )
 
-    # Guard the property above: linking the full archive would give the loader its
-    # own DetourModKit instance, which is the arrangement DMK's unload proofs exclude.
+    # Guard the property above. A link against the full archive gives the loader its own DetourModKit instance, which
+    # is the arrangement DMK's unload proofs exclude.
     get_target_property(_lt_loader_links transmog_loader LINK_LIBRARIES)
     if(NOT _lt_loader_links MATCHES "DetourModKit::WheelHost")
         message(FATAL_ERROR "transmog_loader must link DetourModKit::WheelHost.")
@@ -234,18 +228,21 @@ endif()
 
     target_compile_options(transmog_loader PRIVATE /W4)
 
-    # --- Logic DLL (all mod code) ---
+    # Logic DLL, holding all mod code.
     add_library(transmog_logic SHARED
         ${COMMON_SOURCES}
         src/dev/mod_logic.cpp
-        $<TARGET_OBJECTS:overlay_ui_obj>
     )
+
+    # The object library lands in this DLL, so it needs the same macro environment as every other TU in it.
+    target_compile_definitions(overlay_ui_obj PRIVATE TRANSMOG_DEV_BUILD)
 
     target_include_directories(transmog_logic PRIVATE ${COMMON_INCLUDE_DIRS} ${CDCORE_DEV_INCLUDE_DIR})
 
     target_compile_definitions(transmog_logic PRIVATE TRANSMOG_DEV_BUILD)
 
     target_link_libraries(transmog_logic PRIVATE
+        overlay_ui_obj
         DetourModKit
         CrimsonDesertCore::core
         nlohmann_json::nlohmann_json
@@ -253,7 +250,7 @@ endif()
         d3d11
         dxgi
         dwmapi
-        psapi
+        winmm
         user32
         kernel32
     )
@@ -284,7 +281,7 @@ if(rc EQUAL 0)
     # Clear anything an earlier fallback left behind, so the loader cannot promote a stale build over this one.
     file(REMOVE "${STAGING_DLL}" "${STAGING_PDB}")
 else()
-    message(STATUS "Direct deploy skipped (file locked) -- staging for the loader to promote on next reload")
+    message(STATUS "Direct deploy skipped (file locked): staging for the loader to promote on next reload")
     get_filename_component(staging_dir "${STAGING_DLL}" DIRECTORY)
     file(MAKE_DIRECTORY "${staging_dir}")
     execute_process(COMMAND "${CMAKE_COMMAND}" -E copy "${SRC_DLL}" "${STAGING_DLL}")
@@ -306,10 +303,10 @@ endif()
         COMMENT "Deploying Logic DLL+PDB (falls back to staging if locked)"
     )
 
-    # The display_names TSV (item names + the wearer-body "Male"/"Female" column filled by
-    # scripts/gen_item_body_table.py) is data the mod loads at runtime. Keep the deployed copy in
-    # sync so it never goes stale -- unlike the DLL it is never game-locked, so a direct
-    # copy_if_different is enough (no staging dance).
+    # The display_names TSV (item names plus the wearer-body "Male"/"Female" column that
+    # scripts/gen_item_body_table.py fills) is data the mod loads at runtime. Keep the deployed copy in sync so it
+    # never goes stale. Unlike the DLL it is never game-locked, so a direct copy_if_different is enough and needs no
+    # staging dance.
     add_custom_command(TARGET transmog_logic POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${CMAKE_CURRENT_SOURCE_DIR}/build/template/CrimsonDesertLiveTransmog_display_names.tsv"
@@ -318,21 +315,19 @@ endif()
     )
 
     target_compile_options(transmog_logic PRIVATE /W4 /Zi)
-    target_link_options(transmog_logic PRIVATE /DEBUG /INCREMENTAL:NO /OPT:REF /OPT:ICF ${RESHADE_FORCE_LINK_FLAGS})
+    target_link_options(transmog_logic PRIVATE /DEBUG /INCREMENTAL:NO /OPT:REF /OPT:ICF)
 
 else() # TRANSMOG_DEV_BUILD=OFF
-    # =====================================================================
-    # Production Build: single ASI
-    # =====================================================================
+    # Production build: a single ASI.
 
     add_library(${PROJECT_NAME}-ASI SHARED
         ${ASI_SOURCES}
-        $<TARGET_OBJECTS:overlay_ui_obj>
     )
 
     target_include_directories(${PROJECT_NAME}-ASI PRIVATE ${COMMON_INCLUDE_DIRS})
 
     target_link_libraries(${PROJECT_NAME}-ASI PRIVATE
+        overlay_ui_obj
         DetourModKit
         CrimsonDesertCore::core
         nlohmann_json::nlohmann_json
@@ -340,7 +335,7 @@ else() # TRANSMOG_DEV_BUILD=OFF
         d3d11
         dxgi
         dwmapi
-        psapi
+        winmm
         user32
         kernel32
     )
@@ -357,7 +352,7 @@ else() # TRANSMOG_DEV_BUILD=OFF
 
     target_link_options(${PROJECT_NAME}-ASI PRIVATE
         $<$<CONFIG:Release>:/OPT:REF /OPT:ICF>
-           )
+    )
 
     include(CheckIPOSupported)
     check_ipo_supported(RESULT _ipo_supported LANGUAGES CXX OUTPUT _ipo_error)
@@ -378,11 +373,9 @@ else() # TRANSMOG_DEV_BUILD=OFF
         COMMENT "Renaming ASI output to final name"
     )
 
-    message(STATUS "---------------------------------------------------------------------")
     message(STATUS "CrimsonDesertLiveTransmog (${PROJECT_VERSION}) Configuration Summary:")
     message(STATUS "  Generator:                   ${CMAKE_GENERATOR}")
     message(STATUS "  Build Type:                  ${CMAKE_BUILD_TYPE}")
     message(STATUS "  Targets:")
     message(STATUS "    - ${PROJECT_NAME}-ASI      -> CrimsonDesertLiveTransmog.asi (via post-build copy)")
-    message(STATUS "---------------------------------------------------------------------")
 endif() # TRANSMOG_DEV_BUILD

@@ -1,17 +1,14 @@
-#pragma once
+#ifndef TRANSMOG_VERSION_HPP
+#define TRANSMOG_VERSION_HPP
 
 #include <string>
 
-// ========================================================================== //
-//                           VERSION DEFINITION                               //
-//            >>> MODIFY ONLY THESE VALUES WHEN UPDATING VERSION <<<          //
-// ========================================================================== //
+// Bump these three values to release a new version. Nothing else in this file needs an edit.
 #define VERSION_MAJOR 0
 #define VERSION_MINOR 15
 #define VERSION_PATCH 1
-// ========================================================================== //
 
-// Helper macros for stringification - DO NOT MODIFY.
+// Stringification helpers. Nothing below this line carries a version value.
 #define VERSION_STRINGIFY_IMPL(x) #x
 #define VERSION_STRINGIFY(x) VERSION_STRINGIFY_IMPL(x)
 
@@ -23,9 +20,11 @@
 
 namespace Transmog::Version
 {
-    // Numeric components.
+    /// Major version component.
     inline constexpr int MAJOR = VERSION_MAJOR;
+    /// Minor version component.
     inline constexpr int MINOR = VERSION_MINOR;
+    /// Patch version component.
     inline constexpr int PATCH = VERSION_PATCH;
 
     /** @brief Full version string, e.g. "0.5.0". */
@@ -42,10 +41,13 @@ namespace Transmog::Version
     /** @brief Compile-time HH:MM:SS from __TIME__. */
     inline constexpr const char *BUILD_TIME = __TIME__;
 
-    // Static project metadata.
+    /// Mod identifier used for log lines, file names, and the deployed asset names.
     inline constexpr const char *MOD_NAME = "CrimsonDesertLiveTransmog";
+    /// Mod author.
     inline constexpr const char *AUTHOR = "tkhquang";
+    /// Source repository URL.
     inline constexpr const char *REPOSITORY = "https://github.com/tkhquang/CrimsonDesertTools";
+    /// Nexus Mods page URL.
     inline constexpr const char *NEXUS_URL = "https://www.nexusmods.com/crimsondesert/mods/1056";
 
     /** @brief GitHub release URL matching this version. */
@@ -65,3 +67,5 @@ namespace Transmog::Version
     void log_version_info();
 
 } // namespace Transmog::Version
+
+#endif // TRANSMOG_VERSION_HPP

@@ -4,11 +4,12 @@
 
 namespace EquipHide
 {
-    std::unordered_map<std::string, std::uint32_t> scan_indexed_string_table(std::uintptr_t mapLookupFunc)
+    std::unordered_map<std::string, std::uint32_t> scan_indexed_string_table(std::uintptr_t map_lookup_func)
     {
-        CDCore::IndexedStringScanConfig cfg;
-        cfg.logLabel = "IndexedStringA scan [EH]";
-        return CDCore::scan_indexed_string_table(mapLookupFunc, cfg);
+        const CDCore::IndexedStringScanConfig config{
+            .logLabel = "IndexedStringA scan [EH]",
+        };
+        return CDCore::scan_indexed_string_table(map_lookup_func, config);
     }
 
 } // namespace EquipHide

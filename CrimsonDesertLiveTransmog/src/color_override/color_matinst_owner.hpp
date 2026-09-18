@@ -1,4 +1,5 @@
-#pragma once
+#ifndef TRANSMOG_COLOR_OVERRIDE_COLOR_MATINST_OWNER_HPP
+#define TRANSMOG_COLOR_OVERRIDE_COLOR_MATINST_OWNER_HPP
 
 // matInst* -> lt_slot owner map with per-entry expected_hash check
 // (cheap pool-recycle detection). The setter hook reads this map to resolve which LT slot a setter event belongs to
@@ -27,3 +28,5 @@ namespace Transmog::ColorOverride::MatInstOwner
     void clear_for_slot(int slot) noexcept;
     void clear_all() noexcept;
 } // namespace Transmog::ColorOverride::MatInstOwner
+
+#endif // TRANSMOG_COLOR_OVERRIDE_COLOR_MATINST_OWNER_HPP
