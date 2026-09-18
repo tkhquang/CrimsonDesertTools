@@ -20,7 +20,7 @@
 #include <atomic>
 #include <cstddef>
 
-namespace Transmog::ColorOverride
+namespace Transmog::color_override
 {
     template <typename T, std::size_t N> class OneShotLogSet
     {
@@ -32,22 +32,22 @@ namespace Transmog::ColorOverride
         bool insert_unique(T value) noexcept
         {
             // Snapshot count once.
-            std::size_t cnt = count_.load(std::memory_order_acquire);
+            std::size_t cnt = m_count.load(std::memory_order_acquire);
             const std::size_t upper = (cnt < N) ? cnt : N;
             for (std::size_t i = 0; i < upper; ++i)
-                if (set_[i].load(std::memory_order_relaxed) == value)
+                if (m_set[i].load(std::memory_order_relaxed) == value)
                     return false;
 
             // Reserve a slot via compare-exchange. Refresh cnt on each retry. Avoids the `fetch_add +
             // fetch_sub-on-overflow` pattern which leaves the count transiently above N.
             for (;;)
             {
-                cnt = count_.load(std::memory_order_acquire);
+                cnt = m_count.load(std::memory_order_acquire);
                 if (cnt >= N)
                     return false;
-                if (count_.compare_exchange_weak(cnt, cnt + 1, std::memory_order_acq_rel, std::memory_order_acquire))
+                if (m_count.compare_exchange_weak(cnt, cnt + 1, std::memory_order_acq_rel, std::memory_order_acquire))
                 {
-                    set_[cnt].store(value, std::memory_order_release);
+                    m_set[cnt].store(value, std::memory_order_release);
                     return true;
                 }
             }
@@ -59,22 +59,22 @@ namespace Transmog::ColorOverride
          */
         void clear() noexcept
         {
-            const std::size_t prev = count_.load(std::memory_order_acquire);
-            count_.store(0, std::memory_order_release);
+            const std::size_t prev = m_count.load(std::memory_order_acquire);
+            m_count.store(0, std::memory_order_release);
             const std::size_t upper = (prev < N) ? prev : N;
             for (std::size_t i = 0; i < upper; ++i)
-                set_[i].store(T{}, std::memory_order_relaxed);
+                m_set[i].store(T{}, std::memory_order_relaxed);
         }
 
         /**
          * Current size (diagnostic only - may transiently lag concurrent inserts).
          */
-        std::size_t size() const noexcept { return count_.load(std::memory_order_acquire); }
+        std::size_t size() const noexcept { return m_count.load(std::memory_order_acquire); }
 
     private:
-        std::array<std::atomic<T>, N> set_{};
-        std::atomic<std::size_t> count_{0};
+        std::array<std::atomic<T>, N> m_set{};
+        std::atomic<std::size_t> m_count{0};
     };
-} // namespace Transmog::ColorOverride
+} // namespace Transmog::color_override
 
 #endif // TRANSMOG_COLOR_OVERRIDE_ONE_SHOT_LOG_SET_HPP

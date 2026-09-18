@@ -131,10 +131,10 @@ namespace Transmog
         bmi.bmiHeader.biBitCount = 32;
         bmi.bmiHeader.biCompression = BI_RGB;
 
-        HDC screenDC = GetDC(nullptr);
-        s_mem_dc = CreateCompatibleDC(screenDC);
-        s_dib = CreateDIBSection(screenDC, &bmi, DIB_RGB_COLORS, &s_dib_pixels, nullptr, 0);
-        ReleaseDC(nullptr, screenDC);
+        HDC screen_dc = GetDC(nullptr);
+        s_mem_dc = CreateCompatibleDC(screen_dc);
+        s_dib = CreateDIBSection(screen_dc, &bmi, DIB_RGB_COLORS, &s_dib_pixels, nullptr, 0);
+        ReleaseDC(nullptr, screen_dc);
 
         if (!s_dib || !s_dib_pixels)
             return false;
@@ -151,8 +151,8 @@ namespace Transmog
         if (!dd || dd->CmdListsCount == 0)
             return false;
         const float fW = static_cast<float>(s_width);
-        const float fH = static_cast<float>(s_height);
-        float mnx = fW, mny = fH, mxx = 0.0f, mxy = 0.0f;
+        const float f_h = static_cast<float>(s_height);
+        float mnx = fW, mny = f_h, mxx = 0.0f, mxy = 0.0f;
         bool any = false;
         for (int i = 0; i < dd->CmdListsCount; ++i)
         {
@@ -167,7 +167,7 @@ namespace Transmog
                 float x0 = (std::max)(0.0f, cmd.ClipRect.x);
                 float y0 = (std::max)(0.0f, cmd.ClipRect.y);
                 float x1 = (std::min)(fW, cmd.ClipRect.z);
-                float y1 = (std::min)(fH, cmd.ClipRect.w);
+                float y1 = (std::min)(f_h, cmd.ClipRect.w);
                 if (x1 <= x0 || y1 <= y0)
                     continue;
                 if (x0 < mnx)
@@ -261,23 +261,23 @@ namespace Transmog
         // Composite onto screen with a dirty-rect hint so GDI only touches the changed region of the layered surface.
         RECT gr{};
         GetWindowRect(s_game_hwnd, &gr);
-        POINT ptPos = {gr.left, gr.top};
+        POINT pt_pos = {gr.left, gr.top};
         SIZE sz = {W, H};
-        POINT ptSrc = {0, 0};
+        POINT pt_src = {0, 0};
         BLENDFUNCTION blend{};
         blend.BlendOp = AC_SRC_OVER;
         blend.SourceConstantAlpha = 255;
         blend.AlphaFormat = AC_SRC_ALPHA;
-        RECT dirtyClamped{x0, y0, x1, y1};
+        RECT dirty_clamped{x0, y0, x1, y1};
         UPDATELAYEREDWINDOWINFO ulwi{};
         ulwi.cbSize = sizeof(ulwi);
-        ulwi.pptDst = &ptPos;
+        ulwi.pptDst = &pt_pos;
         ulwi.psize = &sz;
         ulwi.hdcSrc = s_mem_dc;
-        ulwi.pptSrc = &ptSrc;
+        ulwi.pptSrc = &pt_src;
         ulwi.pblend = &blend;
         ulwi.dwFlags = ULW_ALPHA;
-        ulwi.prcDirty = &dirtyClamped;
+        ulwi.prcDirty = &dirty_clamped;
         UpdateLayeredWindowIndirect(s_overlay_hwnd, &ulwi);
     }
 
@@ -588,9 +588,9 @@ namespace Transmog
                 // Per-button latches survive across render frames. The "was" pair is the previous-frame raw state and
                 // is the basis for rising-edge detection; the "latch" pair is the cooked value forwarded to ImGui (see
                 // comment block above for the state machine).
-                static bool s_lLatch = false, s_lWas = false;
-                static bool s_rLatch = false, s_rWas = false;
-                static bool s_mLatch = false, s_mWas = false;
+                static bool s_l_latch = false, s_l_was = false;
+                static bool s_r_latch = false, s_r_was = false;
+                static bool s_m_latch = false, s_m_was = false;
                 auto poll = [&](int idx, int vk, bool &latch, bool &was) -> void
                 {
                     const bool now = (GetAsyncKeyState(vk) & 0x8000) != 0;
@@ -601,9 +601,9 @@ namespace Transmog
                     was = now;
                     io.AddMouseButtonEvent(idx, latch);
                 };
-                poll(0, VK_LBUTTON, s_lLatch, s_lWas);
-                poll(1, VK_RBUTTON, s_rLatch, s_rWas);
-                poll(2, VK_MBUTTON, s_mLatch, s_mWas);
+                poll(0, VK_LBUTTON, s_l_latch, s_l_was);
+                poll(1, VK_RBUTTON, s_r_latch, s_r_was);
+                poll(2, VK_MBUTTON, s_m_latch, s_m_was);
             }
 
             ImGui_ImplDX11_NewFrame();
@@ -682,7 +682,7 @@ namespace Transmog
 
     // Public API
 
-    bool init_dx_overlay()
+    bool init_dx_overlay() noexcept
     {
         try
         {

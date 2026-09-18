@@ -27,24 +27,24 @@
 #include <cstdint>
 #include <cstring>
 
-namespace Transmog::DyeRecordInject
+namespace Transmog::dye_record_inject
 {
     // Per-slot dye injection state set by LT's dispatch loop before each apply_transmog call. Thread-local because the
     // DyeCopier detour runs on the same thread that published the state.
     //
-    //   s_injectActive: true if any channel has group_hash != 0.
-    //   s_injectChannels: per-channel state.
-    //   s_injectConsumed: marks that at least one inject ran for the currently published state. It does NOT gate
+    //   s_inject_active: true if any channel has group_hash != 0.
+    //   s_inject_channels: per-channel state.
+    //   s_inject_consumed: marks that at least one inject ran for the currently published state. It does NOT gate
     //     injection. DyeCopier fires several times per slot, and the call whose destination reaches the renderer is
     //     not always the first one, so the detour injects on every call while a state is published. The per-channel
     //     upsert in the detour makes that idempotent. This flag only keeps the diagnostic log to one line per slot.
-    static thread_local bool s_injectActive = false;
-    static thread_local ChannelState s_injectChannels[k_dyeChannelCount] = {};
-    static thread_local bool s_injectConsumed = false;
+    static thread_local bool s_inject_active = false;
+    static thread_local ChannelState s_inject_channels[DYE_CHANNEL_COUNT] = {};
+    static thread_local bool s_inject_consumed = false;
     // When true, the detour emits records ONLY for channels with group_hash != 0. It skips inactive channels entirely
     // instead of filling them with the first active channel's settings. Callers that mirror a real auth-table source
     // (the restore path) set this, because the original mesh never colored those channels.
-    static thread_local bool s_injectSparse = false;
+    static thread_local bool s_inject_sparse = false;
 
     // - Counters
     static std::atomic<std::uint64_t> g_dyeInjectCount{0};
@@ -58,13 +58,13 @@ namespace Transmog::DyeRecordInject
     // - DyeCopier inline detour (the injection site)
     //
     // After the engine's own dye-copy completes (with empty source for LT-fake), the detour writes up to
-    // `k_dyeChannelCount` records into the destination vector through the engine's record-copy primitive. Dense mode
+    // `DYE_CHANNEL_COUNT` records into the destination vector through the engine's record-copy primitive. Dense mode
     // emits every channel. Sparse mode emits only the channels the slot overrides. This is INDEPENDENT of any real
     // item the user wears.
     //
     // The detour is gated by:
     //   1. `Transmog::in_transmog()`  - only patch during LT apply
-    //   2. `s_injectActive`           - a slot state was published
+    //   2. `s_inject_active`           - a slot state was published
     //   3. `g_dye_copy_fn != nullptr` - DyeCopy AOB resolved cleanly
 
     using DyeCopier_t = std::int64_t(__fastcall *)(std::uintptr_t a1, std::uintptr_t a2);
@@ -96,19 +96,19 @@ namespace Transmog::DyeRecordInject
 
     // One ARMOR_MOD record is 16 bytes, but the engine primitive only copies the first 13 (+0x00 through +0x0C) and
     // leaves the rest of the stride untouched. An in-place overwrite must write the same span to match its semantics.
-    static constexpr std::size_t k_dyeRecordCopySpan = 13;
+    static constexpr std::size_t DYE_RECORD_COPY_SPAN = 13;
 
-    // Channel index inside one record, and the sentinel used when the read fails. k_noChannel is out of range for a
+    // Channel index inside one record, and the sentinel used when the read fails. NO_CHANNEL is out of range for a
     // valid channel, so a failed read never matches the channel the loop is looking for.
-    static constexpr std::uintptr_t k_recordChannelOffset = 6;
-    static constexpr std::uint8_t k_noChannel = 0xFF;
+    static constexpr std::uintptr_t RECORD_CHANNEL_OFFSET = 6;
+    static constexpr std::uint8_t NO_CHANNEL = 0xFF;
 
     // Upper bound on the existing-record scan in the upsert path. The engine's copy leaves at most one record per
     // channel, which is what lets the upsert below stop at the first match, so a sane vector never holds more than a
     // handful of records and this ceiling is generous rather than tight. Its job is to reject a torn or relocated
     // vector whose count field reads as a huge value, before that value drives a long scan over unmapped memory.
-    static constexpr std::uint32_t k_maxScanRecords = 256;
-    static constexpr std::uint32_t k_invalidCount = 0xFFFFFFFFu;
+    static constexpr std::uint32_t MAX_SCAN_RECORDS = 256;
+    static constexpr std::uint32_t INVALID_COUNT = 0xFFFFFFFFu;
 
     // Build a 16-byte ARMOR_MOD record. See ChannelState in the header for the offset map. The +13 = 0x04 marker on
     // indices 0 and 3 mirrors what natural captures show. The engine accepts records without it, but matching the
@@ -147,7 +147,7 @@ namespace Transmog::DyeRecordInject
         // Gate: skip when not in LT apply, no state published, or DyeCopy never resolved.
         //
         // There is deliberately NO one-shot gate here. DyeCopier fires several times per slot (see the
-        // s_injectConsumed comment above), and the destination of the FIRST call is not the one that reaches the
+        // s_inject_consumed comment above), and the destination of the FIRST call is not the one that reaches the
         // renderer. That first destination is a throwaway buffer that the engine tears down right after the apply, so
         // a one-shot inject writes correct records into memory nobody reads.
         //
@@ -161,7 +161,7 @@ namespace Transmog::DyeRecordInject
         // overwrites the record for the same channel instead of appending a duplicate.
         if (!in_transmog().load(std::memory_order_acquire))
             return result;
-        if (!s_injectActive || g_dye_copy_fn == nullptr)
+        if (!s_inject_active || g_dye_copy_fn == nullptr)
             return result;
 
         // Locate the first active channel. In dense mode this also serves as the fill value for inactive channels. In
@@ -169,11 +169,11 @@ namespace Transmog::DyeRecordInject
         // outright. Either way, when no channel is active, there is nothing to emit. The detour returns before it
         // touches the destination.
         const ChannelState *fallback = nullptr;
-        for (std::size_t i = 0; i < k_dyeChannelCount; ++i)
+        for (std::size_t i = 0; i < DYE_CHANNEL_COUNT; ++i)
         {
-            if (s_injectChannels[i].group_hash != 0)
+            if (s_inject_channels[i].group_hash != 0)
             {
-                fallback = &s_injectChannels[i];
+                fallback = &s_inject_channels[i];
                 break;
             }
         }
@@ -187,7 +187,7 @@ namespace Transmog::DyeRecordInject
         // Vector header, relative to target_vec: +0x00 data pointer, +0x08 count, +0x0C capacity. That layout comes
         // straight from the engine primitive: it reads capacity at +0x0C, count at +0x08, grows when capacity is not
         // greater than count, writes the record at data + count * 16, then increments count.
-        const auto target_vec = dst_struct + k_dyeVectorOffset;
+        const auto target_vec = dst_struct + DYE_VECTOR_OFFSET;
 
         // Dedup precondition for the per-channel upsert below.
         //
@@ -198,11 +198,11 @@ namespace Transmog::DyeRecordInject
         // duplicates records on every call and grows the vector without bound. When the scan is not possible, skip
         // this call instead. Another DyeCopier call follows.
         const auto scan_data =
-            DMK::memory::read<std::uintptr_t>(DMK::Address{target_vec + k_vecDataOffset}).value_or(0);
+            DMK::memory::read<std::uintptr_t>(DMK::Address{target_vec + VEC_DATA_OFFSET}).value_or(0);
         const auto scan_count =
-            DMK::memory::read<std::uint32_t>(DMK::Address{target_vec + k_vecCountOffset}).value_or(k_invalidCount);
+            DMK::memory::read<std::uint32_t>(DMK::Address{target_vec + VEC_COUNT_OFFSET}).value_or(INVALID_COUNT);
         const bool scannable = (scan_count == 0) || (DMK::memory::is_plausible_ptr(DMK::Address{scan_data}) &&
-                                                     scan_count <= k_maxScanRecords);
+                                                     scan_count <= MAX_SCAN_RECORDS);
         if (!scannable)
         {
             (void)DMK::log().try_log(
@@ -216,14 +216,14 @@ namespace Transmog::DyeRecordInject
 
         bool all_ok = true;
         std::size_t emitted = 0;
-        const bool sparse = s_injectSparse;
-        for (std::size_t i = 0; i < k_dyeChannelCount && all_ok; ++i)
+        const bool sparse = s_inject_sparse;
+        for (std::size_t i = 0; i < DYE_CHANNEL_COUNT && all_ok; ++i)
         {
-            const bool active = s_injectChannels[i].group_hash != 0;
+            const bool active = s_inject_channels[i].group_hash != 0;
             if (!active && sparse)
                 continue;
-            const auto &channel = active ? s_injectChannels[i] : *fallback;
-            std::uint8_t record[k_dyeRecordSize];
+            const auto &channel = active ? s_inject_channels[i] : *fallback;
+            std::uint8_t record[DYE_RECORD_SIZE];
             build_dye_record(
                 record,
                 i,
@@ -247,10 +247,10 @@ namespace Transmog::DyeRecordInject
             // The header is re-read every iteration because an append can grow and relocate the array.
             bool replaced = false;
             const auto vec_data =
-                DMK::memory::read<std::uintptr_t>(DMK::Address{target_vec + k_vecDataOffset}).value_or(0);
+                DMK::memory::read<std::uintptr_t>(DMK::Address{target_vec + VEC_DATA_OFFSET}).value_or(0);
             const auto vec_count =
-                DMK::memory::read<std::uint32_t>(DMK::Address{target_vec + k_vecCountOffset}).value_or(k_invalidCount);
-            if (vec_count > k_maxScanRecords ||
+                DMK::memory::read<std::uint32_t>(DMK::Address{target_vec + VEC_COUNT_OFFSET}).value_or(INVALID_COUNT);
+            if (vec_count > MAX_SCAN_RECORDS ||
                 (vec_count > 0 && !DMK::memory::is_plausible_ptr(DMK::Address{vec_data})))
             {
                 // Dedup is no longer possible mid-loop. Stop rather than append blind.
@@ -261,10 +261,10 @@ namespace Transmog::DyeRecordInject
             {
                 for (std::uint32_t k = 0; k < vec_count; ++k)
                 {
-                    const auto rec_addr = vec_data + static_cast<std::uintptr_t>(k) * k_dyeRecordSize;
+                    const auto rec_addr = vec_data + static_cast<std::uintptr_t>(k) * DYE_RECORD_SIZE;
                     const auto existing_channel =
-                        DMK::memory::read<std::uint8_t>(DMK::Address{rec_addr + k_recordChannelOffset})
-                            .value_or(k_noChannel);
+                        DMK::memory::read<std::uint8_t>(DMK::Address{rec_addr + RECORD_CHANNEL_OFFSET})
+                            .value_or(NO_CHANNEL);
                     if (existing_channel != static_cast<std::uint8_t>(i))
                         continue;
                     // write_in_place never changes page protection: the dye vector is already writable engine
@@ -272,7 +272,7 @@ namespace Transmog::DyeRecordInject
                     // there is the correct outcome.
                     replaced = DMK::memory::write_in_place(
                                    DMK::Address{rec_addr},
-                                   std::span{reinterpret_cast<const std::byte *>(record), k_dyeRecordCopySpan}
+                                   std::span{reinterpret_cast<const std::byte *>(record), DYE_RECORD_COPY_SPAN}
                     )
                                    .has_value();
                     break;
@@ -286,8 +286,8 @@ namespace Transmog::DyeRecordInject
 
         // Marks that at least one inject ran for the published state. This flag does not gate injection. It keeps the
         // summary below to one line per slot instead of one line per DyeCopier call.
-        const bool first_inject_for_slot = !s_injectConsumed;
-        s_injectConsumed = true;
+        const bool first_inject_for_slot = !s_inject_consumed;
+        s_inject_consumed = true;
         if (!first_inject_for_slot)
             return result;
 
@@ -299,7 +299,7 @@ namespace Transmog::DyeRecordInject
             target_vec,
             sparse ? "sparse" : "dense",
             emitted,
-            k_dyeChannelCount,
+            DYE_CHANNEL_COUNT,
             fallback->group_hash,
             fallback->r,
             fallback->g,
@@ -401,7 +401,7 @@ namespace Transmog::DyeRecordInject
     }
 
     // Cross-thread snapshot of the first active channel's RGB. The setter-substitute hook runs on the engine's render
-    // thread, which differs from the LT apply thread where the thread_local s_injectChannels is set. Atomic snapshot
+    // thread, which differs from the LT apply thread where the thread_local s_inject_channels is set. Atomic snapshot
     // lets the render-side detour read the user color without TLS coupling.
     static std::atomic<std::uint32_t> g_publishedRGB{0};
 
@@ -411,9 +411,9 @@ namespace Transmog::DyeRecordInject
         std::uint32_t first_hash = 0;
         std::uint8_t first_r = 0, first_g = 0, first_b = 0;
         int active_count = 0;
-        for (std::size_t i = 0; i < k_dyeChannelCount; ++i)
+        for (std::size_t i = 0; i < DYE_CHANNEL_COUNT; ++i)
         {
-            s_injectChannels[i] = channels[i];
+            s_inject_channels[i] = channels[i];
             if (channels[i].group_hash != 0)
             {
                 if (!any_active)
@@ -427,11 +427,11 @@ namespace Transmog::DyeRecordInject
                 ++active_count;
             }
         }
-        s_injectActive = any_active;
-        s_injectSparse = sparse;
-        s_injectConsumed = false;
+        s_inject_active = any_active;
+        s_inject_sparse = sparse;
+        s_inject_consumed = false;
 
-        // Cross-thread snapshot for ColorOverride::SetterSubstitute. Bit-layout:
+        // Cross-thread snapshot for color_override::setter_substitute. Bit-layout:
         //   bits  0..7 : R
         //   bits  8..15: G
         //   bits 16..23: B
@@ -458,13 +458,13 @@ namespace Transmog::DyeRecordInject
 
     void clear_slot_dye_state() noexcept
     {
-        s_injectActive = false;
-        s_injectConsumed = false;
-        s_injectSparse = false;
+        s_inject_active = false;
+        s_inject_consumed = false;
+        s_inject_sparse = false;
         // NOTE: deliberately do NOT clear g_publishedRGB here. LT calls clear_slot_dye_state immediately after each
-        // apply_transmog completes. The engine reads the dst+120 records once during slotPop and discards them, so
+        // apply_transmog completes. The engine reads the dst+120 records once during slot_pop and discards them, so
         // clearing the ARMOR_MOD inject state is fine. But the engine's per-property color setter fires DURING RENDER
-        // frames, long after apply_transmog returns, so the ColorOverride::SetterSubstitute hook needs the RGB
+        // frames, long after apply_transmog returns, so the color_override::setter_substitute hook needs the RGB
         // snapshot to persist beyond apply. The next set_slot_dye_state (a preset color change) overwrites the
         // snapshot, so stale state self-clears on the next apply pass.
     }
@@ -484,7 +484,7 @@ namespace Transmog::DyeRecordInject
     }
 
     void
-    log_dye_snapshot(const char *source, const char *slotName, const ChannelState (&state)[k_dyeChannelCount]) noexcept
+    log_dye_snapshot(const char *source, const char *slot_name, const ChannelState (&state)[DYE_CHANNEL_COUNT]) noexcept
     {
         auto &logger = DMK::log();
         std::size_t active = 0;
@@ -495,11 +495,11 @@ namespace Transmog::DyeRecordInject
             DMK::LogLevel::Trace,
             "[dye-snapshot] src={} slot={} active_channels={}/{}",
             source,
-            slotName,
+            slot_name,
             active,
-            k_dyeChannelCount
+            DYE_CHANNEL_COUNT
         );
-        for (std::size_t i = 0; i < k_dyeChannelCount; ++i)
+        for (std::size_t i = 0; i < DYE_CHANNEL_COUNT; ++i)
         {
             const auto &ch = state[i];
             if (ch.group_hash == 0)
@@ -521,36 +521,36 @@ namespace Transmog::DyeRecordInject
         }
     }
 
-    std::size_t read_entry_dye_records(std::uintptr_t entryBase, ChannelState (&out)[k_dyeChannelCount]) noexcept
+    std::size_t read_entry_dye_records(std::uintptr_t entry_base, ChannelState (&out)[DYE_CHANNEL_COUNT]) noexcept
     {
         for (auto &c : out)
             c = ChannelState{};
 
-        // entryBase points into the live auth/dye table, which can tear or relocate on a world reload or arena flip.
+        // entry_base points into the live auth/dye table, which can tear or relocate on a world reload or arena flip.
         // Both call sites invoke this outside an SEH frame, so every read here is self-guarded: a faulting header read
         // yields 0 and the entry is treated as having no records.
         //
         // The dye vector sits at the same offset inside an auth-table entry as it does inside the DyeCopier
-        // destination struct, so both paths read it through k_dyeVectorOffset. That offset tracks the auth-entry
-        // stride and MUST move with it: see k_entryStride and k_entrySlotTagOffset in real_part_tear_down.cpp. A
+        // destination struct, so both paths read it through DYE_VECTOR_OFFSET. That offset tracks the auth-entry
+        // stride and MUST move with it: see ENTRY_STRIDE and ENTRY_SLOT_TAG_OFFSET in real_part_tear_down.cpp. A
         // stale value lands on the neighboring field and dereferences a garbage pointer instead of failing closed.
         const auto data =
-            DMK::memory::read<std::uintptr_t>(DMK::Address{entryBase + k_dyeVectorOffset + k_vecDataOffset})
+            DMK::memory::read<std::uintptr_t>(DMK::Address{entry_base + DYE_VECTOR_OFFSET + VEC_DATA_OFFSET})
                 .value_or(0);
-        auto count = DMK::memory::read<std::uint32_t>(DMK::Address{entryBase + k_dyeVectorOffset + k_vecCountOffset})
+        auto count = DMK::memory::read<std::uint32_t>(DMK::Address{entry_base + DYE_VECTOR_OFFSET + VEC_COUNT_OFFSET})
                          .value_or(0);
         if (!DMK::memory::is_plausible_ptr(DMK::Address{data}) || count == 0)
             return 0;
-        if (count > k_dyeChannelCount)
-            count = static_cast<std::uint32_t>(k_dyeChannelCount);
+        if (count > DYE_CHANNEL_COUNT)
+            count = static_cast<std::uint32_t>(DYE_CHANNEL_COUNT);
 
         std::size_t filled = 0;
         for (std::uint32_t i = 0; i < count; ++i)
         {
-            const auto rec = data + i * k_dyeRecordSize;
+            const auto rec = data + i * DYE_RECORD_SIZE;
             // Copy the whole record under one fault guard, then parse from the local buffer so a torn record cannot
             // fault mid-field.
-            std::uint8_t buf[k_dyeRecordSize];
+            std::uint8_t buf[DYE_RECORD_SIZE];
             if (!DMK::memory::read_into(DMK::Address{rec}, std::span{reinterpret_cast<std::byte *>(buf), sizeof(buf)}))
                 continue;
 
@@ -559,7 +559,7 @@ namespace Transmog::DyeRecordInject
             if (group_hash == 0)
                 continue;
             const std::uint8_t channel_idx = buf[6];
-            if (channel_idx >= k_dyeChannelCount)
+            if (channel_idx >= DYE_CHANNEL_COUNT)
                 continue;
 
             std::uint16_t material_id = 0;
@@ -576,4 +576,4 @@ namespace Transmog::DyeRecordInject
         }
         return filled;
     }
-} // namespace Transmog::DyeRecordInject
+} // namespace Transmog::dye_record_inject

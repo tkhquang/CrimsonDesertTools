@@ -7,7 +7,7 @@ namespace EquipHide
         ResolvedAddresses s_resolved_addrs{};
 
         // Every member carries a constexpr initializer, so this table is constant-initialized and needs no run-time
-        // seeding pass. visCharIdx already reads -1 (unidentified) in a pre-resolve consumer: apply_direct_vis_write
+        // seeding pass. vis_char_idx already reads -1 (unidentified) in a pre-resolve consumer: apply_direct_vis_write
         // runs before resolve_player_vis_ctrls fills the slots and falls back to the active character's hide mask.
         constinit PlayerState s_player_state{};
 

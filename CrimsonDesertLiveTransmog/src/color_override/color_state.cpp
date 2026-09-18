@@ -3,15 +3,15 @@
 #include <array>
 #include <chrono>
 
-namespace Transmog::ColorOverride::State
+namespace Transmog::color_override::state
 {
     namespace
     {
         std::atomic<int> g_activeApplySlot{-1};
         std::atomic<std::int64_t> g_activeApplyValidUntilMs{0};
-        std::array<std::atomic<bool>, k_slotCount> g_swatchFrozen{};
+        std::array<std::atomic<bool>, SLOT_COUNT> g_swatchFrozen{};
         std::atomic<std::int64_t> g_blockPublisherInsertsUntilMs{0};
-        std::array<std::atomic<std::int64_t>, k_slotCount> g_hashSetLastAddMs{};
+        std::array<std::atomic<std::int64_t>, SLOT_COUNT> g_hashSetLastAddMs{};
     } // namespace
 
     std::int64_t now_ms() noexcept
@@ -40,4 +40,4 @@ namespace Transmog::ColorOverride::State
     {
         return g_hashSetLastAddMs[static_cast<std::size_t>(slot)];
     }
-} // namespace Transmog::ColorOverride::State
+} // namespace Transmog::color_override::state

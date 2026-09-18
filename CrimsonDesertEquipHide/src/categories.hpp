@@ -48,10 +48,10 @@ namespace EquipHide
         UserPreset8,
         UserPreset9,
         UserPreset10,
-        COUNT
+        Count
     };
 
-    inline constexpr std::size_t CATEGORY_COUNT = static_cast<std::size_t>(Category::COUNT);
+    inline constexpr std::size_t CATEGORY_COUNT = static_cast<std::size_t>(Category::Count);
 
     /** @brief Returns the INI section name for a category, or "Unknown" for an out-of-range value. */
     [[nodiscard]] constexpr std::string_view category_section(Category cat) noexcept
@@ -124,7 +124,7 @@ namespace EquipHide
     // Per-character Parts overrides
 
     /** @brief Number of supported protagonist identities for per-char overrides. */
-    inline constexpr std::size_t k_charIdxCount = 3;
+    inline constexpr std::size_t CHAR_IDX_COUNT = 3;
 
     /**
      * @brief Returns the human-readable name for a character index (0=Kliff, 1=Damiane, 2=Oongka).
@@ -140,7 +140,7 @@ namespace EquipHide
 
     /**
      * @brief Update the active character index. Triggers rebuild_part_lookup() on change.
-     * @param char_idx 0..k_charIdxCount-1 for Kliff/Damiane/Oongka, or -1 to use only base Parts.
+     * @param char_idx 0..CHAR_IDX_COUNT-1 for Kliff/Damiane/Oongka, or -1 to use only base Parts.
      */
     void set_active_character(int char_idx);
 
@@ -189,7 +189,7 @@ namespace EquipHide
      *          so a slot with unresolved identity mirrors the active character's hide state (single-character
      *          semantics).
      * @param mask Category bitmask, the part-classification value returned by classify_part.
-     * @param char_idx 0..k_charIdxCount-1 for a known protagonist, or -1 for the active-character fallback.
+     * @param char_idx 0..CHAR_IDX_COUNT-1 for a known protagonist, or -1 for the active-character fallback.
      */
     [[nodiscard]] bool is_any_category_hidden_for(CategoryMask mask, int char_idx) noexcept;
 
@@ -215,7 +215,7 @@ namespace EquipHide
      * @brief Returns the per-character part map for a specific protagonist idx.
      * @details Built alongside the active-map double-buffer in rebuild_part_lookup(). Each character's map is a
      *          snapshot of (base [Section] Parts merged with that character's [Section:CharName] override) at the last
-     *          rebuild point. The caller MUST pass a valid char_idx (0..k_charIdxCount-1). The active-character
+     *          rebuild point. The caller MUST pass a valid char_idx (0..CHAR_IDX_COUNT-1). The active-character
      *          fallback is the consumer's responsibility (see is_any_category_hidden_for and the direct-write loop for
      *          the canonical pattern).
      */

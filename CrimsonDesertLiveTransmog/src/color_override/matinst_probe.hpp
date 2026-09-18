@@ -15,30 +15,30 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace Transmog::ColorOverride::MatInstProbe
+namespace Transmog::color_override::mat_inst_probe
 {
     // Engine struct offsets. Centralized here so a future patch that shifts them needs a single edit. Every reader
     // picks up the new value at once.
-    inline constexpr std::ptrdiff_t k_offMi_PermutTok = 0x70;
-    inline constexpr std::ptrdiff_t k_offMi_TemplateId = 0x48;
-    inline constexpr std::ptrdiff_t k_offMi_StableId = 0x80;
-    inline constexpr std::ptrdiff_t k_offMi_ArecBackref = 0xA0;
-    inline constexpr std::ptrdiff_t k_offArec_ContentHash = 0x40;
+    inline constexpr std::ptrdiff_t MI_OFFSET_PERMUT_TOKEN = 0x70;
+    inline constexpr std::ptrdiff_t MI_OFFSET_TEMPLATE_ID = 0x48;
+    inline constexpr std::ptrdiff_t MI_OFFSET_STABLE_ID = 0x80;
+    inline constexpr std::ptrdiff_t MI_OFFSET_AREC_BACKREF = 0xA0;
+    inline constexpr std::ptrdiff_t AREC_OFFSET_CONTENT_HASH = 0x40;
 
     // Material to SkinnedMeshMaterialWrapper backref, and the wrapper's `_subMeshName` string-wrapper field offsets.
-    inline constexpr std::ptrdiff_t k_offMat_WrapperBackref = 0x10;
-    inline constexpr std::ptrdiff_t k_offWrapper_SubMeshNameSw = 0x28;
-    inline constexpr std::ptrdiff_t k_offStringWrapper_Inline = 0x18;
+    inline constexpr std::ptrdiff_t MAT_OFFSET_WRAPPER_BACKREF = 0x10;
+    inline constexpr std::ptrdiff_t WRAPPER_OFFSET_SUBMESH_NAME_SW = 0x28;
+    inline constexpr std::ptrdiff_t STRING_WRAPPER_OFFSET_INLINE = 0x18;
 
     // Address range sanity. The engine heap pool sits above `0x200000000`. This floor is deliberately stricter than
     // the generic user-space lower bound and screens out bogus-low pointers that the weaker `memory::is_plausible_ptr`
     // floor (0x10000) accepts.
-    inline constexpr std::uintptr_t k_heapFloor = 0x200000000ULL;
-    inline constexpr std::uintptr_t k_heapCeiling = 0x800000000000ULL;
+    inline constexpr std::uintptr_t HEAP_FLOOR = 0x200000000ULL;
+    inline constexpr std::uintptr_t HEAP_CEILING = 0x800000000000ULL;
 
     inline bool is_likely_heap(std::uintptr_t p) noexcept
     {
-        return p >= k_heapFloor && p < k_heapCeiling;
+        return p >= HEAP_FLOOR && p < HEAP_CEILING;
     }
 
     /**
@@ -53,8 +53,8 @@ namespace Transmog::ColorOverride::MatInstProbe
      */
     inline bool is_module_resident(std::uintptr_t p) noexcept
     {
-        static const DMK::Region s_hostImage = DMK::Region::host();
-        return s_hostImage.contains(DMK::Address{p});
+        static const DMK::Region s_host_image = DMK::Region::host();
+        return s_host_image.contains(DMK::Address{p});
     }
 
     // Identity probe
@@ -107,6 +107,6 @@ namespace Transmog::ColorOverride::MatInstProbe
      * @note Callback-safe: every hop is a guarded read and nothing allocates.
      */
     bool read_submesh_name(std::uintptr_t material, char *out, std::size_t out_cap) noexcept;
-} // namespace Transmog::ColorOverride::MatInstProbe
+} // namespace Transmog::color_override::mat_inst_probe
 
 #endif // TRANSMOG_COLOR_OVERRIDE_MATINST_PROBE_HPP

@@ -26,7 +26,7 @@
 #include <cstdint>
 #include <span>
 
-namespace Transmog::ColorOverride::SetterSubstitute
+namespace Transmog::color_override::setter_substitute
 {
     namespace
     {
@@ -35,24 +35,24 @@ namespace Transmog::ColorOverride::SetterSubstitute
         // discriminator that keeps the candidate unique against its sibling write path.
 
         // Property descriptor field offsets (read from rcx).
-        constexpr std::ptrdiff_t k_descSize = 0x70;     // u32 byte-size
-        constexpr std::ptrdiff_t k_descCallback = 0x78; // qword fn ptr
+        constexpr std::ptrdiff_t DESC_SIZE = 0x70;     // u32 byte-size
+        constexpr std::ptrdiff_t DESC_CALLBACK = 0x78; // qword fn ptr
 
-        // matInst struct offsets + carrier vtables live in color_override/matinst_probe.hpp (shared with the publisher
-        // hook). Reference them via `MatInstProbe::k_offMi_*` / `MatInstProbe::k_carrierVtable_*`.
-        namespace Probe = Transmog::ColorOverride::MatInstProbe;
+        // matInst struct offsets live in color_override/matinst_probe.hpp (shared with the publisher
+        // hook). Reference them via `mat_inst_probe::MI_OFFSET_*` and the sibling AREC_, MAT_ and WRAPPER_ offsets.
+        namespace probe = Transmog::color_override::mat_inst_probe;
 
         std::atomic<bool> g_applyWindowActive{false};
 
-        // Primary slot context. transmog_apply.cpp wraps each per-slot apply call with set_active_slot(slotIdx) / -1.
-        // This is also mirrored into ColorOverride::State by set_active_slot so the publisher hook (installed by
-        // ColorOverride::init) sees the same slot during its async per-frame fires.
+        // Primary slot context. transmog_apply.cpp wraps each per-slot apply call with set_active_slot(slot_idx) / -1.
+        // This is also mirrored into color_override::state by set_active_slot so the publisher hook (installed by
+        // color_override::init) sees the same slot during its async per-frame fires.
         std::atomic<int> g_activeSlot{-1};
 
         // Tail of the apply window: the engine fires per-property setter writes asynchronously for some frames after
-        // slotPop returns. Keep substituting for k_applyTailMs after the window closes so the natural post-apply render
-        // writes are also captured.
-        constexpr std::int64_t k_applyTailMs = 300;
+        // slot_pop returns. Keep substituting for APPLY_TAIL_MS after the window closes so the natural post-apply
+        // render writes are also captured.
+        constexpr std::int64_t APPLY_TAIL_MS = 300;
         std::atomic<std::int64_t> g_windowEndMs{0};
 
         // Counters
@@ -76,7 +76,7 @@ namespace Transmog::ColorOverride::SetterSubstitute
         OneShotLogSet<std::uintptr_t, 8> g_seenDescShapes;
         // First-fire-per-(slot, content_hash) dedup. Logged once per distinct (slot, hash) so a new region shows up
         // exactly one time per session without drowning the hot path.
-        std::array<OneShotLogSet<std::uint32_t, 32>, ::Transmog::k_slotCount> g_seenSlotHashes;
+        std::array<OneShotLogSet<std::uint32_t, 32>, ::Transmog::SLOT_COUNT> g_seenSlotHashes;
 
         // SEH-guarded read of one u32 with fault-tolerance. Returns 0 on fault. Used by the descriptor dump below so a
         // bad address in one slot does not abort the whole row.
@@ -98,7 +98,7 @@ namespace Transmog::ColorOverride::SetterSubstitute
         //           from arg `a4` inside the 4-arg dispatch wrapper's
         //           internal filter (`if (!a4 || hash_match)`).
         //           Mismatch -> dispatch silently skipped.
-        //   +0x28 = u32 token id (= our `tokId`).
+        //   +0x28 = u32 token id (= our `tok_id`).
         //   +0x44 = u32 flag field. Bit 0x200 (= 1<<9) is the
         //           "publish-skip" gate. Read by the descriptor's
         //           vtbl[20] (a tiny 11-byte function whose body is
@@ -106,10 +106,10 @@ namespace Transmog::ColorOverride::SetterSubstitute
         //           ret`). When the bit is set the descriptor is
         //           silently filtered out of the publish iterator's
         //           inner loop.
-        //   +0x70 = u32 byte-size offset (k_descSize). Controls the
+        //   +0x70 = u32 byte-size offset (DESC_SIZE). Controls the
         //           target-relative write offset and the inline
         //           vs callback path in the setter.
-        //   +0x78 = qword callback fn ptr (k_descCallback). Tail-
+        //   +0x78 = qword callback fn ptr (DESC_CALLBACK). Tail-
         //           called by the per-channel setter when +0x70 == 0.
         //
         // Publish chain shape that reaches THIS setter (functions named by ROLE since RVAs shift on patch):
@@ -175,13 +175,13 @@ namespace Transmog::ColorOverride::SetterSubstitute
         // point it here. The buffer's lifetime spans only a single midhook callback: the engine's setter consumes
         // DMK::hook::gpr(ctx, DMK::hook::Gpr::R8) synchronously inside the trampoline that runs after we return, and no
         // reentrant path enters the setter, so thread-local storage is sufficient.
-        thread_local std::uint8_t s_overrideBuf[4]{};
+        thread_local std::uint8_t s_override_buf[4]{};
 
         // SEH-guarded property-size read (from the descriptor at rcx). Returns false on fault so a fault is never
         // conflated with a real zero size (which selects the callback dispatch path).
         bool read_desc_size(std::uintptr_t rcx, std::uint32_t &out) noexcept
         {
-            const auto v = DMK::memory::read<std::uint32_t>(DMK::Address{rcx + k_descSize});
+            const auto v = DMK::memory::read<std::uint32_t>(DMK::Address{rcx + DESC_SIZE});
             if (!v)
                 return false;
             out = *v;
@@ -199,10 +199,10 @@ namespace Transmog::ColorOverride::SetterSubstitute
         }
 
         // matInst probe + submesh-name read live in color_override/matinst_probe.{hpp,cpp} (shared with the publisher
-        // hook). Use `Probe::probe_from_wrapper` / `Probe::read_submesh_name`.
+        // hook). Use `probe::probe_from_wrapper` / `probe::read_submesh_name`.
 
-        // Resolve which LT slot owns this matInst. Tries the MatInstOwner map first (populated by the publisher hook on
-        // dst matInsts), falls back to the carrier set's content-hash ownership, and finally to the active apply
+        // Resolve which LT slot owns this matInst. Tries the mat_inst_owner map first (populated by the publisher hook
+        // on dst matInsts), falls back to the carrier set's content-hash ownership, and finally to the active apply
         // window. Returns -1 if ownership cannot be established.
         int resolve_slot(std::uintptr_t mi, std::uint32_t content_hash) noexcept
         {
@@ -211,14 +211,14 @@ namespace Transmog::ColorOverride::SetterSubstitute
             int slot = g_activeSlot.load(std::memory_order_acquire);
             if (slot >= 0)
                 return slot;
-            // Secondary: ColorOverride owner map (populated by the publisher hook on dst matInsts during each apply).
-            slot = ColorOverride::MatInstOwner::lookup_verified(mi, content_hash);
+            // Secondary: color_override owner map (populated by the publisher hook on dst matInsts during each apply).
+            slot = color_override::mat_inst_owner::lookup_verified(mi, content_hash);
             if (slot >= 0)
                 return slot;
-            slot = ColorOverride::CarrierSet::find_slot_by_hash(content_hash);
+            slot = color_override::carrier_set::find_slot_by_hash(content_hash);
             if (slot >= 0)
                 return slot;
-            return ColorOverride::State::active_apply_slot().load(std::memory_order_acquire);
+            return color_override::state::active_apply_slot().load(std::memory_order_acquire);
         }
 
         void on_setter_mid(DMK::hook::MidContext &ctx) noexcept
@@ -227,19 +227,19 @@ namespace Transmog::ColorOverride::SetterSubstitute
 
             // Periodic counter dump. The cadence is deliberately coarse: these are running TOTALS, so a fine
             // interval only repeats the same trend across many near-identical blocks.
-            constexpr std::uint64_t k_counterDumpEveryFires = 98304;
+            constexpr std::uint64_t counter_dump_every_fires = 98304;
             const auto fires = g_hookFires.load(std::memory_order_relaxed);
-            if (fires % k_counterDumpEveryFires == 0)
+            if (fires % counter_dump_every_fires == 0)
             {
                 std::uint8_t r = 0, g = 0, b = 0;
-                bool active = DyeRecordInject::get_published_first_active_rgb(&r, &g, &b);
-                const auto hs = ColorOverride::HostScope::snapshot_stats();
+                bool active = dye_record_inject::get_published_first_active_rgb(&r, &g, &b);
+                const auto hs = color_override::host_scope::snapshot_stats();
                 // windowOpen indicates the engine-vs-our-gate timing:
                 // setter calls outside the LT-apply window + tail are silently dropped before any of the counters above
                 // increment (so a sudden fires-count gap correlates with windowOpen=0 at the time). tailMs is the
-                // post-close grace period (see k_applyTailMs).
-                const bool winOpen = g_applyWindowActive.load(std::memory_order_relaxed);
-                const auto winAge = State::now_ms() - g_windowEndMs.load(std::memory_order_relaxed);
+                // post-close grace period (see APPLY_TAIL_MS).
+                const bool win_open = g_applyWindowActive.load(std::memory_order_relaxed);
+                const auto win_age = state::now_ms() - g_windowEndMs.load(std::memory_order_relaxed);
                 (void)DMK::log().try_log(
                     DMK::LogLevel::Trace,
                     "[color-setter-sub] fires={} subs={} defs={} miss={} "
@@ -251,9 +251,9 @@ namespace Transmog::ColorOverride::SetterSubstitute
                     g_swatchMisses.load(std::memory_order_relaxed),
                     g_slotUnknown.load(std::memory_order_relaxed),
                     g_hostRejects.load(std::memory_order_relaxed),
-                    winOpen ? 1 : 0,
-                    winAge,
-                    k_applyTailMs,
+                    win_open ? 1 : 0,
+                    win_age,
+                    APPLY_TAIL_MS,
                     active,
                     r,
                     g,
@@ -265,15 +265,15 @@ namespace Transmog::ColorOverride::SetterSubstitute
             }
 
             // Gate 1: only inside the LT-apply window or short tail.
-            const bool inWindow = g_applyWindowActive.load(std::memory_order_relaxed) ||
-                                  (State::now_ms() - g_windowEndMs.load(std::memory_order_relaxed) < k_applyTailMs);
-            if (!inWindow)
+            const bool in_window = g_applyWindowActive.load(std::memory_order_relaxed) ||
+                                   (state::now_ms() - g_windowEndMs.load(std::memory_order_relaxed) < APPLY_TAIL_MS);
+            if (!in_window)
                 return;
 
             // Gate 2: host-scope. The setter detour fires from MANY actors - player, NPCs in render range, mounts,
             // scenery. Each NPC wearing the same shader template contributes its own matInst (unique stable_id) to the
             // capture set, padding the row cap with non-player rows. Filter to player-owned hosts only.
-            if (!ColorOverride::HostScope::is_current_host_player_owned(DMK::hook::stack_pointer(ctx)))
+            if (!color_override::host_scope::is_current_host_player_owned(DMK::hook::stack_pointer(ctx)))
             {
                 g_hostRejects.fetch_add(1, std::memory_order_relaxed);
                 return;
@@ -286,67 +286,68 @@ namespace Transmog::ColorOverride::SetterSubstitute
             // earns nothing.
 
             // Token id (for grouping + UI display). NOT a gate.
-            std::uint32_t tokId = 0;
-            if (read_token_id(DMK::hook::gpr(ctx, DMK::hook::Gpr::Rdx), tokId))
+            std::uint32_t tok_id = 0;
+            if (read_token_id(DMK::hook::gpr(ctx, DMK::hook::Gpr::Rdx), tok_id))
             {
                 // Lazy warm-up: cold-start can leave the discovery table underpopulated (Windows lazy-commit means some
                 // registrar code pages were not faulted in at module-init scan time) and the interner table can grow
                 // after our initial walk. Retry both when we see a token we cannot classify; throttled internally so
                 // this is a cheap no-op once warmed.
-                if (ColorOverride::TokenTable::token_layer(tokId) < 0)
+                if (color_override::token_table::token_layer(tok_id) < 0)
                 {
-                    ColorOverride::TokenSlotDiscovery::retry_if_underpopulated(33);
-                    ColorOverride::InternerHook::refresh();
+                    color_override::token_slot_discovery::retry_if_underpopulated(33);
+                    color_override::interner_hook::refresh();
                 }
-                if (g_seenTokens.insert_unique(tokId))
+                if (g_seenTokens.insert_unique(tok_id))
                 {
                     // Only report a token that CLASSIFIES. layer/channel == -1 means the token table does not know
                     // it, and most tokens seen here are in that state, so reporting them is noise.
                     // [token-discovery] owns the job of finding unknown tokens.
-                    const auto layer = ColorOverride::TokenTable::token_layer(tokId);
-                    const auto channel = ColorOverride::TokenTable::channel_kind(tokId);
+                    const auto layer = color_override::token_table::token_layer(tok_id);
+                    const auto channel = color_override::token_table::channel_kind(tok_id);
                     if (layer >= 0 || channel >= 0)
                     {
                         (void)DMK::log().try_log(
                             DMK::LogLevel::Trace,
                             "[color-setter-sub] token seen: 0x{:08X} layer={} channel={}",
-                            tokId,
+                            tok_id,
                             layer,
                             channel
                         );
                     }
                 }
             }
-            if (tokId == 0)
+            if (tok_id == 0)
                 return;
             // No token-allowlist gate. Every dye-class property write that reaches here is a candidate swatch - tokens
             // we can't classify get bucketed under "misc" in the UI but still substitute via the user's Recolor picks.
             // Substitution itself only fires when the user has an `override_active` row, so unrelated writes that slip
             // through resolve_slot still do not get substituted.
-            const std::uint16_t tok16 = static_cast<std::uint16_t>(tokId);
+            const std::uint16_t tok16 = static_cast<std::uint16_t>(tok_id);
 
             // matInst identity probe.
-            Probe::MatInstFields mf{};
-            if (!Probe::probe_from_wrapper(DMK::hook::gpr(ctx, DMK::hook::Gpr::Rdi), mf))
+            probe::MatInstFields mf{};
+            if (!probe::probe_from_wrapper(DMK::hook::gpr(ctx, DMK::hook::Gpr::Rdi), mf))
                 return;
             if (mf.content_hash == 0)
                 return;
 
             // Slot-agnostic pending match.
             //
-            // Before resolving slot ownership, consult PendingOverrides by (submesh_name, token_id) alone. If the
+            // Before resolving slot ownership, consult pending_overrides by (submesh_name, token_id) alone. If the
             // active preset has a saved override whose submesh+token matches what the engine is writing, substitute the
             // user's RGB and skip the slot-routing pipeline. Name-based match is sufficient because submesh names are
             // globally unique inside the dyeable surface set of one outfit. The pending entry stays in the map after
             // a hit, so repeated engine writes to the same property keep substituting.
-            if (ColorOverride::PendingOverrides::has_any())
+            if (color_override::pending_overrides::has_any())
             {
                 char pend_sm[40] = {0};
-                const bool sm_ok = Probe::read_submesh_name(mf.mi, pend_sm, sizeof(pend_sm));
+                const bool sm_ok = probe::read_submesh_name(mf.mi, pend_sm, sizeof(pend_sm));
                 if (sm_ok && pend_sm[0] != '\0')
                 {
                     std::uint8_t pr = 0, pg = 0, pb = 0;
-                    const bool pend_hit = ColorOverride::PendingOverrides::lookup_any_slot(pend_sm, tok16, pr, pg, pb);
+                    const bool pend_hit =
+                        color_override::pending_overrides::lookup_any_slot(pend_sm, tok16, pr, pg, pb);
                     if (pend_hit)
                     {
                         // Snapshot the engine's source bytes BEFORE redirecting DMK::hook::gpr(ctx, DMK::hook::Gpr::R8)
@@ -358,13 +359,13 @@ namespace Transmog::ColorOverride::SetterSubstitute
                             src_bgra[0] = src_bgra[1] = src_bgra[2] = 0;
                             src_bgra[3] = 0xFF;
                         }
-                        s_overrideBuf[0] = pb;
-                        s_overrideBuf[1] = pg;
-                        s_overrideBuf[2] = pr;
-                        s_overrideBuf[3] = 0xFF;
-                        DMK::hook::gpr(ctx, DMK::hook::Gpr::R8) = reinterpret_cast<std::uintptr_t>(&s_overrideBuf);
+                        s_override_buf[0] = pb;
+                        s_override_buf[1] = pg;
+                        s_override_buf[2] = pr;
+                        s_override_buf[3] = 0xFF;
+                        DMK::hook::gpr(ctx, DMK::hook::Gpr::R8) = reinterpret_cast<std::uintptr_t>(&s_override_buf);
                         g_substitutions.fetch_add(1, std::memory_order_relaxed);
-                        ColorOverride::SwatchTable::promote_placeholder_identity(
+                        color_override::swatch_table::promote_placeholder_identity(
                             pend_sm,
                             tok16,
                             mf.content_hash,
@@ -405,7 +406,7 @@ namespace Transmog::ColorOverride::SetterSubstitute
             // Capture submesh name early - needed by the placeholder-first slot router below AND by lookup_or_insert
             // plus the one-shot log later. SEH-protected; empty on bail.
             char sm_name[40] = {0};
-            const bool nameOk = Probe::read_submesh_name(mf.mi, sm_name, sizeof(sm_name));
+            const bool name_ok = probe::read_submesh_name(mf.mi, sm_name, sizeof(sm_name));
 
             // Placeholder-first slot router.
             //
@@ -414,17 +415,17 @@ namespace Transmog::ColorOverride::SetterSubstitute
             // Chest apply window, so resolve_slot() can mis-attribute helm hashes to Chest. The user's saved
             // placeholder is the authoritative "this submesh belongs to slot X" signal; when one exists for (submesh,
             // token), trust it over resolve_slot's answer.
-            if (nameOk)
+            if (name_ok)
             {
-                const int placeholderSlot = ColorOverride::SwatchTable::find_placeholder_slot(sm_name, tok16);
-                if (placeholderSlot >= 0)
-                    slot = placeholderSlot;
+                const int placeholder_slot = color_override::swatch_table::find_placeholder_slot(sm_name, tok16);
+                if (placeholder_slot >= 0)
+                    slot = placeholder_slot;
             }
             // First-fire log per (slot, content_hash). A per-slot SET (not last-hash dedup) is required so hair/eye
             // re-fires cannot mask a chest matInst between its own fires.
             // Name-less regions are skipped immediately below, so reporting them says only "here is another one I
             // ignored". Report the ones that carry a usable submesh name.
-            if (nameOk && g_seenSlotHashes[slot].insert_unique(mf.content_hash))
+            if (name_ok && g_seenSlotHashes[slot].insert_unique(mf.content_hash))
             {
                 (void)DMK::log().try_log(
                     DMK::LogLevel::Trace,
@@ -439,13 +440,13 @@ namespace Transmog::ColorOverride::SetterSubstitute
             // (Material[+0x10] = nullptr, or wrapper +0x28 = module-resident empty-string sentinel). They re-render
             // every frame inside the apply window and bleed into every slot's capture set without user value. To debug
             // a coverage gap, comment this out and search the log for "(no-name)" lines.
-            if (!nameOk)
+            if (!name_ok)
             {
                 g_swatchMisses.fetch_add(1, std::memory_order_relaxed);
                 return;
             }
 
-            const int row = ColorOverride::SwatchTable::lookup_or_insert(
+            const int row = color_override::swatch_table::lookup_or_insert(
                 slot,
                 mf.content_hash,
                 mf.stable_id,
@@ -457,14 +458,14 @@ namespace Transmog::ColorOverride::SetterSubstitute
             // Pending-override consume: if the user previously persisted an RGB for this (slot, submesh, token), apply
             // it now. Pending entries stay in the map so subsequent re-captures (post-teardown / reapply) keep
             // auto-applying without user action.
-            if (row >= 0 && ColorOverride::PendingOverrides::slot_has_pending(slot))
+            if (row >= 0 && color_override::pending_overrides::slot_has_pending(slot))
             {
                 std::uint8_t pr = 0, pg = 0, pb = 0;
-                if (ColorOverride::PendingOverrides::lookup(slot, sm_name, tok16, pr, pg, pb))
+                if (color_override::pending_overrides::lookup(slot, sm_name, tok16, pr, pg, pb))
                 {
-                    const auto rowIdx = static_cast<std::size_t>(row);
-                    ColorOverride::SwatchTable::set_override_rgb(slot, rowIdx, pr, pg, pb);
-                    ColorOverride::SwatchTable::set_override_active(slot, rowIdx, true);
+                    const auto row_idx = static_cast<std::size_t>(row);
+                    color_override::swatch_table::set_override_rgb(slot, row_idx, pr, pg, pb);
+                    color_override::swatch_table::set_override_active(slot, row_idx, true);
                 }
             }
             if (row < 0)
@@ -472,20 +473,20 @@ namespace Transmog::ColorOverride::SetterSubstitute
                 g_swatchMisses.fetch_add(1, std::memory_order_relaxed);
                 return;
             }
-            const auto rowIdx = static_cast<std::size_t>(row);
+            const auto row_idx = static_cast<std::size_t>(row);
 
             // Read the engine's natural BGRA value - the bytes the setter is about to copy from `DMK::hook::gpr(ctx,
-            // DMK::hook::Gpr::R8)`. The master dye toggle lives in SwatchTable's per-slot storage rather than
+            // DMK::hook::Gpr::R8)`. The master dye toggle lives in swatch_table's per-slot storage rather than
             // PickerState because the UI's `ImGui::Checkbox("Dye##dye_on")` writes through that storage; gating on the
             // same value avoids a stale-read race.
-            const bool slotEn = ColorOverride::SwatchTable::slot_enabled_get(slot);
-            auto *ovr = ColorOverride::SwatchTable::override_row(slot, rowIdx);
-            const bool rowOverride = ovr && ovr->override_active;
+            const bool slot_en = color_override::swatch_table::slot_enabled_get(slot);
+            auto *ovr = color_override::swatch_table::override_row(slot, row_idx);
+            const bool row_override = ovr && ovr->override_active;
 
             std::uint8_t bgra[4]{};
-            const bool readOk = read_source_bgra(DMK::hook::gpr(ctx, DMK::hook::Gpr::R8), bgra);
+            const bool read_ok = read_source_bgra(DMK::hook::gpr(ctx, DMK::hook::Gpr::R8), bgra);
 
-            if (readOk)
+            if (read_ok)
             {
                 // Always capture the engine value here - `DMK::hook::gpr(ctx, DMK::hook::Gpr::R8)` still holds the
                 // natural source bytes (we have not redirected it yet). Running capture regardless of override state
@@ -494,9 +495,9 @@ namespace Transmog::ColorOverride::SetterSubstitute
                 // idempotent via its own `def_seen_mask & 1` gate; only the first fire per row actually writes.
                 //
                 // Source byte order: BGRA at `DMK::hook::gpr(ctx, DMK::hook::Gpr::R8)`.
-                ColorOverride::SwatchTable::capture_default_if_unset(
+                color_override::swatch_table::capture_default_if_unset(
                     slot,
-                    rowIdx,
+                    row_idx,
                     /*r=*/bgra[2],
                     /*g=*/bgra[1],
                     /*b=*/bgra[0],
@@ -507,15 +508,15 @@ namespace Transmog::ColorOverride::SetterSubstitute
 
             // Only substitute when BOTH the slot is enabled AND this specific row's override flag is on. Otherwise the
             // engine value flows through unchanged.
-            if (!slotEn || !rowOverride || !ovr)
+            if (!slot_en || !row_override || !ovr)
                 return;
 
             // size > 0  -> direct 4-byte DWORD memcpy path
             // size == 0 -> callback dispatch path (non-DWORD types)
-            std::uint32_t fieldOffset = 0;
-            if (!read_desc_size(DMK::hook::gpr(ctx, DMK::hook::Gpr::Rcx), fieldOffset))
+            std::uint32_t field_offset = 0;
+            if (!read_desc_size(DMK::hook::gpr(ctx, DMK::hook::Gpr::Rcx), field_offset))
                 return;
-            if (fieldOffset == 0)
+            if (field_offset == 0)
                 return;
 
             const auto ur = ovr->r;
@@ -523,11 +524,11 @@ namespace Transmog::ColorOverride::SetterSubstitute
             const auto ub = ovr->b;
 
             // BGRA pack.
-            s_overrideBuf[0] = ub;
-            s_overrideBuf[1] = ug;
-            s_overrideBuf[2] = ur;
-            s_overrideBuf[3] = 0xFF;
-            DMK::hook::gpr(ctx, DMK::hook::Gpr::R8) = reinterpret_cast<std::uintptr_t>(&s_overrideBuf);
+            s_override_buf[0] = ub;
+            s_override_buf[1] = ug;
+            s_override_buf[2] = ur;
+            s_override_buf[3] = 0xFF;
+            DMK::hook::gpr(ctx, DMK::hook::Gpr::R8) = reinterpret_cast<std::uintptr_t>(&s_override_buf);
             g_substitutions.fetch_add(1, std::memory_order_relaxed);
         }
     } // namespace
@@ -583,11 +584,11 @@ namespace Transmog::ColorOverride::SetterSubstitute
         if (!::Transmog::flag_color_override().load(std::memory_order_acquire))
             return;
         g_activeSlot.store(slot, std::memory_order_release);
-        // Mirror into ColorOverride::State so the publisher hook resolves the right slot when its TLS-stack fallback
+        // Mirror into color_override::state so the publisher hook resolves the right slot when its TLS-stack fallback
         // is empty, which happens whenever the orchestrator hooks are absent. This also sets the apply-window deadline
         // so the publisher window check does not bail.
         if (slot >= 0)
-            ColorOverride::mark_apply_begin(slot);
+            color_override::mark_apply_begin(slot);
     }
 
     void set_apply_window(bool active) noexcept
@@ -604,8 +605,8 @@ namespace Transmog::ColorOverride::SetterSubstitute
         }
         else
         {
-            g_windowEndMs.store(State::now_ms(), std::memory_order_release);
+            g_windowEndMs.store(state::now_ms(), std::memory_order_release);
         }
     }
 
-} // namespace Transmog::ColorOverride::SetterSubstitute
+} // namespace Transmog::color_override::setter_substitute

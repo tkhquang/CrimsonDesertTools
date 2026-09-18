@@ -29,7 +29,7 @@ namespace
     DMK::Result<void> on_ready(DMK::Session &session)
     {
         auto &logger = session.log();
-        EquipHide::Version::log_version_info();
+        EquipHide::version::log_version_info();
         logger.info("DLL loaded, runtime dir: {}", DMK::filesystem::get_runtime_directory_utf8());
 
         auto ready = EquipHide::init(session);

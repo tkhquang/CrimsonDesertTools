@@ -9,7 +9,7 @@
 
 #include <cstdint>
 
-namespace Transmog::ColorOverride::PublisherHook
+namespace Transmog::color_override::publisher_hook
 {
     /**
      * Install the MidHook. Returns true on success, false if the AOB cascade fails to resolve the publisher entry
@@ -27,6 +27,6 @@ namespace Transmog::ColorOverride::PublisherHook
         std::uint64_t arec_rejects{};
     };
     Stats snapshot_stats() noexcept;
-} // namespace Transmog::ColorOverride::PublisherHook
+} // namespace Transmog::color_override::publisher_hook
 
 #endif // TRANSMOG_COLOR_OVERRIDE_COLOR_PUBLISHER_HOOK_HPP

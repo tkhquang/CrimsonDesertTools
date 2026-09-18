@@ -8,9 +8,9 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace Transmog::ColorOverride::MatInstOwner
+namespace Transmog::color_override::mat_inst_owner
 {
-    constexpr std::size_t k_capacity = 1024;
+    constexpr std::size_t CAPACITY = 1024;
 
     /**
      * Bind `mi` to `slot` with the matInst's current content hash.
@@ -27,6 +27,6 @@ namespace Transmog::ColorOverride::MatInstOwner
     /// Drop every entry bound to `slot`.
     void clear_for_slot(int slot) noexcept;
     void clear_all() noexcept;
-} // namespace Transmog::ColorOverride::MatInstOwner
+} // namespace Transmog::color_override::mat_inst_owner
 
 #endif // TRANSMOG_COLOR_OVERRIDE_COLOR_MATINST_OWNER_HPP

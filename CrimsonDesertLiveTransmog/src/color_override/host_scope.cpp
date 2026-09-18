@@ -12,14 +12,14 @@
 #include <atomic>
 #include <cstdint>
 
-namespace Transmog::ColorOverride::HostScope
+namespace Transmog::color_override::host_scope
 {
     namespace
     {
         // Per-host owner-container vfuncs. Each is a vtable slot on the per-host matInst-container; at entry RCX IS the
         // owner container (no `[+0x10]` deref). They internally call the matInst-list copy loop, which
         // dispatches the publisher, which eventually invokes the 4-byte property setter that
-        // ColorOverride::SetterSubstitute hooks. Both targets are resolved live via the AOB cascade in
+        // color_override::setter_substitute hooks. Both targets are resolved live via the AOB cascade in
         // `aob_resolver.hpp` so they survive function relocation across patches.
 
         // Per-thread RSP-tagged owner state. x64 RSP grows DOWNWARD, so setter_rsp < tl_ownerRsp puts the setter
@@ -35,9 +35,9 @@ namespace Transmog::ColorOverride::HostScope
             std::atomic<std::uintptr_t> parent{0};
             std::atomic<std::uint32_t> hits{0};
         };
-        constexpr std::size_t k_clusterCap = 64;
-        constexpr std::uint32_t k_electionFloorHits = 5;
-        std::array<ClusterEntry, k_clusterCap> g_cluster{};
+        constexpr std::size_t CLUSTER_CAP = 64;
+        constexpr std::uint32_t ELECTION_FLOOR_HITS = 5;
+        std::array<ClusterEntry, CLUSTER_CAP> g_cluster{};
 
         // Diagnostic counters.
         std::atomic<std::uint64_t> g_dbgEntered{0};
@@ -53,8 +53,8 @@ namespace Transmog::ColorOverride::HostScope
         // arithmetic. This runs once per owner-container vfunc fire.
         bool ptr_in_text_or_rdata(std::uintptr_t p) noexcept
         {
-            static const DMK::Region s_hostImage = DMK::Region::host();
-            return s_hostImage.contains(DMK::Address{p});
+            static const DMK::Region s_host_image = DMK::Region::host();
+            return s_host_image.contains(DMK::Address{p});
         }
 
         bool looks_like_live_host(std::uintptr_t parent) noexcept
@@ -79,7 +79,7 @@ namespace Transmog::ColorOverride::HostScope
             }
         }
 
-        // O(k_clusterCap) insert/increment.
+        // O(CLUSTER_CAP) insert/increment.
         void cluster_record(std::uintptr_t parent) noexcept
         {
             if (parent == 0)
@@ -113,14 +113,14 @@ namespace Transmog::ColorOverride::HostScope
         // so the first ~5 vfunc calls of an apply do not lock the substitute out before the cluster has any data.
         bool election_ready() noexcept
         {
-            std::uint32_t topHits = 0;
+            std::uint32_t top_hits = 0;
             for (auto &e : g_cluster)
             {
                 const auto h = e.hits.load(std::memory_order_relaxed);
-                if (h > topHits)
-                    topHits = h;
+                if (h > top_hits)
+                    top_hits = h;
             }
-            return topHits >= k_electionFloorHits;
+            return top_hits >= ELECTION_FLOOR_HITS;
         }
 
         // True if `parent` is in the elected player set:
@@ -130,23 +130,23 @@ namespace Transmog::ColorOverride::HostScope
         {
             if (parent == 0)
                 return false;
-            std::uint32_t topHits = 0;
-            std::uint32_t parentHits = 0;
+            std::uint32_t top_hits = 0;
+            std::uint32_t parent_hits = 0;
             for (auto &e : g_cluster)
             {
                 const auto p = e.parent.load(std::memory_order_acquire);
                 const auto h = e.hits.load(std::memory_order_relaxed);
                 if (p == 0)
                     continue;
-                if (h > topHits)
-                    topHits = h;
+                if (h > top_hits)
+                    top_hits = h;
                 if (p == parent)
-                    parentHits = h;
+                    parent_hits = h;
             }
-            if (topHits < k_electionFloorHits)
+            if (top_hits < ELECTION_FLOOR_HITS)
                 return false;
-            // parentHits * 10 >= topHits avoids float division.
-            return parentHits * 10 >= topHits;
+            // parent_hits * 10 >= top_hits avoids float division.
+            return parent_hits * 10 >= top_hits;
         }
 
         // Mid-hook on the per-host owner-container vfuncs. RCX at entry IS the owner container; the iter that
@@ -286,4 +286,4 @@ namespace Transmog::ColorOverride::HostScope
         };
     }
 
-} // namespace Transmog::ColorOverride::HostScope
+} // namespace Transmog::color_override::host_scope

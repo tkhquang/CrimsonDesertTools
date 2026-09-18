@@ -27,13 +27,13 @@ namespace EquipHide
 {
     namespace
     {
-        // s_workersMtx serializes the lazy-launch arms. launch_*() sets each worker pointer under the lock and
+        // s_workers_mtx serializes the lazy-launch arms. launch_*() sets each worker pointer under the lock and
         // join_background_threads() reads it unlocked. The atomic launch guards stop a second launch_*() call from a
         // race against the first, so the unique_ptr writes see no contention beyond the launch site.
-        std::mutex s_workersMtx;
-        std::unique_ptr<DetourModKit::StoppableWorker> s_deferredScanWorker;
-        std::unique_ptr<DetourModKit::StoppableWorker> s_lazyProbeWorker;
-        std::unique_ptr<DetourModKit::StoppableWorker> s_resolvePollWorker;
+        std::mutex s_workers_mtx;
+        std::unique_ptr<DetourModKit::StoppableWorker> s_deferred_scan_worker;
+        std::unique_ptr<DetourModKit::StoppableWorker> s_lazy_probe_worker;
+        std::unique_ptr<DetourModKit::StoppableWorker> s_resolve_poll_worker;
 
         // Deferred IndexedStringA scan tuning. Convergence rests on two gates plus a stability window.
         //
@@ -43,16 +43,16 @@ namespace EquipHide
         // polls lets the gate refuse the commit until the world is live.
         //
         // Minimum count: even once the chain reports a controlled actor, the gate refuses a commit below
-        // k_minStableCount, so a torn or partially loaded registry cannot snapshot a sub-50 entry table that happens
+        // MIN_STABLE_COUNT, so a torn or partially loaded registry cannot snapshot a sub-50 entry table that happens
         // to repeat itself across consecutive polls.
         //
-        // Stability window: with both gates satisfied, k_stabilityRequired identical scans confirm that the table
+        // Stability window: with both gates satisfied, STABILITY_REQUIRED identical scans confirm that the table
         // finished growing for this load.
-        constexpr int k_scanRetryMs = 2000;
-        constexpr int k_scanInitialDelayMs = 8000;
-        constexpr int k_scanHeartbeatEvery = 30;
-        constexpr int k_stabilityRequired = 5;
-        constexpr std::size_t k_minStableCount = 32;
+        constexpr int SCAN_RETRY_MS = 2000;
+        constexpr int SCAN_INITIAL_DELAY_MS = 8000;
+        constexpr int SCAN_HEARTBEAT_EVERY = 30;
+        constexpr int STABILITY_REQUIRED = 5;
+        constexpr std::size_t MIN_STABLE_COUNT = 32;
 
         // Forward declaration. The world-ready probe lives below, next to the resolve-poll thread that consumes it,
         // and the deferred scan body calls it as a commit gate.
@@ -61,15 +61,15 @@ namespace EquipHide
         // Sleeps in short slices and observes both the StoppableWorker stop_token and the process-wide
         // shutdown_requested() flag, so the worker exits within about 50ms of either signal whatever the
         // per-iteration retry delay is.
-        bool sleep_responsive_ms(std::stop_token st, int totalMs) noexcept
+        bool sleep_responsive_ms(std::stop_token st, int total_ms) noexcept
         {
-            constexpr int sliceMs = 50;
-            int remaining = totalMs;
+            constexpr int slice_ms = 50;
+            int remaining = total_ms;
             while (remaining > 0)
             {
                 if (st.stop_requested() || shutdown_requested().load(std::memory_order_relaxed))
                     return false;
-                const int slice = remaining < sliceMs ? remaining : sliceMs;
+                const int slice = remaining < slice_ms ? remaining : slice_ms;
                 std::this_thread::sleep_for(std::chrono::milliseconds(slice));
                 remaining -= slice;
             }
@@ -79,21 +79,21 @@ namespace EquipHide
         void deferred_scan_body(std::stop_token st) noexcept
         {
             auto &logger = DMK::log();
-            const auto mapLookupAddr = resolved_addrs().mapLookup;
-            if (!mapLookupAddr)
+            const auto map_lookup_addr = resolved_addrs().map_lookup;
+            if (!map_lookup_addr)
                 return;
 
             // The initial grace period gives the game a chance to seed the table before the first poll.
-            if (!sleep_responsive_ms(st, k_scanInitialDelayMs))
+            if (!sleep_responsive_ms(st, SCAN_INITIAL_DELAY_MS))
                 return;
 
-            std::size_t prevCount = 0;
-            int stableStreak = 0;
+            std::size_t prev_count = 0;
+            int stable_streak = 0;
             int attempt = 0;
 
             for (;;)
             {
-                if (!sleep_responsive_ms(st, k_scanRetryMs))
+                if (!sleep_responsive_ms(st, SCAN_RETRY_MS))
                     return;
 
                 ++attempt;
@@ -104,101 +104,101 @@ namespace EquipHide
                 // satisfies the stability check below and commits an almost-empty hash map.
                 if (read_controlled_actor_ptr() == 0)
                 {
-                    if (attempt % k_scanHeartbeatEvery == 0)
+                    if (attempt % SCAN_HEARTBEAT_EVERY == 0)
                         logger.debug(
                             "IndexedStringA deferred scan: still waiting "
                             "after {} attempts (controlled actor not yet live)",
                             attempt
                         );
-                    stableStreak = 0;
-                    prevCount = 0;
+                    stable_streak = 0;
+                    prev_count = 0;
                     continue;
                 }
 
-                auto runtimeHashes = scan_indexed_string_table(mapLookupAddr);
-                const auto curCount = runtimeHashes.size();
+                auto runtime_hashes = scan_indexed_string_table(map_lookup_addr);
+                const auto cur_count = runtime_hashes.size();
 
-                if (curCount == 0)
+                if (cur_count == 0)
                 {
                     // The table is still entirely empty. Reset the streak so stability never commits the empty
                     // state.
-                    if (attempt % k_scanHeartbeatEvery == 0)
+                    if (attempt % SCAN_HEARTBEAT_EVERY == 0)
                         logger.debug(
                             "IndexedStringA deferred scan: still waiting after {} attempts (table empty)",
                             attempt
                         );
-                    stableStreak = 0;
-                    prevCount = 0;
+                    stable_streak = 0;
+                    prev_count = 0;
                     continue;
                 }
 
-                if (curCount < k_minStableCount)
+                if (cur_count < MIN_STABLE_COUNT)
                 {
                     // Below the minimum-count gate. The world reports ready but the registry published only a
                     // partial table so far. Treat it as still settling.
-                    if (curCount != prevCount)
+                    if (cur_count != prev_count)
                     {
-                        prevCount = curCount;
+                        prev_count = cur_count;
                         logger.trace(
                             "IndexedStringA deferred scan: attempt {}, {} entries (below min {}, awaiting growth)",
                             attempt,
-                            curCount,
-                            k_minStableCount
+                            cur_count,
+                            MIN_STABLE_COUNT
                         );
                     }
-                    if (attempt % k_scanHeartbeatEvery == 0)
+                    if (attempt % SCAN_HEARTBEAT_EVERY == 0)
                         logger.debug(
                             "IndexedStringA deferred scan: {} entries "
                             "after {} attempts (below min commit threshold {}, registry still loading)",
-                            curCount,
+                            cur_count,
                             attempt,
-                            k_minStableCount
+                            MIN_STABLE_COUNT
                         );
-                    stableStreak = 0;
+                    stable_streak = 0;
                     continue;
                 }
 
-                if (curCount != prevCount)
+                if (cur_count != prev_count)
                 {
                     // Growing or shrinking: not stable yet, reset streak and update the baseline.
-                    stableStreak = 0;
-                    prevCount = curCount;
+                    stable_streak = 0;
+                    prev_count = cur_count;
                     logger.trace(
                         "IndexedStringA deferred scan: attempt {}, {} entries (changed, stability streak reset)",
                         attempt,
-                        curCount
+                        cur_count
                     );
 
-                    if (attempt % k_scanHeartbeatEvery == 0)
+                    if (attempt % SCAN_HEARTBEAT_EVERY == 0)
                         logger.debug(
                             "IndexedStringA deferred scan: still waiting "
                             "after {} attempts ({} entries currently, table still settling)",
                             attempt,
-                            curCount
+                            cur_count
                         );
                     continue;
                 }
 
-                ++stableStreak;
-                if (stableStreak < k_stabilityRequired)
+                ++stable_streak;
+                if (stable_streak < STABILITY_REQUIRED)
                 {
                     logger.trace(
                         "IndexedStringA deferred scan: attempt {}, {} entries (stable {}/{}, awaiting commit)",
                         attempt,
-                        curCount,
-                        stableStreak,
-                        k_stabilityRequired
+                        cur_count,
+                        stable_streak,
+                        STABILITY_REQUIRED
                     );
 
-                    if (attempt % k_scanHeartbeatEvery == 0)
+                    if (attempt % SCAN_HEARTBEAT_EVERY == 0)
                         logger.debug(
                             "IndexedStringA deferred scan: {} entries "
                             "after {} attempts (stable streak {}/{}, need {} consecutive identical scans)",
-                            curCount,
+                            cur_count,
                             attempt,
-                            stableStreak,
-                            k_stabilityRequired,
-                            k_stabilityRequired
+                            stable_streak,
+                            STABILITY_REQUIRED,
+                            STABILITY_REQUIRED
                         );
                     continue;
                 }
@@ -209,23 +209,23 @@ namespace EquipHide
                 if (st.stop_requested() || shutdown_requested().load(std::memory_order_relaxed))
                     return;
 
-                const auto totalParts = total_part_count();
-                // Capture the unresolved parts BEFORE the move of runtimeHashes into the published map, because
+                const auto total_parts = total_part_count();
+                // Capture the unresolved parts BEFORE the move of runtime_hashes into the published map, because
                 // get_unresolved_parts borrows it.
-                auto unresolved = get_unresolved_parts(runtimeHashes);
-                const auto resolvedCount = totalParts - unresolved.size();
+                auto unresolved = get_unresolved_parts(runtime_hashes);
+                const auto resolved_count = total_parts - unresolved.size();
 
                 logger.info(
                     "IndexedStringA deferred scan: stable at {} entries "
                     "across {} consecutive scans, committing ({}/{} resolved, {} attempts)",
-                    curCount,
-                    k_stabilityRequired,
-                    resolvedCount,
-                    totalParts,
+                    cur_count,
+                    STABILITY_REQUIRED,
+                    resolved_count,
+                    total_parts,
                     attempt
                 );
 
-                set_runtime_hashes(std::move(runtimeHashes));
+                set_runtime_hashes(std::move(runtime_hashes));
                 rebuild_part_lookup();
                 deferred_scan_pending().store(false, std::memory_order_relaxed);
 
@@ -234,8 +234,8 @@ namespace EquipHide
                 cleanup_vis_bytes();
 
                 auto &ps = player_state();
-                for (int j = 0; j < k_maxProtagonists; ++j)
-                    ps.armorInjected[j].store(false, std::memory_order_relaxed);
+                for (int j = 0; j < MAX_PROTAGONISTS; ++j)
+                    ps.armor_injected[j].store(false, std::memory_order_relaxed);
                 needs_direct_write().store(true, std::memory_order_release);
 
                 if (!unresolved.empty())
@@ -247,56 +247,56 @@ namespace EquipHide
         void lazy_probe_body(std::stop_token st) noexcept
         {
             auto &logger = DMK::log();
-            const auto mapLookupAddr = resolved_addrs().mapLookup;
-            int probeCount = 0;
+            const auto map_lookup_addr = resolved_addrs().map_lookup;
+            int probe_count = 0;
 
             // Track the lowest unresolved count committed so far. A scan that drops the unresolved count below this
             // baseline means new INI parts turned resolvable since the last commit, so the worker publishes even
             // while some still miss. One typo in the INI therefore no longer blocks the rest of the part map.
             // Seeded with size_t-max so the first non-empty scan always wins.
-            std::size_t bestUnresolved = std::numeric_limits<std::size_t>::max();
+            std::size_t best_unresolved = std::numeric_limits<std::size_t>::max();
 
             // Signal value consumed by the previous tick.
             //
             // The signal doubles as the interval throttle: it carries the timestamp it was armed at, and the mid-hook
-            // re-arms only when it reads 0 or a value older than k_lazyProbeIntervalMs. Consuming it by comparison
+            // re-arms only when it reads 0 or a value older than LAZY_PROBE_INTERVAL_MS. Consuming it by comparison
             // keeps that throttle intact. Clearing it instead would present the producer with the "never armed"
             // sentinel, which it re-arms on immediately, collapsing the real interval to this loop's sleep period.
-            int64_t lastSignal = 0;
+            int64_t last_signal = 0;
 
-            logger.info("Lazy probe started for demand-loaded parts (interval: {}s)", k_lazyProbeIntervalMs / 1000);
+            logger.info("Lazy probe started for demand-loaded parts (interval: {}s)", LAZY_PROBE_INTERVAL_MS / 1000);
 
             while (lazy_probe_pending().load(std::memory_order_relaxed))
             {
-                if (!sleep_responsive_ms(st, static_cast<int>(k_lazyProbeTickMs)))
+                if (!sleep_responsive_ms(st, static_cast<int>(LAZY_PROBE_TICK_MS)))
                     return;
 
                 const auto signal = lazy_probe_signal().load(std::memory_order_relaxed);
-                if (signal == 0 || signal == lastSignal)
+                if (signal == 0 || signal == last_signal)
                     continue;
-                lastSignal = signal;
+                last_signal = signal;
 
-                ++probeCount;
-                logger.trace("Lazy probe #{}: scanning IndexedStringA table", probeCount);
+                ++probe_count;
+                logger.trace("Lazy probe #{}: scanning IndexedStringA table", probe_count);
 
-                auto runtimeHashes = scan_indexed_string_table(mapLookupAddr);
-                if (runtimeHashes.empty())
+                auto runtime_hashes = scan_indexed_string_table(map_lookup_addr);
+                if (runtime_hashes.empty())
                     continue;
 
-                auto unresolved = get_unresolved_parts(runtimeHashes);
-                const auto unresolvedCount = unresolved.size();
-                const bool fullyResolved = unresolved.empty();
-                const bool madeProgress = unresolvedCount < bestUnresolved;
+                auto unresolved = get_unresolved_parts(runtime_hashes);
+                const auto unresolved_count = unresolved.size();
+                const bool fully_resolved = unresolved.empty();
+                const bool made_progress = unresolved_count < best_unresolved;
 
-                if (!madeProgress)
+                if (!made_progress)
                 {
                     // No new INI parts resolved since the last commit. Common stable state on saves whose INI carries
                     // unresolvable entries (typos or parts the game never registers). Keep the probe alive in case the
                     // registry grows later but skip the rebuild work for this tick.
                     logger.trace(
                         "Lazy probe #{}: {} parts unresolved (no progress since last commit)",
-                        probeCount,
-                        unresolvedCount
+                        probe_count,
+                        unresolved_count
                     );
                     continue;
                 }
@@ -307,30 +307,30 @@ namespace EquipHide
                 if (st.stop_requested() || shutdown_requested().load(std::memory_order_relaxed))
                     return;
 
-                const auto newHashCount = runtimeHashes.size();
-                set_runtime_hashes(std::move(runtimeHashes));
+                const auto new_hash_count = runtime_hashes.size();
+                set_runtime_hashes(std::move(runtime_hashes));
                 rebuild_part_lookup();
                 cleanup_vis_bytes();
                 auto &ps = player_state();
-                for (int j = 0; j < k_maxProtagonists; ++j)
-                    ps.armorInjected[j].store(false, std::memory_order_relaxed);
+                for (int j = 0; j < MAX_PROTAGONISTS; ++j)
+                    ps.armor_injected[j].store(false, std::memory_order_relaxed);
                 needs_direct_write().store(true, std::memory_order_release);
 
-                bestUnresolved = unresolvedCount;
+                best_unresolved = unresolved_count;
 
-                if (fullyResolved)
+                if (fully_resolved)
                 {
                     lazy_probe_pending().store(false, std::memory_order_relaxed);
-                    logger.info("Lazy probe resolved all remaining parts ({} probes)", probeCount);
+                    logger.info("Lazy probe resolved all remaining parts ({} probes)", probe_count);
                     return;
                 }
 
                 logger.info(
                     "Lazy probe #{}: committed {} runtime hashes; "
                     "{} INI parts still unresolved (will keep polling for late registrations)",
-                    probeCount,
-                    newHashCount,
-                    unresolvedCount
+                    probe_count,
+                    new_hash_count,
+                    unresolved_count
                 );
             }
         }
@@ -350,21 +350,21 @@ namespace EquipHide
         std::uintptr_t read_controlled_actor_ptr() noexcept
         {
             auto &addrs = resolved_addrs();
-            if (!addrs.worldSystem)
+            if (!addrs.world_system)
                 return 0;
             // The walk steps WorldSystem -> ActorManager -> UserActor -> controlled-actor SLOT under one fault
             // guard, and the trailing read performs the terminal deref, so a half-torn rotation state faults safely
             // instead of a crash. The final floor rejects the not-yet-wired-up sentinel range. Layout offsets come
-            // from CDCore::ActorChainOffsets (controlled_char.hpp), the single authority shared with LiveTransmog and
+            // from CDCore::actor_chain_offsets (controlled_char.hpp), the single authority shared with LiveTransmog and
             // with CDCore's own resolver.
-            namespace AC = CDCore::ActorChainOffsets;
+            namespace ac = CDCore::actor_chain_offsets;
             const auto r = DMK::memory::walk(
-                               DMK::Address{addrs.worldSystem},
+                               DMK::Address{addrs.world_system},
                                std::array<std::ptrdiff_t, 4>{
                                    0x00,
-                                   AC::k_worldSystemToActorManager,
-                                   AC::k_actorManagerToUserActor,
-                                   AC::k_userActorToControlled,
+                                   ac::WORLD_SYSTEM_TO_ACTOR_MANAGER,
+                                   ac::ACTOR_MANAGER_TO_USER_ACTOR,
+                                   ac::USER_ACTOR_TO_CONTROLLED,
                                }
             )
                                .and_then([](DMK::Address leaf) { return DMK::memory::read<std::uintptr_t>(leaf); });
@@ -381,49 +381,49 @@ namespace EquipHide
         void resolve_poll_body(std::stop_token st) noexcept
         {
             auto &logger = DMK::log();
-            logger.info("Resolve poll thread started (interval: {}ms)", k_resolvePollIntervalMs);
+            logger.info("Resolve poll thread started (interval: {}ms)", RESOLVE_POLL_INTERVAL_MS);
 
-            std::uintptr_t prevActor = 0;
-            constexpr std::size_t k_snapshotCountUninit = static_cast<std::size_t>(-1);
-            std::size_t prevSnapshotCount = k_snapshotCountUninit;
+            std::uintptr_t prev_actor = 0;
+            constexpr std::size_t snapshot_count_uninit = static_cast<std::size_t>(-1);
+            std::size_t prev_snapshot_count = snapshot_count_uninit;
 
             while (!st.stop_requested() && !shutdown_requested().load(std::memory_order_relaxed))
             {
-                if (!sleep_responsive_ms(st, static_cast<int>(k_resolvePollIntervalMs)))
+                if (!sleep_responsive_ms(st, static_cast<int>(RESOLVE_POLL_INTERVAL_MS)))
                     return;
 
                 // Defer until the AOB-resolved singletons are populated. read_controlled_actor_ptr carries an
                 // equivalent guard, and this check avoids the guarded-walk cost on every early tick before init
                 // completes.
                 auto &addrs = resolved_addrs();
-                if (!addrs.worldSystem || !addrs.childActorVtbl)
+                if (!addrs.world_system || !addrs.child_actor_vtbl)
                     continue;
 
-                const auto curActor = read_controlled_actor_ptr();
-                const bool actorRotated = (curActor != prevActor);
+                const auto cur_actor = read_controlled_actor_ptr();
+                const bool actor_rotated = (cur_actor != prev_actor);
 
                 // Any change in roster size re-resolves, in both directions. A shrink matters as much as a growth. A
                 // despawned companion leaves its vis ctrl published and the direct-write path then keeps writing
                 // through that stale pointer. Nothing else observes a despawn, because the controlled actor does not
                 // rotate for it, so this is the only trigger that catches one.
-                std::array<CDCore::BodyCacheEntry, k_maxProtagonists> snap{};
-                const auto curSnapshotCount = CDCore::snapshot_body_cache(snap.data(), snap.size());
-                const bool rosterChanged =
-                    (prevSnapshotCount != k_snapshotCountUninit && curSnapshotCount != prevSnapshotCount);
+                std::array<CDCore::BodyCacheEntry, MAX_PROTAGONISTS> snap{};
+                const auto cur_snapshot_count = CDCore::snapshot_body_cache(snap.data(), snap.size());
+                const bool roster_changed =
+                    (prev_snapshot_count != snapshot_count_uninit && cur_snapshot_count != prev_snapshot_count);
 
-                const auto prevSnapshotCountForLog = prevSnapshotCount;
-                if (actorRotated)
-                    prevActor = curActor;
-                prevSnapshotCount = curSnapshotCount;
+                const auto prev_snapshot_count_for_log = prev_snapshot_count;
+                if (actor_rotated)
+                    prev_actor = cur_actor;
+                prev_snapshot_count = cur_snapshot_count;
 
-                if (!actorRotated && !rosterChanged)
+                if (!actor_rotated && !roster_changed)
                     continue;
 
-                if (rosterChanged)
+                if (roster_changed)
                     logger.info(
                         "Player roster changed {} -> {}; re-resolving vis-ctrls",
-                        prevSnapshotCountForLog,
-                        curSnapshotCount
+                        prev_snapshot_count_for_log,
+                        cur_snapshot_count
                     );
 
                 resolve_player_vis_ctrls();
@@ -435,15 +435,16 @@ namespace EquipHide
     {
         if (!deferred_scan_pending().load(std::memory_order_relaxed))
             return;
-        if (!resolved_addrs().mapLookup)
+        if (!resolved_addrs().map_lookup)
             return;
 
         static std::atomic<bool> s_launched{false};
         if (s_launched.exchange(true, std::memory_order_relaxed))
             return;
 
-        std::lock_guard<std::mutex> lk(s_workersMtx);
-        s_deferredScanWorker = std::make_unique<DetourModKit::StoppableWorker>("EH_DeferredScan", &deferred_scan_body);
+        std::lock_guard<std::mutex> lk(s_workers_mtx);
+        s_deferred_scan_worker =
+            std::make_unique<DetourModKit::StoppableWorker>("EH_DeferredScan", &deferred_scan_body);
     }
 
     void launch_lazy_probe() noexcept
@@ -455,8 +456,8 @@ namespace EquipHide
         if (s_launched.exchange(true, std::memory_order_relaxed))
             return;
 
-        std::lock_guard<std::mutex> lk(s_workersMtx);
-        s_lazyProbeWorker = std::make_unique<DetourModKit::StoppableWorker>("EH_LazyProbe", &lazy_probe_body);
+        std::lock_guard<std::mutex> lk(s_workers_mtx);
+        s_lazy_probe_worker = std::make_unique<DetourModKit::StoppableWorker>("EH_LazyProbe", &lazy_probe_body);
     }
 
     void launch_resolve_poll() noexcept
@@ -465,8 +466,8 @@ namespace EquipHide
         if (s_launched.exchange(true, std::memory_order_relaxed))
             return;
 
-        std::lock_guard<std::mutex> lk(s_workersMtx);
-        s_resolvePollWorker = std::make_unique<DetourModKit::StoppableWorker>("EH_ResolvePoll", &resolve_poll_body);
+        std::lock_guard<std::mutex> lk(s_workers_mtx);
+        s_resolve_poll_worker = std::make_unique<DetourModKit::StoppableWorker>("EH_ResolvePoll", &resolve_poll_body);
     }
 
     void join_background_threads()
@@ -474,48 +475,48 @@ namespace EquipHide
         // shutdown() flips the process-wide shutdown_requested() flag before this call. The explicit shutdown() on
         // each worker also calls request_stop() on its stop_token, so the bodies exit promptly.
         //
-        // Lock ordering: extract each unique_ptr into a local under s_workersMtx, then RELEASE the mutex before the
-        // join. A join under s_workersMtx deadlocks against the mid-hook path on the game thread. An EquipVisCheck
-        // tick calls launch_lazy_probe(), which blocks on s_workersMtx.lock(). Meanwhile the lazy-probe worker body
+        // Lock ordering: extract each unique_ptr into a local under s_workers_mtx, then RELEASE the mutex before the
+        // join. A join under s_workers_mtx deadlocks against the mid-hook path on the game thread. An EquipVisCheck
+        // tick calls launch_lazy_probe(), which blocks on s_workers_mtx.lock(). Meanwhile the lazy-probe worker body
         // calls cleanup_vis_bytes(), whose blocking lock on vis_write_mutex stalls behind the resolve-poll worker's
         // try_lock-held critical section in resolve_player_vis_ctrls. With the lock held, shutdown waits on the
-        // lazy-probe join while the game thread waits on s_workersMtx, forever.
+        // lazy-probe join while the game thread waits on s_workers_mtx, forever.
         //
         // Request stop on all three first so the bodies unwind concurrently across the sequential joins below. That
         // shaves wall-clock shutdown latency and leaves the join order unchanged.
         auto &logger = DMK::log();
 
-        std::unique_ptr<DetourModKit::StoppableWorker> deferredLocal;
-        std::unique_ptr<DetourModKit::StoppableWorker> lazyLocal;
-        std::unique_ptr<DetourModKit::StoppableWorker> resolveLocal;
+        std::unique_ptr<DetourModKit::StoppableWorker> deferred_local;
+        std::unique_ptr<DetourModKit::StoppableWorker> lazy_local;
+        std::unique_ptr<DetourModKit::StoppableWorker> resolve_local;
         {
-            std::lock_guard<std::mutex> lk(s_workersMtx);
-            deferredLocal = std::move(s_deferredScanWorker);
-            lazyLocal = std::move(s_lazyProbeWorker);
-            resolveLocal = std::move(s_resolvePollWorker);
+            std::lock_guard<std::mutex> lk(s_workers_mtx);
+            deferred_local = std::move(s_deferred_scan_worker);
+            lazy_local = std::move(s_lazy_probe_worker);
+            resolve_local = std::move(s_resolve_poll_worker);
         }
 
-        if (deferredLocal)
-            deferredLocal->request_stop();
-        if (lazyLocal)
-            lazyLocal->request_stop();
-        if (resolveLocal)
-            resolveLocal->request_stop();
+        if (deferred_local)
+            deferred_local->request_stop();
+        if (lazy_local)
+            lazy_local->request_stop();
+        if (resolve_local)
+            resolve_local->request_stop();
 
-        if (resolveLocal)
+        if (resolve_local)
         {
             logger.info("{} shutdown: joining resolve-poll worker", MOD_NAME);
-            resolveLocal->shutdown();
+            resolve_local->shutdown();
         }
-        if (lazyLocal)
+        if (lazy_local)
         {
             logger.info("{} shutdown: joining lazy-probe worker", MOD_NAME);
-            lazyLocal->shutdown();
+            lazy_local->shutdown();
         }
-        if (deferredLocal)
+        if (deferred_local)
         {
             logger.info("{} shutdown: joining deferred-scan worker", MOD_NAME);
-            deferredLocal->shutdown();
+            deferred_local->shutdown();
         }
     }
 

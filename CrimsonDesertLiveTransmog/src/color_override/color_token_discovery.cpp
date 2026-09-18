@@ -20,7 +20,7 @@
 #include <stop_token>
 #include <vector>
 
-namespace Transmog::ColorOverride::TokenSlotDiscovery
+namespace Transmog::color_override::token_slot_discovery
 {
     namespace
     {
@@ -30,7 +30,7 @@ namespace Transmog::ColorOverride::TokenSlotDiscovery
             int layer{};
             int channel{};
         };
-        constexpr KnownProp k_known[] = {
+        constexpr KnownProp KNOWN[] = {
             {"_tintColorR", 0, 0},
             {"_tintColorG", 0, 1},
             {"_tintColorB", 0, 2},
@@ -78,21 +78,21 @@ namespace Transmog::ColorOverride::TokenSlotDiscovery
         std::atomic<std::size_t> g_lastCount{0};
         std::once_flag g_runOnce;
 
-        // The longest entry in k_known is 30 characters, so a 32-byte window always contains the terminator and a
+        // The longest entry in KNOWN is 30 characters, so a 32-byte window always contains the terminator and a
         // name longer than the window can never compare equal to an allow-list entry.
-        constexpr std::size_t k_name_window = 32;
+        constexpr std::size_t NAME_WINDOW = 32;
 
         // Copy a candidate property name out of the host image. One guarded read per hit replaces a per-known-name
         // walk over foreign memory, and the forced terminator makes std::strcmp over the copy the exact comparison
         // the allow-list needs.
-        bool read_foreign_name(std::uintptr_t addr, char (&out)[k_name_window]) noexcept
+        bool read_foreign_name(std::uintptr_t addr, char (&out)[NAME_WINDOW]) noexcept
         {
             out[0] = '\0';
-            std::array<std::byte, k_name_window> raw{};
+            std::array<std::byte, NAME_WINDOW> raw{};
             // read_into fails the WHOLE span on a fault anywhere inside it, so a name that ends within the window of
             // an unmapped page would reject a candidate the byte-at-a-time predecessor accepted. Walk the window down
             // to its readable prefix and terminate there. A normal candidate reads in one pass.
-            std::size_t readable = k_name_window;
+            std::size_t readable = NAME_WINDOW;
             while (readable > 0 && !DMK::memory::read_into(DMK::Address{addr}, std::span{raw.data(), readable}))
                 readable /= 2;
             if (readable == 0)
@@ -109,8 +109,8 @@ namespace Transmog::ColorOverride::TokenSlotDiscovery
             if (out == nullptr || out_cap == 0)
                 return false;
             out[0] = '\0';
-            const std::size_t limit = (out_cap - 1 < k_name_window) ? out_cap - 1 : k_name_window;
-            std::array<std::byte, k_name_window> raw{};
+            const std::size_t limit = (out_cap - 1 < NAME_WINDOW) ? out_cap - 1 : NAME_WINDOW;
+            std::array<std::byte, NAME_WINDOW> raw{};
             if (!DMK::memory::read_into(DMK::Address{addr}, std::span{raw.data(), limit}))
             {
                 std::snprintf(out, out_cap, "<fault>");
@@ -169,14 +169,14 @@ namespace Transmog::ColorOverride::TokenSlotDiscovery
             //
             // The pattern is intentionally non-unique: there is one match per registered property across the entire
             // module. The name-allow-list filter below accepts only the entries whose strings
-            // appear in k_known, so over-scanning is a performance concern rather than a correctness one. Compile all 3
+            // appear in KNOWN, so over-scanning is a performance concern rather than a correctness one. Compile all 3
             // walk patterns up front. We try each in turn over the module range; the inner accept logic dedups by
             // slot_addr so a site matched by multiple patterns is recorded only once. Walking the union gives
             // resilience: if a future patch reshapes one pattern's tail, the others still cover the call site.
             // The candidates are compiled at BUILD time (Pattern::literal is consteval), so there is no parse step
             // that can fail at runtime and no compiled-count guard to write.
-            const auto &patterns = Transmog::k_colorTokenRegistrarCallAobs;
-            constexpr std::size_t compiledCount = Transmog::k_colorTokenRegistrarCallAobCount;
+            const auto &patterns = Transmog::COLOR_TOKEN_REGISTRAR_CALL_AOBS;
+            constexpr std::size_t compiled_count = Transmog::COLOR_TOKEN_REGISTRAR_CALL_AOB_COUNT;
 
             // Zero-write decode. The instruction immediately preceding the matched `mov r9d, 0x2FFFF` anchor is one
             // of:
@@ -222,25 +222,25 @@ namespace Transmog::ColorOverride::TokenSlotDiscovery
             // positives) so ordinary drift between game builds cannot reach it. This is a runaway stop, not a tuning
             // knob: the wall-clock budget below is what actually bounds the sweep, and a cap sitting just above the
             // real count silently truncates the moment the game grows a few thousand more matching sites.
-            constexpr std::size_t k_maxItersPerPattern = 250000;
-            constexpr auto k_timeBudget = std::chrono::milliseconds(3000);
+            constexpr std::size_t max_iters_per_pattern = 250000;
+            constexpr auto time_budget = std::chrono::milliseconds(3000);
             // The anchor is the start of the `mov r9d, 0x2FFFF` sentinel. Advance the cursor by the shared head
             // length each iteration even when the matched pattern is longer (the P2/P3 tails are not needed for
             // overlap prevention; their hit ranges always extend past the head and never abut another distinct site).
-            constexpr std::size_t k_patternHeadLen = Transmog::k_colorTokenRegistrarCallAobHeadLen;
+            constexpr std::size_t pattern_head_len = Transmog::COLOR_TOKEN_REGISTRAR_CALL_AOB_HEAD_LEN;
 
             // Offset of the `lea rdx, [rip+name]` inside a matched head. That lea is always the LAST instruction of
             // the head and is always 7 bytes (opcode 48 8D 15 + disp32), so DERIVING it from the head length is what
             // keeps the two in step. Do not restate it as an independent constant: a head length that changes without
             // this offset following it decodes the name from the wrong address on every hit, every candidate then
             // fails the allow-list, and discovery reports zero slots with no error anywhere.
-            constexpr std::size_t k_nameLeaOffset = k_patternHeadLen - 7;
+            constexpr std::size_t name_lea_offset = pattern_head_len - 7;
 
-            std::size_t totalHits = 0;
-            std::size_t totalIter = 0;
+            std::size_t total_hits = 0;
+            std::size_t total_iter = 0;
             std::size_t accepted = 0;
-            bool budgetExceeded = false;
-            for (std::size_t pi = 0; pi < patterns.size() && !budgetExceeded; ++pi)
+            bool budget_exceeded = false;
+            for (std::size_t pi = 0; pi < patterns.size() && !budget_exceeded; ++pi)
             {
                 const auto &compiled = patterns[pi];
 
@@ -251,64 +251,64 @@ namespace Transmog::ColorOverride::TokenSlotDiscovery
                 // this site: the query bytes live in this DLL's own .rdata, outside the scanned image, so a match
                 // can never be the query finding itself.
                 const auto *cursor = range.base.ptr<const std::byte>();
-                const auto *const scanEnd = range.end().ptr<const std::byte>();
-                std::size_t patternHits = 0;
+                const auto *const scan_end = range.end().ptr<const std::byte>();
+                std::size_t pattern_hits = 0;
                 std::size_t iter = 0;
-                for (; iter < k_maxItersPerPattern; ++iter)
+                for (; iter < max_iters_per_pattern; ++iter)
                 {
                     if (g_stopping.load(std::memory_order_acquire))
                     {
                         // Teardown asked for the module back. Abandoning mid-sweep is safe: every accepted slot is
                         // already in g_slots and the dedup makes a later scan idempotent.
-                        budgetExceeded = true;
+                        budget_exceeded = true;
                         break;
                     }
-                    if (clock::now() - t0 > k_timeBudget)
+                    if (clock::now() - t0 > time_budget)
                     {
                         DMK::log().warning(
                             "[token-discovery] time budget exceeded at pattern={} iter={} hits={} (bailing)",
                             pi,
                             iter,
-                            patternHits
+                            pattern_hits
                         );
-                        budgetExceeded = true;
+                        budget_exceeded = true;
                         break;
                     }
-                    const auto bytesLeft = static_cast<std::size_t>(scanEnd - cursor);
-                    if (bytesLeft < k_patternHeadLen)
+                    const auto bytes_left = static_cast<std::size_t>(scan_end - cursor);
+                    if (bytes_left < pattern_head_len)
                         break;
                     const auto *const hit =
-                        DMK::scan::unchecked::find_pattern(DMK::Region{DMK::Address{cursor}, bytesLeft}, compiled);
+                        DMK::scan::unchecked::find_pattern(DMK::Region{DMK::Address{cursor}, bytes_left}, compiled);
                     if (hit == nullptr)
                         break;
-                    ++patternHits;
+                    ++pattern_hits;
 
-                    const auto matchAddr = reinterpret_cast<std::uintptr_t>(hit);
+                    const auto match_addr = reinterpret_cast<std::uintptr_t>(hit);
 
                     // Decode the `lea rdx, [rip+disp32]` target that closes the matched head. The disp32 sits 3
                     // bytes into the 7-byte lea, so the target resolves against the byte after the instruction.
-                    const auto nameTarget = DMK::scan::resolve_rip_relative(DMK::Address{hit + k_nameLeaOffset}, 3, 7);
-                    if (!nameTarget)
+                    const auto name_target = DMK::scan::resolve_rip_relative(DMK::Address{hit + name_lea_offset}, 3, 7);
+                    if (!name_target)
                     {
                         cursor = hit + 1;
                         continue;
                     }
-                    const auto strAddr = nameTarget->raw();
+                    const auto str_addr = name_target->raw();
 
                     // Diagnostic trace: log first 5 match decodes across all patterns (with a peek at the first 32
                     // bytes of the candidate name string) so we can sanity-check the decode pipeline.
-                    static std::atomic<std::size_t> s_traceLeft{5};
-                    if (s_traceLeft.load(std::memory_order_acquire) > 0)
+                    static std::atomic<std::size_t> s_trace_left{5};
+                    if (s_trace_left.load(std::memory_order_acquire) > 0)
                     {
-                        if (s_traceLeft.fetch_sub(1, std::memory_order_acq_rel) > 0)
+                        if (s_trace_left.fetch_sub(1, std::memory_order_acq_rel) > 0)
                         {
                             char preview[33] = {0};
-                            peek_name_preview(strAddr, preview, sizeof(preview));
+                            peek_name_preview(str_addr, preview, sizeof(preview));
                             DMK::log().trace(
                                 "[token-discovery] trace: P{} site=0x{:X} strAddr=0x{:X} preview='{}'",
                                 pi + 1,
-                                matchAddr,
-                                strAddr,
+                                match_addr,
+                                str_addr,
                                 preview
                             );
                         }
@@ -316,14 +316,14 @@ namespace Transmog::ColorOverride::TokenSlotDiscovery
 
                     // Match against known names and proceed only on a hit. One guarded copy of the candidate feeds
                     // all 18 comparisons, and the names are short so the linear scan is cheap.
-                    char candidate[k_name_window] = {0};
-                    if (!read_foreign_name(strAddr, candidate))
+                    char candidate[NAME_WINDOW] = {0};
+                    if (!read_foreign_name(str_addr, candidate))
                     {
                         cursor = hit + 1;
                         continue;
                     }
                     const KnownProp *matched_kp = nullptr;
-                    for (const auto &kp : k_known)
+                    for (const auto &kp : KNOWN)
                     {
                         if (std::strcmp(candidate, kp.name) == 0)
                         {
@@ -333,8 +333,8 @@ namespace Transmog::ColorOverride::TokenSlotDiscovery
                     }
                     if (matched_kp != nullptr)
                     {
-                        const auto slotAddr = decode_zero_write_slot(hit);
-                        if (slotAddr != 0)
+                        const auto slot_addr = decode_zero_write_slot(hit);
+                        if (slot_addr != 0)
                         {
                             bool dup = false;
                             {
@@ -343,7 +343,7 @@ namespace Transmog::ColorOverride::TokenSlotDiscovery
                                 std::lock_guard<std::mutex> lk(g_slotsMtx);
                                 for (const auto &s : g_slots)
                                 {
-                                    if (s.slot_addr == slotAddr)
+                                    if (s.slot_addr == slot_addr)
                                     {
                                         dup = true;
                                         break;
@@ -352,7 +352,7 @@ namespace Transmog::ColorOverride::TokenSlotDiscovery
                                 if (!dup)
                                 {
                                     g_slots.push_back({
-                                        slotAddr,
+                                        slot_addr,
                                         matched_kp->name,
                                         matched_kp->layer,
                                         matched_kp->channel,
@@ -364,44 +364,44 @@ namespace Transmog::ColorOverride::TokenSlotDiscovery
                                 ++accepted;
                                 DMK::log().trace(
                                     "[token-discovery] slot=0x{:X} '{}' layer={} channel={} site=0x{:X} via P{}",
-                                    slotAddr,
+                                    slot_addr,
                                     matched_kp->name,
                                     matched_kp->layer,
                                     matched_kp->channel,
-                                    matchAddr,
+                                    match_addr,
                                     pi + 1
                                 );
                             }
                         }
                     }
 
-                    cursor = hit + k_patternHeadLen;
+                    cursor = hit + pattern_head_len;
                 }
                 // The cap exit is the one loop exit that used to say nothing. Silence here is the worst case of
                 // the three: a truncated P1 (the superset pattern) drops the slot count below the retry baseline, so
                 // retry_if_underpopulated never settles and re-scans on the hot path for the rest of the session,
                 // with no line in the log pointing at the cause.
-                if (iter >= k_maxItersPerPattern)
+                if (iter >= max_iters_per_pattern)
                 {
                     DMK::log().warning(
                         "[token-discovery] pattern={} hit the {} iteration cap with {} hit(s) - its sweep was "
-                        "TRUNCATED and later slots were not seen; raise k_maxItersPerPattern",
+                        "TRUNCATED and later slots were not seen; raise max_iters_per_pattern",
                         pi,
-                        k_maxItersPerPattern,
-                        patternHits
+                        max_iters_per_pattern,
+                        pattern_hits
                     );
                 }
 
-                totalHits += patternHits;
-                totalIter += iter;
+                total_hits += pattern_hits;
+                total_iter += iter;
             }
 
             const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(clock::now() - t0).count();
             DMK::log().info(
                 "[token-discovery] scan complete: patterns={} iter={} hits={} slots={} elapsed_ms={}",
-                compiledCount,
-                totalIter,
-                totalHits,
+                compiled_count,
+                total_iter,
+                total_hits,
                 accepted,
                 static_cast<long long>(elapsed)
             );
@@ -432,7 +432,7 @@ namespace Transmog::ColorOverride::TokenSlotDiscovery
     namespace
     {
         /// One re-scan, on the worker thread. Clearing @ref g_rescanBusy is deliberately its last act.
-        void rescan_worker(std::stop_token stop, std::size_t expectedMin) noexcept
+        void rescan_worker(std::stop_token stop, std::size_t expected_min) noexcept
         {
             if (stop.stop_requested())
             {
@@ -453,13 +453,13 @@ namespace Transmog::ColorOverride::TokenSlotDiscovery
                     before,
                     after,
                     prev,
-                    expectedMin
+                    expected_min
                 );
             }
             // Settle = two consecutive scans returned the same count AND the expected baseline is met. Without the
             // baseline gate, an early scan that finds 0 slots settles immediately on the next 0-slot scan and freezes
             // the retry permanently. A sweep abandoned by teardown must not settle on its short count.
-            if (after == prev && after >= expectedMin && !g_stopping.load(std::memory_order_acquire))
+            if (after == prev && after >= expected_min && !g_stopping.load(std::memory_order_acquire))
             {
                 g_settled.store(true, std::memory_order_release);
                 DMK::log().info("[token-discovery] settled at {} slots; no further re-scans this session", after);
@@ -468,7 +468,7 @@ namespace Transmog::ColorOverride::TokenSlotDiscovery
         }
     } // namespace
 
-    void retry_if_underpopulated(std::size_t expectedMin) noexcept
+    void retry_if_underpopulated(std::size_t expected_min) noexcept
     {
         static std::atomic<std::int64_t> s_last_ms{0};
 
@@ -476,7 +476,7 @@ namespace Transmog::ColorOverride::TokenSlotDiscovery
             return;
         // One clock owner for the whole module, so the apply window, the reinit deadlines and this throttle share a
         // time base by construction.
-        const auto now = State::now_ms();
+        const auto now = state::now_ms();
         const auto last = s_last_ms.load(std::memory_order_acquire);
         if (last != 0 && (now - last) < 1500)
             return;
@@ -503,7 +503,7 @@ namespace Transmog::ColorOverride::TokenSlotDiscovery
             g_rescanWorker.reset();
             g_rescanWorker.emplace(
                 "LtTokenRescan",
-                [expectedMin](std::stop_token stop) { rescan_worker(stop, expectedMin); }
+                [expected_min](std::stop_token stop) { rescan_worker(stop, expected_min); }
             );
         }
         catch (const std::exception &)
@@ -598,4 +598,4 @@ namespace Transmog::ColorOverride::TokenSlotDiscovery
         std::lock_guard<std::mutex> lk(g_slotsMtx);
         return g_slots.size();
     }
-} // namespace Transmog::ColorOverride::TokenSlotDiscovery
+} // namespace Transmog::color_override::token_slot_discovery

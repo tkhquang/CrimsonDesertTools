@@ -37,10 +37,10 @@ namespace Transmog
 
     /**
      * @brief Schedule a single-slot transmog apply via the debounce worker.
-     * @param slotIdx TransmogSlot index in [0, k_slotCount). The call tears down and re-applies only this slot. Every
+     * @param slot_idx TransmogSlot index in [0, SLOT_COUNT). The call tears down and re-applies only this slot. Every
      *        other slot stays untouched.
      */
-    void manual_apply_slot(std::size_t slotIdx);
+    void manual_apply_slot(std::size_t slot_idx);
 
     /** @brief Schedule a transmog clear across every slot via the debounce worker. */
     void manual_clear();
@@ -56,16 +56,16 @@ namespace Transmog
     void capture_real_equipment();
 
     /**
-     * @brief Copy the engine's live dye records for `slotIdx` into the active preset's per-slot dye[] array.
-     * @param slotIdx TransmogSlot index in [0, k_slotCount). The call finds the auth-table entry whose gameTag maps
+     * @brief Copy the engine's live dye records for `slot_idx` into the active preset's per-slot dye[] array.
+     * @param slot_idx TransmogSlot index in [0, SLOT_COUNT). The call finds the auth-table entry whose game_tag maps
      *        to it.
      * @return true when the call captured at least one channel.
-     * @details The copy replaces whatever the preset stored. On success it sets `dyeSparse=true` and
+     * @details The copy replaces whatever the preset stored. On success it sets `dye_sparse=true` and
      *          `dye_dirty()=true`. The per-slot "sync from live" button calls this when the user applies in-game dye
      *          to a fake-bound slot's underlying real item and wants those bytes saved into the active preset. The
      *          call does nothing when no preset is active, the slot is disabled, or the auth-table entry is missing.
      */
-    [[nodiscard]] bool sync_live_dye_for_slot(std::size_t slotIdx) noexcept;
+    [[nodiscard]] bool sync_live_dye_for_slot(std::size_t slot_idx) noexcept;
 
     /**
      * @brief True once the WorldSystem chain resolves to a live player component.

@@ -34,6 +34,7 @@
 #include <DetourModKit/config.hpp>
 #include <DetourModKit/diagnostics.hpp>
 #include <DetourModKit/error.hpp>
+#include <DetourModKit/filesystem.hpp>
 #include <DetourModKit/format.hpp>
 #include <DetourModKit/hook.hpp>
 #include <DetourModKit/input.hpp>
@@ -47,6 +48,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <filesystem>
 #include <fstream>
 #include <string>
 #include <string_view>
@@ -62,7 +64,7 @@ namespace Transmog
 
     // EquipHide's module name, used to yield the shared PartAddShow target to it. Both of EquipHide's shipped shapes
     // - the release single ASI and the dev resident loader that stages a logic DLL - load under this exact name.
-    inline constexpr std::string_view k_equipHideModule = "CrimsonDesertEquipHide.asi";
+    inline constexpr std::string_view EQUIP_HIDE_MODULE = "CrimsonDesertEquipHide.asi";
 
     // Config
 
@@ -86,7 +88,7 @@ namespace Transmog
         // Disable to render preset items on the controlled body regardless of the dropdown.
         general.bind<bool>("ApplyToSelectedCharacter", "Apply To Selected Character", flag_apply_to_editing(), true);
 
-        // Advanced: rtti_dissect self-heal search radius (bytes, per side) for the manager->userActor offset recovery
+        // Advanced: rtti_dissect self-heal search radius (bytes, per side) for the manager->user_actor offset recovery
         // in CDCore. The default 0x200 covers roughly ten times the worst drift seen so far. Raise it toward
         // MAX_HEAL_WINDOW only if a game patch pushes the field further. Not for normal users.
         advanced.bind<int>("SelfHealWindow", "Self Heal Window", CDCore::heal_window_setting(), 0x200);
@@ -123,7 +125,7 @@ namespace Transmog
             "cd_phm_oongka"
         );
 
-        // Experimental: master toggle for the per-shader-property ColorOverride pipeline (publisher hook, setter
+        // Experimental: master toggle for the per-shader-property color_override pipeline (publisher hook, setter
         // substitute, host-scope owner-vfunc midhooks, and the per-region color picker UI). Disabled by default. The
         // feature relies on AOB-resolved engine entry points that can shift under a major game patch.
         experimental.bind<bool>("ColorOverride", "Color Override", flag_color_override(), false);
@@ -141,8 +143,8 @@ namespace Transmog
         // Auto-reload toggle. An off-by-default watcher forces a relaunch for every INI tweak. On-by-default keeps the
         // iteration loop tight. Setters invoked from the watcher thread are idempotent (every bind and press_combo
         // path is safe to re-fire).
-        static std::atomic<bool> s_autoReload{true};
-        general.bind<bool>("AutoReloadConfig", "Auto-Reload Config", s_autoReload, true);
+        static std::atomic<bool> s_auto_reload{true};
+        general.bind<bool>("AutoReloadConfig", "Auto-Reload Config", s_auto_reload, true);
 
         // load_config registers each hotkey binding here, while the config registry fills, so the press_combo INI
         // keys join the same load pass below. press_combo also registers each binding with the input engine, so
@@ -150,12 +152,12 @@ namespace Transmog
         // Session's input scope, which ~Session clears first and in reverse insertion order.
         register_hotkeys(session.scope());
 
-        PrefabWrapperSwap::register_config();
+        prefab_wrapper_swap::register_config();
 
         session.ini().load(INI_FILE);
         DMK::config::log_all();
 
-        if (s_autoReload.load(std::memory_order_relaxed))
+        if (s_auto_reload.load(std::memory_order_relaxed))
         {
             // Atomic flags update silently through their per-setter callbacks. The watcher does not drive any
             // game-state work. A re-apply or a clear of transmog still requires a hotkey or an in-game action.
@@ -224,8 +226,8 @@ namespace Transmog
             if (!flag_apply_to_editing().load(std::memory_order_acquire))
                 return true;
 
-            const std::string editName{pm.editing_character()};
-            const auto idx = CDCore::character_idx_from_name(editName);
+            const std::string edit_name{pm.editing_character()};
+            const auto idx = CDCore::character_idx_from_name(edit_name);
             if (idx == 0)
                 return true; // Unknown character name; fall back to default.
 
@@ -236,7 +238,7 @@ namespace Transmog
             bool live = false;
             for (std::size_t i = 0; i < n; ++i)
             {
-                if (entries[i].charIdx == idx)
+                if (entries[i].char_idx == idx)
                 {
                     live = true;
                     break;
@@ -247,8 +249,8 @@ namespace Transmog
                 DMK::log().info(
                     "[targeted-apply] editing '{}' not currently "
                     "loaded - preset edit saved, render deferred until {} is in the world",
-                    editName,
-                    editName
+                    edit_name,
+                    edit_name
                 );
                 return false;
             }
@@ -276,26 +278,26 @@ namespace Transmog
         DMK::log().debug("Manual apply: scheduling (debounced)");
         clear_pending().store(false, std::memory_order_release);
         // Reset to "all slots" so the worker runs the full path.
-        pending_slot_index().store(k_slotCount, std::memory_order_release);
-        schedule_transmog_ms(k_manualDebounceMs);
+        pending_slot_index().store(SLOT_COUNT, std::memory_order_release);
+        schedule_transmog_ms(MANUAL_DEBOUNCE_MS);
     }
 
-    void manual_apply_slot(std::size_t slotIdx)
+    void manual_apply_slot(std::size_t slot_idx)
     {
         if (!slot_populator_fn())
             return;
         if (!is_world_ready())
         {
-            DMK::log().debug("Manual apply slot={}: player not found", slotIdx);
+            DMK::log().debug("Manual apply slot={}: player not found", slot_idx);
             return;
         }
         if (!prime_targeted_apply_if_pinned())
             return;
 
-        DMK::log().debug("Manual apply slot={}: scheduling (debounced)", slotIdx);
+        DMK::log().debug("Manual apply slot={}: scheduling (debounced)", slot_idx);
         clear_pending().store(false, std::memory_order_release);
-        pending_slot_index().store(slotIdx, std::memory_order_release);
-        schedule_transmog_ms(k_manualDebounceMs);
+        pending_slot_index().store(slot_idx, std::memory_order_release);
+        schedule_transmog_ms(MANUAL_DEBOUNCE_MS);
     }
 
     void manual_clear()
@@ -312,38 +314,38 @@ namespace Transmog
 
         DMK::log().info("Manual clear: scheduling (debounced)");
         clear_pending().store(true, std::memory_order_release);
-        schedule_transmog_ms(k_manualDebounceMs);
+        schedule_transmog_ms(MANUAL_DEBOUNCE_MS);
     }
 
     // Copies a captured live-dye snapshot into a preset slot's per-channel dye state. It skips channels with
-    // `group_hash == 0`. It resolves `group_name` from the static DyeColorTable, so the string key survives a
-    // renumbered hash table across patches. It sets `dyeSparse=true`, so the apply path emits only the channels that
+    // `group_hash == 0`. It resolves `group_name` from the static dye_color_table, so the string key survives a
+    // renumbered hash table across patches. It sets `dye_sparse=true`, so the apply path emits only the channels that
     // the source item actually colors. It returns the count of non-empty channels written. The caller owns any
-    // pre-wipe of `slotPreset.dye[]` before the call.
+    // pre-wipe of `slot_preset.dye[]` before the call.
     //
     // This work lives outside capture_outfit() because it mutates std::string members (ChannelDye::group_name), which
     // requires C++ object unwinding. MSVC C2712 forbids that in the same function as a __try frame, and
     // capture_outfit() owns one. Keep this function out of every __try frame.
     static std::size_t apply_live_dye_to_preset_slot(
-        PresetSlot &slotPreset,
-        const DyeRecordInject::ChannelState (&live)[DyeRecordInject::k_dyeChannelCount]
+        PresetSlot &slot_preset,
+        const dye_record_inject::ChannelState (&live)[dye_record_inject::DYE_CHANNEL_COUNT]
     ) noexcept
     {
-        slotPreset.dyeSparse = true;
+        slot_preset.dye_sparse = true;
         std::size_t written = 0;
-        for (std::size_t k = 0; k < DyeRecordInject::k_dyeChannelCount; ++k)
+        for (std::size_t k = 0; k < dye_record_inject::DYE_CHANNEL_COUNT; ++k)
         {
             const auto &src = live[k];
             if (src.group_hash == 0)
                 continue;
-            auto &dst = slotPreset.dye[k];
+            auto &dst = slot_preset.dye[k];
             dst.group_hash = src.group_hash;
             dst.r = src.r;
             dst.g = src.g;
             dst.b = src.b;
             dst.material_id = src.material_id;
             dst.repair_byte = src.repair_byte;
-            const auto *grp = DyeColorTable::find_group(src.group_hash);
+            const auto *grp = dye_color_table::find_group(src.group_hash);
             if (grp != nullptr && grp->string_key != nullptr)
                 dst.group_name = grp->string_key;
             else
@@ -356,7 +358,7 @@ namespace Transmog
     // Walks the live auth-table entry array and snapshots each LT-managed slot's dye records into the active preset's
     // SlotDyeChannels through read_entry_dye_records(). The per-entry dye-record vector sits inside the auth entry, so
     // its offset moves together with the auth-table entry geometry. The vector header and the 16-byte record layout
-    // are declared once in dye_record_inject.hpp (k_dyeVectorOffset / k_vecDataOffset / k_vecCountOffset, and the
+    // are declared once in dye_record_inject.hpp (DYE_VECTOR_OFFSET / VEC_DATA_OFFSET / VEC_COUNT_OFFSET, and the
     // field map on ChannelState). This function reaches them only through read_entry_dye_records(), so the offsets
     // are deliberately NOT restated here.
     //
@@ -364,56 +366,56 @@ namespace Transmog
     // above. The caller's __try/__except therefore covers any access fault from a stale auth table here too, and this
     // function deliberately does NOT open another __try frame.
     //
-    // SAFETY: the raw reads of `entryArray`, `base + ...`, and the call to read_entry_dye_records() can fault when the
+    // SAFETY: the raw reads of `entry_array`, `base + ...`, and the call to read_entry_dye_records() can fault when the
     // caller passes a stale or torn auth table. capture_outfit()'s __try/__except is the only line of defense.
-    static void capture_live_dye_into_active_preset(uintptr_t entryArray, uint32_t entryCount) noexcept
+    static void capture_live_dye_into_active_preset(uintptr_t entry_array, uint32_t entryCount) noexcept
     {
         auto &logger = DMK::log();
-        auto *activePreset = PresetManager::instance().active_preset_mut();
-        if (activePreset == nullptr)
+        auto *active_preset = PresetManager::instance().active_preset_mut();
+        if (active_preset == nullptr)
             return;
 
         // Wipe existing dye on every LT-managed slot before the capture writes so channels that the captured item does
         // NOT override do not retain a stale value from a previous capture or picker session.
-        for (std::size_t i = 0; i < k_slotCount; ++i)
+        for (std::size_t i = 0; i < SLOT_COUNT; ++i)
         {
             if (!Transmog::slot_enabled(i))
                 continue;
-            if (i >= activePreset->slots.size())
+            if (i >= active_preset->slots.size())
                 continue;
-            for (auto &ch : activePreset->slots[i].dye)
+            for (auto &ch : active_preset->slots[i].dye)
                 ch = ChannelDye{};
         }
 
         bool any = false;
-        for (uint32_t e = 0; e < entryCount && entryArray > 0x10000; ++e)
+        for (uint32_t e = 0; e < entryCount && entry_array > 0x10000; ++e)
         {
-            const auto base = entryArray + e * AuthTable::k_entryStride;
-            const auto gameSlot = *reinterpret_cast<int16_t *>(base + AuthTable::k_entrySlotTagOffset);
-            const auto itemId = *reinterpret_cast<uint16_t *>(base + AuthTable::k_entryItemIdOffset);
-            if (itemId == 0 || itemId == 0xFFFF)
+            const auto base = entry_array + e * auth_table::ENTRY_STRIDE;
+            const auto game_slot = *reinterpret_cast<int16_t *>(base + auth_table::ENTRY_SLOT_TAG_OFFSET);
+            const auto item_id = *reinterpret_cast<uint16_t *>(base + auth_table::ENTRY_ITEM_ID_OFFSET);
+            if (item_id == 0 || item_id == 0xFFFF)
                 continue;
-            const auto tmSlot = slot_from_game_slot(gameSlot);
-            if (!tmSlot.has_value())
+            const auto tm_slot = slot_from_game_slot(game_slot);
+            if (!tm_slot.has_value())
                 continue;
-            const auto idx = static_cast<std::size_t>(*tmSlot);
+            const auto idx = static_cast<std::size_t>(*tm_slot);
             if (!Transmog::slot_enabled(idx))
                 continue;
-            if (idx >= activePreset->slots.size())
+            if (idx >= active_preset->slots.size())
                 continue;
 
-            DyeRecordInject::ChannelState live[DyeRecordInject::k_dyeChannelCount];
-            const auto dyeFilled = DyeRecordInject::read_entry_dye_records(base, live);
-            if (dyeFilled == 0)
+            dye_record_inject::ChannelState live[dye_record_inject::DYE_CHANNEL_COUNT];
+            const auto dye_filled = dye_record_inject::read_entry_dye_records(base, live);
+            if (dye_filled == 0)
                 continue;
 
-            DyeRecordInject::log_dye_snapshot("capture", slot_name(*tmSlot), live);
+            dye_record_inject::log_dye_snapshot("capture", slot_name(*tm_slot), live);
 
             // Real-item capture. The apply path emits sparse records, that is, only the channels the item actually
             // colors. A slot previously edited in picker-dense mode also flips back to sparse here.
-            apply_live_dye_to_preset_slot(activePreset->slots[idx], live);
+            apply_live_dye_to_preset_slot(active_preset->slots[idx], live);
             any = true;
-            logger.info("    -> {} dye channel(s) captured for {}", dyeFilled, slot_name(*tmSlot));
+            logger.info("    -> {} dye channel(s) captured for {}", dye_filled, slot_name(*tm_slot));
         }
 
         if (any)
@@ -434,70 +436,71 @@ namespace Transmog
 
         __try
         {
-            const auto entryDesc = *reinterpret_cast<uintptr_t *>(a1 + AuthTable::k_containerPtrOffset);
-            if (entryDesc < 0x10000)
+            const auto entry_desc = *reinterpret_cast<uintptr_t *>(a1 + auth_table::CONTAINER_PTR_OFFSET);
+            if (entry_desc < 0x10000)
             {
                 logger.warning("Capture: no entry table");
                 return;
             }
-            const auto entryArray = *reinterpret_cast<uintptr_t *>(entryDesc + AuthTable::k_containerArrayBaseOffset);
-            const auto entryCount = *reinterpret_cast<uint32_t *>(entryDesc + AuthTable::k_containerCountOffset);
+            const auto entry_array =
+                *reinterpret_cast<uintptr_t *>(entry_desc + auth_table::CONTAINER_ARRAY_BASE_OFFSET);
+            const auto entryCount = *reinterpret_cast<uint32_t *>(entry_desc + auth_table::CONTAINER_COUNT_OFFSET);
 
             logger.info("=== CAPTURE: {} equipment slots ===", entryCount);
 
-            namespace PWS = Transmog::PrefabWrapperSwap;
+            namespace pws = Transmog::prefab_wrapper_swap;
 
-            // Capture means "snapshot what the user wears right now". Any session-only PWS prefab pick must be
+            // Capture means "snapshot what the user wears right now". Any session-only pws prefab pick must be
             // cleared, so the captured carrier itemIds become the visible state. Otherwise the cyan prefab label hides
             // the captured gear behind a stale prefab pick. Disabled slots are skipped entirely: the dispatcher does
             // not service them, and captured state written into their mapping only bloats in-memory rows that the next
             // Save drops on disk anyway, per slot_metadata.hpp.
-            for (std::size_t i = 0; i < k_slotCount; ++i)
+            for (std::size_t i = 0; i < SLOT_COUNT; ++i)
             {
                 if (!Transmog::slot_enabled(i))
                     continue;
                 const auto tslot = static_cast<TransmogSlot>(i);
-                const int curSrc = PWS::selection_src_index(tslot);
-                PWS::set_selection(tslot, curSrc, -1, "capture");
+                const int cur_src = pws::selection_src_index(tslot);
+                pws::set_selection(tslot, cur_src, -1, "capture");
             }
 
-            for (std::size_t i = 0; i < k_slotCount; ++i)
+            for (std::size_t i = 0; i < SLOT_COUNT; ++i)
             {
                 if (!Transmog::slot_enabled(i))
                     continue;
                 slot_mappings()[i].active = true;
-                slot_mappings()[i].targetItemId = 0;
+                slot_mappings()[i].target_item_id = 0;
             }
 
             int captured = 0;
-            for (uint32_t e = 0; e < entryCount && entryArray > 0x10000; ++e)
+            for (uint32_t e = 0; e < entryCount && entry_array > 0x10000; ++e)
             {
-                const auto base = entryArray + e * AuthTable::k_entryStride;
-                const auto gameSlot = *reinterpret_cast<int16_t *>(base + AuthTable::k_entrySlotTagOffset);
-                const auto itemId = *reinterpret_cast<uint16_t *>(base + AuthTable::k_entryItemIdOffset);
+                const auto base = entry_array + e * auth_table::ENTRY_STRIDE;
+                const auto game_slot = *reinterpret_cast<int16_t *>(base + auth_table::ENTRY_SLOT_TAG_OFFSET);
+                const auto item_id = *reinterpret_cast<uint16_t *>(base + auth_table::ENTRY_ITEM_ID_OFFSET);
 
-                logger.info("  Slot {:>2} ({:<12}) = item {:#06x}", gameSlot, game_slot_name(gameSlot), itemId);
+                logger.info("  Slot {:>2} ({:<12}) = item {:#06x}", game_slot, game_slot_name(game_slot), item_id);
 
-                const auto tmSlot = slot_from_game_slot(gameSlot);
-                if (tmSlot.has_value() && itemId != 0 && itemId != 0xFFFF)
+                const auto tm_slot = slot_from_game_slot(game_slot);
+                if (tm_slot.has_value() && item_id != 0 && item_id != 0xFFFF)
                 {
-                    const auto idx = static_cast<std::size_t>(*tmSlot);
+                    const auto idx = static_cast<std::size_t>(*tm_slot);
                     if (!Transmog::slot_enabled(idx))
                     {
-                        logger.info("    -> Skipping {} (slot disabled)", slot_name(*tmSlot));
+                        logger.info("    -> Skipping {} (slot disabled)", slot_name(*tm_slot));
                         continue;
                     }
-                    slot_mappings()[idx].targetItemId = itemId;
+                    slot_mappings()[idx].target_item_id = item_id;
                     ++captured;
-                    logger.info("    -> Captured as {} target", slot_name(*tmSlot));
+                    logger.info("    -> Captured as {} target", slot_name(*tm_slot));
                 }
             }
 
             // Live dye snapshot delegated to a separate function so its std::string mutations do not conflict with
             // this function's __try frame (MSVC C2712 forbids C++ object unwinding inside __try).
-            capture_live_dye_into_active_preset(entryArray, entryCount);
+            capture_live_dye_into_active_preset(entry_array, entryCount);
 
-            logger.info("=== CAPTURE DONE: {} equipped, {} total slots ===", captured, k_slotCount);
+            logger.info("=== CAPTURE DONE: {} equipped, {} total slots ===", captured, SLOT_COUNT);
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
@@ -516,48 +519,49 @@ namespace Transmog
         }
 
         // Capture-style snapshot: skip disabled slots to keep in-memory rows out for slots the dispatcher does not
-        // service. PWS picks are intentionally NOT preserved. This function is a "what does the user wear right now"
-        // snapshot, and it mirrors capture_outfit. Any session-only prefab pick must surrender to the captured itemId,
+        // service. pws picks are intentionally NOT preserved. This function is a "what does the user wear right now"
+        // snapshot, and it mirrors capture_outfit. Any session-only prefab pick must surrender to the captured item_id,
         // so the visible state matches.
-        namespace PWS = Transmog::PrefabWrapperSwap;
-        for (std::size_t i = 0; i < k_slotCount; ++i)
+        namespace pws = Transmog::prefab_wrapper_swap;
+        for (std::size_t i = 0; i < SLOT_COUNT; ++i)
         {
             if (!Transmog::slot_enabled(i))
                 continue;
             const auto tslot = static_cast<TransmogSlot>(i);
-            const int curSrc = PWS::selection_src_index(tslot);
-            PWS::set_selection(tslot, curSrc, -1, "capture");
+            const int cur_src = pws::selection_src_index(tslot);
+            pws::set_selection(tslot, cur_src, -1, "capture");
         }
 
-        for (std::size_t i = 0; i < k_slotCount; ++i)
+        for (std::size_t i = 0; i < SLOT_COUNT; ++i)
         {
             if (!Transmog::slot_enabled(i))
                 continue;
             slot_mappings()[i].active = true;
-            slot_mappings()[i].targetItemId = 0;
+            slot_mappings()[i].target_item_id = 0;
         }
 
         __try
         {
-            const auto entryDesc = *reinterpret_cast<uintptr_t *>(a1 + AuthTable::k_containerPtrOffset);
-            if (entryDesc < 0x10000)
+            const auto entry_desc = *reinterpret_cast<uintptr_t *>(a1 + auth_table::CONTAINER_PTR_OFFSET);
+            if (entry_desc < 0x10000)
                 return;
-            const auto entryArray = *reinterpret_cast<uintptr_t *>(entryDesc + AuthTable::k_containerArrayBaseOffset);
-            const auto entryCount = *reinterpret_cast<uint32_t *>(entryDesc + AuthTable::k_containerCountOffset);
+            const auto entry_array =
+                *reinterpret_cast<uintptr_t *>(entry_desc + auth_table::CONTAINER_ARRAY_BASE_OFFSET);
+            const auto entryCount = *reinterpret_cast<uint32_t *>(entry_desc + auth_table::CONTAINER_COUNT_OFFSET);
 
-            for (uint32_t e = 0; e < entryCount && entryArray > 0x10000; ++e)
+            for (uint32_t e = 0; e < entryCount && entry_array > 0x10000; ++e)
             {
-                const auto base = entryArray + e * AuthTable::k_entryStride;
-                const auto gameSlot = *reinterpret_cast<int16_t *>(base + AuthTable::k_entrySlotTagOffset);
-                const auto itemId = *reinterpret_cast<uint16_t *>(base + AuthTable::k_entryItemIdOffset);
+                const auto base = entry_array + e * auth_table::ENTRY_STRIDE;
+                const auto game_slot = *reinterpret_cast<int16_t *>(base + auth_table::ENTRY_SLOT_TAG_OFFSET);
+                const auto item_id = *reinterpret_cast<uint16_t *>(base + auth_table::ENTRY_ITEM_ID_OFFSET);
 
-                const auto tmSlot = slot_from_game_slot(gameSlot);
-                if (tmSlot.has_value() && itemId != 0 && itemId != 0xFFFF)
+                const auto tm_slot = slot_from_game_slot(game_slot);
+                if (tm_slot.has_value() && item_id != 0 && item_id != 0xFFFF)
                 {
-                    const auto idx = static_cast<std::size_t>(*tmSlot);
+                    const auto idx = static_cast<std::size_t>(*tm_slot);
                     if (!Transmog::slot_enabled(idx))
                         continue;
-                    slot_mappings()[idx].targetItemId = itemId;
+                    slot_mappings()[idx].target_item_id = item_id;
                 }
             }
         }
@@ -567,25 +571,25 @@ namespace Transmog
         }
     }
 
-    bool sync_live_dye_for_slot(std::size_t slotIdx) noexcept
+    bool sync_live_dye_for_slot(std::size_t slot_idx) noexcept
     {
         auto &logger = DMK::log();
-        if (slotIdx >= k_slotCount)
+        if (slot_idx >= SLOT_COUNT)
             return false;
-        if (!Transmog::slot_enabled(slotIdx))
+        if (!Transmog::slot_enabled(slot_idx))
         {
-            logger.info("[dye-sync] slot {} disabled in mod config - skipped", slotIdx);
+            logger.info("[dye-sync] slot {} disabled in mod config - skipped", slot_idx);
             return false;
         }
 
-        auto *activePreset = PresetManager::instance().active_preset_mut();
-        if (activePreset == nullptr)
+        auto *active_preset = PresetManager::instance().active_preset_mut();
+        if (active_preset == nullptr)
             return false;
-        if (slotIdx >= activePreset->slots.size())
+        if (slot_idx >= active_preset->slots.size())
             return false;
 
-        const auto tslot = static_cast<TransmogSlot>(slotIdx);
-        const auto gameTag = game_slot_from_transmog(tslot);
+        const auto tslot = static_cast<TransmogSlot>(slot_idx);
+        const auto game_tag = game_slot_from_transmog(tslot);
 
         const auto a1 = get_player_a1();
         if (a1 < 0x10000)
@@ -600,73 +604,74 @@ namespace Transmog
         const auto field = [](std::uintptr_t base, std::ptrdiff_t disp) noexcept
         { return DMK::Address{base + static_cast<std::uintptr_t>(disp)}; };
 
-        const auto entryDesc =
-            DMK::memory::read<std::uintptr_t>(field(static_cast<std::uintptr_t>(a1), AuthTable::k_containerPtrOffset));
-        if (!entryDesc.has_value() || !DMK::memory::is_plausible_ptr(DMK::Address{*entryDesc}))
+        const auto entry_desc =
+            DMK::memory::read<std::uintptr_t>(field(static_cast<std::uintptr_t>(a1), auth_table::CONTAINER_PTR_OFFSET));
+        if (!entry_desc.has_value() || !DMK::memory::is_plausible_ptr(DMK::Address{*entry_desc}))
         {
             logger.info("[dye-sync] no auth-table container for slot {} - skipped", slot_name(tslot));
             return false;
         }
 
-        const auto entryArray =
-            DMK::memory::read<std::uintptr_t>(field(*entryDesc, AuthTable::k_containerArrayBaseOffset));
-        const auto entryCount = DMK::memory::read<std::uint32_t>(field(*entryDesc, AuthTable::k_containerCountOffset));
-        if (!entryArray.has_value() || !entryCount.has_value() ||
-            !DMK::memory::is_plausible_ptr(DMK::Address{*entryArray}))
+        const auto entry_array =
+            DMK::memory::read<std::uintptr_t>(field(*entry_desc, auth_table::CONTAINER_ARRAY_BASE_OFFSET));
+        const auto entryCount =
+            DMK::memory::read<std::uint32_t>(field(*entry_desc, auth_table::CONTAINER_COUNT_OFFSET));
+        if (!entry_array.has_value() || !entryCount.has_value() ||
+            !DMK::memory::is_plausible_ptr(DMK::Address{*entry_array}))
         {
             logger.info("[dye-sync] auth-table container unreadable for slot {} - skipped", slot_name(tslot));
             return false;
         }
 
-        std::uintptr_t entryBase = 0;
+        std::uintptr_t entry_base = 0;
         for (std::uint32_t e = 0; e < *entryCount; ++e)
         {
-            const auto base = *entryArray + static_cast<std::uintptr_t>(e) * AuthTable::k_entryStride;
-            const auto tag = DMK::memory::read<std::int16_t>(field(base, AuthTable::k_entrySlotTagOffset));
+            const auto base = *entry_array + static_cast<std::uintptr_t>(e) * auth_table::ENTRY_STRIDE;
+            const auto tag = DMK::memory::read<std::int16_t>(field(base, auth_table::ENTRY_SLOT_TAG_OFFSET));
             if (!tag.has_value())
             {
                 logger.warning("[dye-sync] auth-table entry {} unreadable at {}", e, DMK::format::format_address(base));
                 break;
             }
-            if (*tag == gameTag)
+            if (*tag == game_tag)
             {
-                entryBase = base;
+                entry_base = base;
                 break;
             }
         }
 
-        if (entryBase == 0)
+        if (entry_base == 0)
         {
             logger.info(
                 "[dye-sync] no auth-table entry for slot {} (gameTag={:#x}) - skipped",
                 slot_name(tslot),
-                gameTag
+                game_tag
             );
             return false;
         }
 
-        DyeRecordInject::ChannelState live[DyeRecordInject::k_dyeChannelCount];
-        const auto dyeFilled = DyeRecordInject::read_entry_dye_records(entryBase, live);
-        if (dyeFilled == 0)
+        dye_record_inject::ChannelState live[dye_record_inject::DYE_CHANNEL_COUNT];
+        const auto dye_filled = dye_record_inject::read_entry_dye_records(entry_base, live);
+        if (dye_filled == 0)
         {
             logger.info("[dye-sync] slot {} has no live dye records - preset slot left untouched", slot_name(tslot));
             return false;
         }
 
-        DyeRecordInject::log_dye_snapshot("sync", slot_name(tslot), live);
+        dye_record_inject::log_dye_snapshot("sync", slot_name(tslot), live);
 
         // Wipe before writing so channels not present in `live` do not linger from a prior picker session (matches the
         // capture_outfit per-slot pattern).
-        auto &slotPreset = activePreset->slots[slotIdx];
-        for (auto &ch : slotPreset.dye)
+        auto &slot_preset = active_preset->slots[slot_idx];
+        for (auto &ch : slot_preset.dye)
             ch = ChannelDye{};
 
-        const bool any = apply_live_dye_to_preset_slot(slotPreset, live) > 0;
+        const bool any = apply_live_dye_to_preset_slot(slot_preset, live) > 0;
 
         if (any)
         {
             dye_dirty().store(true, std::memory_order_release);
-            logger.info("[dye-sync] slot {} captured {} channel(s) from live engine", slot_name(tslot), dyeFilled);
+            logger.info("[dye-sync] slot {} captured {} channel(s) from live engine", slot_name(tslot), dye_filled);
         }
         return any;
     }
@@ -683,14 +688,17 @@ namespace Transmog
         // resolution. A missing file means the user installed the mod incorrectly. Surface a hard, visible error
         // (modal popup) and bail out of init, so a user who never opens the log cannot ignore the failure.
         {
-            const auto rtDir = runtime_dir_utf8();
-            std::string tsvPath = rtDir.empty() ? std::string{DISPLAY_NAMES_FILE} : rtDir + DISPLAY_NAMES_FILE;
-            const bool dirOk = !rtDir.empty();
-            std::ifstream probe(tsvPath);
-            if (!dirOk || !probe.is_open())
+            // The wide directory keeps full Unicode fidelity and operator/ inserts the separator, so the
+            // path that gets opened never passes through a narrow encoding. get_runtime_directory() falls
+            // back to the working directory and finally to a relative anchor, so it is never empty and the
+            // probe alone decides whether the asset is present.
+            const std::filesystem::path tsv_path =
+                std::filesystem::path{DMK::filesystem::get_runtime_directory()} / DISPLAY_NAMES_FILE;
+            std::ifstream probe(tsv_path);
+            if (!probe.is_open())
             {
                 std::string body = "Required asset '" + std::string{DISPLAY_NAMES_FILE} +
-                                   "' was not found.\n\nExpected location:\n  " + tsvPath +
+                                   "' was not found.\n\nExpected location:\n  " + to_utf8(tsv_path) +
                                    "\n\nThe TSV must sit next to the mod DLL (same folder, "
                                    "wherever you installed it). Reinstall the mod and "
                                    "verify all files are present.\n\nThe mod will not function.";
@@ -728,27 +736,27 @@ namespace Transmog
         resolve_all_anchors();
 
         // SlotPopulator: the KEY function for transmog.
-        addrs.slotPopulator = anchor_address(AnchorId::SlotPopulator);
+        addrs.slot_populator = anchor_address(AnchorId::SlotPopulator);
 
         // PartSlotRefresh: rebuilds ONE slot's visual. SlotPopulator calls it with the slot derived from the ITEM,
         // which is the same value for both halves of a paired slot, so an apply to the second half rebuilds the
         // first. Calling it directly with the intended slot is what reaches the other half.
         {
-            const auto refreshAddr = anchor_address(AnchorId::PartSlotRefresh);
-            const auto tagToHandleAddr = anchor_address(AnchorId::SlotTagToHandle);
-            if (tagToHandleAddr)
+            const auto refresh_addr = anchor_address(AnchorId::PartSlotRefresh);
+            const auto tag_to_handle_addr = anchor_address(AnchorId::SlotTagToHandle);
+            if (tag_to_handle_addr)
             {
-                slot_tag_to_handle_fn() = reinterpret_cast<SlotTagToHandleFn>(tagToHandleAddr);
-                logger.info("SlotTagToHandle resolved at {:#x}", tagToHandleAddr);
+                slot_tag_to_handle_fn() = reinterpret_cast<SlotTagToHandleFn>(tag_to_handle_addr);
+                logger.info("SlotTagToHandle resolved at {:#x}", tag_to_handle_addr);
             }
             else
             {
                 logger.warning("SlotTagToHandle AOB scan failed - paired slots cannot be refreshed");
             }
-            if (refreshAddr)
+            if (refresh_addr)
             {
-                part_slot_refresh_fn() = reinterpret_cast<PartSlotRefreshFn>(refreshAddr);
-                logger.info("PartSlotRefresh resolved at {:#x}", refreshAddr);
+                part_slot_refresh_fn() = reinterpret_cast<PartSlotRefreshFn>(refresh_addr);
+                logger.info("PartSlotRefresh resolved at {:#x}", refresh_addr);
             }
             else
             {
@@ -759,18 +767,18 @@ namespace Transmog
             }
         }
 
-        if (!addrs.slotPopulator)
+        if (!addrs.slot_populator)
             logger.warning("SlotPopulator AOB scan failed - transmog will not work");
 
         // MapLookup: IndexedStringA::lookup. Not hooked - RIP anchor for scan_indexed_string_table(). Must be resolved
-        // before PartShowSuppress::init_slot_hashes.
-        addrs.mapLookup = anchor_address(AnchorId::MapLookup);
+        // before part_show_suppress::init_slot_hashes.
+        addrs.map_lookup = anchor_address(AnchorId::MapLookup);
 
-        if (addrs.mapLookup)
+        if (addrs.map_lookup)
         {
             // Deferred slot-hash resolution. A synchronous scan here observes a small or empty IndexedStringA table on
             // cold-launch, because LT loads before the game finishes wiring main-menu state. That leaves
-            // PartShowSuppress inert for the whole session. The deferred worker polls until world-ready, then commits
+            // part_show_suppress inert for the whole session. The deferred worker polls until world-ready, then commits
             // after every expected slot hash is present. See transmog_worker.hpp for the contract.
             launch_deferred_slot_hash_scan();
             logger.info("[dispatch] slot-hash resolution scheduled (deferred until world-ready)");
@@ -785,24 +793,24 @@ namespace Transmog
 
         // SubTranslator: anchor for the item-name catalog scan, and the item -> slot resolver LT calls to ask whether
         // a carrier can be placed at all. One function, both roles - see its cascade doc in aob_resolver.hpp.
-        addrs.subTranslator = anchor_address(AnchorId::SubTranslator);
-        if (addrs.subTranslator)
+        addrs.sub_translator = anchor_address(AnchorId::SubTranslator);
+        if (addrs.sub_translator)
         {
             // Wire the resolver BEFORE the catalog build. The build can take the deferred path and hand off to the
             // worker, and no downstream caller must care whether the pointer landed first.
-            item_to_slot_resolve_fn() = reinterpret_cast<ItemToSlotResolveFn>(addrs.subTranslator);
+            item_to_slot_resolve_fn() = reinterpret_cast<ItemToSlotResolveFn>(addrs.sub_translator);
 
             using BR = ItemNameTable::BuildResult;
-            const auto result = ItemNameTable::instance().build(addrs.subTranslator);
+            const auto result = ItemNameTable::instance().build(addrs.sub_translator);
             if (result == BR::Ok)
             {
                 logger.info("[nametable] built synchronously at init ({} entries)", ItemNameTable::instance().size());
                 // Load display names BEFORE dump_catalog_tsv, so the sorted cache that the dump builds lazily already
                 // contains display names. A second rebuild stalls the overlay render thread.
                 {
-                    const auto dir = runtime_dir_utf8();
-                    if (!dir.empty())
-                        ItemNameTable::instance().load_display_names(dir + DISPLAY_NAMES_FILE);
+                    ItemNameTable::instance().load_display_names(
+                        std::filesystem::path{DMK::filesystem::get_runtime_directory()} / DISPLAY_NAMES_FILE
+                    );
                 }
                 if (flag_dump_item_catalog().load(std::memory_order_relaxed))
                     ItemNameTable::instance().dump_catalog_tsv();
@@ -824,10 +832,10 @@ namespace Transmog
                 logger.warning("[nametable] address chain resolution failed - item-name table disabled this session");
             }
 
-            addrs.indexedStringLookup = ItemNameTable::instance().indexed_string_lookup_addr();
-            if (addrs.indexedStringLookup)
+            addrs.indexed_string_lookup = ItemNameTable::instance().indexed_string_lookup_addr();
+            if (addrs.indexed_string_lookup)
             {
-                logger.info("IndexedStringLookup cached at 0x{:X} (via chain walk)", addrs.indexedStringLookup);
+                logger.info("IndexedStringLookup cached at 0x{:X} (via chain walk)", addrs.indexed_string_lookup);
             }
         }
         else
@@ -839,8 +847,8 @@ namespace Transmog
         }
 
         // SafeTearDown: scene-graph tear-down.
-        addrs.safeTearDown = anchor_address(AnchorId::SafeTearDown);
-        if (!addrs.safeTearDown)
+        addrs.safe_tear_down = anchor_address(AnchorId::SafeTearDown);
+        if (!addrs.safe_tear_down)
         {
             logger.warning("SafeTearDown AOB scan failed - real_part_tear_down will be disabled this session");
         }
@@ -849,12 +857,12 @@ namespace Transmog
         {
             // The registry's code_site validator already applied the prologue-plausibility screen, so a site
             // that failed it arrives here as 0.
-            const auto iseAddr = anchor_address(AnchorId::InitSwapEntry);
+            const auto ise_addr = anchor_address(AnchorId::InitSwapEntry);
 
-            if (iseAddr)
+            if (ise_addr)
             {
-                init_swap_entry_fn() = reinterpret_cast<InitSwapEntryFn>(iseAddr);
-                logger.info("InitSwapEntry at 0x{:X}", iseAddr);
+                init_swap_entry_fn() = reinterpret_cast<InitSwapEntryFn>(ise_addr);
+                logger.info("InitSwapEntry at 0x{:X}", ise_addr);
             }
             else
             {
@@ -865,32 +873,32 @@ namespace Transmog
         // Load presets
 
         {
-            const auto rtDir = runtime_dir_utf8();
-            const std::string presetsPath = rtDir + PRESETS_FILE;
+            const std::filesystem::path presets_path =
+                std::filesystem::path{DMK::filesystem::get_runtime_directory()} / PRESETS_FILE;
 
             auto &pm = PresetManager::instance();
-            pm.load(presetsPath);
+            pm.load(presets_path);
             pm.apply_to_state();
         }
 
         // Install hooks
 
         // SlotPopulator: resolved for direct call (not hooked).
-        if (addrs.slotPopulator)
+        if (addrs.slot_populator)
         {
-            if (DMK::scan::is_likely_function_prologue(DMK::Address{addrs.slotPopulator}))
+            if (DMK::scan::is_likely_function_prologue(DMK::Address{addrs.slot_populator}))
             {
-                slot_populator_fn() = reinterpret_cast<SlotPopulatorFn>(addrs.slotPopulator);
-                logger.info("SlotPopulator resolved at 0x{:X}", addrs.slotPopulator);
+                slot_populator_fn() = reinterpret_cast<SlotPopulatorFn>(addrs.slot_populator);
+                logger.info("SlotPopulator resolved at 0x{:X}", addrs.slot_populator);
             }
             else
             {
                 logger.warning(
                     "SlotPopulator resolved to 0x{:X} but prologue byte "
                     "looks wrong - rejecting, transmog apply disabled",
-                    addrs.slotPopulator
+                    addrs.slot_populator
                 );
-                addrs.slotPopulator = 0;
+                addrs.slot_populator = 0;
             }
         }
 
@@ -898,7 +906,7 @@ namespace Transmog
         // schedules an apply that re-dresses the slot afterwards, which is what makes the real item visible in the
         // meantime.
         //
-        // SocketMeshOverride is the whole equip-change mechanism instead. It overrides the mesh and its dye as the
+        // socket_mesh_override is the whole equip-change mechanism instead. It overrides the mesh and its dye as the
         // part is BUILT, so the slot is already correct before anything is drawn. That also covers the paths an
         // equip-event hook never sees: an item-to-item replace, and several further callers that reach the same
         // builder.
@@ -923,8 +931,8 @@ namespace Transmog
         // both the dev two-DLL ("..._Logic.dll") and the release single-ASI (".asi") layouts in one call.
         // EquipHide ships as a single ASI in release and, in its dev configuration, as a resident loader ASI that
         // stages the logic DLL. Both shapes load the same .asi module name, so one exact-basename query covers them.
-        const bool ehPresent = DMK::memory::is_module_loaded(k_equipHideModule);
-        if (ehPresent)
+        const bool eh_present = DMK::memory::is_module_loaded(EQUIP_HIDE_MODULE);
+        if (eh_present)
         {
             logger.info(
                 "[dispatch] PartAddShow hook skipped - CrimsonDesertEquipHide detected; yielding to "
@@ -935,41 +943,41 @@ namespace Transmog
         {
             // The registry's code_site validator already applied the prologue-plausibility screen, so a site that
             // failed it arrives here as 0.
-            const auto pasAddr = anchor_address(AnchorId::PartAddShow);
+            const auto pas_addr = anchor_address(AnchorId::PartAddShow);
 
-            if (pasAddr)
+            if (pas_addr)
             {
-                auto pasHook = DMK::hook::inline_at(
+                auto pas_hook = DMK::hook::inline_at(
                     DMK::hook::InlineRequest{
                         .name = "PartAddShow",
-                        .target = DMK::Address{pasAddr},
+                        .target = DMK::Address{pas_addr},
                     },
-                    &PartShowSuppress::on_part_add_show
+                    &part_show_suppress::on_part_add_show
                 );
-                bool pasOk = false;
-                if (!pasHook)
+                bool pas_ok = false;
+                if (!pas_hook)
                 {
-                    logger.warning("PartAddShow hook creation failed: {}", pasHook.error().message());
+                    logger.warning("PartAddShow hook creation failed: {}", pas_hook.error().message());
                 }
                 else
                 {
                     // Publish the trampoline BEFORE enable() arms the patch, so no game thread can enter the detour
                     // while its original pointer is still null.
-                    PartShowSuppress::set_part_add_show_trampoline(
-                        pasHook->original<PartShowSuppress::PartAddShowFn>()
+                    part_show_suppress::set_part_add_show_trampoline(
+                        pas_hook->original<part_show_suppress::PartAddShowFn>()
                     );
-                    if (auto armed = pasHook->enable(); !armed)
+                    if (auto armed = pas_hook->enable(); !armed)
                     {
                         logger.warning("PartAddShow hook could not be armed: {}", armed.error().message());
-                        PartShowSuppress::set_part_add_show_trampoline(nullptr);
+                        part_show_suppress::set_part_add_show_trampoline(nullptr);
                     }
                     else
                     {
-                        s_hooks.push(std::move(*pasHook));
-                        pasOk = true;
+                        s_hooks.push(std::move(*pas_hook));
+                        pas_ok = true;
                     }
                 }
-                if (!pasOk)
+                if (!pas_ok)
                 {
                     logger.warning("PartAddShow hook failed - transition flash suppression disabled");
                 }
@@ -981,7 +989,7 @@ namespace Transmog
         }
 
         // Real-part scene-graph tear-down.
-        if (!RealPartTearDown::resolve_helpers())
+        if (!real_part_tear_down::resolve_helpers())
         {
             logger.warning("[dispatch] tear_down: helper resolution failed - feature disabled");
         }
@@ -992,11 +1000,11 @@ namespace Transmog
         // fallbacks). Independent of CDCore::controlled_char, which uses its own static-chain anchor and does not need
         // a published WorldSystem holder.
         {
-            const auto wsAddr = anchor_address(AnchorId::WorldSystem);
-            if (wsAddr)
+            const auto ws_addr = anchor_address(AnchorId::WorldSystem);
+            if (ws_addr)
             {
-                world_system_ptr().store(wsAddr, std::memory_order_release);
-                logger.info("WorldSystem pointer at 0x{:X}", wsAddr);
+                world_system_ptr().store(ws_addr, std::memory_order_release);
+                logger.info("WorldSystem pointer at 0x{:X}", ws_addr);
             }
             else
             {
@@ -1008,16 +1016,16 @@ namespace Transmog
         // tolerate the null-owner window its own non-atomic erase opens. Until it is in place, any erase that
         // overlaps a walk on a job thread can fault. See claim_walk_guard.hpp.
         // install() logs its own failure and the mod still runs without the guard, so the result is discarded here.
-        (void)ClaimWalkGuard::install(s_hooks);
+        (void)claim_walk_guard::install(s_hooks);
 
         // init() logs its own failure. Without the swap the mod applies carriers but never redirects their meshes.
-        (void)PrefabWrapperSwap::init(s_hooks);
+        (void)prefab_wrapper_swap::init(s_hooks);
 
         // Override the mesh a socket is about to wear, so the engine never builds a real item for a slot LT dresses.
-        // Installed after PWS because it reads PWS's per-slot target. See socket_mesh_override.hpp.
+        // Installed after pws because it reads pws's per-slot target. See socket_mesh_override.hpp.
         // install() logs its own failure. A failure here leaves every transmogged slot rendering its real item, so
         // the log line is the only signal and the mod stays up.
-        (void)SocketMeshOverride::install(s_hooks);
+        (void)socket_mesh_override::install(s_hooks);
 
         // Helm-audio filter. It intervenes at the passive-skill REGISTRATION boundary, BEFORE the muffle tag enters
         // the character's skill registry, so no downstream Wwise / RTPC / Switch path ever observes it. The combined
@@ -1031,7 +1039,7 @@ namespace Transmog
         // safety lever for that bypass.
         if (flag_helm_audio_unmuffle().load(std::memory_order_relaxed))
         {
-            HelmAudioFilter::init(s_hooks);
+            helm_audio_filter::init(s_hooks);
         }
         else
         {
@@ -1043,16 +1051,16 @@ namespace Transmog
 
         // Per-slot dye-record injector. Hooks the engine's dye-copier primitive and appends fabricated ARMOR_MOD
         // records so fake transmog items render with user-chosen colors regardless of the underlying real item.
-        DyeRecordInject::init(s_hooks);
+        dye_record_inject::init(s_hooks);
 
-        // ColorOverride is a tri-hook subsystem (host-scope owner vfuncs, setter property substitute, publisher
-        // per-matInst capture). The `[Experimental] ColorOverride` INI key gates it, so the hooks do not install on
+        // color_override is a tri-hook subsystem (host-scope owner vfuncs, setter property substitute, publisher
+        // per-matInst capture). The `[Experimental] color_override` INI key gates it, so the hooks do not install on
         // the default configuration. The picker UI keys off the same flag.
         if (flag_color_override().load(std::memory_order_acquire))
         {
-            ColorOverride::HostScope::init(s_hooks);
-            ColorOverride::SetterSubstitute::init(s_hooks);
-            Transmog::ColorOverride::init(s_hooks);
+            color_override::host_scope::init(s_hooks);
+            color_override::setter_substitute::init(s_hooks);
+            Transmog::color_override::init(s_hooks);
         }
         else
         {
@@ -1063,7 +1071,7 @@ namespace Transmog
         //   1. Bench/menu UI dyeability - gated by the partprefabdyeslotinfo.pabgb registry. LT does not modify it at
         //      runtime. Static PAZ overlays handle this externally.
         //   2. Render-time dye apply - the engine reads dye records from a publish vector at dst+120 during slotpop.
-        //      The DyeRecordInject inline detour on DyeCopier (see dye_copier(), init above) injects
+        //      The dye_record_inject inline detour on DyeCopier (see dye_copier(), init above) injects
         //      user-chosen records here.
 
         start_load_detect_thread();
@@ -1075,14 +1083,14 @@ namespace Transmog
         // that module instead of this one and the logic DLL stays unmappable. Without a host (the production ASI, and
         // a dev loader whose host failed to start) the local message hook is the correct backend and takes that
         // keepalive here.
-        DMK::input::Input::Settings inputSettings{};
+        DMK::input::Input::Settings input_settings{};
         if (wheel_host != nullptr)
         {
-            inputSettings.wheel_backend = DMK::input::Input::WheelBackend::ExternalHost;
-            inputSettings.wheel_host = wheel_host;
-            inputSettings.wheel_host_required = false;
+            input_settings.wheel_backend = DMK::input::Input::WheelBackend::ExternalHost;
+            input_settings.wheel_host = wheel_host;
+            input_settings.wheel_host_required = false;
         }
-        if (auto started = session.input().start(inputSettings); !started)
+        if (auto started = session.input().start(input_settings); !started)
         {
             logger.warning("Input engine did not start: {} - hotkeys are inactive", started.error().message());
         }
@@ -1144,8 +1152,8 @@ namespace Transmog
         shutdown_requested().store(true, std::memory_order_release);
 
         // Drain workers before the hooks they call into come down. Every spawned worker calls raw game functions
-        // under SEH (apply_all_transmog -> SlotPopulator, debounce worker -> RealPartTearDown -> safeTearDown). Join
-        // them first to guarantee that no worker sits mid-call inside a trampoline when the trampoline pages are
+        // under SEH (apply_all_transmog -> SlotPopulator, debounce worker -> real_part_tear_down -> safe_tear_down).
+        // Join them first to guarantee that no worker sits mid-call inside a trampoline when the trampoline pages are
         // unmapped.
         stop_load_detect_thread();
         stop_apply_worker();
@@ -1153,12 +1161,12 @@ namespace Transmog
         join_deferred_slot_hash_scan();
         // The token-discovery re-scan walks the host image from its own worker and touches this module's statics, so
         // it has to be gone before the dev loader can unmap the generation.
-        ColorOverride::TokenSlotDiscovery::stop_and_join_rescan();
+        color_override::token_slot_discovery::stop_and_join_rescan();
         // The TSV dump waits for a swap catalog that never appears at the main menu, so it must be stopped rather
         // than waited out.
         join_itemmesh_dump();
 
-        PrefabWrapperSwap::shutdown();
+        prefab_wrapper_swap::shutdown();
 
         // Newest-first teardown of every hook this mod owns (PartAddShow, the claim-walk guard, the socket-mesh
         // override and the rest). Each detour body snapshots its trampoline pointer at entry and bails to a benign
@@ -1168,10 +1176,10 @@ namespace Transmog
         // LeakSubsystem::HookManager, so the delta across the clear IS the unmap authorization the dev loader needs.
         // Comparing a delta rather than an absolute is required, because the counter also carries caller-requested
         // leaks from elsewhere.
-        const auto pinsBefore = DMK::diagnostics::intentional_leak_count(DMK::diagnostics::LeakSubsystem::HookManager);
+        const auto pins_before = DMK::diagnostics::intentional_leak_count(DMK::diagnostics::LeakSubsystem::HookManager);
         s_hooks.clear();
         const bool restored =
-            DMK::diagnostics::intentional_leak_count(DMK::diagnostics::LeakSubsystem::HookManager) == pinsBefore;
+            DMK::diagnostics::intentional_leak_count(DMK::diagnostics::LeakSubsystem::HookManager) == pins_before;
         if (!restored)
         {
             DMK::log().error("{} shutdown: a hooked prologue could not be restored and stays pinned", MOD_NAME);

@@ -40,7 +40,7 @@
 
 #include <DetourModKit/scan.hpp>
 
-namespace CDCore::Anchors
+namespace CDCore::anchors
 {
     using DetourModKit::scan::Candidate;
     using DetourModKit::scan::Pattern;
@@ -51,13 +51,13 @@ namespace CDCore::Anchors
      *          obtain the player actor component.
      *
      *          Walk (runtime data). The +0x30 / +0x58 / +0xD8 manager-chain offsets are owned by
-     *          CDCore::ActorChainOffsets (controlled_char.hpp), the single authority shared with the LT/EH
+     *          CDCore::actor_chain_offsets (controlled_char.hpp), the single authority shared with the LT/EH
      *          controlled-actor polls:
      *            *(wsPtr) -> *(+0x30) -> *(+0x58) -> *(+0xD8) = actor
      *            actor    -> *(+104)  -> *(+56)              = component
      * @note A 3-tier ladder that resolves the slot address (data, not code).
      */
-    inline const Candidate k_worldSystemCandidates[] = {
+    inline const Candidate WORLD_SYSTEM_CANDIDATES[] = {
 
         // P1 - the accessor body, at the site where it is inlined into its caller. There is no standalone getter
         // function to anchor on: a whole-function row is not available for this global, so do not go looking for one.
@@ -120,9 +120,9 @@ namespace CDCore::Anchors
      * @details Not hooked. Its address anchors the `mov rax, [rip+disp32]` at +20 that points at the IndexedStringA
      *          global. Both mods walk that global to build their CD_-prefixed part-name tables.
      * @note A 2-tier ladder that resolves the function entry. The third authored tier cannot live in this ladder:
-     *         see @ref k_mapLookupCallSiteCandidates.
+     *         see @ref MAP_LOOKUP_CALL_SITE_CANDIDATES.
      */
-    inline const Candidate k_mapLookupCandidates[] = {
+    inline const Candidate MAP_LOOKUP_CANDIDATES[] = {
 
         // P1 - full function prologue plus the first body instruction. The `83 79 04 00` (cmp [rcx+4], 0) check is
         // distinctive. The 2-byte early-out branch slot is wildcarded (see the section 9 branch-encoding note in the
@@ -157,7 +157,7 @@ namespace CDCore::Anchors
      *          scan::resolve_rip_relative(call, 1, 5).
      * @note A 1-row ladder that resolves the address of the `E8` instruction.
      */
-    inline const Candidate k_mapLookupCallSiteCandidates[] = {
+    inline const Candidate MAP_LOOKUP_CALL_SITE_CANDIDATES[] = {
 
         // The caller is identified by its argument setup: a module global, `+0x28` to the owner, then the large
         // `+0x10778` walk to the map. That displacement is the distinctive part and stays literal. The `|` marker puts
@@ -178,7 +178,7 @@ namespace CDCore::Anchors
      *            __int64 PartAddShow(
      *                __int64  a1,           // RCX  descriptor context
      *                char     a2,           // DL   transition flag
-     *                uint64_t partHashPtr,  // R8   pointer to DWORD part hash
+     *                uint64_t part_hash_ptr,  // R8   pointer to DWORD part hash
      *                float    blend,        // XMM3 animation blend
      *                __int64  a5..a9)       // stack params
      * @note CALL FREQUENCY. This function is conditional and does not run every frame. It fires in bursts of one call
@@ -187,7 +187,7 @@ namespace CDCore::Anchors
      *       breakpoint armed and trigger a state transition first.
      * @note A 3-tier ladder that resolves the function entry.
      */
-    inline const Candidate k_partAddShowCandidates[] = {
+    inline const Candidate PART_ADD_SHOW_CANDIDATES[] = {
 
         // P1 is tightened past the bare prologue. A scan of the register-save run alone also hits a Windows module
         // (kernel DLL) function with a different body, so P1 runs on through the same array/count setup P2 anchors on,
@@ -220,7 +220,7 @@ namespace CDCore::Anchors
         // array base, spill xmm6, park the blend argument in xmm6, then compare base against end for the empty-list
         // guard. The 0x10 stride and the register roles carry the uniqueness budget, and the only wildcarded byte is
         // the xmm6 spill slot. This row survives a further shift of the array and count displacements, which is the
-        // known failure mode of the other two rows. Anchors at function start + 0x17.
+        // known failure mode of the other two rows. anchors at function start + 0x17.
         //
         // The scale/add pair and the xmm6 spill can be scheduled in either order. A row that stretches to pin more of
         // that ordering is pinning a compiler scheduling choice, so keep the window tight around the two halves that
@@ -238,13 +238,13 @@ namespace CDCore::Anchors
      *
      *          Signature (x64 __fastcall):
      *            __int64 VisualEquipChange(
-     *                __int64 bodyComp,    // RCX  ClientFrameEventActorComponent*
-     *                int16_t slotId,      // DX   equipment slot
-     *                int16_t itemId,      // R8W  new item (0xFFFF = removing)
+     *                __int64 body_comp,    // RCX  ClientFrameEventActorComponent*
+     *                int16_t slot_id,      // DX   equipment slot
+     *                int16_t item_id,      // R8W  new item (0xFFFF = removing)
      *                __int64 itemData)    // R9   item data pointer
      * @note A 4-tier ladder that resolves the function entry.
      */
-    inline const Candidate k_visualEquipChangeCandidates[] = {
+    inline const Candidate VISUAL_EQUIP_CHANGE_CANDIDATES[] = {
 
         // P1 - full prologue from `mov [rsp+0x10], rbx` through the `B8 ?? ?? ?? ??` (mov eax, imm32 = __chkstk
         // function-size marker). Stack frame size and function-size hint are wildcarded: both are compiler-owned and
@@ -308,7 +308,7 @@ namespace CDCore::Anchors
      *            _DWORD *BatchEquip(_QWORD *a1, _DWORD *a2, __int64 **a3_old, __int64 **a4_new)
      * @note A 3-tier ladder that resolves the function entry.
      */
-    inline const Candidate k_batchEquipCandidates[] = {
+    inline const Candidate BATCH_EQUIP_CANDIDATES[] = {
 
         // The arg shuffle right after __chkstk is four moves in a fixed ORDER, though not into fixed registers: a3,
         // then a2, then a1, then [a1+8], each parked in whichever register allocation picked. The order and the `08`
@@ -369,14 +369,14 @@ namespace CDCore::Anchors
      * @brief ClientActorManagerGlobal: the module-static slot holding the published pa::ClientActorManager* singleton.
      * @details Source of truth for the entire controlled-character resolver chain:
      *            [global] -> mgr (pa::ClientActorManager)
-     *            mgr  +0x58 -> userActor (pa::ClientUserActor)
-     *            user +0x08 -> subMgr
+     *            mgr  +0x58 -> user_actor (pa::ClientUserActor)
+     *            user +0x08 -> sub_mgr
      *            sub  +0x30 -> Kliff CCOIA (always present)
      *            sub  +0x38 -> currently-controlled CCOIA
      *
-     *          A game update that re-lays-out pa::ClientActorManager moves the userActor field (mgr+0x58) and the
+     *          A game update that re-lays-out pa::ClientActorManager moves the user_actor field (mgr+0x58) and the
      *          CCOIA actor-array descriptor independently, so neither offset can be derived from the other. The
-     *          userActor offset is owned by CDCore::ActorChainOffsets (controlled_char.hpp). The descriptor offsets
+     *          user_actor offset is owned by CDCore::actor_chain_offsets (controlled_char.hpp). The descriptor offsets
      *          live with the snapshot walk in controlled_char.cpp, which re-derives them from the live manager.
      * @warning A hardcoded module-relative offset for this slot reads unrelated `.data` on the wrong build, and that
      *          failure is SILENT: a stale offset can land inside a packed string table, and the dereference then
@@ -384,7 +384,7 @@ namespace CDCore::Anchors
      * @note A 2-row ladder that resolves the slot address. There are exactly two rows because the global carries
      *         exactly two references in the image, so the ladder cannot be widened.
      */
-    inline const Candidate k_clientActorManagerGlobalCandidates[] = {
+    inline const Candidate CLIENT_ACTOR_MANAGER_GLOBAL_CANDIDATES[] = {
 
         // P1 - publish-store + sibling sub-pointer assignments:
         //   mov [rip+disp32], reg         ; <- publishes the manager, slot +0
@@ -455,6 +455,6 @@ namespace CDCore::Anchors
         // the match count, before a third row lands here.
     };
 
-} // namespace CDCore::Anchors
+} // namespace CDCore::anchors
 
 #endif // CDCORE_ANCHORS_HPP

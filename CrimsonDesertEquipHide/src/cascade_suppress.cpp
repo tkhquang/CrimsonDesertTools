@@ -19,13 +19,13 @@ namespace EquipHide
 {
     namespace
     {
-        std::atomic<bool> s_equipChangeDetected{false};
-        std::atomic<VisualEquipChangeFn> s_originalVisualEquipChange{nullptr};
-        std::atomic<VisualEquipSwapFn> s_originalVisualEquipSwap{nullptr};
+        std::atomic<bool> s_equip_change_detected{false};
+        std::atomic<VisualEquipChangeFn> s_original_visual_equip_change{nullptr};
+        std::atomic<VisualEquipSwapFn> s_original_visual_equip_swap{nullptr};
 
         // Slot id for chest armor. Only a chest change needs a cascade re-sync - the other armor slots (necklace=9,
         // mask=18, and so on) do not affect the chest lock state.
-        constexpr uint16_t k_chestSlot = 4;
+        constexpr uint16_t CHEST_SLOT = 4;
 
         // BatchEquip dispatch-entry layout, used to read the per-entry slot id.
         //
@@ -54,7 +54,7 @@ namespace EquipHide
         // imul change length - folding two loads into one is enough to shift it. A stale value decodes a neighboring
         // instruction's bytes as the stride, and the range check is the only thing standing between that and a silently
         // wrong entry width.
-        const DMK::scan::Candidate k_equipSwapStrideSite[] = {
+        const DMK::scan::Candidate EQUIP_SWAP_STRIDE_SITE[] = {
             // P1 - outer loop head through the imul. Widest context, anchored before the null check.
             DMK::scan::Candidate::direct(
                 "BatchEquipStride_P1_LoopHeadToImul",
@@ -81,7 +81,7 @@ namespace EquipHide
         // Slot: the disp32 of `movzx eax, word ptr [rbx+<slot>]`, where rbx is the current outer entry. The instruction
         // that follows compares that word against the inner table's own slot field, which uses a different offset.
         // Anchor on the movzx, not on the compare.
-        const DMK::scan::Candidate k_equipSwapSlotSite[] = {
+        const DMK::scan::Candidate EQUIP_SWAP_SLOT_SITE[] = {
             // P1 - inner-loop setup through the movzx. Widest context and unique across the whole process.
             DMK::scan::Candidate::direct(
                 "BatchEquipSlot_P1_InnerSetupToMovzx",
@@ -166,8 +166,8 @@ namespace EquipHide
             {
                 // Fail closed and loud. A silent swallow here hides a decode that never ran, and the nominal below then
                 // looks like a successful match.
-                static std::atomic<bool> s_throwLogged{false};
-                if (!s_throwLogged.exchange(true, std::memory_order_relaxed))
+                static std::atomic<bool> s_throw_logged{false};
+                if (!s_throw_logged.exchange(true, std::memory_order_relaxed))
                     (void)DMK::log().try_log(
                         DMK::LogLevel::Warning,
                         "BatchEquip {} live-decode raised an exception. Using nominal {}",
@@ -184,7 +184,7 @@ namespace EquipHide
             // further change of entry width still decodes instead of a fall back to the nominal.
             static const std::size_t value = decode_layout_constant(
                 LayoutConstantRequest{
-                    .site = k_equipSwapStrideSite,
+                    .site = EQUIP_SWAP_STRIDE_SITE,
                     .kind = DMK::scan::OperandKind::Immediate,
                     .operand_index = 2,
                     .lo = 216,
@@ -202,7 +202,7 @@ namespace EquipHide
             // field: that one sits at a different offset and belongs to a container with a different stride.
             static const std::size_t value = decode_layout_constant(
                 LayoutConstantRequest{
-                    .site = k_equipSwapSlotSite,
+                    .site = EQUIP_SWAP_SLOT_SITE,
                     .kind = DMK::scan::OperandKind::MemoryDisplacement,
                     .operand_index = 1,
                     .lo = 192,
@@ -215,33 +215,33 @@ namespace EquipHide
         }
     } // namespace
 
-    void set_visual_equip_change_trampoline(VisualEquipChangeFn original)
+    void set_visual_equip_change_trampoline(VisualEquipChangeFn original) noexcept
     {
-        s_originalVisualEquipChange.store(original, std::memory_order_relaxed);
+        s_original_visual_equip_change.store(original, std::memory_order_relaxed);
     }
 
-    __int64 __fastcall on_visual_equip_change(__int64 bodyComp, int16_t slotId, int16_t itemId, __int64 itemData)
+    __int64 __fastcall on_visual_equip_change(__int64 body_comp, int16_t slot_id, int16_t item_id, __int64 itemData)
     {
-        DMK::log().trace("VisualEquipChange: slot={} item={}", slotId, itemId);
+        DMK::log().trace("VisualEquipChange: slot={} item={}", slot_id, item_id);
 
         if (flag_cascade_fix().load(std::memory_order_relaxed) && is_category_hidden(Category::Chest) &&
-            slotId == k_chestSlot)
+            slot_id == CHEST_SLOT)
         {
-            DMK::log().debug("VisualEquipChange: chest slot={} item={} - clearing cascade locks", slotId, itemId);
-            s_equipChangeDetected.store(true, std::memory_order_relaxed);
+            DMK::log().debug("VisualEquipChange: chest slot={} item={} - clearing cascade locks", slot_id, item_id);
+            s_equip_change_detected.store(true, std::memory_order_relaxed);
         }
         // Snapshot guards a teardown race. A drop of the Hook handle restores the prologue and disables the detour,
         // but a game thread already past the JMP can still enter the body before the DLL unmaps. A return of zero
         // matches the engine no-op shape for this slot-update API.
-        const auto trampoline = s_originalVisualEquipChange.load(std::memory_order_relaxed);
+        const auto trampoline = s_original_visual_equip_change.load(std::memory_order_relaxed);
         if (!trampoline)
             return 0;
-        return trampoline(bodyComp, slotId, itemId, itemData);
+        return trampoline(body_comp, slot_id, item_id, itemData);
     }
 
-    void set_visual_equip_swap_trampoline(VisualEquipSwapFn original)
+    void set_visual_equip_swap_trampoline(VisualEquipSwapFn original) noexcept
     {
-        s_originalVisualEquipSwap.store(original, std::memory_order_relaxed);
+        s_original_visual_equip_swap.store(original, std::memory_order_relaxed);
         // Warm the layout self-heal at install (setup/control-plane). The dispatch-entry stride and slot then decode
         // and cache before the first swap, and the hot path stays free of the one-time AOB scan.
         (void)equip_swap_entry_stride();
@@ -261,7 +261,7 @@ namespace EquipHide
                 // reshaped dispatch list a per-entry miss instead of a fault the frame below has to absorb.
                 const auto base = DMK::memory::read<std::uintptr_t>(DMK::Address{iter});
                 const auto count = DMK::memory::read<std::uint32_t>(DMK::Address{iter}.offset(8));
-                bool hasChest = false;
+                bool has_chest = false;
                 const uint32_t entries = (base && count) ? *count : 0;
                 for (uint32_t i = 0; i < entries && i < 16; ++i)
                 {
@@ -271,15 +271,15 @@ namespace EquipHide
                     if (!slot)
                         break;
                     logger.trace("EquipSwap: slot={}", *slot);
-                    if (*slot == k_chestSlot)
-                        hasChest = true;
+                    if (*slot == CHEST_SLOT)
+                        has_chest = true;
                 }
 
-                if (hasChest && flag_cascade_fix().load(std::memory_order_relaxed) &&
+                if (has_chest && flag_cascade_fix().load(std::memory_order_relaxed) &&
                     is_category_hidden(Category::Chest))
                 {
                     logger.debug("EquipSwap: chest slot detected - signaling re-sync");
-                    s_equipChangeDetected.store(true, std::memory_order_relaxed);
+                    s_equip_change_detected.store(true, std::memory_order_relaxed);
                 }
             }
         }
@@ -287,12 +287,12 @@ namespace EquipHide
         {
             // Fail closed and loud. A silent swallow hides a reshaped dispatch list, and the chest re-sync then stops
             // firing with the hook still reporting installed.
-            static std::atomic<bool> s_crashLogged{false};
-            if (!s_crashLogged.exchange(true, std::memory_order_relaxed))
+            static std::atomic<bool> s_crash_logged{false};
+            if (!s_crash_logged.exchange(true, std::memory_order_relaxed))
                 (void)DMK::log().try_log(DMK::LogLevel::Warning, "EquipSwap: SEH caught crash in the slot walk");
         }
         // Snapshot guards a teardown race (see on_visual_equip_change).
-        const auto trampoline = s_originalVisualEquipSwap.load(std::memory_order_relaxed);
+        const auto trampoline = s_original_visual_equip_swap.load(std::memory_order_relaxed);
         if (!trampoline)
             return 0;
         return trampoline(a1, a2, a3, a4);
@@ -300,7 +300,7 @@ namespace EquipHide
 
     bool consume_equip_change() noexcept
     {
-        return s_equipChangeDetected.exchange(false, std::memory_order_relaxed);
+        return s_equip_change_detected.exchange(false, std::memory_order_relaxed);
     }
 
 } // namespace EquipHide

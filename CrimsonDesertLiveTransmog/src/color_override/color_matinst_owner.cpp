@@ -3,7 +3,7 @@
 #include <array>
 #include <atomic>
 
-namespace Transmog::ColorOverride::MatInstOwner
+namespace Transmog::color_override::mat_inst_owner
 {
     namespace
     {
@@ -13,7 +13,7 @@ namespace Transmog::ColorOverride::MatInstOwner
             std::atomic<std::uint32_t> expected_hash{0};
             std::atomic<int> slot{-1};
         };
-        std::array<Entry, k_capacity> g_map{};
+        std::array<Entry, CAPACITY> g_map{};
 
         std::size_t hash_mi(std::uintptr_t mi) noexcept
         {
@@ -21,7 +21,7 @@ namespace Transmog::ColorOverride::MatInstOwner
             x ^= x >> 33;
             x *= 0xff51afd7ed558ccdULL;
             x ^= x >> 33;
-            return static_cast<std::size_t>(x) & (k_capacity - 1);
+            return static_cast<std::size_t>(x) & (CAPACITY - 1);
         }
     } // namespace
 
@@ -30,7 +30,7 @@ namespace Transmog::ColorOverride::MatInstOwner
         if (mi == 0 || slot < 0)
             return;
         std::size_t idx = hash_mi(mi);
-        for (std::size_t step = 0; step < k_capacity; ++step)
+        for (std::size_t step = 0; step < CAPACITY; ++step)
         {
             auto &e = g_map[idx];
             auto cur = e.mi.load(std::memory_order_acquire);
@@ -51,7 +51,7 @@ namespace Transmog::ColorOverride::MatInstOwner
                 e.slot.store(slot, std::memory_order_release);
                 return;
             }
-            idx = (idx + 1) & (k_capacity - 1);
+            idx = (idx + 1) & (CAPACITY - 1);
         }
     }
 
@@ -60,7 +60,7 @@ namespace Transmog::ColorOverride::MatInstOwner
         if (mi == 0)
             return -1;
         std::size_t idx = hash_mi(mi);
-        for (std::size_t step = 0; step < k_capacity; ++step)
+        for (std::size_t step = 0; step < CAPACITY; ++step)
         {
             auto &e = g_map[idx];
             const auto cur = e.mi.load(std::memory_order_acquire);
@@ -73,7 +73,7 @@ namespace Transmog::ColorOverride::MatInstOwner
                     return -1;
                 return e.slot.load(std::memory_order_acquire);
             }
-            idx = (idx + 1) & (k_capacity - 1);
+            idx = (idx + 1) & (CAPACITY - 1);
         }
         return -1;
     }
@@ -102,4 +102,4 @@ namespace Transmog::ColorOverride::MatInstOwner
             e.slot.store(-1, std::memory_order_relaxed);
         }
     }
-} // namespace Transmog::ColorOverride::MatInstOwner
+} // namespace Transmog::color_override::mat_inst_owner

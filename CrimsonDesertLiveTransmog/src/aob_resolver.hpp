@@ -24,12 +24,12 @@
 
 namespace Transmog
 {
-    using CDCore::Anchors::Candidate;
-    using CDCore::Anchors::Pattern;
+    using CDCore::anchors::Candidate;
+    using CDCore::anchors::Pattern;
 
     /**
      * @brief SafeTearDown - scene-graph tear-down that retires a matched part without mutating the authoritative
-     *        equip table at AuthTable::k_containerPtrOffset. Used by the two-phase transmog apply in
+     *        equip table at auth_table::CONTAINER_PTR_OFFSET. Used by the two-phase transmog apply in
      *        real_part_tear_down.
      *
      * The prologue alone is not unique, so P1 runs past it into the body.
@@ -44,7 +44,7 @@ namespace Transmog
      *          transmogged one, and a slot that goes from "no transmog" to "transmog" silently does nothing.
      * @note Prefer losing the cascade to matching the wrong function.
      */
-    inline const Candidate k_safeTearDownCandidates[] = {
+    inline const Candidate SAFE_TEAR_DOWN_CANDIDATES[] = {
         // P1 - full prologue through the word-argument extract. The row wildcards both frame immediates. rdi
         // SPILLS here rather than pushes, so the register-save run is five pushes and the spill block is three.
 
@@ -57,7 +57,7 @@ namespace Transmog
         ),
 
         // P2 - post-alloca anchor, extended through the component chain walk so it cannot match a function that
-        // merely shares the stack-alloc and the word-argument extract. Anchors at function start + 0x20 (three
+        // merely shares the stack-alloc and the word-argument extract. anchors at function start + 0x20 (three
         // 5-byte spills, five pushes, an 8-byte frame lea and a 7-byte sub rsp).
 
         Candidate::direct(
@@ -68,7 +68,7 @@ namespace Transmog
 
         // P3 - the chain walk alone, past the whole prologue: capture the this-pointer, load the component at
         // [this+0x08], take its sub-object at +0x68, take that object's list head at +0x40, and reject an empty list.
-        // Every displacement is a game-struct field, so this row survives any prologue reshuffle. Anchors at function
+        // Every displacement is a game-struct field, so this row survives any prologue reshuffle. anchors at function
         // start + 0x2B.
         //
         // The two moves are loosened differently. The first wildcards only its REX prefix, so it still pins the
@@ -83,7 +83,7 @@ namespace Transmog
     };
 
     /**
-     * @brief SubTranslator - SlotPopulator's item -> slot resolver, `f(a1, itemId) -> slot handle` (0xFFFF when the
+     * @brief SubTranslator - SlotPopulator's item -> slot resolver, `f(a1, item_id) -> slot handle` (0xFFFF when the
      *        item cannot be placed). Serves two callers in LT, which is why there is one cascade and not two.
      *
      * @details Called, not hooked. It is the FIRST thing SlotPopulator does, and a 0xFFFF makes SlotPopulator bail
@@ -97,7 +97,7 @@ namespace Transmog
      *          Both roles resolve to the same address. Do not add a second cascade for the resolver role, because
      *          two cascades onto one function drift apart and only one of them gets re-anchored on patch day.
      */
-    inline const Candidate k_subTranslatorCandidates[] = {
+    inline const Candidate SUB_TRANSLATOR_CANDIDATES[] = {
         // The second scratch-buffer lea flips encodings across builds: rsp-relative 5-byte (`48 8D 4C 24 ??`,
         // lea rcx,[rsp+X]) against rbp-relative 4-byte (`48 8D 4D ??`, lea rcx,[rbp-Y]). Everything else in the entry
         // block is stable in shape. P1 to P3 pin the current encoding for a precise match, and P4 anchors entirely
@@ -124,7 +124,7 @@ namespace Transmog
             -0x19
         ),
 
-        // P3 - deeper anchor: the argument-count load and lea pair, then the post-call tail. Anchors at function
+        // P3 - deeper anchor: the argument-count load and lea pair, then the post-call tail. anchors at function
         // start + 0x1C, so the walk-back is -0x1C.
 
         Candidate::direct(
@@ -135,7 +135,7 @@ namespace Transmog
 
         // P4 - post-call tail. This row sits fully past the scratch-buffer preparation block, so it survives another
         // flip of the lea addressing mode. Shape: the two chained calls, the `movzx ebx,ax` result capture, and the
-        // `cmp bx,0xFFFF` sentinel test. Anchors at function start + 0x31, so the walk-back is -0x31.
+        // `cmp bx,0xFFFF` sentinel test. anchors at function start + 0x31, so the walk-back is -0x31.
 
         Candidate::direct(
             "SubTranslator_P4_PostCallTail",
@@ -157,7 +157,7 @@ namespace Transmog
      * `mov qword [rcx],-1` (`48 C7 01 FF FF FF FF`) and reshuffle the sentinel-store offsets. That fold breaks every
      * candidate that pins the unfolded form.
      */
-    inline const Candidate k_initSwapEntryCandidates[] = {
+    inline const Candidate INIT_SWAP_ENTRY_CANDIDATES[] = {
         // Entry layout, with the byte lengths that produce each walk-back:
         //     +0x00  48 89 5C 24 18 / 48 89 4C 24 08   two arg-home spills
         //     +0x0A  55 56 57 41 56 41 57               five pushes
@@ -182,7 +182,7 @@ namespace Transmog
         ),
 
         // P2 - init-body anchor with no prologue head: mov qword [rcx],-1 / mov r15d,0xFFFF / mov [rcx+8],r15w.
-        // Anchors at function start + 0x18. Survives a prologue reshuffle that leaves the sentinel writes intact.
+        // anchors at function start + 0x18. Survives a prologue reshuffle that leaves the sentinel writes intact.
 
         Candidate::direct(
             "InitSwapEntry_P2_SentinelBody",
@@ -194,7 +194,7 @@ namespace Transmog
         // zero store at +0x20, the lea of the inline sub-object at +0x28, its own zero and -1 stores, then the u16
         // zero at +0x40. Every DISPLACEMENT here is a struct field offset or a fixed sentinel. The only
         // compiler-owned part is the register selection, and it is a different register from the one P1 and P2
-        // depend on, so the three rows do not fail together. Anchors at function start + 0x31.
+        // depend on, so the three rows do not fail together. anchors at function start + 0x31.
 
         Candidate::direct(
             "InitSwapEntry_P3_SentinelRunTail",
@@ -204,10 +204,10 @@ namespace Transmog
     };
 
     /**
-     * @brief SlotTagToHandle: `f(a1, out_u16, slotTag, flag)`, the tag-to-handle translation every direct
+     * @brief SlotTagToHandle: `f(a1, out_u16, slot_tag, flag)`, the tag-to-handle translation every direct
      *        PartSlotRefresh call needs.
      * @details Walks the part records in the container the engine reaches through `mov rax,[a1+X]`, matches
-     *          `record+0xC8 == slotTag`, and writes `record+8` (the slot HANDLE) to *out. It writes 0xFFFF when the
+     *          `record+0xC8 == slot_tag`, and writes `record+8` (the slot HANDLE) to *out. It writes 0xFFFF when the
      *          tag is not present.
      *
      *          PartSlotRefresh takes its two slot arguments in DIFFERENT namespaces: the first is a tag (matched
@@ -219,10 +219,10 @@ namespace Transmog
      *          0xFFFF written to *out when the tag is absent.
      * @warning The container displacement X is the one operand the engine renumbers, and it moves on its own while
      *          every other byte of the function holds, so the rows wildcard it rather than pin it. The same
-     *          displacement is mirrored by AuthTable::k_containerPtrOffset, whose header explains why a stale copy
+     *          displacement is mirrored by auth_table::CONTAINER_PTR_OFFSET, whose header explains why a stale copy
      *          fails silently rather than loudly. Update both together.
      */
-    inline const Candidate k_slotTagToHandleCandidates[] = {
+    inline const Candidate SLOT_TAG_TO_HANDLE_CANDIDATES[] = {
         // P1 - full prologue: three spills, push rdi, the frame, then the container load and the argument shuffle.
 
         Candidate::direct(
@@ -235,7 +235,7 @@ namespace Transmog
 
         // P2 - the record-walk setup, entirely past the prologue: base/count reads, the stride multiply and the
         // end-pointer form. Independent of the prologue AND of the container displacement, so it is the row that
-        // survives a prologue reshuffle and a renumbered container. Anchors at function start + 0x21.
+        // survives a prologue reshuffle and a renumbered container. anchors at function start + 0x21.
 
         Candidate::direct(
             "SlotTagToHandle_P2_RecordWalkSetup",
@@ -245,7 +245,7 @@ namespace Transmog
 
         // P3 - the not-found tail: the 0xFFFF sentinel store into *out followed by the register restores and the
         // frame teardown. Branch-free, and past the whole search loop, so a rewrite of the loop body cannot reach it.
-        // Anchors at function start + 0x56.
+        // anchors at function start + 0x56.
 
         Candidate::direct(
             "SlotTagToHandle_P3_SentinelTail",
@@ -255,14 +255,14 @@ namespace Transmog
     };
 
     /**
-     * @brief PartSlotRefresh: the per-slot rebuild SlotPopulator calls last, as `f(a1, slotA, slotB, swapEntry)`.
+     * @brief PartSlotRefresh: the per-slot rebuild SlotPopulator calls last, as `f(a1, slot_a, slot_b, swap_entry)`.
      * @details Every record it builds is keyed by its SECOND argument, which SlotPopulator fills with the slot
      *          DERIVED FROM THE ITEM. For a paired slot that derivation is identical for both halves (both rings are
-     *          typeCode 0x000a, both earrings 0x0008), so an apply to the second half filed its entry under the right
+     *          type_code 0x000a, both earrings 0x0008), so an apply to the second half filed its entry under the right
      *          slot and then rebuilt the first one. Calling this directly with the intended slot in both argument
      *          positions is what refreshes the half the engine otherwise skips.
      */
-    inline const Candidate k_partSlotRefreshCandidates[] = {
+    inline const Candidate PART_SLOT_REFRESH_CANDIDATES[] = {
         // P1 - full prologue: the two stack spills, the distinctive `mov [rsp+18h], r8w` (a WORD-sized argument
         // spill, rare on its own), the five pushes, then the large-frame alloca setup.
 
@@ -274,7 +274,7 @@ namespace Transmog
             )
         ),
 
-        // P2 - post-alloca shuffle: rsi=r9 (swapEntry), the two WORD argument extractions, rcx=a1, then the scratch
+        // P2 - post-alloca shuffle: rsi=r9 (swap_entry), the two WORD argument extractions, rcx=a1, then the scratch
         // lea/call/nop and the part-record count load. The shuffle ALONE is not unique - it also occurs in an
         // unrelated function - so the row deliberately runs on through the call into `mov edx,[r14+<countOff>]`. The
         // row wildcards the lea and call displacements and the count field offset. Only opcodes carry the match.
@@ -336,7 +336,7 @@ namespace Transmog
      *          still right. LT inline-hooks this target, so the registry's code_site validator is the runtime
      *          backstop for exactly this.
      */
-    inline const Candidate k_slotPopulatorCandidates[] = {
+    inline const Candidate SLOT_POPULATOR_CANDIDATES[] = {
         // P1 - full prologue through the register shuffle (mov r12,rdx; mov r13,rcx; xor edi,edi). The row
         // wildcards the frame immediate. The spill/push split and the `mov rbp,rsp` framing carry the match.
 
@@ -371,7 +371,7 @@ namespace Transmog
     /**
      * @brief StringInfoRegistry global - the StringInfo registry struct.
      *
-     * +0x08 holds the count u32, and +0x58 holds the QWORD entry-array pointer. PrefabWrapperSwap walks this registry
+     * +0x08 holds the count u32, and +0x58 holds the QWORD entry-array pointer. prefab_wrapper_swap walks this registry
      * to resolve prefab NAMES to entry wrapper-ptrs.
      *
      * The entry-array offset tracks the width of the pa::StaticInfoManager2 base and moves when that base changes
@@ -393,7 +393,7 @@ namespace Transmog
      *       and can never satisfy require_unique. Each row below anchors in a distinct CALLER instead, which is the
      *       only place manager-specific context survives.
      */
-    inline const Candidate k_stringInfoRegistryCandidates[] = {
+    inline const Candidate STRING_INFO_REGISTRY_CANDIDATES[] = {
         // P1 - caller that loads a `+0x828` field and null-checks it before the registry load. That field read is
         // the caller-specific part and carries the whole uniqueness budget. The bucket-probe tail after the load
         // (`cmp dword [reg+0x6C],0` / `mov r8d,[reg+0x68]` / `mov ecx,[rcx+0x18]`) confirms it is a registry access
@@ -444,7 +444,7 @@ namespace Transmog
      * @brief StringInfoVtable sentinel, resolved at runtime.
      * @details No hardcoded address. An absolute vtable value goes stale on every game build.
      *
-     * Vtable pointer used as the +0x08 sentinel of every StringInfo entry. PrefabWrapperSwap reads it to filter out
+     * Vtable pointer used as the +0x08 sentinel of every StringInfo entry. prefab_wrapper_swap reads it to filter out
      * non-StringInfo heap rows during walk_string_info.
      *
      * The engine references this vtable from many thousands of sites, most of them bulk static-initializer tables
@@ -459,7 +459,7 @@ namespace Transmog
      * @warning Do not shorten these rows toward the bare `lea`. The surrounding stores are the only thing separating
      *          a real ctor from the static-initializer noise.
      */
-    inline const Candidate k_stringInfoVtableCandidates[] = {
+    inline const Candidate STRING_INFO_VTABLE_CANDIDATES[] = {
         // P1 - ctor that zeroes its header first: `xor r15d,r15d ; mov [rbp+8],r15 ; lea r?,[rip+vtable] ;
         // mov [rbp+8],r12 ; mov [rbp+0x10],r15d ; mov [rbp+0x18],r15 ; mov byte [rbp+0x20],0xFF`. The trailing
         // 0xFF byte-store is the entry's "unset" marker and is what makes the window unique.
@@ -506,7 +506,7 @@ namespace Transmog
     /**
      * @brief LoaderRegistry singleton - the engine partprefab name->wrapper registry.
      *
-     * The engine's own name lookup dereferences this singleton and queries [+0x50]. PrefabWrapperSwap reads it on
+     * The engine's own name lookup dereferences this singleton and queries [+0x50]. prefab_wrapper_swap reads it on
      * init to enumerate prefab wrappers, and indexes that walk instead of calling the engine primitive.
      *
      * Layout both consumers depend on: the slot dereferences to the registry struct, whose u32 entry count sits at
@@ -515,7 +515,7 @@ namespace Transmog
      * IteminfoHolder and StringinfoHolder reach their slots without a cascade of their own:
      *
      *   StringinfoHolder - never a distinct global. It is the same slot as StringInfoRegistry, so itemmesh_dumper
-     *                      resolves it through k_stringInfoRegistryCandidates above.
+     *                      resolves it through STRING_INFO_REGISTRY_CANDIDATES above.
      *
      *   IteminfoHolder   - resolved by ItemNameTable's bounded call-graph walk, which reaches the correct clone
      *                      first and only then reads its displacement. Read it via
@@ -529,7 +529,7 @@ namespace Transmog
      * @warning The adjacent +0x50 slot still holds a valid-looking heap pointer into a DIFFERENT array, so a stale
      *          displacement reads the wrong array instead of faulting. The failure is SILENT.
      */
-    inline const Candidate k_loaderRegistryCandidates[] = {
+    inline const Candidate LOADER_REGISTRY_CANDIDATES[] = {
         // WARNING for P1. The add-0xD0 window is SHARED: two sites in the module carry it, and only one of them
         // loads THIS registry. The other is a decoy on a different global, separated only by what follows the add -
         // the decoy calls immediately, this site passes an argument first. Keep whatever instruction sits between
@@ -540,7 +540,7 @@ namespace Transmog
         // whose form the compiler is free to change. Wildcard its operand, never its position.
         //
         // This registry's container field (the compare in P3) and the sibling pa::StaticInfoManager2 family (see
-        // k_stringInfoRegistryCandidates) move in OPPOSITE directions across builds. Never blanket-apply a layout
+        // STRING_INFO_REGISTRY_CANDIDATES) move in OPPOSITE directions across builds. Never blanket-apply a layout
         // shift from one registry to another.
 
         // P1 - distinctive 64-bit add-immediate `48 81 C1 D0 00 00 00` (add rcx, 0xD0) after the registry load.
@@ -601,13 +601,13 @@ namespace Transmog
     /**
      * @brief NaturalPipeline - engine unlink function.
      *
-     * PrefabWrapperSwap installs a MidHook here to substitute Kliff src wrappers with target wrappers in the engine's
+     * prefab_wrapper_swap installs a MidHook here to substitute Kliff src wrappers with target wrappers in the engine's
      * unlink list (helm/cloak ghost cleanup).
      *
      * The function is a 6k-byte unlink pipeline that pushes all 8 callee-saved registers, so the prologue is highly
      * distinctive.
      */
-    inline const Candidate k_naturalPipelineCandidates[] = {
+    inline const Candidate NATURAL_PIPELINE_CANDIDATES[] = {
         // P1 - full prologue + chkstk preamble + post-alloca arg shuffle. The stack reservation size changes across
         // patches, which sinks any row that pins the chkstk B8 immediate or the lea displacement. Both are therefore
         // wildcarded, and the frame-independent body shuffle (a3 and a2 and a1 parked in callee-saved registers,
@@ -628,7 +628,7 @@ namespace Transmog
             )
         ),
 
-        // P2 - post-arg-spill prologue. Anchors past the first arg-home store onto the (wildcarded) lea rbp + chkstk
+        // P2 - post-arg-spill prologue. anchors past the first arg-home store onto the (wildcarded) lea rbp + chkstk
         // pair and the body shuffle. Walk-back -5 = past `48 89 5C 24 10` to start.
 
         Candidate::direct(
@@ -651,14 +651,14 @@ namespace Transmog
         ),
     };
 
-    // PrefabWrapperSwap module function targets.
+    // prefab_wrapper_swap module function targets.
     //
     // Each carries its own cascade, ordered most-specific-first per
     // CrimsonDesertCore/external/DetourModKit/docs/misc/aob-signatures.md.
     //
     //   PartListMerge    : part-list assembly. Hooked to learn which actor the following struct-copies belong to.
     //   UnlinkByWrapper  : unlink one wrapper from a body. Called direct.
-    //   PartDescriptorBuild : per-socket descriptor build. Hooked by SocketMeshOverride to rewrite the mesh.
+    //   PartDescriptorBuild : per-socket descriptor build. Hooked by socket_mesh_override to rewrite the mesh.
     //   StructCopy       : 0x40-byte struct-copy hot path, inline-hooked to swap source wrapper-ptrs.
     //
     // Verify every row's hit count against the live module before you ship a change. Where a function has a sibling
@@ -679,7 +679,7 @@ namespace Transmog
      * Each row wildcards the `lea rbp, [rsp-disp32]` frame size, the chkstk immediate and its call displacement, so
      * a frame-size change does not invalidate the anchor.
      */
-    inline const Candidate k_partListMergeCandidates[] = {
+    inline const Candidate PART_LIST_MERGE_CANDIDATES[] = {
         // P1 - prologue through the argument shuffle and into the three-way count sum. The register-save block
         // ALONE is not unique (the push-run plus large-frame-lea shape matches double digits of functions
         // module-wide), so the pattern deliberately runs on through chkstk into the shuffle and the count reads,
@@ -724,7 +724,7 @@ namespace Transmog
      * specific stale visual without a synthesized NaturalPipeline call (which needs two simultaneously-valid
      * input lists) and without driving `SafeTearDown`.
      */
-    inline const Candidate k_unlinkByWrapperCandidates[] = {
+    inline const Candidate UNLINK_BY_WRAPPER_CANDIDATES[] = {
         // P1 - prologue through the argument shuffle. The two argument spills (`rbx` to `rsp+0x10`, `r9` to
         // `rsp+0x20`) plus the 7 pushes and the `mov r15,r8 / mov rdi,rdx` tail make this a single hit. Verified
         // count == 1 against the live image. The bare prologue alone is NOT unique in this binary.
@@ -752,17 +752,17 @@ namespace Transmog
     /**
      * @brief PartDescriptorBuild - builds the part descriptor for ONE socket and appends it to the rebuild request.
      *
-     * Signature `f(a1, int16_t *partId, uint16_t slotTag, uint32_t *a4, char a5, int64_t record, uint64_t *outList)`.
-     * The first four arrive in registers and the last three on the stack. The body reads them back at rbp+0x230,
-     * rbp+0x238 and rbp+0x240. It expands the part to mesh ids, and for each one takes the canonical wrapper
+     * Signature `f(a1, int16_t *part_id, uint16_t slot_tag, uint32_t *a4, char a5, int64_t record, uint64_t
+     * *out_list)`. The first four arrive in registers and the last three on the stack. The body reads them back at
+     * rbp+0x230, rbp+0x238 and rbp+0x240. It expands the part to mesh ids, and for each one takes the canonical wrapper
      * (interned wrapper + 0x18) into the descriptor's FIRST field before appending the 112-byte descriptor to
-     * `outList`.
+     * `out_list`.
      *
      * That first field is the mesh that will be attached to the socket, which makes this the override point: the
      * slot tag is an argument here, whereas the append itself (already hooked as StructCopy) cannot tell which
      * socket it is serving.
      */
-    inline const Candidate k_partDescriptorBuildCandidates[] = {
+    inline const Candidate PART_DESCRIPTOR_BUILD_CANDIDATES[] = {
         // P1 - the full prologue: the `mov rax,rsp` frame plus four argument spills, eight pushes, and the frame
         // setup pair that follows. The pushes alone are NOT enough. That shorter window also matches an unrelated
         // function, so the row has to reach the `lea rbp,[rax-disp32]` / `sub rsp,imm32` pair to be singular. The
@@ -776,11 +776,11 @@ namespace Transmog
             )
         ),
 
-        // P2 - post-frame argument shuffle plus the item-id sentinel test. Anchors past the prologue and past the
+        // P2 - post-frame argument shuffle plus the item-id sentinel test. anchors past the prologue and past the
         // xmm spills entirely, so a spill reorder or a frame resize that sinks P1 leaves this row standing. Shape:
-        // the four argument moves (r9 -> rbx, r8w -> the slot-tag register, rdx -> the partId register, rcx -> the
+        // the four argument moves (r9 -> rbx, r8w -> the slot-tag register, rdx -> the part_id register, rcx -> the
         // context register), the zeroed loop counter and its two frame spills, then `mov eax,0FFFFh` and the WORD
-        // compare against `*partId` that decides whether there is anything to build. The row wildcards both frame
+        // compare against `*part_id` that decides whether there is anything to build. The row wildcards both frame
         // displacements. The 0xFFFF sentinel is semantic and stays literal.
         //
         // The walk-back to the function start spans the xmm spill block, whose width is a compiler choice, so it is
@@ -809,7 +809,7 @@ namespace Transmog
     };
 
     /**
-     * @brief Claim-walk deref site - the shape ClaimWalkGuard patches. NOT a resolution ladder.
+     * @brief Claim-walk deref site - the shape claim_walk_guard patches. NOT a resolution ladder.
      *
      * Deliberately outside the ladders: a ladder requires a UNIQUE match, and this pattern is expected to hit MORE
      * THAN ONE site (two, at time of writing). Feeding a knowingly non-unique signature through a ladder means
@@ -825,7 +825,7 @@ namespace Transmog
      * The signature stops BEFORE that `jz`, per the short-Jcc rule in aob-signatures.md section 9: a compiler is free
      * to emit the branch as `0F 84 rel32` instead, which changes the opcode byte and retires the row. The three
      * instructions that remain are already exactly as selective (verified: same two sites with and without the
-     * branch). The guard still needs the branch, so it VALIDATES the opcode at @ref k_claimWalkJzOffset at install
+     * branch). The guard still needs the branch, so it VALIDATES the opcode at @ref CLAIM_WALK_JZ_OFFSET at install
      * time and skips any site that does not carry it - which turns an encoding change into a logged skip instead of
      * a silent no-match.
      *
@@ -838,25 +838,25 @@ namespace Transmog
      * only the RBX-based encoding. A walker allocated to another register needs its site branch-checked by hand
      * before it joins the list.
      */
-    [[nodiscard]] DetourModKit::scan::Pattern claim_walk_site_pattern();
+    inline constexpr Pattern CLAIM_WALK_SITE_PATTERN = Pattern::literal("48 8B 43 08 48 8B 48 28 48 85 C9");
 
     /**
-     * @brief Number of sites @ref claim_walk_site_pattern occupies.
+     * @brief Number of sites @ref CLAIM_WALK_SITE_PATTERN occupies.
      * @details A mismatch means the walk survey needs redoing.
      */
-    inline constexpr std::size_t k_claimWalkExpectedSites = 2;
+    inline constexpr std::size_t CLAIM_WALK_EXPECTED_SITES = 2;
 
     /// Offset from the match to `mov rcx,[rax+28h]`, the instruction the guard precedes.
-    inline constexpr std::size_t k_claimWalkDerefOffset = 4;
+    inline constexpr std::size_t CLAIM_WALK_DEREF_OFFSET = 4;
 
     /// Offset from the match to the loop-continue `jz rel8`, whose target the guard decodes.
-    inline constexpr std::size_t k_claimWalkJzOffset = 11;
+    inline constexpr std::size_t CLAIM_WALK_JZ_OFFSET = 11;
 
     /**
      * @brief StructCopy - 0x40-byte struct-copy hotpath.
      *
      * Signature: `__int64(*)(dst, src)`. The function copies a partprefab wrapper-related struct field-by-field.
-     * PrefabWrapperSwap installs an inline hook here and (when LT-active) substitutes carrier source wrappers with
+     * prefab_wrapper_swap installs an inline hook here and (when LT-active) substitutes carrier source wrappers with
      * target wrappers for the duration of the copy.
      *
      * The function reads the engine's StringInfo vtable sentinel through a `lea rax, [rip+disp32]` early in the body.
@@ -866,7 +866,7 @@ namespace Transmog
      * mov [src], rax ; movzx-byte transfers from [src+8..src+0xA] into [dst+8..]`. Re-anchor on the byte-transfer
      * block (P3 below). It is the most function-specific shape and the least likely to shuffle.
      */
-    inline const Candidate k_structCopyCandidates[] = {
+    inline const Candidate STRUCT_COPY_CANDIDATES[] = {
         // P1 - full prologue + first qword copy + vtable load. The single RIP-rel `lea rax, [rip+disp32]` that loads
         // the StringInfo vtable sentinel carries a wildcarded displacement. One match module-wide.
 
@@ -885,7 +885,7 @@ namespace Transmog
         // P2 - pointer-move block that follows the packed byte transfer. Shape: read the +0x10 pointer out of the
         // source, write it to the destination, null the source slot, null the destination +0x18 slot, then move the
         // +0x18 pointer across. This ownership-transfer idiom (copy across, then clear the source) is what makes the
-        // window unique, and it holds no compiler-owned bytes at all. Anchors at function start + 0x51.
+        // window unique, and it holds no compiler-owned bytes at all. anchors at function start + 0x51.
 
         Candidate::direct(
             "PrefabWrapperSwap_StructCopy_P2_PointerMoveBlock",
@@ -912,7 +912,7 @@ namespace Transmog
     // ItemNameTable bounded-window anchor patterns.
     //
     // These are NOT cascades. They are compiled patterns handed to `DMK::scan::scan` over a 0x40 to 0x80 byte LOCAL
-    // scan inside a function whose start the cascade already resolved (via `k_subTranslatorCandidates`). Every
+    // scan inside a function whose start the cascade already resolved (via `SUB_TRANSLATOR_CANDIDATES`). Every
     // byte-pattern literal lives in this header.
     //
     // The `|` glyph marks the result point. The compiler folds it into the pattern's offset and `scan` returns the
@@ -930,7 +930,7 @@ namespace Transmog
      * Used as the FIRST pattern in a 0x80-byte scan window. The anchor offset `|` lands on the byte immediately after
      * the `E8` opcode, which is the start of the call's disp32.
      */
-    inline constexpr Pattern k_nametableSubTxV105Anchor =
+    inline constexpr Pattern NAMETABLE_SUB_TX_RSP_LEA_ANCHOR =
         Pattern::literal("41 B8 01 00 00 00 48 8D 55 ?? 48 8D 4C 24 ?? | E8 ?? ?? ?? ??");
 
     /**
@@ -938,7 +938,7 @@ namespace Transmog
      *
      * The scan tries it after the rsp-relative anchor, inside the same 0x80-byte window.
      */
-    inline constexpr Pattern k_nametableSubTxV104Anchor =
+    inline constexpr Pattern NAMETABLE_SUB_TX_RBP_LEA_ANCHOR =
         Pattern::literal("41 B8 01 00 00 00 48 8D 55 ?? 48 8D 4D ?? | E8 ?? ?? ?? ??");
 
     /**
@@ -956,10 +956,10 @@ namespace Transmog
      * resolves fine. Wildcarding is safe here because the scan is bounded to 0x40 bytes of an already-located
      * function, so global uniqueness is not required.
      */
-    inline constexpr Pattern k_nametableItemAccessorAnchor =
+    inline constexpr Pattern NAMETABLE_ITEM_ACCESSOR_ANCHOR =
         Pattern::literal("41 56 48 83 EC ?? 0F B7 39 | 48 8B 1D ?? ?? ?? ??");
 
-    // DyeRecordInject function targets.
+    // dye_record_inject function targets.
     //
     // The dye-injection module installs an inline detour on DyeCopier that, post-trampoline, calls DyeCopy directly to
     // APPEND 16 fabricated ARMOR_MOD records to dst+120.
@@ -981,7 +981,7 @@ namespace Transmog
      * @brief DyeCopier - per-slot dye-record copy driver.
      *
      * Signature `__int64(*)(dst_iteminfo, src_iteminfo)` - copies primary fields then appends the 12-record dye
-     * vector at src+120 into dst+120 through the DyeCopy primitive. DyeRecordInject installs an inline detour here to
+     * vector at src+120 into dst+120 through the DyeCopy primitive. dye_record_inject installs an inline detour here to
      * append 16 fabricated dye records post-trampoline (see `dye_copier_inline_detour` in dye_record_inject.cpp).
      *
      * The prologue spills rbx to its home slot, homes two register arguments, saves five callee-saved registers
@@ -996,7 +996,7 @@ namespace Transmog
      *     +0x1B  48 8B F2 ...                       <- P2 anchors here, so -0x1B
      *     +0x4F  C5 F8 10 42 28 ...                 <- P3 anchors here, so -0x4F
      */
-    inline const Candidate k_dyeCopierCandidates[] = {
+    inline const Candidate DYE_COPIER_CANDIDATES[] = {
         // P1 - full prologue + first three field copies. The `48 8B F2 4C 8B F1` (mov rsi,rdx ; mov r14,rcx)
         // arg-shuffle followed by the qword/word/word field copies through [rdx+0..0xA] is unique to this
         // iteminfo-copy function. One match module-wide.
@@ -1029,7 +1029,7 @@ namespace Transmog
 
         // P3 - mid-body AVX xmm copy. The `vmovups xmm0, [rdx+28h] ; vmovups [rcx+28h], xmm0` pair followed by the
         // `vmovsd` qword move and continued field copies is a unique SSE/AVX shape this function emits at offset
-        // +0x4F. Walk-back -0x4F to function start. Anchors entirely past the prologue, so a prologue-shape shuffle
+        // +0x4F. Walk-back -0x4F to function start. anchors entirely past the prologue, so a prologue-shape shuffle
         // does not sink P3.
 
         Candidate::direct(
@@ -1068,7 +1068,7 @@ namespace Transmog
      *     +0x41  the stride shift and record write                          <- P2 anchors here, so -0x41
      *     +0x75  the last byte-pair, count++ and epilogue                   <- P3 anchors here, so -0x75
      */
-    inline const Candidate k_dyeCopyCandidates[] = {
+    inline const Candidate DYE_COPY_CANDIDATES[] = {
         // P1 - true prologue through the capacity check and the grow call. Shape: spill rbx, push rdi, take the 0x20
         // frame, capture both arguments, then read the live count from `[rcx+0x08]` and the capacity from
         // `[rbx+0x0C]` and skip the grow while the capacity still has room. The grow size is the engine's 1.5x rule,
@@ -1116,9 +1116,9 @@ namespace Transmog
     };
 
     /**
-     * @brief ColorPublisher - per-(dst, src) matInst publisher invoked from the matInst-list copy loop. ColorOverride
+     * @brief ColorPublisher - per-(dst, src) matInst publisher invoked from the matInst-list copy loop. color_override
      *        installs a MidHook here so every dst matInst exposed during a transmog apply gets its content_hash and
-     *        slot cached into MatInstOwner / CarrierSet for the setter substitute to query.
+     *        slot cached into mat_inst_owner / carrier_set for the setter substitute to query.
      *
      * "ColorPublisher" is a mod-internal label. The engine writer family is
      * pa::ClientFrameEventChange{,Global}MaterialParameter. The cascade below resolves the target by AOB, so no
@@ -1129,7 +1129,7 @@ namespace Transmog
      * wildcarded in every row below. What identifies the function is the arg-home stores, the eight-push saved-reg
      * run, and the arg-reload quad (r12<-r9, rdi<-r8, r13<-rdx, r15<-rcx).
      */
-    inline const Candidate k_colorPublisherCandidates[] = {
+    inline const Candidate COLOR_PUBLISHER_CANDIDATES[] = {
         // P1 - full prologue through the arg-reload quad. The row wildcards both frame immediates, because the
         // frame size and the lea displacement shift whenever a patch adds or removes locals. The quad itself
         // identifies the function, and the row pins it. One match module-wide.
@@ -1174,8 +1174,8 @@ namespace Transmog
     };
 
     /**
-     * @brief HostScope OwnerVfunc1 - per-host owner-container vtable slot that invokes the matInst-list copy loop,
-     *        which in turn dispatches the publisher. Mid-hooked by ColorOverride::HostScope to capture rcx (the live
+     * @brief host_scope OwnerVfunc1 - per-host owner-container vtable slot that invokes the matInst-list copy loop,
+     *        which in turn dispatches the publisher. Mid-hooked by color_override::host_scope to capture rcx (the live
      *        owner container) for the player-vs-NPC election.
      *
      * The function is one of three byte-identical sibling thunks, so nothing inside the thunk can single it out. The
@@ -1198,7 +1198,7 @@ namespace Transmog
      *          neighboring function. The durable replacement is an RttiVtable tier plus a slot index, which needs a
      *          resolver change, not another byte row.
      */
-    inline const Candidate k_hostScopeVfunc1Candidates[] = {
+    inline const Candidate HOST_SCOPE_VFUNC1_CANDIDATES[] = {
         // P1 - preceding-function tail (a two-arm indirect-dispatch epilogue ending in `jmp rax`), then six bytes of
         // `CC` alignment, then the thunk prologue through its `xor r14d,r14d ; mov rdi,r9` head. Walk forward +0x1A
         // (20 bytes of tail + 6 of padding) to the thunk entry.
@@ -1214,11 +1214,11 @@ namespace Transmog
     };
 
     /**
-     * @brief HostScope OwnerVfunc2 - sibling per-host owner-container vtable slot. Same role as Vfunc1 (capture rcx
+     * @brief host_scope OwnerVfunc2 - sibling per-host owner-container vtable slot. Same role as Vfunc1 (capture rcx
      *        as the live owner container) but with a distinct prologue, so it admits a direct-prologue anchor without
      *        relying on the preceding function.
      */
-    inline const Candidate k_hostScopeVfunc2Candidates[] = {
+    inline const Candidate HOST_SCOPE_VFUNC2_CANDIDATES[] = {
         // P1 - full prologue. Spills three args, pushes rdi/r14/r15, allocates 0x60 of stack, then loads rbx from
         // a2 and a1 into a register of the compiler's choosing, zeros r14d, and tests r9b (the inline-call
         // optimization flag arg). The 0x60 frame and the `xor r14d,r14d ; test r9b,r9b` flag test are what make this
@@ -1236,7 +1236,7 @@ namespace Transmog
             )
         ),
 
-        // P2 - post-arg-spill + frame setup + arg flag test. Anchors past the three 5-byte arg-home stores, so the
+        // P2 - post-arg-spill + frame setup + arg flag test. anchors past the three 5-byte arg-home stores, so the
         // walk-back is -0x0F. Independent of the arg-home block, which is the part of the prologue that reshapes
         // most. The 0x60 frame and the `xor r14d,r14d ; test r9b,r9b` flag test carry the match.
 
@@ -1270,11 +1270,11 @@ namespace Transmog
 
     /**
      * @brief PropertyByteSetter - 4-byte property descriptor's BYTE-variant write path. Mid-hooked by
-     *        ColorOverride::SetterSubstitute so the engine's per-property color writes can be redirected to user-chosen
-     *        RGB values.
+     *        color_override::setter_substitute so the engine's per-property color writes can be redirected
+     *        to user-chosen RGB values.
      *
      * The color descriptors written here are pa::PartPrefabMaterialParemeterSetEventData / ...FloatEventData (the
-     * engine's "Paremeter" misspelling is intentional). "SetterSubstitute" is a mod-internal label.
+     * engine's "Paremeter" misspelling is intentional). "setter_substitute" is a mod-internal label.
      *
      * The function tests the descriptor's callback at `[rcx+0x78]`, falls through to a 4-byte equality test when
      * present, and tail-jumps to a downstream writer on mismatch. Sibling functions share the entire byte-compare
@@ -1282,7 +1282,7 @@ namespace Transmog
      * byte separates this function from all of them. See the discriminator note on the candidate table below for the
      * pair of struct offsets and the byte-by-byte chain that every row has to carry.
      */
-    inline const Candidate k_setterByteCandidates[] = {
+    inline const Candidate SETTER_BYTE_CANDIDATES[] = {
         // BEWARE the near-clone that sits directly after this function. It shares the entire byte-compare chain and
         // differs only in its head (`mov rax,[rcx+0x98]` against `[rcx+0x78]`) and its second gate (`cmp [rcx+0xD8]`
         // against `[rcx+0xC8]`), so both gates have to be inside every window.
@@ -1351,14 +1351,14 @@ namespace Transmog
      *
      * The function lives in the `.tls` section. The body is large (0x86E bytes) and includes a once-only
      * `lock cmpxchg` guarded init path. That path allocates the hash table, sets the bucket-prime count (0x8E = 142)
-     * and the sentinel cap (0x2FFFF), and publishes the state pointer to a module global. The InternerHook computes
+     * and the sentinel cap (0x2FFFF), and publishes the state pointer to a module global. The interner_hook computes
      * that global from the publish store's RIP displacement and never hardcodes it. Subsequent calls take the table
      * lock, look up the name, and return either the existing token or a freshly minted one.
      *
-     * Resolution lets ColorOverride::InternerHook walk the body to locate the `qword = state` publish store and reach
+     * Resolution lets color_override::interner_hook walk the body to locate the `qword = state` publish store and reach
      * the entries-array without scanning E8 trampolines through a registrar call site.
      */
-    inline const Candidate k_colorTokenInternerCandidates[] = {
+    inline const Candidate COLOR_TOKEN_INTERNER_CANDIDATES[] = {
         // P1 - full Microsoft __fastcall prologue. The 4 shadow-store saves (`mov [rsp+disp8], rbx/r8d/rdx/rcx`)
         // wildcard their disp8 home-area offsets because the prototype's argument layout is the only thing that pins
         // them. The 7-register push run `55 56 57 41 54 41 55 41 56 41 57` (rbp/rsi/rdi/r12/r13/r14/r15) is the
@@ -1421,7 +1421,7 @@ namespace Transmog
      *
      * The middle instruction is the volatile one: the compiler is free to derive that operand from a counter
      * register (`lea r8d, [reg+1]`, 4 bytes) instead of materializing it, which changes the head LENGTH. Keep
-     * k_colorTokenRegistrarCallAobHeadLen and these rows in step, or the walker decodes names from the wrong
+     * COLOR_TOKEN_REGISTRAR_CALL_AOB_HEAD_LEN and these rows in step, or the walker decodes names from the wrong
      * address on every hit and discovery silently reports zero slots.
      *
      * An rcx-load and an `E8 disp32` call to the interner follow within a few bytes. The three patterns below anchor
@@ -1434,12 +1434,12 @@ namespace Transmog
      * P3 covers exactly those first-call entries. Walking all three keeps the discoverer correct even if P1 loses its
      * shape, because the union of P2 and P3 covers the same site set as P1.
      */
-    inline constexpr std::array<Pattern, 3> k_colorTokenRegistrarCallAobs = {{
-        // P1 - 19-byte literal head. Anchors on the run from `mov r9d, 0x2FFFF` through `lea rdx, [name]`.
+    inline constexpr std::array<Pattern, 3> COLOR_TOKEN_REGISTRAR_CALL_AOBS = {{
+        // P1 - 19-byte literal head. anchors on the run from `mov r9d, 0x2FFFF` through `lea rdx, [name]`.
         //
         // The middle instruction is the one the compiler is free to re-materialize: it can emit the operand as a
         // constant (`mov r8d, 1`, 6 bytes) or derive it from a counter register (`lea r8d, [reg+1]`, 4 bytes). Its
-        // LENGTH is therefore part of the head, so k_colorTokenRegistrarCallAobHeadLen and the lea offset derived
+        // LENGTH is therefore part of the head, so COLOR_TOKEN_REGISTRAR_CALL_AOB_HEAD_LEN and the lea offset derived
         // from it must be re-measured together with these rows. A head length that disagrees with the pattern makes
         // the walker decode a name from the wrong address on every hit: every candidate then fails the allow-list,
         // discovery reports zero slots, and color override silently has nothing to bind.
@@ -1458,19 +1458,19 @@ namespace Transmog
     }};
 
     /**
-     * @brief Byte width of the literal head shared by all k_colorTokenRegistrarCallAobs candidates.
+     * @brief Byte width of the literal head shared by all COLOR_TOKEN_REGISTRAR_CALL_AOBS candidates.
      * @details The walker steps the cursor past a matched anchor by this width before it scans for the next hit.
      */
-    inline constexpr std::size_t k_colorTokenRegistrarCallAobHeadLen = 19;
+    inline constexpr std::size_t COLOR_TOKEN_REGISTRAR_CALL_AOB_HEAD_LEN = 19;
 
     /**
-     * @brief Number of walk-pattern variants in k_colorTokenRegistrarCallAobs.
+     * @brief Number of walk-pattern variants in COLOR_TOKEN_REGISTRAR_CALL_AOBS.
      * @details A standalone constant, so a dependent compile-time expression (std::array sizing, an unrolled loop)
      *          does not have to rebind the array through a reference before it reads the extent. MSVC declines to
      *          treat `.size()` on a `const auto &` alias as a constant expression even when the underlying global is
      *          `inline constexpr`.
      */
-    inline constexpr std::size_t k_colorTokenRegistrarCallAobCount = k_colorTokenRegistrarCallAobs.size();
+    inline constexpr std::size_t COLOR_TOKEN_REGISTRAR_CALL_AOB_COUNT = COLOR_TOKEN_REGISTRAR_CALL_AOBS.size();
 
     /**
      * @brief Signature input for the skill-tag resolver scan (`resolve_skill_tag_resolver` in helm_audio_filter.cpp).
@@ -1484,7 +1484,7 @@ namespace Transmog
      * signs only the opcode and ModRM shape, with every movable operand wildcarded: the manager disp32 and the
      * forward-jump rel32. It matches every member of the family. The consumer enumerates the hits and picks the right
      * one by reading each resolver's manager pointer and comparing that manager's MSVC RTTI class name against
-     * @ref k_skillInfoManagerRttiName. A class name survives relocation. A displacement does not.
+     * @ref SKILL_INFO_MANAGER_RTTI_NAME. A class name survives relocation. A displacement does not.
      *
      * The body anchors at function entry + 0x12, past the first five bytes, so a sibling mod that inline-hooks the
      * resolver and overwrites its prologue does not stop the scan from matching.
@@ -1508,7 +1508,7 @@ namespace Transmog
      * base changes width. A stale value produces zero matches, and the scan reports that at trace level only. Verify
      * this signature against live memory on every patch day, because a dead scan looks like a clean log.
      */
-    inline constexpr Pattern k_skillTagResolverBodyAob = Pattern::literal(
+    inline constexpr Pattern SKILL_TAG_RESOLVER_BODY_AOB = Pattern::literal(
         "0F B7 39 48 8B 1D ?? ?? ?? ?? 3B 7B 08 0F 83 ?? ?? ?? ?? 4? 8D 34 FD 00 00 00 00 48 8B 43 58 4? 8B 04 06"
     );
 
@@ -1518,14 +1518,14 @@ namespace Transmog
      *        managers cannot be mistaken for the SkillInfo one. A class rename in a future patch is the only edit this
      *        primary path ever needs.
      */
-    inline constexpr std::string_view k_skillInfoManagerRttiName = ".?AVSkillInfoManager@pa@@";
+    inline constexpr std::string_view SKILL_INFO_MANAGER_RTTI_NAME = ".?AVSkillInfoManager@pa@@";
 
     /// Body offset of the disp32 inside the `mov rbx,[rip+disp32]`.
-    inline constexpr std::ptrdiff_t k_skillTagResolverDispOffset = 6;
+    inline constexpr std::ptrdiff_t SKILL_TAG_RESOLVER_DISP_OFFSET = 6;
     /// End of the `mov rbx,[rip+disp32]`, i.e. the RIP base for its disp32.
-    inline constexpr std::ptrdiff_t k_skillTagResolverInstrEnd = 10;
+    inline constexpr std::ptrdiff_t SKILL_TAG_RESOLVER_INSTR_END = 10;
     /// Distance from the body anchor (entry+0x12) back to the entry.
-    inline constexpr std::ptrdiff_t k_skillTagResolverEntryBackoff = 0x12;
+    inline constexpr std::ptrdiff_t SKILL_TAG_RESOLVER_ENTRY_BACKOFF = 0x12;
 
     /**
      * @brief `pa::GameAudioEffectBuffData` vtable - the class marker we compare buff-instance vtable pointers against
@@ -1549,7 +1549,7 @@ namespace Transmog
      * it keeps the LEA's disp32 inside the matched bytes, so a field added anywhere in the constructor breaks the
      * match loudly instead of leaving the displacement pointing mid-instruction at a plausible wrong address.
      */
-    inline const Candidate k_gameAudioEffectVtableCandidates[] = {
+    inline const Candidate GAME_AUDIO_EFFECT_VTABLE_CANDIDATES[] = {
         // Primary - resolve by RTTI mangled name. Every pa::GameAudioEffectBuffData instance stores its primary
         // (COL.offset == 0) vtable base in its first qword, which is exactly what the byte row below recovers.
         // Resolving by the patch-stable mangled name self-heals across the vtable relocations and the constructor
@@ -1607,7 +1607,7 @@ namespace Transmog
      *          call graph, and it loads PlayerStatic as the first argument to an actor-query primitive. P3 keeps the
      *          cascade alive even when a future patch reshapes the whole writer function that P1 and P2 sit in.
      */
-    inline const Candidate k_playerStaticCandidates[] = {
+    inline const Candidate PLAYER_STATIC_CANDIDATES[] = {
         // P1 - unique writer site. It carries the distinctive `mov r12d, <scratch-id>` init tag immediately after the
         // writer, plus a follow-on load from [rdi+0xF8]. The scratch-id is NOT build-stable across patches, so the
         // row wildcards the imm32. The +0xF8 ABI offset and the writer+test shape keep the site unique. The row
@@ -1683,14 +1683,14 @@ namespace Transmog
      *            +0x0A  48 89 54 24 10             mov  [rsp+10h], rdx   ; home a1
      *            +0x0F  55 56 57                   push rbp/rsi/rdi
      *            +0x12  41 54 41 55 41 56 41 57    push r12/r13/r14/r15
-     *            +0x1A  48 8D AC 24 ?? ?? FF FF    lea  rbp, [rsp-disp32]
+     *            +0x1A  48 8D ac 24 ?? ?? FF FF    lea  rbp, [rsp-disp32]
      *            +0x22  48 81 EC ?? ?? 00 00       sub  rsp, imm32
      *            +0x29  48 8B 41 08 ...            registry read and arg parking
      * @warning The register-save run alone is NOT unique. It matches several functions, so every row runs on into the
      *          registry read. Each row wildcards both frame immediates, which are compiler-owned. Pinning them buys
      *          no uniqueness the body read does not already provide, and costs the row on the next frame resize.
      */
-    inline const Candidate k_helmAudioRegistrarCandidates[] = {
+    inline const Candidate HELM_AUDIO_REGISTRAR_CANDIDATES[] = {
         // P1 - full prologue, entry-anchored. dispOffset = 0 because the pattern starts exactly at the function entry.
         // The prologue alone matches five functions, so the row runs on into the `mov rax,[rcx+8]` body read to
         // single this one out. The row wildcards both frame immediates and the register the a1 pointer parks in.

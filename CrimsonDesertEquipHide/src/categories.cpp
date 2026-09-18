@@ -227,7 +227,7 @@ namespace EquipHide
 
     // Per-character Parts overrides. Empty = inherit from s_category_parts[cat]. Written during config load and never
     // thereafter, so no synchronization is needed beyond the existing s_rebuild_mutex guard on rebuild_part_lookup.
-    static std::string s_category_parts_per_char[CATEGORY_COUNT][k_charIdxCount];
+    static std::string s_category_parts_per_char[CATEGORY_COUNT][CHAR_IDX_COUNT];
 
     // Active character index. -1 = use base Parts only (pre-resolution / unknown).
     static std::atomic<int> s_active_char{-1};
@@ -239,13 +239,13 @@ namespace EquipHide
     std::string_view character_name_for_idx(std::size_t idx) noexcept
     {
         constexpr std::string_view names[] = {"Kliff", "Damiane", "Oongka"};
-        static_assert(std::size(names) == k_charIdxCount, "names[] must match k_charIdxCount");
-        return (idx < k_charIdxCount) ? names[idx] : std::string_view{};
+        static_assert(std::size(names) == CHAR_IDX_COUNT, "names[] must match CHAR_IDX_COUNT");
+        return (idx < CHAR_IDX_COUNT) ? names[idx] : std::string_view{};
     }
 
     void set_per_char_parts(Category cat, std::size_t char_idx, std::string parts_str)
     {
-        if (char_idx >= k_charIdxCount)
+        if (char_idx >= CHAR_IDX_COUNT)
             return;
         s_category_parts_per_char[static_cast<std::size_t>(cat)][char_idx] = std::move(parts_str);
     }
@@ -254,7 +254,7 @@ namespace EquipHide
     static const std::string &effective_parts_for_category(std::size_t cat_idx) noexcept
     {
         const int active = s_active_char.load(std::memory_order_acquire);
-        if (active >= 0 && active < static_cast<int>(k_charIdxCount))
+        if (active >= 0 && active < static_cast<int>(CHAR_IDX_COUNT))
         {
             const auto &override_parts = s_category_parts_per_char[cat_idx][active];
             if (!override_parts.empty())
@@ -361,7 +361,7 @@ namespace EquipHide
      * @brief Parse a Parts= string and write classification entries into the supplied target map.
      * @details The single token parser behind both builds. The active-map build reports what it resolves, while the
      *          per-character build stays quiet because it re-resolves the same tokens once per protagonist, and an
-     *          ungated report would multiply every line by k_charIdxCount on each rebuild.
+     *          ungated report would multiply every line by CHAR_IDX_COUNT on each rebuild.
      * @param cat The category whose bit every resolved hash carries.
      * @param parts_str The raw INI value: a comma-separated list of part names and 0x-prefixed hash literals.
      * @param target The map that receives the hash to mask entries.
@@ -492,19 +492,19 @@ namespace EquipHide
 
     // Per-character part maps, one separate unordered_map per protagonist. The hot path is classify_part_for(),
     // called from apply_direct_vis_write per (vis_ctrl, hash) pair on every schedule. A single merged map that tags
-    // every entry with an array<CategoryMask, k_charIdxCount> (12 bytes per value against 4) triples the cache
+    // every entry with an array<CategoryMask, CHAR_IDX_COUNT> (12 bytes per value against 4) triples the cache
     // footprint of the inner walk that already dominates direct-write latency.
     //
     // Separate maps instead pay a small rebuild cost on a character swap or an INI reload, both rare and off the hot
     // path, for one map lookup keyed on char_idx during a direct write. They are built alongside the active-map
     // double-buffer flip in build_part_lookup(), so every consumer sees the same generation, and each is keyed
     // (hash -> CategoryMask) exactly like the active-character map.
-    static std::unordered_map<uint32_t, CategoryMask> s_part_maps_per_char[k_charIdxCount];
+    static std::unordered_map<uint32_t, CategoryMask> s_part_maps_per_char[CHAR_IDX_COUNT];
 
     // Per-character flat tables, mirroring the active-map flat-table fast path for the contiguous range. Outliers are
     // searched off the per-character unordered_map directly because the per-char outlier count is small enough that
     // maintaining a sorted vector alongside is not worth the rebuild cost.
-    static std::array<CategoryMask, FLAT_SIZE> s_flat_tables_per_char[k_charIdxCount]{};
+    static std::array<CategoryMask, FLAT_SIZE> s_flat_tables_per_char[CHAR_IDX_COUNT]{};
 
     // Outlier hash set
     static constexpr std::size_t MAX_OUTLIERS = 8;
@@ -647,7 +647,7 @@ namespace EquipHide
      */
     static void build_per_char_part_maps()
     {
-        for (std::size_t c = 0; c < k_charIdxCount; ++c)
+        for (std::size_t c = 0; c < CHAR_IDX_COUNT; ++c)
         {
             auto &map = s_part_maps_per_char[c];
             map.clear();
@@ -737,7 +737,7 @@ namespace EquipHide
 
     void set_active_character(int new_idx)
     {
-        const int clamped = (new_idx < -1 || new_idx >= static_cast<int>(k_charIdxCount)) ? -1 : new_idx;
+        const int clamped = (new_idx < -1 || new_idx >= static_cast<int>(CHAR_IDX_COUNT)) ? -1 : new_idx;
         const int prev = s_active_char.exchange(clamped, std::memory_order_acq_rel);
         if (prev == clamped)
             return;
@@ -849,7 +849,7 @@ namespace EquipHide
 
     CategoryMask classify_part_for(uint32_t hash, int char_idx) noexcept
     {
-        if (char_idx < 0 || char_idx >= static_cast<int>(k_charIdxCount))
+        if (char_idx < 0 || char_idx >= static_cast<int>(CHAR_IDX_COUNT))
             return classify_part(hash);
 
         const auto c = static_cast<std::size_t>(char_idx);
@@ -869,7 +869,7 @@ namespace EquipHide
     {
         // The out-of-range fallback returns the active-character map, so accidental misuse stays observably correct
         // instead of a crash.
-        if (char_idx < 0 || char_idx >= static_cast<int>(k_charIdxCount))
+        if (char_idx < 0 || char_idx >= static_cast<int>(CHAR_IDX_COUNT))
             return get_part_map();
         return s_part_maps_per_char[static_cast<std::size_t>(char_idx)];
     }

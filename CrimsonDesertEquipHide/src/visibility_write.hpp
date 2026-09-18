@@ -34,7 +34,8 @@ namespace EquipHide
     /**
      * @name Vis-ctrl to part-visibility-map pointer chain
      * @brief Pointer-chain offsets from a vis controller to its part-visibility map base.
-     * @details `mapBase = *(*(vc + k_visCtrlToCccOffset) + k_cccToDescriptorOffset) + k_descriptorToPartVisMapOffset`.
+     * @details `map_base = *(*(vc + VIS_CTRL_TO_CCC_OFFSET) + CCC_TO_DESCRIPTOR_OFFSET) +
+     * DESCRIPTOR_TO_PART_VIS_MAP_OFFSET`.
      *
      *          The direct-write and armor-injection passes both walk it and must agree, so the values live here and
      *          in no other translation unit. A copy in each caller is one offset to miss when the layout shifts.
@@ -45,13 +46,13 @@ namespace EquipHide
      *
      *          A wrong descriptor offset does NOT fault. It reads a neighboring field, which is either zero (the
      *          map base then lands on the bare map offset and the plausible-pointer gate rejects it) or a
-     *          non-pointer scalar whose low bits still look mapped. It surfaces as the "implausible mapBase" and
+     *          non-pointer scalar whose low bits still look mapped. It surfaces as the "implausible map_base" and
      *          "not a valid part-vis map" traces, never as a crash.
      * @{
      */
-    inline constexpr std::size_t k_visCtrlToCccOffset = 0x88;
-    inline constexpr std::size_t k_cccToDescriptorOffset = 0x220;
-    inline constexpr std::size_t k_descriptorToPartVisMapOffset = 0x28;
+    inline constexpr std::size_t VIS_CTRL_TO_CCC_OFFSET = 0x88;
+    inline constexpr std::size_t CCC_TO_DESCRIPTOR_OFFSET = 0x220;
+    inline constexpr std::size_t DESCRIPTOR_TO_PART_VIS_MAP_OFFSET = 0x28;
     /** @} */
 
 } // namespace EquipHide

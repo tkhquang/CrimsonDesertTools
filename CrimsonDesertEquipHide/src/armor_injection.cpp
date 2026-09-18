@@ -22,7 +22,7 @@ namespace EquipHide
     // Serialized by vis_write_mutex, which stays held for the full call duration, so concurrent callers cannot race.
     // MSVC C2712 requires file scope rather than a function-scope std::vector or std::string: the function's
     // __try/__finally cannot coexist with objects that require C++ unwinding, and that includes a temporary returned
-    // by value from a helper. Mirrors the s_touchedVisKeys pattern in visibility_write.cpp.
+    // by value from a helper. Mirrors the s_touched_vis_keys pattern in visibility_write.cpp.
     static std::vector<uint32_t> s_v_injected;
     static std::vector<uint32_t> s_v_reinjected;
     static std::string s_v_joined;
@@ -73,67 +73,67 @@ namespace EquipHide
                                                 __int64 *out_hash_ptr,
                                                 __int64 *out_data_ptr);
 
-    // Reject a mapBase that passed the plausible-pointer gate but does not look like a real part-visibility
+    // Reject a map_base that passed the plausible-pointer gate but does not look like a real part-visibility
     // hashtable. A stale or reallocated vis-ctrl descriptor (a companion despawned between the resolve pass and this
     // write) yields a garbage map: an oversized count, or a bucket pointer that lands in the image .rdata instead of
     // the heap. An insert into that map faults inside the game's MapInsert, and the SEH frame catches it noisily on
     // every frame.
-    static bool part_vis_map_looks_valid(std::uintptr_t mapBase) noexcept
+    static bool part_vis_map_looks_valid(std::uintptr_t map_base) noexcept
     {
         // Exactly the fields the game's MapInsert dereferences, verified from its disassembly: bucket modulus [+0],
         // live entry count [+4], capacity [+8], bucket array [+0x10], entry-pointer array [+0x18]. MapInsert *writes*
         // through [+0x18][entryCount], so a bad entry-pointer array, or a garbage capacity that skips the grow path,
         // faults inside the game. A stale or reallocated descriptor, or a wrong map offset after a struct re-layout,
         // fails one of these. Part-vis maps are tiny per-character hashtables.
-        const auto count = DMK::memory::read<std::uint32_t>(DMK::Address{mapBase});
-        const auto entryCount = DMK::memory::read<std::uint32_t>(DMK::Address{mapBase + 4});
-        const auto cap = DMK::memory::read<std::uint32_t>(DMK::Address{mapBase + 8});
-        const auto buckets = DMK::memory::read<std::uintptr_t>(DMK::Address{mapBase + 0x10});
-        const auto entryPtrs = DMK::memory::read<std::uintptr_t>(DMK::Address{mapBase + 0x18});
-        if (!count || !entryCount || !cap || !buckets || !entryPtrs)
+        const auto count = DMK::memory::read<std::uint32_t>(DMK::Address{map_base});
+        const auto entryCount = DMK::memory::read<std::uint32_t>(DMK::Address{map_base + 4});
+        const auto cap = DMK::memory::read<std::uint32_t>(DMK::Address{map_base + 8});
+        const auto buckets = DMK::memory::read<std::uintptr_t>(DMK::Address{map_base + 0x10});
+        const auto entry_ptrs = DMK::memory::read<std::uintptr_t>(DMK::Address{map_base + 0x18});
+        if (!count || !entryCount || !cap || !buckets || !entry_ptrs)
             return false;
         if (*count == 0 || *count > 0x400)
             return false;
         if (*cap == 0 || *cap > 0x10000 || *entryCount > *cap)
             return false;
         if (!DMK::memory::is_plausible_ptr(DMK::Address{*buckets}) ||
-            !DMK::memory::is_plausible_ptr(DMK::Address{*entryPtrs}))
+            !DMK::memory::is_plausible_ptr(DMK::Address{*entry_ptrs}))
             return false;
         // Both arrays MapInsert will index/write must be readable.
         return DMK::memory::read<std::uint32_t>(DMK::Address{*buckets}).has_value() &&
-               DMK::memory::read<std::uintptr_t>(DMK::Address{*entryPtrs}).has_value();
+               DMK::memory::read<std::uintptr_t>(DMK::Address{*entry_ptrs}).has_value();
     }
 
     // The body performs only guarded memory:: calls, which are noexcept and carry their own fault guard, so this
     // function needs no SEH frame of its own.
-    static uint32_t compute_bucket_key(uint32_t partHash) noexcept
+    static uint32_t compute_bucket_key(uint32_t part_hash) noexcept
     {
-        const auto globalAddr = resolved_addrs().indexedStringGlobal;
-        if (!globalAddr)
+        const auto global_addr = resolved_addrs().indexed_string_global;
+        if (!global_addr)
             return 0;
 
-        // Walk globalAddr -> [+0] -> [+0x58] to the bucket table.
+        // Walk global_addr -> [+0] -> [+0x58] to the bucket table.
         // The trailing 0 dereferences the +0x58 link so the result is the table pointer itself. Without it the walk
         // stops at the slot address and corrupts every bucket key.
-        const auto tbl = DMK::memory::walk(DMK::Address{globalAddr}, std::array<std::ptrdiff_t, 3>{0x00, 0x58, 0x00});
+        const auto tbl = DMK::memory::walk(DMK::Address{global_addr}, std::array<std::ptrdiff_t, 3>{0x00, 0x58, 0x00});
         if (!tbl)
         {
-            static std::atomic<bool> s_logOnce{false};
-            if (!s_logOnce.exchange(true, std::memory_order_relaxed))
+            static std::atomic<bool> s_log_once{false};
+            if (!s_log_once.exchange(true, std::memory_order_relaxed))
                 (void)DMK::log().try_log(
                     DMK::LogLevel::Warning,
                     "compute_bucket_key: tablePtr=NULL (globalAddr=0x{:X} +0x58)",
-                    globalAddr
+                    global_addr
                 );
             return 0;
         }
 
         // 16-byte stride table indexed by part hash. The bucket key lives at +8 within the entry. Kept as a separate
         // typed read (not a chain offset) so the indexed arithmetic stays explicit.
-        return DMK::memory::read<uint32_t>(tbl->offset(static_cast<std::ptrdiff_t>(16ULL * partHash + 8))).value_or(0);
+        return DMK::memory::read<uint32_t>(tbl->offset(static_cast<std::ptrdiff_t>(16ULL * part_hash + 8))).value_or(0);
     }
 
-    static int inject_armor_entries_for_map(uintptr_t mapBase, int charIdx) noexcept
+    static int inject_armor_entries_for_map(uintptr_t map_base, int char_idx) noexcept
     {
         auto &mtx = vis_write_mutex();
         if (!mtx.try_lock())
@@ -153,48 +153,48 @@ namespace EquipHide
             __try
             {
                 auto &addrs = resolved_addrs();
-                if (!addrs.mapInsert || !addrs.mapLookup)
+                if (!addrs.map_insert || !addrs.map_lookup)
                     __leave;
 
-                const auto insert = reinterpret_cast<MapInsertFn>(addrs.mapInsert);
-                const auto lookup = reinterpret_cast<MapLookupFn>(addrs.mapLookup);
+                const auto insert = reinterpret_cast<MapInsertFn>(addrs.map_insert);
+                const auto lookup = reinterpret_cast<MapLookupFn>(addrs.map_lookup);
 
                 auto &logger = DMK::log();
                 int injected = 0;
                 int existing_set = 0;
                 int skipped_key = 0;
 
-                const bool cascadeOn = flag_cascade_fix().load(std::memory_order_relaxed);
+                const bool cascade_on = flag_cascade_fix().load(std::memory_order_relaxed);
 
                 // Legs, gloves and boots share a ConditionalPartPrefab cascade with chest. A hidden chest deletes
                 // their map entries, and an injected vis=0 for a visible body part keeps them alive.
-                constexpr CategoryMask k_cascadeBodyMask =
+                constexpr CategoryMask cascade_body_mask =
                     category_bit(Category::Legs) | category_bit(Category::Gloves) | category_bit(Category::Boots);
 
                 // The engine builds these parts through the PartInOutSocket path. A visible socket entry does not
                 // need the body-armor cache flush, and a re-insert makes the engine re-process attachment state that
                 // this mod does not own. That disturbs the game's attachment state for a drawn weapon. The normal
                 // direct-write hide path stays intact. This guard applies only to a visible-entry re-insert.
-                constexpr CategoryMask k_socketPartMask =
+                constexpr CategoryMask socket_part_mask =
                     category_bit(Category::OneHandWeapons) | category_bit(Category::TwoHandWeapons) |
                     category_bit(Category::Shields) | category_bit(Category::Bows) |
                     category_bit(Category::SpecialWeapons) | category_bit(Category::Tools) |
                     category_bit(Category::Lanterns);
 
-                // The per-character map drives both the part list AND the hide-mask classification. charIdx=-1
+                // The per-character map drives both the part list AND the hide-mask classification. char_idx=-1
                 // (unknown body or fallback path) collapses to the active-character map through get_part_map_for and
                 // is_any_category_hidden_for, so an unidentified slot keeps single-character behavior.
-                const auto &partMap = (charIdx >= 0 && charIdx < static_cast<int>(k_charIdxCount))
-                                          ? get_part_map_for(charIdx)
-                                          : get_part_map();
+                const auto &part_map = (char_idx >= 0 && char_idx < static_cast<int>(CHAR_IDX_COUNT))
+                                           ? get_part_map_for(char_idx)
+                                           : get_part_map();
 
                 int reinjected = 0;
                 int socket_reinjection_skipped = 0;
 
-                for (const auto &[hash, mask] : partMap)
+                for (const auto &[hash, mask] : part_map)
                 {
-                    const bool hidden = is_any_category_hidden_for(mask, charIdx);
-                    const auto existing = lookup(mapBase, &hash);
+                    const bool hidden = is_any_category_hidden_for(mask, char_idx);
+                    const auto existing = lookup(map_base, &hash);
 
                     if (!hidden)
                     {
@@ -204,7 +204,7 @@ namespace EquipHide
                         // vis=0. The re-insert path below forces the engine to re-process the entry and clear its
                         // cached hidden state. A visible part with no existing entry has nothing to flush, so skip it
                         // unless the cascade-fix path needs it.
-                        if (existing && (mask & k_socketPartMask) != 0)
+                        if (existing && (mask & socket_part_mask) != 0)
                         {
                             ++socket_reinjection_skipped;
                             continue;
@@ -212,7 +212,7 @@ namespace EquipHide
 
                         if (!existing)
                         {
-                            if (!cascadeOn || (mask & k_cascadeBodyMask) == 0)
+                            if (!cascade_on || (mask & cascade_body_mask) == 0)
                                 continue;
                         }
                     }
@@ -224,8 +224,8 @@ namespace EquipHide
                         continue;
                     }
 
-                    const auto bucketKey = compute_bucket_key(hash);
-                    if (bucketKey == 0)
+                    const auto bucket_key = compute_bucket_key(hash);
+                    if (bucket_key == 0)
                     {
                         (void)logger.try_log(DMK::LogLevel::Trace, "  0x{:X} - skipped (no bucket key)", hash);
                         ++skipped_key;
@@ -245,47 +245,47 @@ namespace EquipHide
                     // A copy of the live payload keeps the flush to its one job: re-insert the same bytes so the
                     // engine re-processes the entry and drops its cached hidden state. Only the hide path writes a
                     // byte, and only into an entry this module hides.
-                    constexpr std::size_t k_entryDataSize = 64;
-                    alignas(8) uint8_t entryData[k_entryDataSize] = {};
-                    const auto visOff = vis_byte_offset();
+                    constexpr std::size_t entry_data_size = 64;
+                    alignas(8) uint8_t entry_data[entry_data_size] = {};
+                    const auto vis_off = vis_byte_offset();
 
                     const bool preserved =
                         existing &&
-                        DMK::memory::read_into(DMK::Address{existing}, std::as_writable_bytes(std::span{entryData}))
+                        DMK::memory::read_into(DMK::Address{existing}, std::as_writable_bytes(std::span{entry_data}))
                             .has_value();
 
                     if (!preserved)
                     {
                         // No live payload to copy. This is a fresh armor entry (a hidden part with no map row, or the
                         // cascade-fix body row), so the armor shape is the right model.
-                        if (visOff < k_entryDataSize)
-                            entryData[visOff] = hidden ? 2 : 0;
+                        if (vis_off < entry_data_size)
+                            entry_data[vis_off] = hidden ? 2 : 0;
                     }
-                    else if (hidden && visOff < k_entryDataSize)
+                    else if (hidden && vis_off < entry_data_size)
                     {
-                        entryData[visOff] = 2;
+                        entry_data[vis_off] = 2;
                     }
 
-                    uint32_t hashCopy = hash;
-                    int *hashPtr = reinterpret_cast<int *>(&hashCopy);
-                    uint8_t outExisted = 0;
-                    __int64 outHashPtr = 0;
-                    __int64 outDataPtr = 0;
+                    uint32_t hash_copy = hash;
+                    int *hash_ptr = reinterpret_cast<int *>(&hash_copy);
+                    uint8_t out_existed = 0;
+                    __int64 out_hash_ptr = 0;
+                    __int64 out_data_ptr = 0;
 
-                    auto *const mapBasePtr = reinterpret_cast<unsigned int *>(mapBase);
+                    auto *const map_base_ptr = reinterpret_cast<unsigned int *>(map_base);
 
                     insert(
-                        mapBasePtr,
-                        &hashPtr,
-                        bucketKey,
-                        reinterpret_cast<__int64>(entryData),
+                        map_base_ptr,
+                        &hash_ptr,
+                        bucket_key,
+                        reinterpret_cast<__int64>(entry_data),
                         0,
-                        &outExisted,
-                        &outHashPtr,
-                        &outDataPtr
+                        &out_existed,
+                        &out_hash_ptr,
+                        &out_data_ptr
                     );
 
-                    if (!outExisted)
+                    if (!out_existed)
                     {
                         s_v_injected.push_back(hash);
                         ++injected;
@@ -329,8 +329,8 @@ namespace EquipHide
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
-                static std::atomic<bool> s_crashLogged{false};
-                if (!s_crashLogged.exchange(true, std::memory_order_relaxed))
+                static std::atomic<bool> s_crash_logged{false};
+                if (!s_crash_logged.exchange(true, std::memory_order_relaxed))
                     (void)DMK::log().try_log(
                         DMK::LogLevel::Warning,
                         "ArmorInject: SEH caught crash during map insertion"
@@ -348,30 +348,30 @@ namespace EquipHide
     void inject_armor_entries() noexcept
     {
         auto &addrs = resolved_addrs();
-        if (!addrs.mapInsert || !addrs.mapLookup || !addrs.indexedStringGlobal)
+        if (!addrs.map_insert || !addrs.map_lookup || !addrs.indexed_string_global)
             return;
 
-        // Hidden-state masks (read by is_any_category_hidden_for) are global, so the global anyHidden short-circuit
+        // Hidden-state masks (read by is_any_category_hidden_for) are global, so the global any_hidden short-circuit
         // stays correct: when no category is hidden anywhere, every per-character query also returns false. The
         // cascade-fix path also writes vis=0 with no category hidden. This pass skips it, because it re-fires on
         // every tick in that case.
-        bool anyHidden = false;
+        bool any_hidden = false;
         for (std::size_t i = 0; i < CATEGORY_COUNT; ++i)
         {
             if (is_category_hidden(static_cast<Category>(i)))
             {
-                anyHidden = true;
+                any_hidden = true;
                 break;
             }
         }
 
         auto &ps = player_state();
-        if (!anyHidden)
+        if (!any_hidden)
         {
             // Reset the injection flags so the next hide toggle re-updates every existing entry and sets its vis
             // byte back to 2.
-            for (int i = 0; i < k_maxProtagonists; ++i)
-                ps.armorInjected[i].store(false, std::memory_order_relaxed);
+            for (int i = 0; i < MAX_PROTAGONISTS; ++i)
+                ps.armor_injected[i].store(false, std::memory_order_relaxed);
             return;
         }
 
@@ -380,32 +380,32 @@ namespace EquipHide
             return;
 
         auto &logger = DMK::log();
-        int totalInjected = 0;
+        int total_injected = 0;
 
         for (int i = 0; i < n; ++i)
         {
-            if (ps.armorInjected[i].load(std::memory_order_relaxed))
+            if (ps.armor_injected[i].load(std::memory_order_relaxed))
                 continue;
 
-            const auto vc = ps.visCtrls[i].load(std::memory_order_relaxed);
+            const auto vc = ps.vis_ctrls[i].load(std::memory_order_relaxed);
             if (!vc)
                 continue;
 
             // Per-slot character idx. -1 (unknown or fallback path) routes the injection through the
             // active-character map, so an unidentified slot keeps single-character behavior.
-            const int charIdx = ps.visCharIdx[i].load(std::memory_order_relaxed);
+            const int char_idx = ps.vis_char_idx[i].load(std::memory_order_relaxed);
 
             // Per-player SEH so one bad pointer does not skip the rest.
             __try
             {
                 // Resolve the part-info descriptor and its part-visibility map. Offsets and the re-verification
-                // recipe live on the k_visCtrl* constants in visibility_write.hpp. The direct-write pass walks the
-                // same three. The walk stops at the descriptor SLOT, so the trailing read is what yields the
+                // recipe live on the three walk-offset constants in visibility_write.hpp. The direct-write pass walks
+                // the same three. The walk stops at the descriptor SLOT, so the trailing read is what yields the
                 // descriptor pointer itself.
                 const auto desc =
                     DMK::memory::walk(
                         DMK::Address{vc},
-                        std::array<std::ptrdiff_t, 2>{k_visCtrlToCccOffset, k_cccToDescriptorOffset}
+                        std::array<std::ptrdiff_t, 2>{VIS_CTRL_TO_CCC_OFFSET, CCC_TO_DESCRIPTOR_OFFSET}
                     )
                         .and_then([](DMK::Address leaf) { return DMK::memory::read<std::uintptr_t>(leaf); });
                 if (!desc)
@@ -415,32 +415,32 @@ namespace EquipHide
                         "ArmorInject [{}]: vc=0x{:X} descriptor=NULL (+{:#x} -> +{:#x})",
                         i,
                         vc,
-                        k_visCtrlToCccOffset,
-                        k_cccToDescriptorOffset
+                        VIS_CTRL_TO_CCC_OFFSET,
+                        CCC_TO_DESCRIPTOR_OFFSET
                     );
                     continue;
                 }
-                const auto mapBase = *desc + k_descriptorToPartVisMapOffset;
+                const auto map_base = *desc + DESCRIPTOR_TO_PART_VIS_MAP_OFFSET;
 
-                // Reject a non-faulting garbage mapBase from a drifted chain. The guarded read traps an actual
+                // Reject a non-faulting garbage map_base from a drifted chain. The guarded read traps an actual
                 // fault, not a wrong-but-mapped pointer. Skip this vis-controller rather than inject into a wrong
                 // map.
-                if (!DMK::memory::is_plausible_ptr(DMK::Address{mapBase}))
+                if (!DMK::memory::is_plausible_ptr(DMK::Address{map_base}))
                 {
                     (void)logger.try_log(
                         DMK::LogLevel::Trace,
                         "ArmorInject [{}]: vc=0x{:X} implausible mapBase=0x{:X} (+{:#x} -> +{:#x} -> +{:#x})",
                         i,
                         vc,
-                        mapBase,
-                        k_visCtrlToCccOffset,
-                        k_cccToDescriptorOffset,
-                        k_descriptorToPartVisMapOffset
+                        map_base,
+                        VIS_CTRL_TO_CCC_OFFSET,
+                        CCC_TO_DESCRIPTOR_OFFSET,
+                        DESCRIPTOR_TO_PART_VIS_MAP_OFFSET
                     );
                     continue;
                 }
 
-                if (!part_vis_map_looks_valid(mapBase))
+                if (!part_vis_map_looks_valid(map_base))
                 {
                     (void)logger.try_log(
                         DMK::LogLevel::Trace,
@@ -448,7 +448,7 @@ namespace EquipHide
                         "(stale/reallocated descriptor) - skipping",
                         i,
                         vc,
-                        mapBase
+                        map_base
                     );
                     continue;
                 }
@@ -459,32 +459,32 @@ namespace EquipHide
                     i,
                     vc,
                     *desc,
-                    mapBase,
-                    charIdx
+                    map_base,
+                    char_idx
                 );
 
-                const int result = inject_armor_entries_for_map(mapBase, charIdx);
+                const int result = inject_armor_entries_for_map(map_base, char_idx);
                 if (result >= 0)
                 {
-                    ps.armorInjected[i].store(true, std::memory_order_relaxed);
-                    totalInjected += result;
+                    ps.armor_injected[i].store(true, std::memory_order_relaxed);
+                    total_injected += result;
                 }
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
                 // Fail closed and loud. A silent swallow makes a per-player fault invisible while the pass still
                 // reports success for every other protagonist.
-                static std::atomic<bool> s_playerFaultLogged{false};
-                if (!s_playerFaultLogged.exchange(true, std::memory_order_relaxed))
+                static std::atomic<bool> s_player_fault_logged{false};
+                if (!s_player_fault_logged.exchange(true, std::memory_order_relaxed))
                     (void)logger.try_log(DMK::LogLevel::Warning, "ArmorInject: SEH caught crash on a protagonist");
             }
         }
 
-        if (totalInjected > 0)
+        if (total_injected > 0)
             (void)logger.try_log(
                 DMK::LogLevel::Info,
                 "ArmorInject: {} new entries injected across {} protagonists",
-                totalInjected,
+                total_injected,
                 n
             );
         else

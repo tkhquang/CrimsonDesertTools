@@ -26,7 +26,7 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace Transmog::ColorOverride::TokenSlotDiscovery
+namespace Transmog::color_override::token_slot_discovery
 {
     /**
      * @brief Runs the one-shot module-init scan pass.
@@ -36,16 +36,16 @@ namespace Transmog::ColorOverride::TokenSlotDiscovery
     void run();
 
     /**
-     * @brief Re-runs the scan when fewer than @p expectedMin slots are known.
-     * @param expectedMin Slot-count baseline the capture must reach before the retry settles.
+     * @brief Re-runs the scan when fewer than @p expected_min slots are known.
+     * @param expected_min Slot-count baseline the capture must reach before the retry settles.
      * @details Cold start misses registrar call sites whose code pages are not committed yet, so a hot-path caller
      *          such as the setter mid-hook covers the gap. Throttled internally to roughly 1.5 s between attempts.
      *          Becomes a permanent no-op once two consecutive scans return the same slot count AND that count reaches
-     *          @p expectedMin. The sweep itself is dispatched to a worker, so the caller returns immediately.
+     *          @p expected_min. The sweep itself is dispatched to a worker, so the caller returns immediately.
      * @note Best-effort: the call is dropped while the throttle holds or a sweep is already in flight.
      * @warning The dispatch takes a mutex shared with the re-scan worker teardown path.
      */
-    void retry_if_underpopulated(std::size_t expectedMin) noexcept;
+    void retry_if_underpopulated(std::size_t expected_min) noexcept;
 
     /**
      * @brief Stops any re-scan worker and waits for it to exit.
@@ -103,6 +103,6 @@ namespace Transmog::ColorOverride::TokenSlotDiscovery
      * @note Callback-safe, but it takes the slot-table mutex the re-scan worker also holds.
      */
     std::size_t slot_count() noexcept;
-} // namespace Transmog::ColorOverride::TokenSlotDiscovery
+} // namespace Transmog::color_override::token_slot_discovery
 
 #endif // TRANSMOG_COLOR_OVERRIDE_COLOR_TOKEN_DISCOVERY_HPP

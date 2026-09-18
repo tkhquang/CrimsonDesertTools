@@ -3,7 +3,7 @@
 
 /**
  * @file color_pending_overrides.hpp
- * @brief Pending-overrides map: persisted user picks not yet matched against a live SwatchTable row.
+ * @brief Pending-overrides map: persisted user picks not yet matched against a live swatch_table row.
  * @details The map loads at game start, and on a preset or character switch, from `Preset::swatch_overrides`. The
  *          setter hook consults it on every successful `lookup_or_insert`. When the captured
  *          `(slot, submesh_name, token_id)` matches a pending entry, the row `override_active` flag flips on and its
@@ -24,9 +24,9 @@
 #include <cstdint>
 #include <string>
 
-namespace Transmog::ColorOverride::PendingOverrides
+namespace Transmog::color_override::pending_overrides
 {
-    using ::Transmog::k_slotCount;
+    using ::Transmog::SLOT_COUNT;
 
     /**
      * Insert a pending override. `submesh_name` and `token_name` form the match key; the setter looks them up by name +
@@ -49,7 +49,7 @@ namespace Transmog::ColorOverride::PendingOverrides
      * @param g Receives the persisted green channel on a hit.
      * @param b Receives the persisted blue channel on a hit.
      * @return True on a hit, with @p r, @p g and @p b filled.
-     * @details The insert resolves the token id through `TokenTable::token_id_for_name`. An entry whose token name did
+     * @details The insert resolves the token id through `token_table::token_id_for_name`. An entry whose token name did
      *          not resolve then is re-tried here, so a late-bootstrap snapshot still finds its match. A hit ERASES the
      *          entry: the substitute path calls `set_override_active(true)` right after, so an entry left in place
      *          re-enables the override on every later engine write and makes "revert to default" and a per-row un-tick
@@ -78,7 +78,7 @@ namespace Transmog::ColorOverride::PendingOverrides
      * `(submesh_name, token_id)` matches, regardless of which slot the JSON stored it under.
      *
      * The setter's substitute path consults this before `resolve_slot()` runs, so a preset's saved color overrides
-     * apply to any matInst write whose submesh-name + token match, without requiring CarrierSet to have already bound
+     * apply to any matInst write whose submesh-name + token match, without requiring carrier_set to have already bound
      * the matInst's content_hash. This handles non-transmog-slot matInsts (hair, face, body) which are not bound during
      * a transmog-slot apply.
      *
@@ -139,6 +139,6 @@ namespace Transmog::ColorOverride::PendingOverrides
         std::uint64_t lookups_miss{};
     };
     Stats snapshot_stats() noexcept;
-} // namespace Transmog::ColorOverride::PendingOverrides
+} // namespace Transmog::color_override::pending_overrides
 
 #endif // TRANSMOG_COLOR_OVERRIDE_COLOR_PENDING_OVERRIDES_HPP

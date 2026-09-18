@@ -26,8 +26,8 @@ namespace EquipHide
 
         // Reset injection flags so newly-toggled categories get entries created.
         auto &ps = player_state();
-        for (int i = 0; i < k_maxProtagonists; ++i)
-            ps.armorInjected[i].store(false, std::memory_order_relaxed);
+        for (int i = 0; i < MAX_PROTAGONISTS; ++i)
+            ps.armor_injected[i].store(false, std::memory_order_relaxed);
 
         inject_armor_entries();
         // Publish the request before the inline write attempt. When apply_direct_vis_write loses the lock race against

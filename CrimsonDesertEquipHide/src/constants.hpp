@@ -6,19 +6,19 @@
 namespace EquipHide
 {
     /// Full mod version string, e.g. "0.9.1".
-    inline constexpr const char *MOD_VERSION = VERSION_STRING;
+    inline constexpr const char *MOD_VERSION = EH_VERSION_STRING;
 
     /// Mod name the session banner, the log file header and DMK::ModInfo carry.
-    inline constexpr const char *MOD_NAME = Version::MOD_NAME;
+    inline constexpr const char *MOD_NAME = version::MOD_NAME;
 
     /// Mod author credited in the release metadata.
-    inline constexpr const char *MOD_AUTHOR = Version::AUTHOR;
+    inline constexpr const char *MOD_AUTHOR = version::AUTHOR;
 
     /// Source repository that hosts the mod.
-    inline constexpr const char *MOD_SOURCE = Version::REPOSITORY;
+    inline constexpr const char *MOD_SOURCE = version::REPOSITORY;
 
     /// Nexus Mods page for the mod.
-    inline constexpr const char *MOD_NEXUS = Version::NEXUS_URL;
+    inline constexpr const char *MOD_NEXUS = version::NEXUS_URL;
 
     /// Log file name DMK::ModInfo opens next to the DLL.
     inline constexpr const char *LOG_FILE = "CrimsonDesertEquipHide.log";

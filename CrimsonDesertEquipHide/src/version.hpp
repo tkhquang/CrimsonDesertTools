@@ -4,35 +4,32 @@
 #include <string>
 
 // Bump these three values to release a new version. Nothing else in this file needs an edit.
-#define VERSION_MAJOR 0
-#define VERSION_MINOR 9
-#define VERSION_PATCH 1
+#define EH_VERSION_MAJOR 0
+#define EH_VERSION_MINOR 9
+#define EH_VERSION_PATCH 1
 
 // Stringification helpers. Nothing below this line carries a version value.
-#define VERSION_STRINGIFY_IMPL(x) #x
-#define VERSION_STRINGIFY(x) VERSION_STRINGIFY_IMPL(x)
+#define EH_VERSION_STRINGIFY_IMPL(x) #x
+#define EH_VERSION_STRINGIFY(x) EH_VERSION_STRINGIFY_IMPL(x)
 
-#define VERSION_STRING                                                                                                 \
-    VERSION_STRINGIFY(VERSION_MAJOR)                                                                                   \
-    "." VERSION_STRINGIFY(VERSION_MINOR) "." VERSION_STRINGIFY(VERSION_PATCH)
+#define EH_VERSION_STRING                                                                                              \
+    EH_VERSION_STRINGIFY(EH_VERSION_MAJOR)                                                                             \
+    "." EH_VERSION_STRINGIFY(EH_VERSION_MINOR) "." EH_VERSION_STRINGIFY(EH_VERSION_PATCH)
 
-#define VERSION_TAG "v" VERSION_STRING
+#define EH_VERSION_TAG "v" EH_VERSION_STRING
 
-namespace EquipHide::Version
+namespace EquipHide::version
 {
     /** @brief Numeric version components, taken from the three macros above. */
-    inline constexpr int MAJOR = VERSION_MAJOR;
-    inline constexpr int MINOR = VERSION_MINOR;
-    inline constexpr int PATCH = VERSION_PATCH;
+    inline constexpr int MAJOR = EH_VERSION_MAJOR;
+    inline constexpr int MINOR = EH_VERSION_MINOR;
+    inline constexpr int PATCH = EH_VERSION_PATCH;
 
     /** @brief Full version string, e.g. "0.5.2". */
-    inline constexpr const char *VERSION_STR = VERSION_STRING;
+    inline constexpr const char *VERSION_STR = EH_VERSION_STRING;
 
-    /** @brief Version tag for filenames / GitHub releases, e.g. "v0.5.2". */
-    inline constexpr const char *TAG = VERSION_TAG;
-
-    /** @brief Semantic-versioning string (currently an alias for VERSION_STR). */
-    inline constexpr const char *SEMVER = VERSION_STRING;
+    /** @brief version tag for filenames / GitHub releases, e.g. "v0.5.2". */
+    inline constexpr const char *TAG = EH_VERSION_TAG;
 
     /// The __DATE__ stamp of this build.
     inline constexpr const char *BUILD_DATE = __DATE__;
@@ -47,7 +44,7 @@ namespace EquipHide::Version
 
     /** @brief GitHub release URL matching this version. */
     inline constexpr const char *RELEASE_URL =
-        "https://github.com/tkhquang/CrimsonDesertTools/releases/tag/equip-hide/" VERSION_TAG;
+        "https://github.com/tkhquang/CrimsonDesertTools/releases/tag/equip-hide/" EH_VERSION_TAG;
 
     /** @brief Expected artifact filename, e.g. "CrimsonDesertEquipHide_v0.5.2.zip". */
     [[nodiscard]] inline std::string get_artifact_name()
@@ -61,6 +58,6 @@ namespace EquipHide::Version
      */
     void log_version_info();
 
-} // namespace EquipHide::Version
+} // namespace EquipHide::version
 
 #endif // EQUIPHIDE_VERSION_HPP

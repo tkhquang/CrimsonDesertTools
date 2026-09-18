@@ -106,7 +106,7 @@ extern "C"
      */
     __declspec(dllexport) const char *Revision() noexcept
     {
-        return VERSION_TAG " (" __DATE__ " " __TIME__ ")";
+        return EH_VERSION_TAG " (" __DATE__ " " __TIME__ ")";
     }
 
     /**
@@ -167,7 +167,7 @@ extern "C"
             s_hook_restore_failed = false;
 
             DMK::log().info("[DEV] Init generation {} - {}", request->generation_id, Revision());
-            EquipHide::Version::log_version_info();
+            EquipHide::version::log_version_info();
 
             if (auto ready = EquipHide::init(*s_session, request->wheel_host); !ready)
             {

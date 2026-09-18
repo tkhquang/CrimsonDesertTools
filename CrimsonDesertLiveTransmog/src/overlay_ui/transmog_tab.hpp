@@ -19,9 +19,9 @@ namespace Transmog
     /**
      * @brief Draws the tab header: mod name, UI-scale combo and the pending and unsaved badges.
      * @param pending True when the overlay holds uncommitted target edits.
-     * @param pendingSave True when the overlay holds edits no Save wrote to JSON.
+     * @param pending_save True when the overlay holds edits no Save wrote to JSON.
      */
-    void draw_header(bool pending, bool pendingSave);
+    void draw_header(bool pending, bool pending_save);
 
     /** @brief Draws the Enabled, Instant Apply and Keep Search Text toggles. */
     void draw_global_toggles();

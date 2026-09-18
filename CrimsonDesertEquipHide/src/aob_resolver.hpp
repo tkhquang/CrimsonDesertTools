@@ -26,8 +26,8 @@
 
 namespace EquipHide
 {
-    using CDCore::Anchors::Candidate;
-    using CDCore::Anchors::Pattern;
+    using CDCore::anchors::Candidate;
+    using CDCore::anchors::Pattern;
 
     /**
      * @brief ChildActor (pa::ClientChildOnlyInGameActor) vtable.
@@ -37,7 +37,7 @@ namespace EquipHide
      *          class, so every tier resolves the same pointer.
      * @note A 4-row ladder resolving the vtable address (data in .rdata, not code).
      */
-    inline const Candidate k_childActorVtblCandidates[] = {
+    inline const Candidate CHILD_ACTOR_VTBL_CANDIDATES[] = {
 
         // Branch-encoding caveat (aob-signatures.md section 9, the short Jcc rel8 rule): P2 keeps the EB opcode of the
         // trailing 2-byte jmp-over-fallback that follows the vtable store, and wildcards only its rel8 operand. A row
@@ -85,7 +85,7 @@ namespace EquipHide
     };
 
     /**
-     * @brief IndexedStringA map insert routine, the companion to CDCore::Anchors::map_lookup().
+     * @brief IndexedStringA map insert routine, the companion to CDCore::anchors::map_lookup().
      * @details Map layout every row depends on: bucket modulus at +0, live count at +4, capacity at +8, bucket array
      *          at +0x10 (256-byte buckets, index `(key % modulus) << 8`), entry-pointer array at +0x18.
      * @warning Do NOT anchor a row on the bucket arithmetic alone. This hash map is heavily templated. The
@@ -94,7 +94,7 @@ namespace EquipHide
      *          is its argument shuffle, four arguments parked in a specific order.
      * @note A 3-tier ladder resolving the function entry.
      */
-    inline const Candidate k_mapInsertCandidates[] = {
+    inline const Candidate MAP_INSERT_CANDIDATES[] = {
 
         // P1 - full prologue through the argument shuffle.
         // The five callee-saved pushes and the shuffle that follows are the most specific window available. The row
@@ -134,7 +134,7 @@ namespace EquipHide
      * @brief EquipVisCheck: the equipment-visibility decision the PartInOut transition runs per part.
      *
      * @details The decision is a leaf function of its own:
-     *            float check(a1, const uint32_t *partHash, PartInOut *pio, uint8_t inOut)
+     *            float check(a1, const uint32_t *part_hash, PartInOut *pio, uint8_t inOut)
      *          It returns the alpha the caller then publishes: 1.0f show, 0.0f hide, -1.0f "no opinion", which the
      *          caller tests with `vcomiss xmm0,0 / jb` and skips the publish for. Every input arrives in a register;
      *          the function allocates no frame of its own.
@@ -169,7 +169,7 @@ namespace EquipHide
      *       match-to-hook displacement together for each added candidate.
      * @note A 3-tier ladder resolving the mid-hook instruction.
      */
-    inline const Candidate k_equipVisCheckCandidates[] = {
+    inline const Candidate EQUIP_VIS_CHECK_CANDIDATES[] = {
 
         // P1 - the whole entry block: the single rbx spill, the visibility read, the context move, the sentinel
         // compare, its branch, and the exclusion-array header. No frame arithmetic sits inside the window because this
@@ -213,7 +213,7 @@ namespace EquipHide
      *          strongest available anchor.
      * @note A 3-tier ladder resolving the function entry.
      */
-    inline const Candidate k_postfixEvalCandidates[] = {
+    inline const Candidate POSTFIX_EVAL_CANDIDATES[] = {
 
         // P1 - full prologue through the first body instruction.
         // The prologue alone is not unique: the same three shadow stores, push set, frame allocation and xmm spill
@@ -269,7 +269,7 @@ namespace EquipHide
      *          fix reject every NPC. Identify it by its ARGUMENT SETUP instead.
      * @note A 1-row ladder resolving the return address.
      */
-    inline const Candidate k_npcPfeReturnAddrCandidates[] = {
+    inline const Candidate NPC_PFE_RETURN_ADDR_CANDIDATES[] = {
 
         // P1 - the rule-eval call's argument setup, then the call itself. The landmark is the byte after the call, at
         // match+0x1E. The setup loads the world singleton from a module global, walks it to a large sub-object

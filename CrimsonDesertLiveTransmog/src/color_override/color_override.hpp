@@ -8,12 +8,12 @@
 //
 // The publisher hook captures the carrier matInst set during the apply window; the setter hook then substitutes the
 // user's chosen RGB for any write whose `(submesh, token)` matches a saved override in the active preset. Companion to
-// `DyeRecordInject`, which drives the engine's native ARMOR_MOD record path for items the bench can dye normally.
+// `dye_record_inject`, which drives the engine's native ARMOR_MOD record path for items the bench can dye normally.
 
 #include <cstddef>
 #include <cstdint>
 
-namespace Transmog::ColorOverride
+namespace Transmog::color_override
 {
     /**
      * Cap on per-slot SwatchEntry rows.
@@ -28,10 +28,10 @@ namespace Transmog::ColorOverride
      * need several hundred rows. Size this for that slot plus live-capture headroom, never for the average.
      *
      * Storage cost is real and worth knowing before raising it again: the cap multiplies TWO static tables, the
-     * SwatchTable rows and the picker-side DyeSlot rows, across every one of k_slotCount slots. At 512 that is
+     * swatch_table rows and the picker-side DyeSlot rows, across every one of SLOT_COUNT slots. At 512 that is
      * roughly 1.2 MB of static data. Still cheap next to silently losing colors, but it is not free.
      */
-    inline constexpr std::size_t k_dyeSwatchesPerSlot = 512;
+    inline constexpr std::size_t DYE_SWATCHES_PER_SLOT = 512;
 
     /**
      * Install all sub-hooks. Returns true when ALL hooks installed cleanly. Failures are logged and individual hooks
@@ -42,7 +42,7 @@ namespace Transmog::ColorOverride
 
     /**
      * Mark the LT apply window for `slot`. Publisher inserts and setter substitutes are gated by this. Call from
-     * `transmog_apply.cpp` around the engine's slotPopulator invocation.
+     * `transmog_apply.cpp` around the engine's slot_populator invocation.
      */
     void mark_apply_begin(int slot) noexcept;
     void mark_apply_end() noexcept;
@@ -61,6 +61,6 @@ namespace Transmog::ColorOverride
 
     /// Diagnostic dump.
     void log_counters() noexcept;
-} // namespace Transmog::ColorOverride
+} // namespace Transmog::color_override
 
 #endif // TRANSMOG_COLOR_OVERRIDE_COLOR_OVERRIDE_HPP

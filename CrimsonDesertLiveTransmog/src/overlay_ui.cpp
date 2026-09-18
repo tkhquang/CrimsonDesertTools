@@ -76,11 +76,11 @@ namespace Transmog
             // Standalone-only: apply the user's scale override to the font. Stacks on top of the init-time auto-DPI
             // scale from dx_overlay.cpp. Title bar catches up next frame (drawn in the preceding Begin call); content
             // reflects it immediately.
-            if (s_standaloneMode)
-                ImGui::GetIO().FontGlobalScale = s_uiScale;
+            if (s_standalone_mode)
+                ImGui::GetIO().FontGlobalScale = s_ui_scale;
 
             // Drive every slot's reinit state machine forward. Cheap when every slot is Idle (just atomic loads).
-            Transmog::ColorOverride::Reinit::tick();
+            Transmog::color_override::reinit::tick();
 
             auto &pm = PresetManager::instance();
             // Lazy retry of populate_from_persisted for any active-preset slot whose saved overrides failed to seed at
@@ -89,10 +89,10 @@ namespace Transmog
             pm.reseed_unresolved_persisted_swatches();
             // When auto-apply is on, picks are applied immediately so there is never a meaningful "pending" state.
             // Suppress the badge and yellow button tint to reduce visual noise.
-            const bool pending = !s_autoApply && has_pending_changes();
-            const bool pendingSave = has_pending_save();
+            const bool pending = !s_auto_apply && has_pending_changes();
+            const bool pending_save = has_pending_save();
 
-            draw_header(pending, pendingSave);
+            draw_header(pending, pending_save);
             draw_global_toggles();
 
             draw_character_picker(pm);
@@ -117,7 +117,7 @@ namespace Transmog
                     // slot_metadata.hpp `enabled` doc) are forced off in the dispatcher, so including them in the "All"
                     // check keeps the box unticked forever.
                     bool all_active = true;
-                    for (std::size_t i = 0; i < k_slotCount; ++i)
+                    for (std::size_t i = 0; i < SLOT_COUNT; ++i)
                     {
                         if (!Transmog::slot_enabled(i))
                             continue;
@@ -129,26 +129,26 @@ namespace Transmog
                     }
                     if (ImGui::Checkbox("All", &all_active))
                     {
-                        for (std::size_t i = 0; i < k_slotCount; ++i)
+                        for (std::size_t i = 0; i < SLOT_COUNT; ++i)
                         {
                             if (!Transmog::slot_enabled(i))
                                 continue;
                             mappings[i].active = all_active;
                         }
-                        if (s_autoApply)
+                        if (s_auto_apply)
                         {
                             flag_enabled().store(true, std::memory_order_relaxed);
                             manual_apply();
                         }
                     }
-                    if (!s_autoApply)
+                    if (!s_auto_apply)
                     {
                         ImGui::SameLine();
                         ui_text_disabled("(pending - Apply All to commit)");
                     }
                 }
 
-                for (std::size_t i = 0; i < k_slotCount; ++i)
+                for (std::size_t i = 0; i < SLOT_COUNT; ++i)
                 {
                     // Skip disabled slots entirely, because the row, picker popup, and label-sync logic below are
                     // misleading for a slot that never reaches the dispatcher. The slot's mapping is left as-is on disk
@@ -157,26 +157,26 @@ namespace Transmog
                         continue;
 
                     auto &m = mappings[i];
-                    auto &ui = s_slotUI[i];
+                    auto &ui = s_slot_ui[i];
                     const char *slot_label = slot_name(static_cast<TransmogSlot>(i));
 
-                    // Lazy sync: when the PWS module has a target selection for this slot but the UI label is empty,
-                    // derive the label from the catalog. Covers boot-time auto-apply (preset's stored prefabName
-                    // resolved by PWS after the heap walk completes) and any other path that mutates PWS selections
+                    // Lazy sync: when the pws module has a target selection for this slot but the UI label is empty,
+                    // derive the label from the catalog. Covers boot-time auto-apply (preset's stored prefab_name
+                    // resolved by pws after the heap walk completes) and any other path that mutates pws selections
                     // without going through the picker.
                     {
-                        namespace PWS = Transmog::PrefabWrapperSwap;
+                        namespace pws = Transmog::prefab_wrapper_swap;
                         const auto tslot = static_cast<TransmogSlot>(i);
-                        const int tgtIdx = PWS::selection_tgt_index(tslot);
-                        if (tgtIdx >= 0 && ui.pickedPrefabName.empty())
+                        const int tgt_idx = pws::selection_tgt_index(tslot);
+                        if (tgt_idx >= 0 && ui.picked_prefab_name.empty())
                         {
-                            const auto &cat = PWS::slot_catalog(tslot);
-                            if (static_cast<std::size_t>(tgtIdx) < cat.size())
-                                ui.pickedPrefabName = cat[tgtIdx].name;
+                            const auto &cat = pws::slot_catalog(tslot);
+                            if (static_cast<std::size_t>(tgt_idx) < cat.size())
+                                ui.picked_prefab_name = cat[tgt_idx].name;
                         }
-                        else if (tgtIdx < 0 && !ui.pickedPrefabName.empty())
+                        else if (tgt_idx < 0 && !ui.picked_prefab_name.empty())
                         {
-                            ui.pickedPrefabName.clear();
+                            ui.picked_prefab_name.clear();
                         }
                     }
 
@@ -187,11 +187,11 @@ namespace Transmog
                         // Toggling active alone may not change the staged id - e.g. an active-none slot (active=true,
                         // targetId=0) unticked back to inactive both yield staged=0, so has_pending_changes misses
                         // the toggle and the Apply All button stays grayed out. Set the force-apply flag so the UI
-                        // sees a pending change and the dispatcher's slotNeedsWork picks the slot up. Its
-                        // hasActiveNone path already handles the apply semantics, and the flag only guarantees that
+                        // sees a pending change and the dispatcher's slot_needs_work picks the slot up. Its
+                        // has_active_none path already handles the apply semantics, and the flag only guarantees that
                         // the dispatcher considers the slot.
                         force_apply_pending()[i] = true;
-                        if (s_autoApply)
+                        if (s_auto_apply)
                         {
                             flag_enabled().store(true, std::memory_order_relaxed);
                             manual_apply_slot(i);
@@ -203,7 +203,7 @@ namespace Transmog
                     // at 4K instead of opening a 500px gap. Reshade mode keeps a fixed 170px because its host UI
                     // applies its own scaling.
                     const float slot_col_w =
-                        s_standaloneMode
+                        s_standalone_mode
                             ? (ImGui::CalcTextSize("TwoHandWeapon  ").x + ImGui::GetStyle().FramePadding.x * 2.0f)
                             : 170.0f;
                     ImGui::SameLine(slot_col_w);
@@ -214,23 +214,23 @@ namespace Transmog
                         // When the user has picked a body-mesh prefab on this slot, surface the prefab name on the
                         // button instead of the carrier item's display name - the carrier is now an implementation
                         // detail (Kairos's gear forced behind the scenes to feed the source wrapper).
-                        const bool show_prefab_label = !ui.pickedPrefabName.empty();
+                        const bool show_prefab_label = !ui.picked_prefab_name.empty();
                         if (show_prefab_label)
                         {
-                            picker_label = ui.pickedPrefabName + " [prefab]";
+                            picker_label = ui.picked_prefab_name + " [prefab]";
                         }
-                        else if (m.targetItemId == 0)
+                        else if (m.target_item_id == 0)
                         {
                             picker_label = "(none)";
                         }
                         else if (table_ready)
                         {
-                            auto internalName = table.name_of(m.targetItemId);
-                            auto dispName = table.display_name_of(internalName);
-                            if (!dispName.empty())
-                                picker_label = dispName;
-                            else if (!internalName.empty())
-                                picker_label = internalName;
+                            auto internal_name = table.name_of(m.target_item_id);
+                            auto disp_name = table.display_name_of(internal_name);
+                            if (!disp_name.empty())
+                                picker_label = disp_name;
+                            else if (!internal_name.empty())
+                                picker_label = internal_name;
                             else
                                 picker_label = "(unknown)";
                         }
@@ -248,14 +248,14 @@ namespace Transmog
                                 sizeof(btn_label),
                                 "%s  [0x%04X]##pick",
                                 picker_label.c_str(),
-                                m.targetItemId
+                                m.target_item_id
                             );
 
                         // Picker button width: ~32 glyphs at the live font plus padding, so the width is content
                         // derived and stays tight at 4K. ImGui's button text rendering truncates a display name that
                         // exceeds it.
                         const float bw =
-                            s_standaloneMode
+                            s_standalone_mode
                                 ? (ImGui::CalcTextSize("M").x * 32.0f + ImGui::GetStyle().FramePadding.x * 2.0f)
                                 : 380.0f;
                         ImGui::SetNextItemWidth(bw);
@@ -270,8 +270,8 @@ namespace Transmog
                         {
                             if (table_ready)
                             {
-                                if (!s_keepSearchText)
-                                    ui.searchBuf[0] = '\0';
+                                if (!s_keep_search_text)
+                                    ui.search_buf[0] = '\0';
                                 ImGui::OpenPopup("##slot_picker");
                             }
                         }
@@ -279,7 +279,7 @@ namespace Transmog
                             ImGui::PopStyleColor(); // Text
                         ImGui::PopStyleVar();       // ButtonTextAlign
 
-                        // outPrefabIdx contract from the popup:
+                        // out_prefab_idx contract from the popup:
                         //   -1: popup did NOT touch the body-mesh (real item
                         //       or "(none) item" was picked) - leave any
                         //       prior body-mesh selection alone.
@@ -290,33 +290,33 @@ namespace Transmog
                                                "##slot_picker",
                                                ui,
                                                static_cast<TransmogSlot>(i),
-                                               m.targetItemId,
-                                               s_autoApply,
+                                               m.target_item_id,
+                                               s_auto_apply,
                                                i,
                                                &prefab_idx
                                            ))
                         {
-                            std::snprintf(ui.hexBuf, sizeof(ui.hexBuf), "%04X", m.targetItemId);
+                            std::snprintf(ui.hex_buf, sizeof(ui.hex_buf), "%04X", m.target_item_id);
 
-                            namespace PWS = Transmog::PrefabWrapperSwap;
+                            namespace pws = Transmog::prefab_wrapper_swap;
                             const auto tslot = static_cast<TransmogSlot>(i);
-                            const int curSrc = PWS::selection_src_index(tslot);
+                            const int cur_src = pws::selection_src_index(tslot);
 
                             if (prefab_idx >= 0 || prefab_idx == -2)
                             {
                                 // Body-mesh interaction. Selection only - the swap map is rebuilt on the next apply
                                 // via notify_apply_starting (apply-only lifecycle, mirroring the carrier pattern).
-                                PWS::set_selection(tslot, curSrc, (prefab_idx >= 0) ? prefab_idx : -1, "ui-picker");
+                                pws::set_selection(tslot, cur_src, (prefab_idx >= 0) ? prefab_idx : -1, "ui-picker");
 
                                 // Update the per-slot UI label state. On a prefab pick (>= 0) we pull the name straight
                                 // out of the catalog; on an explicit clear (-2) we drop the label so the row reverts to
                                 // showing the carrier item.
                                 if (prefab_idx >= 0)
                                 {
-                                    const auto &cat = PWS::slot_catalog(tslot);
+                                    const auto &cat = pws::slot_catalog(tslot);
                                     if (static_cast<std::size_t>(prefab_idx) < cat.size())
                                     {
-                                        ui.pickedPrefabName = cat[static_cast<std::size_t>(prefab_idx)].name;
+                                        ui.picked_prefab_name = cat[static_cast<std::size_t>(prefab_idx)].name;
                                     }
                                     // Force the carrier into the ACTIVE CHARACTER's carrier so the source wrapper (e.g.
                                     // cd_phw_00_ub_00_0163_index01 for
@@ -335,37 +335,37 @@ namespace Transmog
                                     // restore, the slot stays stuck on the
                                     // Kliff plate carrier (e.g. 0x1521 for helm) instead of reverting to the user's
                                     // underlying preset gear (e.g. Wellsknight 0x1520).
-                                    ui.pickedPrefabName.clear();
-                                    if (ui.priorCarrierSaved)
+                                    ui.picked_prefab_name.clear();
+                                    if (ui.prior_carrier_saved)
                                     {
-                                        m.active = ui.priorCarrierActive;
-                                        m.targetItemId = ui.priorCarrierItemId;
-                                        ui.priorCarrierSaved = false;
+                                        m.active = ui.prior_carrier_active;
+                                        m.target_item_id = ui.prior_carrier_item_id;
+                                        ui.prior_carrier_saved = false;
                                     }
                                 }
 
-                                // Set the force-apply flag UNCONDITIONALLY (regardless of s_autoApply). When the new
+                                // Set the force-apply flag UNCONDITIONALLY (regardless of s_auto_apply). When the new
                                 // carrier id equals the prior one (e.g. re-picking a body-mesh prefab on the same
-                                // Kliff carrier 0x1521), staged/lastIds match, so without this flag has_pending_changes
-                                // returns false, the Apply All button stays grayed out, and a manual apply hits the
-                                // dispatcher's `targetId == prevId` early-out anyway. Setting the flag ensures
-                                // (a) the Apply All button activates and (b) the dispatcher bypasses the early-out
-                                // while leaving lastIds[i] intact, so Phase A `tear_down_fake` runs against 0x1521 and
-                                // the engine's natural-pipeline hook substitutes src->tgt to clean up the prior
-                                // body-mesh target wrapper. When ids differ (e.g. body-mesh clear that restored
-                                // Wellsknight 0x1520 over the prior Kliff 0x1521), the dispatcher's own change
+                                // Kliff carrier 0x1521), staged/last_ids match, so without this flag
+                                // has_pending_changes returns false, the Apply All button stays grayed out, and a
+                                // manual apply hits the dispatcher's `targetId == prev_id` early-out anyway. Setting
+                                // the flag ensures (a) the Apply All button activates and (b) the dispatcher bypasses
+                                // the early-out while leaving last_ids[i] intact, so Phase A `tear_down_fake` runs
+                                // against 0x1521 and the engine's natural-pipeline hook substitutes src->tgt to clean
+                                // up the prior body-mesh target wrapper. When ids differ (e.g. body-mesh clear that
+                                // restored Wellsknight 0x1520 over the prior Kliff 0x1521), the dispatcher's own change
                                 // detection covers it - the flag is harmless.
-                                if (last_applied_ids()[i] == m.targetItemId)
+                                if (last_applied_ids()[i] == m.target_item_id)
                                     force_apply_pending()[i] = true;
-                                if (s_autoApply)
+                                if (s_auto_apply)
                                 {
                                     flag_enabled().store(true, std::memory_order_relaxed);
                                     // Body-mesh picks require the natpipe-hook to substitute the source wrapper for the
-                                    // editing character's body. That hook reads s_swapMapPerChar[s_activeCharIdx-1] at
-                                    // entry, and only the full multi-actor apply path drives s_activeCharIdx per CCOIA
-                                    // (PresetManager::apply_to_state binds it for each character in the sweep). The
-                                    // single-slot path runs against the controlled actor only - when the user edits
-                                    // Damiane/Oongka while controlling
+                                    // editing character's body. That hook reads
+                                    // s_swap_map_per_char[s_active_char_idx-1] at entry, and only the full multi-actor
+                                    // apply path drives s_active_char_idx per CCOIA (PresetManager::apply_to_state
+                                    // binds it for each character in the sweep). The single-slot path runs against the
+                                    // controlled actor only - when the user edits Damiane/Oongka while controlling
                                     // Kliff, the slot path byte-patches Kliff and never triggers a body re-bind for the
                                     // editing character, so the substitution never fires and the carrier renders
                                     // natural (e.g. Demenisian Uniform).
@@ -376,58 +376,59 @@ namespace Transmog
                                     slot_label,
                                     (prefab_idx >= 0) ? "prefab_idx" : "cleared",
                                     (prefab_idx >= 0) ? prefab_idx : 0,
-                                    curSrc >= 0,
-                                    m.targetItemId
+                                    cur_src >= 0,
+                                    m.target_item_id
                                 );
                             }
                             else
                             {
-                                // Real item or "(none) item" pick. The carrier itemId was already updated by the popup.
-                                // We also drop any prior body-mesh prefab label for this slot - picking a real item is
-                                // the user's signal to revert to plain carrier mode. The existing body-mesh swap
-                                // selection is also cleared via reactivate so the two states stay mutually exclusive.
-                                const bool had_prior = !ui.pickedPrefabName.empty();
+                                // Real item or "(none) item" pick. The carrier item_id was already updated by the
+                                // popup. We also drop any prior body-mesh prefab label for this slot - picking a real
+                                // item is the user's signal to revert to plain carrier mode. The existing body-mesh
+                                // swap selection is also cleared via reactivate so the two states stay mutually
+                                // exclusive.
+                                const bool had_prior = !ui.picked_prefab_name.empty();
 
                                 // Drop the body-mesh selection UNCONDITIONALLY, not only when the UI label happens to
-                                // be populated. The label and the PWS target index can disagree: a preset load
+                                // be populated. The label and the pws target index can disagree: a preset load
                                 // restores the selection but fills the label lazily, so a slot can carry a live prefab
                                 // target with an empty label. Gating on the label then leaves the selection alive, the
                                 // carrier gets re-forced on the next apply, and picking "(none)" appears to do
                                 // nothing. The two states are meant to be mutually exclusive, so clearing is always
                                 // correct here.
-                                PWS::set_selection(tslot, PWS::selection_src_index(tslot), -1, "ui-clear");
+                                pws::set_selection(tslot, pws::selection_src_index(tslot), -1, "ui-clear");
                                 if (had_prior)
                                 {
-                                    ui.pickedPrefabName.clear();
+                                    ui.picked_prefab_name.clear();
                                     // Drop the saved prior-carrier snapshot. The user explicitly picked a new real
-                                    // item, so the popup-set m.targetItemId is authoritative - restoring the prior
+                                    // item, so the popup-set m.target_item_id is authoritative - restoring the prior
                                     // carrier here clobbers the fresh pick.
-                                    ui.priorCarrierSaved = false;
+                                    ui.prior_carrier_saved = false;
                                 }
                                 // Set the force-apply flag UNCONDITIONALLY so has_pending_changes also returns true
                                 // when the user clears a prefab pick onto a real item that happens to share the prior
                                 // auto-borrowed Kliff carrier id (e.g. helm 0x1521 -> 0x1521). Without it the Apply
                                 // All button stays grayed out. The dispatcher's normal change detection covers the
                                 // different-id case, so the flag is harmless there.
-                                if (had_prior && last_applied_ids()[i] == m.targetItemId)
+                                if (had_prior && last_applied_ids()[i] == m.target_item_id)
                                     force_apply_pending()[i] = true;
-                                if (s_autoApply)
+                                if (s_auto_apply)
                                 {
                                     flag_enabled().store(true, std::memory_order_relaxed);
                                     manual_apply_slot(i);
                                 }
 
                                 const auto name =
-                                    (m.targetItemId == 0) ? std::string("(none)") : table.name_of(m.targetItemId);
+                                    (m.target_item_id == 0) ? std::string("(none)") : table.name_of(m.target_item_id);
                                 const auto cat =
-                                    (m.targetItemId == 0) ? TransmogSlot::Count : table.category_of(m.targetItemId);
-                                const char *cat_name = (m.targetItemId == 0)                   ? "clear"
+                                    (m.target_item_id == 0) ? TransmogSlot::Count : table.category_of(m.target_item_id);
+                                const char *cat_name = (m.target_item_id == 0)                 ? "clear"
                                                        : (cat == static_cast<TransmogSlot>(i)) ? "slot-match"
                                                                                                : "slot-MISMATCH";
                                 DMK::log().info(
                                     "[picker] slot={} id=0x{:04X} name='{}' category={} ({}) - pending Apply All",
                                     slot_label,
-                                    m.targetItemId,
+                                    m.target_item_id,
                                     name.empty() ? "<unknown>" : name,
                                     static_cast<int>(cat),
                                     cat_name
@@ -440,13 +441,13 @@ namespace Transmog
                     ImGui::SameLine();
 
                     if (!ui.editing)
-                        std::snprintf(ui.hexBuf, sizeof(ui.hexBuf), "%04X", m.targetItemId);
+                        std::snprintf(ui.hex_buf, sizeof(ui.hex_buf), "%04X", m.target_item_id);
 
-                    // When a body-mesh prefab is active on this slot the carrier itemId is auto-borrowed (Kairos plate)
-                    // and the user shouldn't be editing it directly - show the hex disabled+dim with an explanatory
-                    // tooltip so it is clear the body-mesh prefab is the source of truth, and the hex is a peek at the
-                    // underlying carrier.
-                    const bool prefab_active = !ui.pickedPrefabName.empty();
+                    // When a body-mesh prefab is active on this slot the carrier item_id is auto-borrowed (Kairos
+                    // plate) and the user shouldn't be editing it directly - show the hex disabled+dim with an
+                    // explanatory tooltip so it is clear the body-mesh prefab is the source of truth, and the hex is a
+                    // peek at the underlying carrier.
+                    const bool prefab_active = !ui.picked_prefab_name.empty();
                     ImGui::BeginDisabled(prefab_active);
                     // Tight fit for 4-hex-digit ids ("FFFF"): measure the glyph run plus frame padding plus a small
                     // cursor margin. The measured width adapts to every font, DPI, and style change.
@@ -457,8 +458,8 @@ namespace Transmog
                     }
                     if (ImGui::InputText(
                             "##hex",
-                            ui.hexBuf,
-                            sizeof(ui.hexBuf),
+                            ui.hex_buf,
+                            sizeof(ui.hex_buf),
                             ImGuiInputTextFlags_CharsHexadecimal | ImGuiInputTextFlags_CharsUppercase,
                             nullptr,
                             nullptr
@@ -468,18 +469,18 @@ namespace Transmog
                         // the buffer hex-only, so the only failure left is a value wider than 16 bits, which is out
                         // of range for an item id and keeps the current one. An empty box still means (none), which
                         // is how the field has always cleared a slot.
-                        const char *const hex_begin = ui.hexBuf;
+                        const char *const hex_begin = ui.hex_buf;
                         const char *const hex_end = hex_begin + std::strlen(hex_begin);
                         if (hex_begin == hex_end)
                         {
-                            m.targetItemId = 0;
+                            m.target_item_id = 0;
                         }
                         else
                         {
                             std::uint16_t parsed = 0;
                             const auto parse = std::from_chars(hex_begin, hex_end, parsed, 16);
                             if (parse.ec == std::errc{} && parse.ptr == hex_end)
-                                m.targetItemId = parsed;
+                                m.target_item_id = parsed;
                         }
                     }
                     ui.editing = !prefab_active && ImGui::IsItemActive();
@@ -496,21 +497,21 @@ namespace Transmog
 
                     // Quick-clear button.
                     ImGui::SameLine();
-                    if (ImGui::SmallButton("X##clr") && m.targetItemId != 0)
+                    if (ImGui::SmallButton("X##clr") && m.target_item_id != 0)
                     {
-                        m.targetItemId = 0;
-                        std::snprintf(ui.hexBuf, sizeof(ui.hexBuf), "0000");
+                        m.target_item_id = 0;
+                        std::snprintf(ui.hex_buf, sizeof(ui.hex_buf), "0000");
                         // X clears both carrier and any body-mesh override on this slot - the user's intent is "remove
                         // everything visible from this slot". Mirrors the (none) pick.
-                        if (!ui.pickedPrefabName.empty())
+                        if (!ui.picked_prefab_name.empty())
                         {
-                            namespace PWS = Transmog::PrefabWrapperSwap;
+                            namespace pws = Transmog::prefab_wrapper_swap;
                             const auto tslot = static_cast<TransmogSlot>(i);
-                            const int curSrc = PWS::selection_src_index(tslot);
-                            ui.pickedPrefabName.clear();
-                            PWS::set_selection(tslot, curSrc, -1, "ui-clear-all");
+                            const int cur_src = pws::selection_src_index(tslot);
+                            ui.picked_prefab_name.clear();
+                            pws::set_selection(tslot, cur_src, -1, "ui-clear-all");
                         }
-                        if (s_autoApply)
+                        if (s_auto_apply)
                         {
                             flag_enabled().store(true, std::memory_order_relaxed);
                             manual_apply_slot(i);
@@ -610,7 +611,7 @@ namespace Transmog
                     // weapon-slot (?) marker pattern.
                     {
                         const auto tslot_l = static_cast<TransmogSlot>(i);
-                        if (tslot_l == TransmogSlot::Lantern && m.targetItemId == 0)
+                        if (tslot_l == TransmogSlot::Lantern && m.target_item_id == 0)
                         {
                             ImGui::SameLine();
                             ui_text_colored(ImVec4(0.95f, 0.65f, 0.20f, 1.0f), "(!)");
@@ -649,7 +650,7 @@ namespace Transmog
 
             ImGui::Separator();
 
-            draw_action_buttons(pending, pendingSave, pm);
+            draw_action_buttons(pending, pending_save, pm);
             draw_status_footer();
         }
 
@@ -661,12 +662,12 @@ namespace Transmog
     {
         // Auto-fit window so 4K screens do not crop content on first open.
         ImGui::SetNextWindowSize(ImVec2(0.0f, 0.0f), ImGuiCond_FirstUseEver);
-        if (!ImGui::Begin(k_windowTitle))
+        if (!ImGui::Begin(WINDOW_TITLE))
         {
             ImGui::End();
             return;
         }
-        s_standaloneMode = true;
+        s_standalone_mode = true;
         draw_overlay_content();
         ImGui::End();
     }

@@ -4,17 +4,18 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 
 // IndexedStringA table scanner.
 //
-// Table layout (resolved from mapLookupFunc prologue `mov rax, [rip+disp]`):
-//   globalPtr   = *(qword*)(rip-relative target)
-//   tableArray  = *(qword*)(globalPtr + tableArrayOffset)
+// Table layout (resolved from map_lookup_func prologue `mov rax, [rip+disp]`):
+//   global_ptr   = *(qword*)(rip-relative target)
+//   tableArray  = *(qword*)(global_ptr + table_array_offset)
 //   entry[hash] = tableArray + hash * 16
 //   entry[hash]+0 = pointer to null-terminated string (or 0)
 //
-// The scanner locates the `48 8B 05 <disp32>` instruction inside the first 0x40 bytes of mapLookupFunc (patch-proof
+// The scanner locates the `48 8B 05 <disp32>` instruction inside the first 0x40 bytes of map_lookup_func (patch-proof
 // against compiler shuffles), walks the chain, then enumerates the configured hash range end-to-end in a single pass
 // and returns every entry whose string starts with cfg.prefix.
 
@@ -34,35 +35,35 @@ namespace CDCore
          * @details The scan skips an entry whose string does not start with this. "CD_" matches every Crimson Desert
          *          slot part name.
          */
-        const char *prefix = "CD_";
+        std::string_view prefix = "CD_";
 
         /// Inclusive low end of the hash range the sweep covers.
-        std::uint32_t tableScanMin = 1;
+        std::uint32_t table_scan_min = 1;
         /// Inclusive high end of the hash range the sweep covers.
-        std::uint32_t tableScanMax = 0x1FFFF;
+        std::uint32_t table_scan_max = 0x1FFFF;
 
         /**
          * @brief Offset of the table-array pointer inside the global struct.
          * @details Runtime-data layout offset with no AOB behind it. Check it after a major patch.
          */
-        std::ptrdiff_t tableArrayOffset = 0x58;
+        std::ptrdiff_t table_array_offset = 0x58;
 
         /// Label used in log lines. Change it to tell per-mod scans apart in the shared log stream.
-        const char *logLabel = "IndexedStringA scan";
+        std::string_view log_label = "IndexedStringA scan";
     };
 
     /**
      * @brief Scan the IndexedStringA global table for name -> hash mappings.
-     * @param mapLookupFunc Engine map-lookup function whose prologue names the IndexedStringA global.
+     * @param map_lookup_func Engine map-lookup function whose prologue names the IndexedStringA global.
      * @param cfg Scan knobs. The defaults cover a Crimson Desert slot-part sweep.
      * @return Every matching name mapped to its hash. The map is empty when:
-     *         - mapLookupFunc is 0,
+     *         - map_lookup_func is 0,
      *         - the `48 8B 05` RIP anchor is absent from the first 0x40 bytes,
      *         - the resolved global pointer or table array is null or not yet initialized.
      * @note All reads of the live table are SEH-guarded.
      */
     [[nodiscard]] std::unordered_map<std::string, std::uint32_t>
-    scan_indexed_string_table(std::uintptr_t mapLookupFunc, const IndexedStringScanConfig &cfg = {});
+    scan_indexed_string_table(std::uintptr_t map_lookup_func, const IndexedStringScanConfig &cfg = {});
 
 } // namespace CDCore
 

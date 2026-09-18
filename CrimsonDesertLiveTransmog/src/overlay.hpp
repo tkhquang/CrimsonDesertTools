@@ -25,7 +25,7 @@ namespace Transmog
     void shutdown_overlay() noexcept;
 
     /** @brief Force the standalone overlay even when ReShade is available. */
-    void set_force_standalone(bool force);
+    void set_force_standalone(bool force) noexcept;
 
     /**
      * @brief Render one frame of the transmog UI inside an ImGui window.

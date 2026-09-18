@@ -12,15 +12,16 @@
 #include <string_view>
 #include <vector>
 
-// PWS state-lifetime model
-// PWS keeps three pieces of state, each with a different scope:
+// pws state-lifetime model
+// pws keeps three pieces of state, each with a different scope:
 //
-//   - s_selSrcIdxPerChar[N] / s_selTgtIdxPerChar[N] - session-scoped, ONE row per protagonist. The UI writes here
+//   - s_sel_src_idx_per_char[N] / s_sel_tgt_idx_per_char[N] - session-scoped, ONE row per protagonist.
+//     The UI writes here
 //     through set_selection, mirrored from the active editing-view globals. The rows preserve uncommitted picks across
 //     editing-character switches, so a flip of the dropdown does not silently drop the outgoing character's picks.
 //
-//   - s_swapMapPerChar[3] / s_targetWrappersPerChar[3] - per-character apply-scoped. Each apply rebuilds ONLY the
-//     active character's bucket (s_activeCharIdx - 1). The other two characters' buckets stay intact, so a pending
+//   - s_swap_map_per_char[3] / s_target_wrappers_per_char[3] - per-character apply-scoped. Each apply rebuilds ONLY the
+//     active character's bucket (s_active_char_idx - 1). The other two characters' buckets stay intact, so a pending
 //     teardown on a body that was applied to in an earlier pass can still find its installed target wrappers. The
 //     natpipe-hook consults the active character's bucket at install-time wrapper traversal to redirect src->tgt. The
 //     redirected wrapper is then materially installed, after which subsequent rendering reads it directly with no
@@ -28,10 +29,10 @@
 //
 //     Per-character keying matters because protagonists can share carrier prefab names (e.g. Kliff and Oongka both
 //     default to `cd_phm_00_ub_00_0054` for Chest). A union of the rows into one map cross-talks one character's
-//     selection onto another character's body. Dispatch by s_activeCharIdx keeps each body's install window resolving
+//     selection onto another character's body. Dispatch by s_active_char_idx keeps each body's install window resolving
 //     only its own row.
 //
-// Driving character: PresetManager::apply_to_state() primes s_activeCharIdx with the editing-character idx. The next
+// Driving character: PresetManager::apply_to_state() primes s_active_char_idx with the editing-character idx. The next
 // apply build reads that idx to pick the right per-char bucket. See the "current_apply_owner" helper for the canonical
 // pin/flag derivation every site uses.
 
@@ -60,10 +61,10 @@
 // No INI keys. The hook installs unconditionally at boot. Per-slot source defaults derive at runtime from each
 // character's carrier item, and target selection is user-driven through the overlay picker.
 
-namespace Transmog::PrefabWrapperSwap
+namespace Transmog::prefab_wrapper_swap
 {
     /// Registers this module's INI keys. The body-mesh swap declares none.
-    void register_config();
+    void register_config() noexcept;
 
     /**
      * @brief Install the record-copy, natural-pipeline, claim-removal and part-list-merge hooks.
@@ -116,12 +117,12 @@ namespace Transmog::PrefabWrapperSwap
     [[nodiscard]] std::uint32_t target_table_char_idx() noexcept;
 
     /**
-     * @brief Target wrapper bound to @p slotIdx for the character currently being applied, or 0 when the slot has no
+     * @brief Target wrapper bound to @p slot_idx for the character currently being applied, or 0 when the slot has no
      *        target.
      *
      * @details Answers what this SOCKET must wear, which the source-hash-keyed swap map cannot.
      */
-    [[nodiscard]] std::uintptr_t target_wrapper_for_slot(std::size_t slotIdx) noexcept;
+    [[nodiscard]] std::uintptr_t target_wrapper_for_slot(std::size_t slot_idx) noexcept;
 
     /**
      * @brief Discard uncommitted prefab picks so a save-load starts from the preset alone.
@@ -136,14 +137,14 @@ namespace Transmog::PrefabWrapperSwap
      * @brief Rebuild the per-slot target table from current selections and slot targets.
      *
      * @details Needs no live actor, so it can run while a new world is still under construction - which is when
-     *          SocketMeshOverride reads it.
+     *          socket_mesh_override reads it.
      */
     void rebuild_target_table() noexcept;
 
     /**
      * @brief Mark ONE slot's previous target as stale, so the post-apply sweep removes it.
      *
-     * @param prevItemId The target being replaced. Zero is a no-op.
+     * @param prev_item_id The target being replaced. Zero is a no-op.
      * @details The full apply gets this for free: `notify_apply_starting` runs a deactivate cycle that parks every
      *          installed target, the rebuild re-registers only what is still selected, and the sweep detaches the
      *          difference. A single-slot apply cannot use that cycle, because a park of everything while only one
@@ -156,7 +157,7 @@ namespace Transmog::PrefabWrapperSwap
      * @warning Call BEFORE @ref ensure_armed_for_slot_apply, and only when the target actually changes. The id that
      *          is being re-installed parks the wrappers the sweep is about to see as live.
      */
-    void park_slot_target_for_sweep(std::uint16_t prevItemId) noexcept;
+    void park_slot_target_for_sweep(std::uint16_t prev_item_id) noexcept;
 
     /**
      * @brief Run the post-apply sweep for a single-slot apply.
@@ -191,8 +192,8 @@ namespace Transmog::PrefabWrapperSwap
     // into one of the 5 transmog slots by sub-prefix. Once populated, `slot_catalog(slot)` returns the per-slot
     // vector sorted alphabetically by name - ready to feed an ImGui combo.
     //
-    // The dropdown state (per-slot src/tgt index) lives in this module alongside `s_swapMapPerChar` /
-    // `s_targetWrappersPerChar` so `apply_selections_to_swap_map()` can rebuild the swap from selections in one
+    // The dropdown state (per-slot src/tgt index) lives in this module alongside `s_swap_map_per_char` /
+    // `s_target_wrappers_per_char` so `apply_selections_to_swap_map()` can rebuild the swap from selections in one
     // place. No disk persistence - selections are session-scoped only.
 
     /**
@@ -273,17 +274,17 @@ namespace Transmog::PrefabWrapperSwap
      *
      * @param site Short caller tag, logged with the write at trace level. Diagnostic only: a poisoned per-character
      *        row is only findable when the log names who wrote it.
-     * @param charIdxFor Bucket to mirror into, 1-based. Zero means whichever character is bound right now.
-     * @warning A caller that already knows which character it is writing for MUST pass @p charIdxFor. A read of the
+     * @param char_idx_for Bucket to mirror into, 1-based. Zero means whichever character is bound right now.
+     * @warning A caller that already knows which character it is writing for MUST pass @p char_idx_for. A read of the
      *          bound character inside this function re-samples a global another thread can change mid-loop, so a
      *          per-slot restore loop can start on one character's bucket and finish on another's.
      */
     void set_selection(
         Transmog::TransmogSlot slot,
-        int srcIdx,
-        int tgtIdx,
+        int src_idx,
+        int tgt_idx,
         std::string_view site = "?",
-        std::uint32_t charIdxFor = 0
+        std::uint32_t char_idx_for = 0
     ) noexcept;
 
     /**
@@ -292,9 +293,10 @@ namespace Transmog::PrefabWrapperSwap
      * @param idx 1=Kliff, 2=Damiane, 3=Oongka. Idx 0 disables per-char mirroring, used while the boot path runs
      *        before PresetManager resolves the editing character.
      * @details The same binding drives the active editing view exposed through selection_*_index.
-     *          `apply_selections_to_swap_map()` rebuilds `s_swapMapPerChar[ci]` from the bound character's row alone.
+     *          `apply_selections_to_swap_map()` rebuilds `s_swap_map_per_char[ci]` from the bound
+     *          character's row alone.
      *          The other characters' buckets stay intact, so a substitution picked on Damiane stays live in her
-     *          bucket while the UI shows Kliff. The natpipe-hook dispatches by `s_activeCharIdx` to pick the right
+     *          bucket while the UI shows Kliff. The natpipe-hook dispatches by `s_active_char_idx` to pick the right
      *          bucket for the body currently under assembly.
      */
     void set_active_char_idx(std::uint32_t idx) noexcept;
@@ -308,22 +310,25 @@ namespace Transmog::PrefabWrapperSwap
     void reset_per_char_state() noexcept;
 
     /**
-     * @brief Cross-slot adoption. Copy the PrefabEntry at @p fromSlot's catalog index @p fromIdx into @p intoSlot's
+     * @brief Cross-slot adoption. Copy the PrefabEntry at @p from_slot's catalog index @p from_idx into @p into_slot's
      *        catalog and select it there.
      *
      * @return The new tgt index on success, -1 on a bad slot or index.
-     * @details Deduped by name: when @p intoSlot's catalog already has an entry with the same name, the existing
-     *          index is reused. Source selection on @p intoSlot is left untouched.
+     * @details Deduped by name: when @p into_slot's catalog already has an entry with the same name, the existing
+     *          index is reused. Source selection on @p into_slot is left untouched.
      *
      *          The overlay's "Prefabs" cross-slot browse mode uses this so the user can apply, say, a 2H weapon
      *          prefab onto the MainHand slot without an auto-route of the apply to the prefab's native slot. The
      *          engine's record-copy hook is slot-agnostic. Correctness of the resulting render is the user's concern.
      */
-    [[nodiscard]] int
-    adopt_into_slot_and_select(Transmog::TransmogSlot intoSlot, Transmog::TransmogSlot fromSlot, int fromIdx) noexcept;
+    [[nodiscard]] int adopt_into_slot_and_select(
+        Transmog::TransmogSlot into_slot,
+        Transmog::TransmogSlot from_slot,
+        int from_idx
+    ) noexcept;
 
     /**
-     * @brief Rebuild `s_swapMapPerChar[active-1]` from the bound character's per-slot selections.
+     * @brief Rebuild `s_swap_map_per_char[active-1]` from the bound character's per-slot selections.
      *
      * @return The count of slot pairs successfully bound.
      * @details Reads pre-cached wrapper instances per name from the catalog (the boot-time heap walk merges parallel
@@ -353,7 +358,7 @@ namespace Transmog::PrefabWrapperSwap
      * @brief Record a DIRECT fake - a slot where the carrier item IS the target item, so it is equipped as itself and
      *        no prefab substitution happens at all.
      *
-     * @param itemId The item equipped as itself.
+     * @param item_id The item equipped as itself.
      * @details Such a slot installs a visual without ever passing through `on_struct_copy`, so nothing lands in this
      *          character's installed-wrapper set and the post-apply sweep has no victim to look for. The slot then
      *          keeps its mesh attached forever once cleared. Resolution of the item's prefabs here, plus their
@@ -361,7 +366,7 @@ namespace Transmog::PrefabWrapperSwap
      *          free: the next apply parks them, the rebuilt set no longer lists them, so they fall out as orphans and
      *          get detached.
      */
-    void register_direct_fake(std::uint16_t itemId) noexcept;
-} // namespace Transmog::PrefabWrapperSwap
+    void register_direct_fake(std::uint16_t item_id) noexcept;
+} // namespace Transmog::prefab_wrapper_swap
 
 #endif // TRANSMOG_PREFAB_WRAPPER_SWAP_HPP

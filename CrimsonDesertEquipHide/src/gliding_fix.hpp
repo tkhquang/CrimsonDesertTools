@@ -15,7 +15,7 @@ namespace EquipHide
      *          intercepts it and suppresses a hidden part.
      * @param a1 Engine show context, passed straight through.
      * @param a2 Engine show flags, passed straight through.
-     * @param partHashPtr Pointer to the part hash the engine shows.
+     * @param part_hash_ptr Pointer to the part hash the engine shows.
      * @param blend Blend weight, passed straight through.
      * @param a5 Engine show context, passed straight through.
      * @param a6 Engine show context, passed straight through.
@@ -27,7 +27,7 @@ namespace EquipHide
     __int64 __fastcall on_part_add_show(
         __int64 a1,
         uint8_t a2,
-        uint64_t partHashPtr,
+        uint64_t part_hash_ptr,
         float blend,
         __int64 a5,
         __int64 a6,

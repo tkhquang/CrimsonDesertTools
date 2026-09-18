@@ -21,7 +21,7 @@
 
 #include <cstdint>
 
-namespace Transmog::ColorOverride::SetterSubstitute
+namespace Transmog::color_override::setter_substitute
 {
     /**
      * Install the setter mid-hook. Returns true on success; failure (AOB cascade exhausted or hook install rejected)
@@ -43,6 +43,6 @@ namespace Transmog::ColorOverride::SetterSubstitute
      * asynchronously during the apply-window tail, and clearing the slot too early would orphan those writes.
      */
     void set_active_slot(int slot) noexcept;
-} // namespace Transmog::ColorOverride::SetterSubstitute
+} // namespace Transmog::color_override::setter_substitute
 
 #endif // TRANSMOG_COLOR_OVERRIDE_SETTER_SUBSTITUTE_HPP

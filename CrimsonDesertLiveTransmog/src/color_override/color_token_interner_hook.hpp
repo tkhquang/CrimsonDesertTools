@@ -16,7 +16,7 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace Transmog::ColorOverride::InternerHook
+namespace Transmog::color_override::interner_hook
 {
     /**
      * @brief Runs the one-shot capture install.
@@ -59,6 +59,6 @@ namespace Transmog::ColorOverride::InternerHook
      * @note Callback-safe: one atomic load.
      */
     std::size_t capture_count() noexcept;
-} // namespace Transmog::ColorOverride::InternerHook
+} // namespace Transmog::color_override::interner_hook
 
 #endif // TRANSMOG_COLOR_OVERRIDE_COLOR_TOKEN_INTERNER_HOOK_HPP

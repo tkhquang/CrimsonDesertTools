@@ -6,7 +6,7 @@
 #include <cstddef>
 #include <span>
 
-namespace Transmog::ColorOverride::MatInstProbe
+namespace Transmog::color_override::mat_inst_probe
 {
     bool probe_matinst(std::uintptr_t mi, MatInstFields &out) noexcept
     {
@@ -15,17 +15,17 @@ namespace Transmog::ColorOverride::MatInstProbe
             return false;
 
         const auto vtable = DMK::memory::read<std::uintptr_t>(DMK::Address{mi});
-        const auto template_id = DMK::memory::read<std::uint16_t>(DMK::Address{mi + k_offMi_TemplateId});
-        const auto stable_id = DMK::memory::read<std::uint64_t>(DMK::Address{mi + k_offMi_StableId});
+        const auto template_id = DMK::memory::read<std::uint16_t>(DMK::Address{mi + MI_OFFSET_TEMPLATE_ID});
+        const auto stable_id = DMK::memory::read<std::uint64_t>(DMK::Address{mi + MI_OFFSET_STABLE_ID});
         if (!vtable || !template_id || !stable_id)
             return false;
 
         // Resolve the arec backref EXPLICITLY, not through memory::walk. The `is_likely_heap` floor (0x200000000) is
         // stricter than the chain primitive default `min_valid` floor (0x10000), which lets a bogus-low arec through.
-        const auto arec = DMK::memory::read<std::uintptr_t>(DMK::Address{mi + k_offMi_ArecBackref});
+        const auto arec = DMK::memory::read<std::uintptr_t>(DMK::Address{mi + MI_OFFSET_AREC_BACKREF});
         if (!arec || !is_likely_heap(*arec))
             return false;
-        const auto content_hash = DMK::memory::read<std::uint32_t>(DMK::Address{*arec + k_offArec_ContentHash});
+        const auto content_hash = DMK::memory::read<std::uint32_t>(DMK::Address{*arec + AREC_OFFSET_CONTENT_HASH});
         if (!content_hash)
             return false;
 
@@ -42,7 +42,8 @@ namespace Transmog::ColorOverride::MatInstProbe
         out = {};
         if (wrapper == 0)
             return false;
-        const auto mi = DMK::memory::read<std::uintptr_t>(DMK::Address{wrapper + k_offMat_WrapperBackref}).value_or(0);
+        const auto mi =
+            DMK::memory::read<std::uintptr_t>(DMK::Address{wrapper + MAT_OFFSET_WRAPPER_BACKREF}).value_or(0);
         return probe_matinst(mi, out);
     }
 
@@ -55,7 +56,7 @@ namespace Transmog::ColorOverride::MatInstProbe
             return false;
 
         // Back-pointer to parent SkinnedMeshMaterialWrapper.
-        const auto wrapper = DMK::memory::read<std::uintptr_t>(DMK::Address{material + k_offMat_WrapperBackref});
+        const auto wrapper = DMK::memory::read<std::uintptr_t>(DMK::Address{material + MAT_OFFSET_WRAPPER_BACKREF});
         if (!wrapper || !is_likely_heap(*wrapper))
             return false;
 
@@ -67,7 +68,7 @@ namespace Transmog::ColorOverride::MatInstProbe
 
         // Wrapper `_subMeshName` string-wrapper field. The engine parks a module-resident empty-string sentinel vtable
         // instance here when the name is unset, so the heap floor rejects those.
-        const auto sw = DMK::memory::read<std::uintptr_t>(DMK::Address{*wrapper + k_offWrapper_SubMeshNameSw});
+        const auto sw = DMK::memory::read<std::uintptr_t>(DMK::Address{*wrapper + WRAPPER_OFFSET_SUBMESH_NAME_SW});
         if (!sw || !is_likely_heap(*sw))
             return false;
 
@@ -77,12 +78,12 @@ namespace Transmog::ColorOverride::MatInstProbe
         // window of an unmapped page would read back as nothing. The retry walks the window down to the readable
         // prefix, which is what the byte-at-a-time predecessor returned. The full window succeeds on every normal
         // wrapper, so the loop costs one guarded read in the common case.
-        constexpr std::size_t k_name_window = 64;
-        const std::size_t window = (out_cap - 1 < k_name_window) ? out_cap - 1 : k_name_window;
-        std::array<std::byte, k_name_window> raw{};
-        const DMK::Address inlineStart{*sw + k_offStringWrapper_Inline};
+        constexpr std::size_t name_window = 64;
+        const std::size_t window = (out_cap - 1 < name_window) ? out_cap - 1 : name_window;
+        std::array<std::byte, name_window> raw{};
+        const DMK::Address inline_start{*sw + STRING_WRAPPER_OFFSET_INLINE};
         std::size_t readable = window;
-        while (readable > 0 && !DMK::memory::read_into(inlineStart, std::span{raw.data(), readable}))
+        while (readable > 0 && !DMK::memory::read_into(inline_start, std::span{raw.data(), readable}))
             readable /= 2;
         if (readable == 0)
             return false;
@@ -103,4 +104,4 @@ namespace Transmog::ColorOverride::MatInstProbe
         out[n] = '\0';
         return n > 0;
     }
-} // namespace Transmog::ColorOverride::MatInstProbe
+} // namespace Transmog::color_override::mat_inst_probe

@@ -23,7 +23,6 @@
 #include <atomic>
 #include <cstdarg>
 #include <cstdio>
-#include <cstring>
 #include <string_view>
 
 namespace Transmog
@@ -68,11 +67,11 @@ namespace Transmog
         return (c >= 'A' && c <= 'Z') ? static_cast<char>(c + 32) : c;
     }
 
-    bool name_contains_ci(const std::string &hay, const char *needle) noexcept
+    bool name_contains_ci(std::string_view hay, std::string_view needle) noexcept
     {
-        if (!needle || needle[0] == '\0')
+        if (needle.empty())
             return true;
-        const auto nlen = std::strlen(needle);
+        const auto nlen = needle.size();
         if (nlen > hay.size())
             return false;
         for (std::size_t i = 0; i + nlen <= hay.size(); ++i)
@@ -93,10 +92,10 @@ namespace Transmog
 
     void mirror_override_to_pending(int slot, std::size_t idx, std::uint8_t r, std::uint8_t g, std::uint8_t b) noexcept
     {
-        namespace SwT = Transmog::ColorOverride::SwatchTable;
-        namespace PO = Transmog::ColorOverride::PendingOverrides;
-        auto *ent = SwT::row(slot, idx);
-        auto *ovr = SwT::override_row(slot, idx);
+        namespace swt = Transmog::color_override::swatch_table;
+        namespace po = Transmog::color_override::pending_overrides;
+        auto *ent = swt::row(slot, idx);
+        auto *ovr = swt::override_row(slot, idx);
         if (ent == nullptr || ovr == nullptr)
             return;
         if (ovr->submesh_name[0] == '\0')
@@ -104,15 +103,15 @@ namespace Transmog
         const std::uint16_t tok = ent->token_id.load(std::memory_order_relaxed);
         if (tok == 0)
             return;
-        PO::set_by_token_id(slot, ovr->submesh_name, tok, r, g, b);
+        po::set_by_token_id(slot, ovr->submesh_name, tok, r, g, b);
     }
 
     void erase_override_from_pending(int slot, std::size_t idx) noexcept
     {
-        namespace SwT = Transmog::ColorOverride::SwatchTable;
-        namespace PO = Transmog::ColorOverride::PendingOverrides;
-        auto *ent = SwT::row(slot, idx);
-        auto *ovr = SwT::override_row(slot, idx);
+        namespace swt = Transmog::color_override::swatch_table;
+        namespace po = Transmog::color_override::pending_overrides;
+        auto *ent = swt::row(slot, idx);
+        auto *ovr = swt::override_row(slot, idx);
         if (ent == nullptr || ovr == nullptr)
             return;
         if (ovr->submesh_name[0] == '\0')
@@ -120,35 +119,35 @@ namespace Transmog
         const std::uint16_t tok = ent->token_id.load(std::memory_order_relaxed);
         if (tok == 0)
             return;
-        PO::erase_by_token_id(slot, ovr->submesh_name, tok);
+        po::erase_by_token_id(slot, ovr->submesh_name, tok);
     }
 
     // Clear all picked-prefab UI state and deactivate the body-mesh hook. Called BEFORE preset switches so the prefab
     // swap is torn down before the new preset's items are equipped; otherwise the hook would still substitute against
     // the old src wrappers, causing weird state across the transition.
     //
-    // Clears UI/PWS selections for slots that had a body-mesh prefab pick and returns the per-slot mask of slots that
-    // were cleared. The caller is responsible for the post-apply_to_state lastIds reconciliation:
-    // for each cleared slot, if the new preset's carrier equals lastIds[i] the caller must zero lastIds[i] so the apply
-    // pass tears down the prior body-mesh fake (otherwise the natural-pipeline cleanup hook never fires and the swap
-    // stays visible). When carriers differ, lastIds is left intact so the regular tear_down_fake path runs.
-    std::array<bool, k_slotCount> clear_all_picked_prefabs_and_deactivate()
+    // Clears UI/pws selections for slots that had a body-mesh prefab pick and returns the per-slot mask of slots that
+    // were cleared. The caller is responsible for the post-apply_to_state last_ids reconciliation:
+    // for each cleared slot, if the new preset's carrier equals last_ids[i] the caller must zero last_ids[i] so the
+    // apply pass tears down the prior body-mesh fake (otherwise the natural-pipeline cleanup hook never fires and the
+    // swap stays visible). When carriers differ, last_ids is left intact so the regular tear_down_fake path runs.
+    std::array<bool, SLOT_COUNT> clear_all_picked_prefabs_and_deactivate()
     {
-        namespace PWS = Transmog::PrefabWrapperSwap;
-        std::array<bool, k_slotCount> hadPick{};
-        for (std::size_t i = 0; i < k_slotCount; ++i)
+        namespace pws = Transmog::prefab_wrapper_swap;
+        std::array<bool, SLOT_COUNT> had_pick{};
+        for (std::size_t i = 0; i < SLOT_COUNT; ++i)
         {
-            hadPick[i] = !s_slotUI[i].pickedPrefabName.empty();
-            s_slotUI[i].pickedPrefabName.clear();
-            s_slotUI[i].priorCarrierSaved = false;
+            had_pick[i] = !s_slot_ui[i].picked_prefab_name.empty();
+            s_slot_ui[i].picked_prefab_name.clear();
+            s_slot_ui[i].prior_carrier_saved = false;
             const auto tslot = static_cast<Transmog::TransmogSlot>(i);
             // Clear the body-mesh tgt selection. Source is left intact so future picks reuse the same auto-seeded src.
-            const int curSrc = PWS::selection_src_index(tslot);
-            PWS::set_selection(tslot, curSrc, -1, "ui-reset-all");
+            const int cur_src = pws::selection_src_index(tslot);
+            pws::set_selection(tslot, cur_src, -1, "ui-reset-all");
         }
         // Selections only: the actual swap-map rebuild happens on the next apply via notify_apply_starting (apply-only
         // lifecycle, mirroring the carrier hybrid pattern).
-        return hadPick;
+        return had_pick;
     }
 
     bool dye_picker_compute_channel_gap_tip(const int present[3][3], char *out, std::size_t cap)
@@ -209,22 +208,22 @@ namespace Transmog
     }
 
     // Compare staged slot_mappings vs last_applied_ids to detect unsaved picker/checkbox edits. Returns true if ANY
-    // slot's effective target (targetItemId when active, else 0) differs from what's currently committed to the game,
+    // slot's effective target (target_item_id when active, else 0) differs from what's currently committed to the game,
     // or the per-slot force-apply flag is set after a re-pick on the same carrier id.
     [[nodiscard]] bool has_pending_changes() noexcept
     {
         const auto &mappings = Transmog::slot_mappings();
-        const auto &lastIds = Transmog::last_applied_ids();
-        const auto &forceApply = Transmog::force_apply_pending();
-        for (std::size_t i = 0; i < Transmog::k_slotCount; ++i)
+        const auto &last_ids = Transmog::last_applied_ids();
+        const auto &force_apply = Transmog::force_apply_pending();
+        for (std::size_t i = 0; i < Transmog::SLOT_COUNT; ++i)
         {
             // A force-apply flag means the user re-picked something on the same carrier id (e.g. a different body-mesh
-            // prefab on the existing 0x1521 helm). The staged/lastIds comparison alone would miss it because the
+            // prefab on the existing 0x1521 helm). The staged/last_ids comparison alone would miss it because the
             // carrier id is unchanged.
-            if (forceApply[i])
+            if (force_apply[i])
                 return true;
-            const uint16_t staged = mappings[i].active ? mappings[i].targetItemId : uint16_t{0};
-            if (staged != lastIds[i])
+            const uint16_t staged = mappings[i].active ? mappings[i].target_item_id : uint16_t{0};
+            if (staged != last_ids[i])
                 return true;
         }
         return false;
@@ -234,14 +233,14 @@ namespace Transmog
     // the overlay but has not committed the change back into the JSON preset via Save. Used to tint the Save button so
     // unsaved work is visible.
     //
-    // Prefab picks are session-only: when one is active, the slot's live `mappings[i].targetItemId` was force-borrowed
-    // by `force_active_character_carrier_for_picked_slots()` to the active character's carrier id, NOT the user's saved
-    // itemId. The saved itemId snapshot is captured into `priorCarrierActive/ItemId` on the first prefab pick. Compare
-    // THAT against the JSON when a prefab pick is in flight, otherwise the Save button stays "Save *" forever even when
-    // the saved state matches.
+    // Prefab picks are session-only: when one is active, the slot's live `mappings[i].target_item_id` was
+    // force-borrowed by `force_active_character_carrier_for_picked_slots()` to the active character's carrier id, NOT
+    // the user's saved item_id. The saved item_id snapshot is captured into `prior_carrier_active/ItemId` on the first
+    // prefab pick. Compare THAT against the JSON when a prefab pick is in flight, otherwise the Save button stays "Save
+    // *" forever even when the saved state matches.
     [[nodiscard]] bool has_pending_save() noexcept
     {
-        namespace PWS = Transmog::PrefabWrapperSwap;
+        namespace pws = Transmog::prefab_wrapper_swap;
         const auto *p = Transmog::PresetManager::instance().active_preset();
         if (!p)
             return false;
@@ -252,7 +251,7 @@ namespace Transmog
             return true;
 
         const auto &mappings = Transmog::slot_mappings();
-        for (std::size_t i = 0; i < Transmog::k_slotCount; ++i)
+        for (std::size_t i = 0; i < Transmog::SLOT_COUNT; ++i)
         {
             // Disabled slots are forced off in the dispatcher and hidden from the picker; their saved row is left
             // untouched on disk and may diverge from `mappings[i]` (which we forced false). Do not let that divergence
@@ -262,94 +261,95 @@ namespace Transmog
 
             const auto tslot = static_cast<Transmog::TransmogSlot>(i);
 
-            // Live prefab name from PWS (source of truth for the session, re-read every frame so picker mutations and
+            // Live prefab name from pws (source of truth for the session, re-read every frame so picker mutations and
             // preset loads both surface here).
-            const int tgtIdx = PWS::selection_tgt_index(tslot);
+            const int tgt_idx = pws::selection_tgt_index(tslot);
             // A view, not a copy: this function is noexcept and an allocation failure here terminates the process.
             // slot_catalog() hands back a reference to storage that outlives this loop.
             std::string_view staged_prefab_name;
-            if (tgtIdx >= 0)
+            if (tgt_idx >= 0)
             {
-                const auto &cat = PWS::slot_catalog(tslot);
-                if (static_cast<std::size_t>(tgtIdx) < cat.size())
-                    staged_prefab_name = cat[tgtIdx].name;
+                const auto &cat = pws::slot_catalog(tslot);
+                if (static_cast<std::size_t>(tgt_idx) < cat.size())
+                    staged_prefab_name = cat[tgt_idx].name;
             }
 
             // Prefab name mismatch -> pending. Covers both directions:
             // user added/changed a prefab AND user cleared a saved one.
-            if (staged_prefab_name != p->slots[i].prefabName)
+            if (staged_prefab_name != p->slots[i].prefab_name)
                 return true;
 
-            // When the saved preset row has a prefab, the carrier itemId and active flag are implementation details:
-            // save_path clears itemName (so saved itemId=0) while apply_to_state writes mappings[i].targetItemId =
-            // auto-borrowed Kairos carrier. Comparing those two would light up Save permanently. Skip the active/itemId
-            // compare for prefab rows - the prefab name match above is the only check that is meaningful here.
-            if (!p->slots[i].prefabName.empty())
+            // When the saved preset row has a prefab, the carrier item_id and active flag are implementation details:
+            // save_path clears item_name (so saved item_id=0) while apply_to_state writes mappings[i].target_item_id =
+            // auto-borrowed Kairos carrier. Comparing those two would light up Save permanently. Skip the
+            // active/item_id compare for prefab rows - the prefab name match above is the only check that is meaningful
+            // here.
+            if (!p->slots[i].prefab_name.empty())
                 continue;
 
             // Plain carrier slot. If the user has a session-only prefab pick on this slot (saved preset has no prefab,
-            // live PWS does), the prefab-name compare above already returned pending - so we will not reach here.
-            // priorCarrierSaved still matters for the inverse: the user is mid-pick, has not applied, and the
+            // live pws does), the prefab-name compare above already returned pending - so we will not reach here.
+            // prior_carrier_saved still matters for the inverse: the user is mid-pick, has not applied, and the
             // snapshot holds the originally-saved carrier.
-            const auto &ui = s_slotUI[i];
-            const bool prefab_borrow = ui.priorCarrierSaved;
-            const bool staged_active = prefab_borrow ? ui.priorCarrierActive : mappings[i].active;
-            const std::uint16_t staged_item_id = prefab_borrow ? ui.priorCarrierItemId : mappings[i].targetItemId;
+            const auto &ui = s_slot_ui[i];
+            const bool prefab_borrow = ui.prior_carrier_saved;
+            const bool staged_active = prefab_borrow ? ui.prior_carrier_active : mappings[i].active;
+            const std::uint16_t staged_item_id = prefab_borrow ? ui.prior_carrier_item_id : mappings[i].target_item_id;
             if (staged_active != p->slots[i].active)
                 return true;
-            if (staged_item_id != p->slots[i].itemId)
+            if (staged_item_id != p->slots[i].item_id)
                 return true;
         }
         return false;
     }
 
     // Force the carrier item for each slot that has a session-only prefab pick to the editing-target character's
-    // default carrier (from carrier_defaults.hpp). PWS swaps are keyed by the source wrapper that THAT character's body
+    // default carrier (from carrier_defaults.hpp). pws swaps are keyed by the source wrapper that THAT character's body
     // emits, so the matching carrier must be resident at apply time or the swap silently no-ops.
     void force_active_character_carrier_for_picked_slots()
     {
         // For each slot with a picked prefab, force the carrier item to THE BODY THIS APPLY TARGETS. Use the central
-        // current_apply_owner() helper so the picker writes the same axis the apply pipeline (and the PWS swap map)
+        // current_apply_owner() helper so the picker writes the same axis the apply pipeline (and the pws swap map)
         // will consult - using a different axis here would install the wrong-family carrier on the targeted body and
         // let the swap-map row miss.
         auto &mappings = Transmog::slot_mappings();
         const auto &carrier_owner = Transmog::current_apply_owner();
-        for (std::size_t i = 0; i < Transmog::k_slotCount; ++i)
+        for (std::size_t i = 0; i < Transmog::SLOT_COUNT; ++i)
         {
-            if (s_slotUI[i].pickedPrefabName.empty())
+            if (s_slot_ui[i].picked_prefab_name.empty())
                 continue;
-            const auto carrierId =
+            const auto carrier_id =
                 Transmog::default_carrier_for_slot(static_cast<Transmog::TransmogSlot>(i), carrier_owner);
-            if (carrierId == 0)
+            if (carrier_id == 0)
                 continue; // Item catalog is not ready yet - skip.
             // Snapshot the slot's prior carrier state on the FIRST pick so a later body-mesh clear can restore it
             // (revert to the user's underlying preset gear instead of leaving Kliff plate stuck on the slot).
             // Subsequent re-picks do not overwrite - the original state is what we want to revert to, not whatever
             // Kliff plate we last force-borrowed.
-            if (!s_slotUI[i].priorCarrierSaved)
+            if (!s_slot_ui[i].prior_carrier_saved)
             {
-                s_slotUI[i].priorCarrierSaved = true;
-                s_slotUI[i].priorCarrierActive = mappings[i].active;
-                s_slotUI[i].priorCarrierItemId = mappings[i].targetItemId;
+                s_slot_ui[i].prior_carrier_saved = true;
+                s_slot_ui[i].prior_carrier_active = mappings[i].active;
+                s_slot_ui[i].prior_carrier_item_id = mappings[i].target_item_id;
             }
             // Snapshot prior state to detect "did this call actually change anything for this slot". Without the change
             // check below the function fires force_apply_pending on every already-stable slot every time the user
             // re-picks any other slot, causing unrelated slots to tear down + re-apply on each pick.
-            const bool prevActive = mappings[i].active;
-            const std::uint16_t prev_target_item_id = mappings[i].targetItemId;
+            const bool prev_active = mappings[i].active;
+            const std::uint16_t prev_target_item_id = mappings[i].target_item_id;
             mappings[i].active = true;
-            mappings[i].targetItemId = carrierId;
+            mappings[i].target_item_id = carrier_id;
             const bool changed =
-                (prevActive != mappings[i].active) || (prev_target_item_id != mappings[i].targetItemId);
+                (prev_active != mappings[i].active) || (prev_target_item_id != mappings[i].target_item_id);
             // When the new carrier id equals the last-applied id, the apply pipeline would short-circuit on the
-            // `targetId == prevId` early-out and never re-run. Set the per-slot force-apply flag so the dispatcher
-            // bypasses that early-out while keeping lastIds[i] intact - Phase A `tear_down_fake` then runs against the
+            // `targetId == prev_id` early-out and never re-run. Set the per-slot force-apply flag so the dispatcher
+            // bypasses that early-out while keeping last_ids[i] intact - Phase A `tear_down_fake` then runs against the
             // prior carrier and the engine's natural-pipeline hook cleans up the prior body-mesh tgt wrapper. In the
-            // OTHER case (lastIds differ) the apply path already runs tear-old-then-equip-new naturally, so the flag is
-            // harmless. Gated on `changed` so already-stable slots (carrier was already carrierId, mapping unchanged)
-            // do not get force-applied when the user re-picks an unrelated slot.
-            auto &lastIds = Transmog::last_applied_ids();
-            if (changed && lastIds[i] == carrierId)
+            // OTHER case (last_ids differ) the apply path already runs tear-old-then-equip-new naturally, so the flag
+            // is harmless. Gated on `changed` so already-stable slots (carrier was already carrier_id, mapping
+            // unchanged) do not get force-applied when the user re-picks an unrelated slot.
+            auto &last_ids = Transmog::last_applied_ids();
+            if (changed && last_ids[i] == carrier_id)
                 Transmog::force_apply_pending()[i] = true;
         }
     }

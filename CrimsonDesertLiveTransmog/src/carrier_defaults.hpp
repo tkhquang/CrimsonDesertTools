@@ -14,21 +14,21 @@ namespace Transmog
      * @brief Per-(character, slot) default carrier ITEM used by LT's transmog apply path and by the
      *        prefab-wrapper-swap picker.
      *
-     * @details `itemName` resolves through ItemNameTable::id_of() at runtime to a uint16_t carrier itemId. It drives
-     *          SlotPopulator(itemId) for the carrier-equip path, and it is the SOLE input the prefab-wrapper-swap
-     *          source needs. PWS derives the carrier's body-mesh source prefab(s) from this item's runtime variant
-     *          list (itemmesh_dumper::variant_meshes_for_item) through PrefabWrapperSwap::carrier_source_seed.
-     * @note A hardcoded prefab column drifts from the itemName each patch. The runtime variant list is always exact.
+     * @details `item_name` resolves through ItemNameTable::id_of() at runtime to a uint16_t carrier item_id. It drives
+     *          SlotPopulator(item_id) for the carrier-equip path, and it is the SOLE input the prefab-wrapper-swap
+     *          source needs. pws derives the carrier's body-mesh source prefab(s) from this item's runtime variant
+     *          list (itemmesh_dumper::variant_meshes_for_item) through prefab_wrapper_swap::carrier_source_seed.
+     * @note A hardcoded prefab column drifts from the item_name each patch. The runtime variant list is always exact.
      */
     struct CarrierDefault
     {
-        const char *itemName{nullptr};
+        const char *item_name{nullptr};
     };
 
     /**
-     * @brief Character axis of @ref k_carriers.
+     * @brief Character axis of @ref CARRIERS.
      *
-     * @warning The order is fixed, because CarrierChar(i) maps to k_carriers[i]. A new character appends at the end,
+     * @warning The order is fixed, because CarrierChar(i) maps to CARRIERS[i]. A new character appends at the end,
      *          before Count.
      */
     enum class CarrierChar : std::size_t
@@ -39,8 +39,8 @@ namespace Transmog
         Count
     };
 
-    /// Number of character rows in @ref k_carriers.
-    inline constexpr std::size_t k_carrierCharCount = static_cast<std::size_t>(CarrierChar::Count);
+    /// Number of character rows in @ref CARRIERS.
+    inline constexpr std::size_t CARRIER_CHAR_COUNT = static_cast<std::size_t>(CarrierChar::Count);
 
     /**
      * @brief Default carrier item per character and slot, indexed [character][slot].
@@ -48,7 +48,7 @@ namespace Transmog
      * @details Adding a slot costs one column in each character row. Adding a character costs one new row.
      */
     // clang-format off
-    inline constexpr CarrierDefault k_carriers[k_carrierCharCount][k_slotCount] = {
+    inline constexpr CarrierDefault CARRIERS[CARRIER_CHAR_COUNT][SLOT_COUNT] = {
         // Kliff (male). Armor slots use the Kairos plate set (`Kliff_PlateArmor_*`). The remaining slots come from the
         // live slot-discovery dump.
         //
@@ -104,8 +104,8 @@ namespace Transmog
         },
 
         // Damiane (female). Demeniss Elite/Uniform Leather armor set + Pattern jewelry set + Damian_OneHandPistol
-        // Ranged. The engine uses cd_phw_* for female-specific assets and cd_phm_* for shared accessories. PWS derives
-        // the source rig meshes from each carrier itemId at runtime.
+        // Ranged. The engine uses cd_phw_* for female-specific assets and cd_phm_* for shared accessories. pws derives
+        // the source rig meshes from each carrier item_id at runtime.
         {
             { "Demian_PlateArmor_Helm_VII"                   }, // Helm
             { "Damian_Demeniss_Elite_Uniform_Leather_Armor"  }, // Chest
@@ -134,13 +134,13 @@ namespace Transmog
             { ""                                             }, // Ranged2
         },
 
-        // Oongka (male orc). Orc assets share the cd_phm_* family (the orc model is male-tier). PWS derives the source
-        // rig meshes from each carrier itemId at runtime. The `_dd` runtime-wrapper suffix note below still applies to
+        // Oongka (male orc). Orc assets share the cd_phm_* family (the orc model is male-tier). pws derives the source
+        // rig meshes from each carrier item_id at runtime. The `_dd` runtime-wrapper suffix note below still applies to
         // how the picker matches source wrappers.
         //
         // Helm `_dd` suffix: the prefab-swap resolver (heap_walk_partprefab_for_names) matches src by EXACT
         // strcmp against LIVE partprefab wrapper names. The helm slot is special (see prefab_wrapper_swap.cpp
-        // k_helmSlotId comment) - the engine instantiates the default helm variant's runtime wrapper with a `_dd`
+        // HELM_SLOT_ID comment) - the engine instantiates the default helm variant's runtime wrapper with a `_dd`
         // suffix. So for hel_0122's index01 the ONLY live wrapper is `cd_phm_00_hel_0122_01_index01_dd`. The bare
         // `..._index01` exists only in string/data tables, never as a wrapper, so a bare helm name never resolves and
         // the helm mesh-swap turns into a silent no-op. Other slots use bare names and resolve correctly, because the
@@ -219,7 +219,7 @@ namespace Transmog
     /** @brief The carrier row for one character and slot. */
     [[nodiscard]] inline constexpr const CarrierDefault &carrier_for(CarrierChar c, TransmogSlot s) noexcept
     {
-        return k_carriers[static_cast<std::size_t>(c)][static_cast<std::size_t>(s)];
+        return CARRIERS[static_cast<std::size_t>(c)][static_cast<std::size_t>(s)];
     }
 } // namespace Transmog
 

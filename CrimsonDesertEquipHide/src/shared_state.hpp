@@ -14,16 +14,16 @@
 namespace EquipHide
 {
     /// Upper bound on the protagonists the mod tracks at once.
-    inline constexpr int k_maxProtagonists = 8;
+    inline constexpr int MAX_PROTAGONISTS = 8;
 
     /** @brief Addresses resolved once during init via AOB scanning. */
     struct ResolvedAddresses
     {
-        std::uintptr_t worldSystem = 0;
-        std::uintptr_t childActorVtbl = 0;
-        std::uintptr_t mapLookup = 0;
-        std::uintptr_t mapInsert = 0;
-        std::uintptr_t indexedStringGlobal = 0;
+        std::uintptr_t world_system = 0;
+        std::uintptr_t child_actor_vtbl = 0;
+        std::uintptr_t map_lookup = 0;
+        std::uintptr_t map_insert = 0;
+        std::uintptr_t indexed_string_global = 0;
         /**
          * @brief Return address inside the prefab-instantiation routine, on the instruction after its inner rule-eval
          *        call, through which PostfixEval runs for a freshly-built prefab.
@@ -33,7 +33,7 @@ namespace EquipHide
          * deterministic call-graph filter, with no ctx cache and no frequency heuristic. The anchor that resolves it
          * is NpcPfeReturnAddr in aob_resolver.hpp, which owns the derivation rules.
          */
-        std::uintptr_t npcPfeReturnAddr = 0;
+        std::uintptr_t npc_pfe_return_addr = 0;
     };
 
     /**
@@ -45,8 +45,8 @@ namespace EquipHide
 
     /**
      * @brief Per-protagonist vis_ctrl pointers and injection state.
-     * @details visCharIdx is parallel to visCtrls. visCharIdx[i] holds the 0-based protagonist index (0=Kliff,
-     *          1=Damiane, 2=Oongka) that visCtrls[i] belongs to, or -1 when the resolver cannot identify the
+     * @details vis_char_idx is parallel to vis_ctrls. vis_char_idx[i] holds the 0-based protagonist index (0=Kliff,
+     *          1=Damiane, 2=Oongka) that vis_ctrls[i] belongs to, or -1 when the resolver cannot identify the
      *          character (an NPC follower, an unknown protagonist, or a torn read after a swap). The per-character
      *          hide write falls back to the active-character hide mask for an entry with idx == -1, which keeps the
      *          old single-character behavior for an unidentified slot. The fields are int32 atomics because
@@ -54,17 +54,17 @@ namespace EquipHide
      */
     struct PlayerState
     {
-        std::atomic<std::uintptr_t> visCtrls[k_maxProtagonists]{};
+        std::atomic<std::uintptr_t> vis_ctrls[MAX_PROTAGONISTS]{};
 
         // Seeded to -1 here, not by a run-time pass. std::atomic<int>(-1) is constexpr, so the whole table is
         // constant-initialized and every slot already reads as unidentified before the first dynamic initializer in
         // the module runs. A zero fill would instead read as protagonist index 0, which is a real character.
-        std::atomic<int> visCharIdx[k_maxProtagonists]{-1, -1, -1, -1, -1, -1, -1, -1};
-        static_assert(k_maxProtagonists == 8, "visCharIdx lists one -1 per slot. Extend the list with the bound.");
+        std::atomic<int> vis_char_idx[MAX_PROTAGONISTS]{-1, -1, -1, -1, -1, -1, -1, -1};
+        static_assert(MAX_PROTAGONISTS == 8, "vis_char_idx lists one -1 per slot. Extend the list with the bound.");
 
         std::atomic<int> count{0};
-        std::atomic<std::uintptr_t> primaryVisCtrl{0};
-        std::atomic<bool> armorInjected[k_maxProtagonists]{};
+        std::atomic<std::uintptr_t> primary_vis_ctrl{0};
+        std::atomic<bool> armor_injected[MAX_PROTAGONISTS]{};
     };
 
     /**
@@ -77,20 +77,20 @@ namespace EquipHide
     std::mutex &vis_write_mutex();
 
     /**
-     * @brief Composite key for the per-(visCtrl, address) original-value map.
+     * @brief Composite key for the per-(vis_ctrl, address) original-value map.
      * @details A key built purely on the vis-byte address makes character-swap invalidation lossy. Two protagonists
      *          with the same part name resolve to two distinct vis-byte addresses, so an orphan restore of every
      *          entry whose hash is not in the active map also reverts the previously-active character's vis bytes
      *          back to visible, because that character's vis ctrl no longer ticks through apply_direct_vis_write.
-     *          The visCtrl half of the key scopes each restore decision to the matching vis ctrl and leaves the
+     *          The vis_ctrl half of the key scopes each restore decision to the matching vis ctrl and leaves the
      *          inactive character's hide state in place.
      */
     struct VisKey
     {
-        std::uintptr_t visCtrl{};
+        std::uintptr_t vis_ctrl{};
         std::uintptr_t addr{};
 
-        bool operator==(const VisKey &other) const noexcept { return visCtrl == other.visCtrl && addr == other.addr; }
+        bool operator==(const VisKey &other) const noexcept { return vis_ctrl == other.vis_ctrl && addr == other.addr; }
     };
 
     /** @brief Hash for VisKey - xor mix of the two pointer fields. */
@@ -101,7 +101,7 @@ namespace EquipHide
             // The two fields are unrelated heap addresses on x64. An xor mix is sufficient because the std lib hashes
             // each field through a strong integer hash before the composition is even observable. Rotate one half so
             // two pointers that happen to alias do not collapse to zero.
-            const auto a = std::hash<std::uintptr_t>{}(k.visCtrl);
+            const auto a = std::hash<std::uintptr_t>{}(k.vis_ctrl);
             const auto b = std::hash<std::uintptr_t>{}(k.addr);
             return a ^ (b + 0x9e3779b97f4a7c15ULL + (a << 6) + (a >> 2));
         }
@@ -160,19 +160,19 @@ namespace EquipHide
     }
 
     /**
-     * @brief Returns true when any category hides the part at @p partHashPtr.
-     * @param partHashPtr Address of the part-hash DWORD. A structurally implausible address reads as not hidden.
+     * @brief Returns true when any category hides the part at @p part_hash_ptr.
+     * @param part_hash_ptr Address of the part-hash DWORD. A structurally implausible address reads as not hidden.
      * @warning The read is unchecked, so the caller must keep this inside an SEH frame for a stale pointer.
      */
-    [[nodiscard]] inline bool check_part_hidden(std::uint64_t partHashPtr)
+    [[nodiscard]] inline bool check_part_hidden(std::uint64_t part_hash_ptr)
     {
-        const DMK::Address hashAddr{static_cast<std::uintptr_t>(partHashPtr)};
-        if (!DMK::memory::is_plausible_ptr(hashAddr))
+        const DMK::Address hash_addr{static_cast<std::uintptr_t>(part_hash_ptr)};
+        if (!DMK::memory::is_plausible_ptr(hash_addr))
             return false;
-        const auto partHash = DMK::memory::unchecked::read<std::uint32_t>(hashAddr);
-        if (!needs_classification(partHash))
+        const auto part_hash = DMK::memory::unchecked::read<std::uint32_t>(hash_addr);
+        if (!needs_classification(part_hash))
             return false;
-        const auto mask = classify_part(partHash);
+        const auto mask = classify_part(part_hash);
         return mask != 0 && is_any_category_hidden(mask);
     }
 

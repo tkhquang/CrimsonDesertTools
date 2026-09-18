@@ -34,7 +34,7 @@
  * single compare, so the cost stays a fixed prologue rather than anything that scales with the walk.
  */
 
-namespace Transmog::ClaimWalkGuard
+namespace Transmog::claim_walk_guard
 {
     /**
      * @brief Install the guard at every claim-walk site found in the host module.
@@ -48,6 +48,6 @@ namespace Transmog::ClaimWalkGuard
 
     /// Number of sites patched by @ref install.
     [[nodiscard]] unsigned patched_site_count() noexcept;
-} // namespace Transmog::ClaimWalkGuard
+} // namespace Transmog::claim_walk_guard
 
 #endif // TRANSMOG_CLAIM_WALK_GUARD_HPP

@@ -5,7 +5,7 @@
 
 namespace Transmog
 {
-    inline constexpr const char *MOD_VERSION = VERSION_STRING;
+    inline constexpr const char *MOD_VERSION = TRANSMOG_VERSION_STRING;
     inline constexpr const char *MOD_NAME = "CrimsonDesertLiveTransmog";
     inline constexpr const char *MOD_AUTHOR = "tkhquang";
     inline constexpr const char *MOD_SOURCE = "https://github.com/tkhquang/CrimsonDesertTools";

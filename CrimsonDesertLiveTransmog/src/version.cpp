@@ -2,7 +2,7 @@
 
 #include <DetourModKit.hpp>
 
-namespace Transmog::Version
+namespace Transmog::version
 {
     void log_version_info()
     {
@@ -15,4 +15,4 @@ namespace Transmog::Version
         logger.info("----------------------------------------------------------");
     }
 
-} // namespace Transmog::Version
+} // namespace Transmog::version

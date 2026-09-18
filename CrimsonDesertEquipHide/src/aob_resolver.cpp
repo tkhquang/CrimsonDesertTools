@@ -84,7 +84,7 @@ namespace EquipHide
             {
                 .label = "WorldSystem",
                 .kind = AnchorKind::RipGlobal,
-                .site = CDCore::Anchors::k_worldSystemCandidates,
+                .site = CDCore::anchors::WORLD_SYSTEM_CANDIDATES,
                 .validator = in_host_image,
                 .validator_context = &s_host_image,
                 .require_validator = true,
@@ -93,7 +93,7 @@ namespace EquipHide
             {
                 .label = "ChildActorVtbl",
                 .kind = AnchorKind::RipGlobal,
-                .site = k_childActorVtblCandidates,
+                .site = CHILD_ACTOR_VTBL_CANDIDATES,
                 .validator = in_host_image,
                 .validator_context = &s_host_image,
                 .require_validator = true,
@@ -102,7 +102,7 @@ namespace EquipHide
             {
                 .label = "MapLookup",
                 .kind = AnchorKind::RipGlobal,
-                .site = CDCore::Anchors::k_mapLookupCandidates,
+                .site = CDCore::anchors::MAP_LOOKUP_CANDIDATES,
                 .validator = code_site,
                 .validator_context = &s_host_image,
                 .require_validator = true,
@@ -111,7 +111,7 @@ namespace EquipHide
             {
                 .label = "MapInsert",
                 .kind = AnchorKind::RipGlobal,
-                .site = k_mapInsertCandidates,
+                .site = MAP_INSERT_CANDIDATES,
                 .validator = code_site,
                 .validator_context = &s_host_image,
                 .require_validator = true,
@@ -120,7 +120,7 @@ namespace EquipHide
             {
                 .label = "EquipVisCheck",
                 .kind = AnchorKind::RipGlobal,
-                .site = k_equipVisCheckCandidates,
+                .site = EQUIP_VIS_CHECK_CANDIDATES,
                 .validator = code_site,
                 .validator_context = &s_host_image,
                 .require_validator = true,
@@ -129,7 +129,7 @@ namespace EquipHide
             {
                 .label = "PartAddShow",
                 .kind = AnchorKind::RipGlobal,
-                .site = CDCore::Anchors::k_partAddShowCandidates,
+                .site = CDCore::anchors::PART_ADD_SHOW_CANDIDATES,
                 .validator = code_site,
                 .validator_context = &s_host_image,
                 .require_validator = true,
@@ -138,7 +138,7 @@ namespace EquipHide
             {
                 .label = "PostfixEval",
                 .kind = AnchorKind::RipGlobal,
-                .site = k_postfixEvalCandidates,
+                .site = POSTFIX_EVAL_CANDIDATES,
                 .validator = code_site,
                 .validator_context = &s_host_image,
                 .require_validator = true,
@@ -147,7 +147,7 @@ namespace EquipHide
             {
                 .label = "NpcPfeReturnAddr",
                 .kind = AnchorKind::RipGlobal,
-                .site = k_npcPfeReturnAddrCandidates,
+                .site = NPC_PFE_RETURN_ADDR_CANDIDATES,
                 // A return address points at the instruction AFTER a call, not at a function entry, so the
                 // entry-plausibility screen does not apply. In-image is the whole contract here.
                 .validator = in_host_image,
@@ -158,7 +158,7 @@ namespace EquipHide
             {
                 .label = "VisualEquipChange",
                 .kind = AnchorKind::RipGlobal,
-                .site = CDCore::Anchors::k_visualEquipChangeCandidates,
+                .site = CDCore::anchors::VISUAL_EQUIP_CHANGE_CANDIDATES,
                 .validator = code_site,
                 .validator_context = &s_host_image,
                 .require_validator = true,
@@ -168,7 +168,7 @@ namespace EquipHide
                 .label = "VisualEquipSwap",
                 .kind = AnchorKind::RipGlobal,
                 // BatchEquip is the same engine function this mod calls VisualEquipSwap.
-                .site = CDCore::Anchors::k_batchEquipCandidates,
+                .site = CDCore::anchors::BATCH_EQUIP_CANDIDATES,
                 .validator = code_site,
                 .validator_context = &s_host_image,
                 .require_validator = true,
@@ -192,13 +192,13 @@ namespace EquipHide
          *          stops resolving is usually one whose rungs were already weakly selective, and this says which,
          *          without a disassembler. An RTTI candidate carries no byte pattern, so the walk skips it.
          */
-        void report_signature_health(std::span<const Anchor> anchors)
+        void report_signature_health(std::span<const Anchor> anchor_table)
         {
             auto &logger = DMK::log();
             std::size_t fragile = 0;
             std::size_t unusable = 0;
 
-            for (const Anchor &entry : anchors)
+            for (const Anchor &entry : anchor_table)
             {
                 for (const DMK::scan::Candidate &candidate : entry.site)
                 {

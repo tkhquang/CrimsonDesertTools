@@ -20,17 +20,17 @@ namespace Transmog
      * @brief Draws the Color Override tab body for one slot.
      * @param slot Per-slot loop index, the TransmogSlot value cast to std::size_t.
      * @param detected Detected-region count for this slot, taken from the reinit metric that drives auto-reinit.
-     * @param detectedReady The `detected > 0` sentinel the caller already cached.
-     * @param ui The slot's SlotUIState, that is s_slotUI[slot].
-     * @param dyeSlot The slot's DyeSlot row from ColorOverride::dye_state().
+     * @param detected_ready The `detected > 0` sentinel the caller already cached.
+     * @param ui The slot's SlotUIState, that is s_slot_ui[slot].
+     * @param dye_slot The slot's DyeSlot row from color_override::dye_state().
      * @note The function never calls ImGui::EndTabItem. The caller owns the BeginTabItem and EndTabItem pair.
      */
     void draw_color_override_tab_body(
         std::size_t slot,
         std::size_t detected,
-        bool detectedReady,
+        bool detected_ready,
         SlotUIState &ui,
-        ColorOverride::DyeSlot &dyeSlot
+        color_override::DyeSlot &dye_slot
     );
 
 } // namespace Transmog

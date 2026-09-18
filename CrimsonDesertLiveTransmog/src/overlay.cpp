@@ -30,7 +30,7 @@ namespace Transmog
 
     namespace
     {
-        bool s_forceStandalone = false;
+        bool s_force_standalone = false;
 
         // Standalone path: point reshade_overlay.hpp's function-table accessor at our populated table so ImGui::
         // calls in overlay_ui.cpp route through imgui_lib's real symbols instead of dereferencing nullptr.
@@ -57,9 +57,9 @@ namespace Transmog
         }
     } // namespace
 
-    void set_force_standalone(bool force)
+    void set_force_standalone(bool force) noexcept
     {
-        s_forceStandalone = force;
+        s_force_standalone = force;
     }
 
     bool init_overlay()
@@ -77,7 +77,7 @@ namespace Transmog
         if (self == nullptr)
             logger.warning("[overlay] Module handle lookup failed - ReShade registration skipped");
 
-        if (!s_forceStandalone && self != nullptr)
+        if (!s_force_standalone && self != nullptr)
         {
             if (init_reshade_overlay(self))
             {

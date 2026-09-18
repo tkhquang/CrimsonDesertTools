@@ -2,7 +2,7 @@
 
 #include <DetourModKit.hpp>
 
-namespace EquipHide::Version
+namespace EquipHide::version
 {
     void log_version_info()
     {
@@ -13,4 +13,4 @@ namespace EquipHide::Version
         logger.info("Nexus:  {}", NEXUS_URL);
     }
 
-} // namespace EquipHide::Version
+} // namespace EquipHide::version

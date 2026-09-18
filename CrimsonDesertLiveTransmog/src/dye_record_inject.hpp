@@ -23,14 +23,14 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace Transmog::DyeRecordInject
+namespace Transmog::dye_record_inject
 {
     /**
      * @brief Maximum dye channels per slot.
-     * @details Mirrors PresetSlot's `k_dyeChannelCount`, but stays independent so this header does not pull in the
+     * @details Mirrors PresetSlot's `DYE_CHANNEL_COUNT`, but stays independent so this header does not pull in the
      *          preset types.
      */
-    inline constexpr std::size_t k_dyeChannelCount = 16;
+    inline constexpr std::size_t DYE_CHANNEL_COUNT = 16;
 
     /**
      * @brief One channel's dye state.
@@ -71,17 +71,17 @@ namespace Transmog::DyeRecordInject
      * @note The offset moves with the auth-table entry geometry (see auth_table.hpp) on patch day. A stale value
      *       lands on the neighbouring field and dereferences a garbage pointer instead of failing closed.
      */
-    inline constexpr std::size_t k_dyeVectorOffset = 0x78; // vector header, from the record / entry base
-    inline constexpr std::size_t k_vecDataOffset = 0x00;   // within the header: qword heap ptr
-    inline constexpr std::size_t k_vecCountOffset = 0x08;  // within the header: u32 valid record count
-    inline constexpr std::size_t k_dyeRecordSize = 16;
+    inline constexpr std::size_t DYE_VECTOR_OFFSET = 0x78; // vector header, from the record / entry base
+    inline constexpr std::size_t VEC_DATA_OFFSET = 0x00;   // within the header: qword heap ptr
+    inline constexpr std::size_t VEC_COUNT_OFFSET = 0x08;  // within the header: u32 valid record count
+    inline constexpr std::size_t DYE_RECORD_SIZE = 16;
 
     /**
      * @brief Fill one 16-byte ARMOR_MOD record.
      * @details The single writer for the field layout documented on @ref ChannelState above. Callers must not
      *          open-code it, or the layout ends up stated in as many places as there are producers.
-     * @param out Destination, at least @ref k_dyeRecordSize bytes.
-     * @param channel_idx Channel this record describes, below @ref k_dyeChannelCount.
+     * @param out Destination, at least @ref DYE_RECORD_SIZE bytes.
+     * @param channel_idx Channel this record describes, below @ref DYE_CHANNEL_COUNT.
      */
     void build_dye_record(
         std::uint8_t *out,
@@ -113,11 +113,11 @@ namespace Transmog::DyeRecordInject
 
     /**
      * @brief Publishes per-slot dye state for the next DyeCopier invocation.
-     * @param channels Exactly `k_dyeChannelCount` entries.
+     * @param channels Exactly `DYE_CHANNEL_COUNT` entries.
      * @param sparse Selects the per-record emission strategy.
      * @details The storage is thread-local, because the detour runs on the thread that publishes.
      *
-     *          `sparse == false`, the default and the fake-transmog path, always emits `k_dyeChannelCount` records.
+     *          `sparse == false`, the default and the fake-transmog path, always emits `DYE_CHANNEL_COUNT` records.
      *          A channel with `group_hash == 0` reuses the first active channel's settings, so the engine sees a
      *          contiguous block. LT-fake meshes require this, because their natural source has zero records and a
      *          sparse vector leaves the engine on its default palette.
@@ -137,33 +137,36 @@ namespace Transmog::DyeRecordInject
 
     /**
      * @brief Reads the live dye-record vector from an auth-table entry.
-     * @param entryBase Base address of the auth-table entry.
+     * @param entry_base Base address of the auth-table entry.
      * @param out Destination array, indexed by the in-record channel index (0..N-1). An inactive or out-of-range
      *        channel stays zero-initialized.
      * @return The number of channels populated. `0` means nothing usable: an empty vector, an invalid data pointer,
      *         or every record carrying `group_hash == 0`.
      * @details Source layout:
-     *          - entryBase + 0x78, qword, data_ptr, contiguous 16-byte records
-     *          - entryBase + 0x80, dword, count
-     *          - entryBase + 0x84, dword, capacity, ignored
+     *          - entry_base + 0x78, qword, data_ptr, contiguous 16-byte records
+     *          - entry_base + 0x80, dword, count
+     *          - entry_base + 0x84, dword, capacity, ignored
      *
      *          Each record has the shape this header documents above, the engine's ARMOR_MOD format that DyeCopy
      *          emits.
      * @note Every read routes through the guarded memory primitives, so the caller needs no SEH of its own. An
      *       unreadable entry yields 0 populated channels.
      */
-    std::size_t read_entry_dye_records(std::uintptr_t entryBase, ChannelState (&out)[k_dyeChannelCount]) noexcept;
+    std::size_t read_entry_dye_records(std::uintptr_t entry_base, ChannelState (&out)[DYE_CHANNEL_COUNT]) noexcept;
 
     /**
      * @brief Trace-logs a ChannelState array in a stable per-channel format.
      * @param source Short tag such as "capture" or "restore".
-     * @param slotName The LT slot the records belong to.
+     * @param slot_name The LT slot the records belong to.
      * @param state The channel array to log.
      * @details The stable format lets a reader diff a capture-time snapshot against an apply-time one in the log. A
      *          channel with `group_hash == 0` still prints, so the diff catches a missing channel too.
      */
-    void
-    log_dye_snapshot(const char *source, const char *slotName, const ChannelState (&state)[k_dyeChannelCount]) noexcept;
+    void log_dye_snapshot(
+        const char *source,
+        const char *slot_name,
+        const ChannelState (&state)[DYE_CHANNEL_COUNT]
+    ) noexcept;
 
     /**
      * @brief Reads the first ACTIVE channel's RGB from the currently published slot dye state.
@@ -172,10 +175,10 @@ namespace Transmog::DyeRecordInject
      * @param b Receives the blue component.
      * @return True when the slot holds an active channel and the three outputs are filled. False when no inject is
      *         active or every channel is zero.
-     * @details `ColorOverride::SetterSubstitute` calls it to learn which color to redirect the engine's per-property
+     * @details `color_override::setter_substitute` calls it to learn which color to redirect the engine's per-property
      *          setter to.
      */
     bool get_published_first_active_rgb(std::uint8_t *r, std::uint8_t *g, std::uint8_t *b) noexcept;
-} // namespace Transmog::DyeRecordInject
+} // namespace Transmog::dye_record_inject
 
 #endif // TRANSMOG_DYE_RECORD_INJECT_HPP

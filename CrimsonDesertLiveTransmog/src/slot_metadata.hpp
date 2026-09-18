@@ -7,7 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
-#include <string>
+#include <string_view>
 
 namespace Transmog
 {
@@ -35,14 +35,14 @@ namespace Transmog
         // records carry no name.
         //
         // What IS derived is a CHECK. The auth-table walk in real_part_tear_down.cpp compares every live
-        // `(tag, itemId)` pair against the catalog's own name-derived classification and warns on disagreement, so a
+        // `(tag, item_id)` pair against the catalog's own name-derived classification and warns on disagreement, so a
         // patch that renumbers this column reports itself instead of silently routing applies into the wrong slot.
-        std::int16_t gameTag{};
-        const char *displayName{nullptr}; // "Helm", "Chest", ... (UI / log labels)
-        // PartShowSuppress IndexedStringA hash key (CD_*). nullptr when the slot does NOT participate in
-        // PartShowSuppress. Only the 5 armor slots have CD_* hashes. Accessory and weapon slots use different
+        std::int16_t game_tag{};
+        const char *display_name{nullptr}; // "Helm", "Chest", ... (UI / log labels)
+        // part_show_suppress IndexedStringA hash key (CD_*). nullptr when the slot does NOT participate in
+        // part_show_suppress. Only the 5 armor slots have CD_* hashes. Accessory and weapon slots use different
         // suppression mechanisms or none at all.
-        const char *partShowHashKey{nullptr};
+        const char *part_show_hash_key{nullptr};
         // Master enable flag. When false, the slot is omitted from the overlay slot picker AND skipped in the
         // apply/clear dispatcher, so even a preset that loaded with `active=true` for this slot becomes a no-op until
         // the flag is flipped back on.
@@ -66,10 +66,10 @@ namespace Transmog
         bool enabled{false};
     };
 
-    inline constexpr SlotMetadata k_slotMetadata[k_slotCount] = {
+    inline constexpr SlotMetadata SLOT_METADATA[SLOT_COUNT] = {
         // clang-format off
-        // slot              gameTag  displayName       partShowHashKey   enabled
-        // - 5 armor slots: the original transmog targets, driven by PartShowSuppress plus the wrapper swap.
+        // slot              game_tag  display_name       part_show_hash_key   enabled
+        // - 5 armor slots: the original transmog targets, driven by part_show_suppress plus the wrapper swap.
         { TransmogSlot::Helm,          0x03, "Helm",          "CD_Helm"      , true  },
         { TransmogSlot::Chest,         0x04, "Chest",         "CD_Upperbody" , true  },
         { TransmogSlot::Cloak,         0x10, "Cloak",         "CD_Cloak"     , true  },
@@ -97,7 +97,7 @@ namespace Transmog
         { TransmogSlot::OffHand,       0x01, "OffHand",       nullptr        , false },
         { TransmogSlot::Ranged,        0x02, "Ranged",        nullptr        , false },
         { TransmogSlot::SubWeapon,     0x0C, "SubWeapon",     nullptr        , false },
-        // displayName is trimmed to "TwoHand" so it fits the overlay's slot column. It is what `slot_name()` and
+        // display_name is trimmed to "TwoHand" so it fits the overlay's slot column. It is what `slot_name()` and
         // `game_slot_name()` both return for this slot.
         { TransmogSlot::TwoHandWeapon, 0x0D, "TwoHand",       nullptr        , false },
         // Tool stays disabled: the gathering-tool mesh family has not been identified. OffHand2 and Ranged2 are the
@@ -110,8 +110,8 @@ namespace Transmog
     };
 
     static_assert(
-        sizeof(k_slotMetadata) / sizeof(k_slotMetadata[0]) == k_slotCount,
-        "k_slotMetadata length must match TransmogSlot::Count"
+        sizeof(SLOT_METADATA) / sizeof(SLOT_METADATA[0]) == SLOT_COUNT,
+        "SLOT_METADATA length must match TransmogSlot::Count"
     );
 
     // Compile-time index/slot drift check. The constexpr loop expands into per-row static_asserts so a misordered or
@@ -120,9 +120,9 @@ namespace Transmog
     {
         constexpr bool slot_metadata_indices_match()
         {
-            for (std::size_t i = 0; i < k_slotCount; ++i)
+            for (std::size_t i = 0; i < SLOT_COUNT; ++i)
             {
-                if (k_slotMetadata[i].slot != static_cast<TransmogSlot>(i))
+                if (SLOT_METADATA[i].slot != static_cast<TransmogSlot>(i))
                     return false;
             }
             return true;
@@ -130,14 +130,14 @@ namespace Transmog
     } // namespace detail
     static_assert(
         detail::slot_metadata_indices_match(),
-        "k_slotMetadata row order must match TransmogSlot enum order "
+        "SLOT_METADATA row order must match TransmogSlot enum order "
         "(SlotMetadata.slot at row i must equal TransmogSlot(i))."
     );
 
     // Direct accessor by enum value. O(1).
     [[nodiscard]] inline constexpr const SlotMetadata &slot_meta(TransmogSlot s) noexcept
     {
-        return k_slotMetadata[static_cast<std::size_t>(s)];
+        return SLOT_METADATA[static_cast<std::size_t>(s)];
     }
 
     // Master enable check. The slot picker hides a disabled slot and the apply/clear dispatcher short-circuits it.
@@ -148,16 +148,16 @@ namespace Transmog
     }
     [[nodiscard]] inline constexpr bool slot_enabled(std::size_t i) noexcept
     {
-        return i < k_slotCount && k_slotMetadata[i].enabled;
+        return i < SLOT_COUNT && SLOT_METADATA[i].enabled;
     }
 
     // Reverse lookup: engine slot tag -> TransmogSlot. Returns std::nullopt for tags LT does not manage (e.g. 0x15).
     // Linear search over the table. The search is cheap and runs sparingly.
-    [[nodiscard]] inline constexpr std::optional<TransmogSlot> slot_from_game_tag(std::int16_t gameTag) noexcept
+    [[nodiscard]] inline constexpr std::optional<TransmogSlot> slot_from_game_tag(std::int16_t game_tag) noexcept
     {
-        for (const auto &m : k_slotMetadata)
+        for (const auto &m : SLOT_METADATA)
         {
-            if (m.gameTag == gameTag)
+            if (m.game_tag == game_tag)
                 return m.slot;
         }
         return std::nullopt;
@@ -178,9 +178,9 @@ namespace Transmog
     // ranged disambiguation.
     //
     // Returns std::nullopt for prefabs that match nothing the picker labels (e.g. environmental meshes, food items).
-    [[nodiscard]] inline std::optional<TransmogSlot> slot_for_prefab_name(const std::string &name) noexcept
+    [[nodiscard]] inline std::optional<TransmogSlot> slot_for_prefab_name(std::string_view name) noexcept
     {
-        const auto has = [&](const char *tag) noexcept { return name.find(tag) != std::string::npos; };
+        const auto has = [&](std::string_view tag) noexcept { return name.find(tag) != std::string_view::npos; };
 
         // Reject UI/knowledge/icon assets that embed a real prefab as a substring (e.g.
         // "cd_knowledgeimage_Knowledge_ItemIcon_Prefab_cd_phm_00_hel_00_0363_c" would otherwise match `_hel_` and
@@ -278,35 +278,35 @@ namespace Transmog
     }
 
     /// Sentinel meaning "no slot named" wherever a game tag is passed or returned as an unsigned word.
-    inline constexpr std::uint16_t k_noGameTag = 0xFFFF;
+    inline constexpr std::uint16_t NO_GAME_TAG = 0xFFFF;
 
     /**
-     * @brief For the SECOND half of a paired slot, the game tag of the FIRST half. @ref k_noGameTag otherwise.
+     * @brief For the SECOND half of a paired slot, the game tag of the FIRST half. @ref NO_GAME_TAG otherwise.
      *
      * @details The engine resolves an item to a slot by walking the character's candidate list and taking the first
      *          entry that validates. Both halves of a pair share one item type, so the first half always wins and the
      *          second is unreachable. Knowing the first half's tag allows it to be excluded for one equip.
-     * @note The tags are read out of @ref k_slotMetadata rather than restated, so a patch that renumbers the column
+     * @note The tags are read out of @ref SLOT_METADATA rather than restated, so a patch that renumbers the column
      *       cannot leave this function pointing at the old value.
      */
     [[nodiscard]] inline constexpr std::uint16_t paired_first_half_tag(TransmogSlot s) noexcept
     {
         const auto tag_of = [](TransmogSlot first) constexpr
-        { return static_cast<std::uint16_t>(k_slotMetadata[static_cast<std::size_t>(first)].gameTag); };
+        { return static_cast<std::uint16_t>(SLOT_METADATA[static_cast<std::size_t>(first)].game_tag); };
         if (s == TransmogSlot::Earring2)
             return tag_of(TransmogSlot::Earring1);
         if (s == TransmogSlot::Ring2)
             return tag_of(TransmogSlot::Ring1);
-        return k_noGameTag;
+        return NO_GAME_TAG;
     }
 
-    // The pair tags themselves are deliberately NOT pinned to literals here: they are derived from k_slotMetadata so
+    // The pair tags themselves are deliberately NOT pinned to literals here: they are derived from SLOT_METADATA so
     // a renumbered column propagates on its own, and a live mismatch is reported by the TAG DRIFT check in
     // real_part_tear_down.cpp. What is pinned is this function's own contract - a slot that is not the second half
     // of a pair must name no first half, or the apply path would exclude an unrelated slot from resolution.
-    static_assert(paired_first_half_tag(TransmogSlot::Helm) == k_noGameTag, "only paired slots may name a first half");
+    static_assert(paired_first_half_tag(TransmogSlot::Helm) == NO_GAME_TAG, "only paired slots may name a first half");
     static_assert(
-        paired_first_half_tag(TransmogSlot::Earring1) == k_noGameTag,
+        paired_first_half_tag(TransmogSlot::Earring1) == NO_GAME_TAG,
         "the FIRST half of a pair must name no first half"
     );
 

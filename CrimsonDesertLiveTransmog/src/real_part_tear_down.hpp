@@ -3,12 +3,12 @@
 
 #include <cstdint>
 
-namespace Transmog::RealPartTearDown
+namespace Transmog::real_part_tear_down
 {
     /**
      * @brief Publish the pre-resolved helper addresses this module calls into.
      * @details Reads them from ResolvedAddresses. Call it once during init, AFTER the SafeTearDown anchor resolves
-     *          and AFTER ItemNameTable::build() has cached its chain walk, which yields indexedStringLookup. On a
+     *          and AFTER ItemNameTable::build() has cached its chain walk, which yields indexed_string_lookup. On a
      *          resolution or sanity-check failure the caller treats the feature as disabled.
      * @return true when both helpers are published and is_ready() turns true.
      */
@@ -16,40 +16,40 @@ namespace Transmog::RealPartTearDown
 
     /**
      * @brief Remove the real part the engine currently shows in one slot.
-     * @details Walks the authoritative equip table at *(a1+k_containerPtrOffset), locates the entry whose slotTag
-     *          matches @p gameSlotTag (helm = 0x0003), extracts its item descriptor hash through IndexedStringA, then
+     * @details Walks the authoritative equip table at *(a1+CONTAINER_PTR_OFFSET), locates the entry whose slot_tag
+     *          matches @p game_slot_tag (helm = 0x0003), extracts its item descriptor hash through IndexedStringA, then
      *          calls the AOB-resolved SafeTearDown engine helper. It does NOT touch the auth table.
      * @param a1 ClientEquipSlotActorComponent pointer.
-     * @param gameSlotTag Engine slot tag to tear down.
+     * @param game_slot_tag Engine slot tag to tear down.
      * @return true when the engine helper ran for this slot; false on any failure.
      * @note Thread affinity: SafeTearDown walks the scene graph. The game normally drives it from its equip/render
      *       thread, and LT calls it from whatever thread apply_all_transmog runs on (currently the deferred-apply
      *       worker). Accepted risk.
      */
-    bool tear_down_real_part(void *a1, std::uint16_t gameSlotTag) noexcept;
+    bool tear_down_real_part(void *a1, std::uint16_t game_slot_tag) noexcept;
 
     /**
      * @brief Same scene-graph tear-down as @ref tear_down_real_part, keyed by an explicit item id.
-     * @details Bypasses the auth-table walk. It removes a previously applied fake transmog mesh whose itemId LT
-     *          tracked in lastIds but which never appeared in the auth table. The pipeline is
-     *          itemId -> IndexedStringLookup -> DWORD hash -> SafeTearDown(a1, hash, slotTag).
+     * @details Bypasses the auth-table walk. It removes a previously applied fake transmog mesh whose item_id LT
+     *          tracked in last_ids but which never appeared in the auth table. The pipeline is
+     *          item_id -> IndexedStringLookup -> DWORD hash -> SafeTearDown(a1, hash, slot_tag).
      * @param a1 ClientEquipSlotActorComponent pointer.
-     * @param itemId Item id whose mesh comes off.
-     * @param gameSlotTag Engine slot tag to tear down.
+     * @param item_id Item id whose mesh comes off.
+     * @param game_slot_tag Engine slot tag to tear down.
      * @return true when the engine helper ran; false on any failure, a hash lookup miss included.
      */
-    bool tear_down_by_item_id(void *a1, std::uint16_t itemId, std::uint16_t gameSlotTag) noexcept;
+    bool tear_down_by_item_id(void *a1, std::uint16_t item_id, std::uint16_t game_slot_tag) noexcept;
 
     /**
      * @brief Read the real item currently equipped in one slot.
-     * @details Walks the authoritative equip table at *(a1+k_containerPtrOffset) and returns the raw item word, not
-     *          the hash-transformed value. Callers compare it against the fake transmog itemId and skip a tear-down
+     * @details Walks the authoritative equip table at *(a1+CONTAINER_PTR_OFFSET) and returns the raw item word, not
+     *          the hash-transformed value. Callers compare it against the fake transmog item_id and skip a tear-down
      *          that would strip layer-2 effects such as particles and hair-hide.
      * @param a1 ClientEquipSlotActorComponent pointer.
-     * @param gameSlotTag Engine slot tag to read.
+     * @param game_slot_tag Engine slot tag to read.
      * @return The raw item word, or 0 when the slot holds no entry or any read fails.
      */
-    std::uint16_t get_real_item_id(void *a1, std::uint16_t gameSlotTag) noexcept;
+    std::uint16_t get_real_item_id(void *a1, std::uint16_t game_slot_tag) noexcept;
 
     /**
      * @brief True once @ref resolve_helpers has succeeded.
@@ -67,9 +67,9 @@ namespace Transmog::RealPartTearDown
      *          attempts at microsecond cost without shrinking the overall retry budget.
      *
      *          Stage 1, structural. Walks the same container chain that `tear_down_real_part` dereferences
-     *          (`*(a1+k_containerPtrOffset) -> container`, `container+0x08 -> arrayBase`,
+     *          (`*(a1+CONTAINER_PTR_OFFSET) -> container`, `container+0x08 -> array_base`,
      *          `container+0x10 -> count`) and verifies each link reads cleanly and `count` is in
-     *          `[1, k_maxPlausibleEntries]`.
+     *          `[1, MAX_PLAUSIBLE_ENTRIES]`.
      *
      *          Stage 2, engine readiness. Locates the `pa::ClientCharacterControlActorComponent` (CCC) for this actor
      *          through RTTI, so component slot drift in the CCOIA component table does not affect the probe, then
@@ -83,6 +83,6 @@ namespace Transmog::RealPartTearDown
      * @return true when both stages pass; false otherwise.
      */
     bool is_actor_apply_ready(void *a1) noexcept;
-} // namespace Transmog::RealPartTearDown
+} // namespace Transmog::real_part_tear_down
 
 #endif // TRANSMOG_REAL_PART_TEAR_DOWN_HPP

@@ -20,9 +20,9 @@
 
 #include <cstdint>
 
-namespace Transmog::ColorOverride::Reinit
+namespace Transmog::color_override::reinit
 {
-    using ::Transmog::k_slotCount;
+    using ::Transmog::SLOT_COUNT;
 
     /**
      * Drive every slot's state machine forward. Call once per UI frame from the overlay render path.
@@ -58,15 +58,15 @@ namespace Transmog::ColorOverride::Reinit
      * Notify the reinit layer that `slot`'s transmog target changed. Wipes the swatch table when the new target id
      * differs from the previously-stored one (so a fresh capture run can start).
      */
-    void notify_transmog_target(int slot, std::uint32_t newTargetItemId) noexcept;
+    void notify_transmog_target(int slot, std::uint32_t new_target_item_id) noexcept;
 
     /**
-     * Zero the cached "last applied target item id" tracking for every slot. Called from `ColorOverride::reset_all()`
+     * Zero the cached "last applied target item id" tracking for every slot. Called from `color_override::reset_all()`
      * so that the next `notify_transmog_target` after a preset/character switch sees `last==0` and skips the stale-row
-     * wipe - which would otherwise destroy placeholders seeded by `SwatchTable::populate_from_persisted` immediately
+     * wipe - which would otherwise destroy placeholders seeded by `swatch_table::populate_from_persisted` immediately
      * before `transmog_apply` runs.
      */
     void reset_target_tracking() noexcept;
-} // namespace Transmog::ColorOverride::Reinit
+} // namespace Transmog::color_override::reinit
 
 #endif // TRANSMOG_COLOR_OVERRIDE_COLOR_REINIT_HPP

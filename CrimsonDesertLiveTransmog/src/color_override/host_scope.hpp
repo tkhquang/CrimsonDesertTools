@@ -5,7 +5,7 @@
  * @file host_scope.hpp
  * @brief Host-scoped gate for the dye-setter substitute.
  * @details The engine frame-render walks every host, the player plus roughly 30 NPCs, on every apply. The
- *          SetterSubstitute detour fires on every 4-byte material-property write inside the apply window, so without
+ *          setter_substitute detour fires on every 4-byte material-property write inside the apply window, so without
  *          a gate the user RGB bleeds onto every visible character.
  *
  *          The gate hooks the per-host owner-container vfuncs that walk the matInst lists, reached through the
@@ -24,7 +24,7 @@
 
 #include <cstdint>
 
-namespace Transmog::ColorOverride::HostScope
+namespace Transmog::color_override::host_scope
 {
     /**
      * @brief Decides whether the current host belongs to the elected player set.
@@ -72,6 +72,6 @@ namespace Transmog::ColorOverride::HostScope
      * @note Callback-safe: five relaxed atomic loads.
      */
     Stats snapshot_stats() noexcept;
-} // namespace Transmog::ColorOverride::HostScope
+} // namespace Transmog::color_override::host_scope
 
 #endif // TRANSMOG_COLOR_OVERRIDE_HOST_SCOPE_HPP

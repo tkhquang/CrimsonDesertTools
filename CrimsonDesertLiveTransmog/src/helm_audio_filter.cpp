@@ -15,7 +15,7 @@
 #include <string_view>
 #include <unordered_map>
 
-namespace Transmog::HelmAudioFilter
+namespace Transmog::helm_audio_filter
 {
     namespace
     {
@@ -142,12 +142,12 @@ namespace Transmog::HelmAudioFilter
         // the first codename hit. Slot[0] (the .app_xml path) is the canonical match target for unarmored protagonists.
         // When armor renames slot[0], the portrait string at the slot whose index varies provides the fallback
         // codename.
-        constexpr std::ptrdiff_t k_offComponentTable = 0x68;
-        constexpr std::ptrdiff_t k_offCharCtlSlot = 0x40;
-        constexpr std::ptrdiff_t k_offCharCtlToInner = 0x40;
-        constexpr std::ptrdiff_t k_offInnerToAssets = 0x38;
-        constexpr std::ptrdiff_t k_assetStride = 0x40;
-        constexpr std::size_t k_assetMaxScan = 8;
+        constexpr std::ptrdiff_t OFF_COMPONENT_TABLE = 0x68;
+        constexpr std::ptrdiff_t OFF_CHAR_CTL_SLOT = 0x40;
+        constexpr std::ptrdiff_t OFF_CHAR_CTL_TO_INNER = 0x40;
+        constexpr std::ptrdiff_t OFF_INNER_TO_ASSETS = 0x38;
+        constexpr std::ptrdiff_t ASSET_STRIDE = 0x40;
+        constexpr std::size_t ASSET_MAX_SCAN = 8;
 
         // Persistent per-host classification cache. Once the CharacterAssets scan identifies an actor's host pointer,
         // the result is stored, so later muffle events for the same actor do not have to re-walk the chain. The cache
@@ -162,10 +162,10 @@ namespace Transmog::HelmAudioFilter
         //   +0x08  size_t length
         //   +0x10  inline buffer (16 bytes)
         //   +0x18  size_t capacity
-        constexpr std::ptrdiff_t k_offEntryPtr = 0x00;
-        constexpr std::ptrdiff_t k_offEntryLen = 0x08;
-        constexpr std::ptrdiff_t k_offEntryInline = 0x10;
-        constexpr std::size_t k_maxStringRead = 96;
+        constexpr std::ptrdiff_t OFF_ENTRY_PTR = 0x00;
+        constexpr std::ptrdiff_t OFF_ENTRY_LEN = 0x08;
+        constexpr std::ptrdiff_t OFF_ENTRY_INLINE = 0x10;
+        constexpr std::size_t MAX_STRING_READ = 96;
 
         // Chain-walk reads route through DMK's fault-guarded primitives (`memory::read<T>` / `memory::walk`).
         // They screen an implausible address internally and report a fault as an empty optional / `false`
@@ -184,17 +184,17 @@ namespace Transmog::HelmAudioFilter
                 return false;
             if (a3 == nullptr)
                 return false;
-            const auto a3Addr = reinterpret_cast<std::uintptr_t>(a3);
-            const auto lvlEcho = DMK::memory::read<std::uint16_t>(DMK::Address{a3Addr + 4});
-            if (!lvlEcho)
+            const auto a3_addr = reinterpret_cast<std::uintptr_t>(a3);
+            const auto lvl_echo = DMK::memory::read<std::uint16_t>(DMK::Address{a3_addr + 4});
+            if (!lvl_echo)
                 return false;
-            const auto padHi = DMK::memory::read<std::uint16_t>(DMK::Address{a3Addr + 2});
-            if (!padHi || *padHi != 0u)
+            const auto pad_hi = DMK::memory::read<std::uint16_t>(DMK::Address{a3_addr + 2});
+            if (!pad_hi || *pad_hi != 0u)
                 return false;
-            const auto padLo = DMK::memory::read<std::uint16_t>(DMK::Address{a3Addr + 6});
-            if (!padLo || *padLo != 0u)
+            const auto pad_lo = DMK::memory::read<std::uint16_t>(DMK::Address{a3_addr + 6});
+            if (!pad_lo || *pad_lo != 0u)
                 return false;
-            return *lvlEcho == static_cast<std::uint16_t>(a4);
+            return *lvl_echo == static_cast<std::uint16_t>(a4);
         }
 
         // Chain walk that resolves the u16 tag at `*a3` to its skill record, walks to the first per-level entry, reads
@@ -243,11 +243,11 @@ namespace Transmog::HelmAudioFilter
             // entry, then the entry's class vtable. walk screens each intermediate link against its plausibility
             // floor and stops on the first implausible one; the final offset is added but not dereferenced, so the
             // terminal vtable value is the read below.
-            static constexpr DMK::memory::ChainStep k_recordToVtable[] = {{0x18}, {0x0}, {0x0}, {0x0}};
-            const auto vtableSlot =
-                DMK::memory::walk(DMK::Address{static_cast<std::uintptr_t>(record)}, k_recordToVtable);
+            static constexpr DMK::memory::ChainStep record_to_vtable[] = {{0x18}, {0x0}, {0x0}, {0x0}};
+            const auto vtable_slot =
+                DMK::memory::walk(DMK::Address{static_cast<std::uintptr_t>(record)}, record_to_vtable);
             const auto vtable =
-                vtableSlot ? DMK::memory::read<std::uintptr_t>(*vtableSlot).value_or(0) : std::uintptr_t{0};
+                vtable_slot ? DMK::memory::read<std::uintptr_t>(*vtable_slot).value_or(0) : std::uintptr_t{0};
             return vtable == g_gameAudioEffectVtable;
         }
 
@@ -303,24 +303,24 @@ namespace Transmog::HelmAudioFilter
         // length).
         std::size_t read_asset_entry(std::uintptr_t entry, char *out, std::size_t cap) noexcept
         {
-            const auto len = DMK::memory::read<std::uint32_t>(DMK::Address{entry + k_offEntryLen}).value_or(0);
+            const auto len = DMK::memory::read<std::uint32_t>(DMK::Address{entry + OFF_ENTRY_LEN}).value_or(0);
             if (len == 0 || len > 0x10000)
                 return 0;
-            const auto ptr = DMK::memory::read<std::uintptr_t>(DMK::Address{entry + k_offEntryPtr}).value_or(0);
+            const auto ptr = DMK::memory::read<std::uintptr_t>(DMK::Address{entry + OFF_ENTRY_PTR}).value_or(0);
             // SSO heuristic: if `ptr` looks like a canonical heap pointer, follow it. Otherwise read inline at +0x10.
-            const bool ptrLooksValid = ptr >= 0x10000000000ULL && ptr < 0xF000000000000ULL;
-            const auto src = ptrLooksValid ? ptr : (entry + k_offEntryInline);
+            const bool ptr_looks_valid = ptr >= 0x10000000000ULL && ptr < 0xF000000000000ULL;
+            const auto src = ptr_looks_valid ? ptr : (entry + OFF_ENTRY_INLINE);
             return copy_ascii_safe(src, len, out, cap);
         }
 
-        // Walk a Server CCOIA host to its CharacterAssets vector and scan each entry (up to k_assetMaxScan) for a
-        // protagonist codename. Returns the matched character or Unknown on chain fault / no match. `outMatchedAsset`
+        // Walk a Server CCOIA host to its CharacterAssets vector and scan each entry (up to ASSET_MAX_SCAN) for a
+        // protagonist codename. Returns the matched character or Unknown on chain fault / no match. `out_matched_asset`
         // (if not null) receives the matched string for log diagnostics.
         CDCore::ControlledCharacter
-        classify_host_by_assets(std::uintptr_t host, char *outMatchedAsset, std::size_t outCap) noexcept
+        classify_host_by_assets(std::uintptr_t host, char *out_matched_asset, std::size_t out_cap) noexcept
         {
-            if (outMatchedAsset != nullptr && outCap > 0)
-                outMatchedAsset[0] = '\0';
+            if (out_matched_asset != nullptr && out_cap > 0)
+                out_matched_asset[0] = '\0';
             if (!DMK::memory::is_plausible_ptr(DMK::Address{host}))
                 return CDCore::ControlledCharacter::Unknown;
 
@@ -328,10 +328,10 @@ namespace Transmog::HelmAudioFilter
             // record, then the CharacterAssets pointer. The trailing 0 step forces the +0x38 link to be
             // dereferenced, so the walk's terminal address IS the assets base that the slot-scan loop below indexes.
             // Each intermediate link is screened against its step's min_valid floor.
-            static constexpr DMK::memory::ChainStep k_hostToAssets[] =
-                {{k_offComponentTable}, {k_offCharCtlSlot}, {k_offCharCtlToInner}, {k_offInnerToAssets}, {0}};
-            const auto assetsAddr = DMK::memory::walk(DMK::Address{host}, k_hostToAssets);
-            const auto assets = assetsAddr ? assetsAddr->raw() : std::uintptr_t{0};
+            static constexpr DMK::memory::ChainStep host_to_assets[] =
+                {{OFF_COMPONENT_TABLE}, {OFF_CHAR_CTL_SLOT}, {OFF_CHAR_CTL_TO_INNER}, {OFF_INNER_TO_ASSETS}, {0}};
+            const auto assets_addr = DMK::memory::walk(DMK::Address{host}, host_to_assets);
+            const auto assets = assets_addr ? assets_addr->raw() : std::uintptr_t{0};
             if (!DMK::memory::is_plausible_ptr(DMK::Address{assets}))
                 return CDCore::ControlledCharacter::Unknown;
 
@@ -344,26 +344,26 @@ namespace Transmog::HelmAudioFilter
             // For protagonists the match is found independently in a later slot (portrait or player_N) when slot[0]
             // does not contain the codename (e.g. Kliff in custom armor).
             CDCore::ControlledCharacter matched = CDCore::ControlledCharacter::Unknown;
-            for (std::size_t i = 0; i < k_assetMaxScan; ++i)
+            for (std::size_t i = 0; i < ASSET_MAX_SCAN; ++i)
             {
-                const auto entry = assets + i * k_assetStride;
-                char buf[k_maxStringRead]{};
+                const auto entry = assets + i * ASSET_STRIDE;
+                char buf[MAX_STRING_READ]{};
                 const auto copied = read_asset_entry(entry, buf, sizeof(buf));
                 if (copied == 0)
                     continue;
-                if (i == 0 && outMatchedAsset != nullptr && outCap > 0)
+                if (i == 0 && out_matched_asset != nullptr && out_cap > 0)
                 {
-                    const auto wl = copied < (outCap - 1) ? copied : (outCap - 1);
-                    std::memcpy(outMatchedAsset, buf, wl);
-                    outMatchedAsset[wl] = '\0';
+                    const auto wl = copied < (out_cap - 1) ? copied : (out_cap - 1);
+                    std::memcpy(out_matched_asset, buf, wl);
+                    out_matched_asset[wl] = '\0';
                 }
                 if (matched == CDCore::ControlledCharacter::Unknown)
                 {
                     const std::string_view sv{buf, copied};
                     matched = classify_asset_string(sv);
                 }
-                if (matched != CDCore::ControlledCharacter::Unknown && outMatchedAsset != nullptr &&
-                    outMatchedAsset[0] != '\0')
+                if (matched != CDCore::ControlledCharacter::Unknown && out_matched_asset != nullptr &&
+                    out_matched_asset[0] != '\0')
                 {
                     // We have both a match and the slot[0] diag. Can short-circuit.
                     return matched;
@@ -387,9 +387,9 @@ namespace Transmog::HelmAudioFilter
             // The leading 0 step dereferences g_playerStatic to the root container. Then +0x18 -> +0xA0 walk to
             // the controlled host, and the terminal +0xD0 is the slot the read below dereferences. Each intermediate
             // link is screened against its step's min_valid floor. A fault or an implausible link returns 0.
-            static constexpr DMK::memory::ChainStep k_playerStaticToHost[] = {{0x0}, {0x18}, {0xA0}, {0xD0}};
-            const auto hostSlot = DMK::memory::walk(DMK::Address{g_playerStatic}, k_playerStaticToHost);
-            const auto host = hostSlot ? DMK::memory::read<std::uintptr_t>(*hostSlot).value_or(0) : std::uintptr_t{0};
+            static constexpr DMK::memory::ChainStep player_static_to_host[] = {{0x0}, {0x18}, {0xA0}, {0xD0}};
+            const auto host_slot = DMK::memory::walk(DMK::Address{g_playerStatic}, player_static_to_host);
+            const auto host = host_slot ? DMK::memory::read<std::uintptr_t>(*host_slot).value_or(0) : std::uintptr_t{0};
             if (!DMK::memory::is_plausible_ptr(DMK::Address{host}))
                 return 0;
             return host;
@@ -408,10 +408,10 @@ namespace Transmog::HelmAudioFilter
         // The cache stores ONLY successful identifications. The Kliff fallback caches its result too, so later muffle
         // events on the same Kliff host hit instantly without a re-walk of the chain.
         CDCore::ControlledCharacter
-        classify_host_cached(std::uintptr_t host, char *outMatchedAsset, std::size_t outCap) noexcept
+        classify_host_cached(std::uintptr_t host, char *out_matched_asset, std::size_t out_cap) noexcept
         {
-            if (outMatchedAsset != nullptr && outCap > 0)
-                outMatchedAsset[0] = '\0';
+            if (out_matched_asset != nullptr && out_cap > 0)
+                out_matched_asset[0] = '\0';
             if (!DMK::memory::is_plausible_ptr(DMK::Address{host}))
                 return CDCore::ControlledCharacter::Unknown;
             {
@@ -420,7 +420,7 @@ namespace Transmog::HelmAudioFilter
                 if (it != g_hostCache.end())
                     return it->second;
             }
-            const auto ch = classify_host_by_assets(host, outMatchedAsset, outCap);
+            const auto ch = classify_host_by_assets(host, out_matched_asset, out_cap);
             if (ch != CDCore::ControlledCharacter::Unknown)
             {
                 std::lock_guard<std::mutex> lk(g_hostCacheMutex);
@@ -433,12 +433,12 @@ namespace Transmog::HelmAudioFilter
             if (controlled != 0 && controlled == host)
             {
                 const auto fb = CDCore::ControlledCharacter::Kliff;
-                if (outMatchedAsset != nullptr && outCap > 0)
+                if (out_matched_asset != nullptr && out_cap > 0)
                 {
                     constexpr std::string_view marker = "<kliff-init-race-fallback>";
-                    const auto wl = marker.size() < (outCap - 1) ? marker.size() : (outCap - 1);
-                    std::memcpy(outMatchedAsset, marker.data(), wl);
-                    outMatchedAsset[wl] = '\0';
+                    const auto wl = marker.size() < (out_cap - 1) ? marker.size() : (out_cap - 1);
+                    std::memcpy(out_matched_asset, marker.data(), wl);
+                    out_matched_asset[wl] = '\0';
                 }
                 std::lock_guard<std::mutex> lk(g_hostCacheMutex);
                 g_hostCache.emplace(host, fb);
@@ -514,31 +514,31 @@ namespace Transmog::HelmAudioFilter
             // covered by the Kliff fallback inside classify_host_cached().
             const auto host =
                 DMK::memory::read<std::uintptr_t>(DMK::Address{static_cast<std::uintptr_t>(a1) + 8}).value_or(0);
-            char matchedAsset[k_maxStringRead]{};
-            const auto actorChar = classify_host_cached(host, matchedAsset, sizeof(matchedAsset));
-            const bool isProtagonist = actorChar != CDCore::ControlledCharacter::Unknown;
+            char matched_asset[MAX_STRING_READ]{};
+            const auto actor_char = classify_host_cached(host, matched_asset, sizeof(matched_asset));
+            const bool is_protagonist = actor_char != CDCore::ControlledCharacter::Unknown;
 
-            const auto actorName = CDCore::controlled_character_name(actorChar);
-            const std::string_view actorSv = actorName.empty() ? std::string_view{"?"} : actorName;
-            const std::string_view assetSv{matchedAsset};
+            const auto actor_name = CDCore::controlled_character_name(actor_char);
+            const std::string_view actor_sv = actor_name.empty() ? std::string_view{"?"} : actor_name;
+            const std::string_view asset_sv{matched_asset};
 
-            constexpr auto k_fmt = "[helm-audio] {} tag=0x{:X} lvl={} a1=0x{:X} host=0x{:X} actor='{}' asset='{}'";
+            constexpr auto fmt = "[helm-audio] {} tag=0x{:X} lvl={} a1=0x{:X} host=0x{:X} actor='{}' asset='{}'";
             auto &log = DMK::log();
 
-            if (!isProtagonist)
+            if (!is_protagonist)
             {
                 // Muffle path, but no protagonist codename was found in the actor's CharacterAssets entries. Pass
                 // through (NPCs, generic humanoids, pre-init).
                 (void)log.try_log(
                     DMK::LogLevel::Trace,
-                    k_fmt,
+                    fmt,
                     "non-protagonist",
                     tag,
                     a4,
                     static_cast<std::uintptr_t>(a1),
                     host,
-                    actorSv,
-                    assetSv
+                    actor_sv,
+                    asset_sv
                 );
                 return g_trampoline(a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12);
             }
@@ -549,14 +549,14 @@ namespace Transmog::HelmAudioFilter
             // bypass-safety analysis), so the skip is a no-op for the only role the protagonist ever has.
             (void)log.try_log(
                 DMK::LogLevel::Info,
-                k_fmt,
+                fmt,
                 "suppress",
                 tag,
                 a4,
                 static_cast<std::uintptr_t>(a1),
                 host,
-                actorSv,
-                assetSv
+                actor_sv,
+                asset_sv
             );
             if (a2 != nullptr)
                 *a2 = 0;
@@ -582,8 +582,8 @@ namespace Transmog::HelmAudioFilter
             auto &log = DMK::log();
 
             // The two signature inputs - the resolver's opcode body shape (every movable operand wildcarded) and the
-            // target manager's decorated RTTI name - live in aob_resolver.hpp (k_skillTagResolverBodyAob /
-            // k_skillInfoManagerRttiName), next to the other candidate cascades, so all of this mod's signatures stay
+            // target manager's decorated RTTI name - live in aob_resolver.hpp (SKILL_TAG_RESOLVER_BODY_AOB /
+            // SKILL_INFO_MANAGER_RTTI_NAME), next to the other candidate cascades, so all of this mod's signatures stay
             // in one place. This target has no fallback cascade: the RTTI pick is the only path. The body anchors at
             // function entry+0x12, and the offsets used below to read the manager disp32 and walk back to the entry are
             // named there too.
@@ -607,7 +607,7 @@ namespace Transmog::HelmAudioFilter
             {
                 const auto *const hit = DMK::scan::unchecked::find_pattern(
                     DMK::Region{DMK::Address{cur}, static_cast<std::size_t>(end - cur)},
-                    ::Transmog::k_skillTagResolverBodyAob
+                    ::Transmog::SKILL_TAG_RESOLVER_BODY_AOB
                 );
                 if (hit == nullptr)
                     break;
@@ -619,28 +619,28 @@ namespace Transmog::HelmAudioFilter
                 // +DispOffset. The mov ends at +InstrEnd, which is the RIP base for it. resolve_rip_relative adds
                 // the base and the displacement exactly the same way, reads the disp32 under the fault guard, and
                 // rejects an implausible target before it reaches the host-image screen below.
-                const auto mgrGlobal = DMK::scan::resolve_rip_relative(
+                const auto mgr_global = DMK::scan::resolve_rip_relative(
                     DMK::Address{match},
-                    static_cast<std::size_t>(::Transmog::k_skillTagResolverDispOffset),
-                    static_cast<std::size_t>(::Transmog::k_skillTagResolverInstrEnd)
+                    static_cast<std::size_t>(::Transmog::SKILL_TAG_RESOLVER_DISP_OFFSET),
+                    static_cast<std::size_t>(::Transmog::SKILL_TAG_RESOLVER_INSTR_END)
                 );
-                if (mgrGlobal.has_value())
+                if (mgr_global.has_value())
                 {
                     // The pointer SLOT lives in the EXE image (.data/.bss). The manager object it points at is on the
                     // heap, and that object's vtable is back inside the image.
-                    if (range.contains(*mgrGlobal))
+                    if (range.contains(*mgr_global))
                     {
-                        const auto mgrObj = DMK::memory::read<std::uintptr_t>(*mgrGlobal).value_or(0);
-                        const auto vtbl = DMK::memory::read<std::uintptr_t>(DMK::Address{mgrObj}).value_or(0);
-                        if (DMK::rtti::vtable_is_type(DMK::Address{vtbl}, ::Transmog::k_skillInfoManagerRttiName))
+                        const auto mgr_obj = DMK::memory::read<std::uintptr_t>(*mgr_global).value_or(0);
+                        const auto vtbl = DMK::memory::read<std::uintptr_t>(DMK::Address{mgr_obj}).value_or(0);
+                        if (DMK::rtti::vtable_is_type(DMK::Address{vtbl}, ::Transmog::SKILL_INFO_MANAGER_RTTI_NAME))
                         {
-                            const auto entry = match - ::Transmog::k_skillTagResolverEntryBackoff;
+                            const auto entry = match - ::Transmog::SKILL_TAG_RESOLVER_ENTRY_BACKOFF;
                             if (DMK::scan::is_likely_function_prologue(DMK::Address{entry}))
                             {
                                 log.info(
                                     "[helm-audio] skill-tag resolver resolved via RTTI '{}' at 0x{:X} "
                                     "(hit #{} of body-shape family)",
-                                    ::Transmog::k_skillInfoManagerRttiName,
+                                    ::Transmog::SKILL_INFO_MANAGER_RTTI_NAME,
                                     entry,
                                     scanned
                                 );
@@ -692,22 +692,22 @@ namespace Transmog::HelmAudioFilter
         // entries. The candidate cascade leads with a ResolveMode::RttiVtable tier (resolve by the patch-stable mangled
         // name, which self-heals across the vtable relocations that move the byte ctor-LEA anchors), then falls back to
         // those byte anchors. Both yield the same vtable base.
-        const auto vtableAddr = anchor_address(AnchorId::GameAudioEffectVtable);
-        if (vtableAddr == 0)
+        const auto vtable_addr = anchor_address(AnchorId::GameAudioEffectVtable);
+        if (vtable_addr == 0)
         {
             log.warning(
                 "[helm-audio] GameAudioEffectBuffData vtable resolve failed (RTTI name + AOB); feature disabled"
             );
             return false;
         }
-        g_gameAudioEffectVtable = vtableAddr;
+        g_gameAudioEffectVtable = vtable_addr;
 
         // Engine player static - needed by the Kliff init-race fallback. On AOB failure we still install the hook. The
         // fallback then does not fire (the asset-string scan still works for Damiane/Oongka, and for Kliff once his
         // assets wire up).
-        const auto playerStatic = anchor_address(AnchorId::PlayerStatic);
-        if (playerStatic != 0)
-            g_playerStatic = playerStatic;
+        const auto player_static = anchor_address(AnchorId::PlayerStatic);
+        if (player_static != 0)
+            g_playerStatic = player_static;
         else
             log.warning(
                 "[helm-audio] player-static AOB resolve failed; "
@@ -740,7 +740,7 @@ namespace Transmog::HelmAudioFilter
             "[helm-audio] inline-hook installed at 0x{:X} "
             "(audio-vtable=0x{:X}, player-static=0x{:X}); skill-tag resolver bound on first use",
             target,
-            vtableAddr,
+            vtable_addr,
             g_playerStatic
         );
 
@@ -748,4 +748,4 @@ namespace Transmog::HelmAudioFilter
         return true;
     }
 
-} // namespace Transmog::HelmAudioFilter
+} // namespace Transmog::helm_audio_filter

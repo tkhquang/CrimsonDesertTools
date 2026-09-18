@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <ios>
 #include <mutex>
@@ -128,12 +129,12 @@ namespace Transmog
             return v.value_or(0);
         }
 
-        size_t read_printable_into(const char *src, char *dst, size_t maxLen) noexcept
+        size_t read_printable_into(const char *src, char *dst, size_t max_len) noexcept
         {
             size_t n = 0;
             __try
             {
-                for (size_t i = 0; i < maxLen; ++i)
+                for (size_t i = 0; i < max_len; ++i)
                 {
                     char c = src[i];
                     if (c == 0)
@@ -160,10 +161,10 @@ namespace Transmog
             return n;
         }
 
-        std::string read_cstr_safe(const char *src, size_t maxLen) noexcept
+        std::string read_cstr_safe(const char *src, size_t max_len) noexcept
         {
             char buf[512];
-            const size_t cap = maxLen < sizeof(buf) ? maxLen : sizeof(buf);
+            const size_t cap = max_len < sizeof(buf) ? max_len : sizeof(buf);
             size_t n = read_printable_into(src, buf, cap);
             return std::string(buf, n);
         }
@@ -214,26 +215,26 @@ namespace Transmog
         // cd_/gimmick_/collection_/craft_/puzzle_/background_/lamp_/fs_/docking_/item_rare_). The test uses the family,
         // not the `itemicon_prefab_` infix alone, and that is deliberate: gimmick/collection/craft/puzzle world-objects
         // own real meshes but reference them through the bare `itemicon_` form, so they must still count as prefabs.
-        bool is_ui_only_icon(std::string_view fullIconLower) noexcept
+        bool is_ui_only_icon(std::string_view full_icon_lower) noexcept
         {
             // `cd_questimage_*` / `cd_knowledgeimage_*` are UI-texture bundle entries with no underlying mesh.
-            constexpr std::string_view k_cdUi[] = {
+            constexpr std::string_view cd_ui[] = {
                 "cd_questimage_",
                 "cd_knowledgeimage_",
             };
-            for (const auto &p : k_cdUi)
+            for (const auto &p : cd_ui)
             {
-                if (fullIconLower.size() >= p.size() && fullIconLower.substr(0, p.size()) == p)
+                if (full_icon_lower.size() >= p.size() && full_icon_lower.substr(0, p.size()) == p)
                     return true;
             }
             // `itemicon_prefab_<cd_mesh>` is always a real mesh.
-            constexpr std::string_view k_itemiconMesh = "itemicon_prefab_";
-            constexpr std::string_view k_itemiconAll = "itemicon_";
-            std::string_view rest = fullIconLower;
-            if (rest.size() >= k_itemiconMesh.size() && rest.substr(0, k_itemiconMesh.size()) == k_itemiconMesh)
+            constexpr std::string_view itemicon_mesh = "itemicon_prefab_";
+            constexpr std::string_view itemicon_all = "itemicon_";
+            std::string_view rest = full_icon_lower;
+            if (rest.size() >= itemicon_mesh.size() && rest.substr(0, itemicon_mesh.size()) == itemicon_mesh)
                 return false;
-            if (rest.size() >= k_itemiconAll.size() && rest.substr(0, k_itemiconAll.size()) == k_itemiconAll)
-                rest = rest.substr(k_itemiconAll.size());
+            if (rest.size() >= itemicon_all.size() && rest.substr(0, itemicon_all.size()) == itemicon_all)
+                rest = rest.substr(itemicon_all.size());
             // Mesh iff the icon-derived name names a known asset family.
             return !starts_with_asset_prefix(rest);
         }
@@ -257,12 +258,12 @@ namespace Transmog
         std::size_t build_pool_from_catalog(std::set<std::string> &out)
         {
             auto &logger = DMK::log();
-            if (!PrefabWrapperSwap::is_catalog_populated())
+            if (!prefab_wrapper_swap::is_catalog_populated())
             {
                 logger.warning("[itemprefab] prefab catalog not yet populated");
                 return 0;
             }
-            const auto &cat = PrefabWrapperSwap::slot_catalog(Transmog::TransmogSlot::Helm);
+            const auto &cat = prefab_wrapper_swap::slot_catalog(Transmog::TransmogSlot::Helm);
             std::size_t added = 0;
             for (const auto &e : cat)
             {
@@ -279,15 +280,15 @@ namespace Transmog
         // the default helm variant's wrapper as `<mesh>_dd` while the bare `<mesh>` exists only as a data/string entry
         // with no live wrapper. Linking items to the `_dd` name keeps this dump aligned with what carrier_defaults and
         // the swap resolver can actually match (cf. carrier_defaults.hpp Oongka-helm note + prefab_wrapper_swap.cpp
-        // k_helmSlotId "helm is the only pair with a suffix").
+        // HELM_SLOT_ID "helm is the only pair with a suffix").
         std::size_t collect_live_wrapper_names(std::set<std::string> &out)
         {
-            if (!PrefabWrapperSwap::is_catalog_populated())
+            if (!prefab_wrapper_swap::is_catalog_populated())
                 return 0;
             std::size_t added = 0;
             for (std::size_t s = 0; s < static_cast<std::size_t>(Transmog::TransmogSlot::Count); ++s)
             {
-                const auto &cat = PrefabWrapperSwap::slot_catalog(static_cast<Transmog::TransmogSlot>(s));
+                const auto &cat = prefab_wrapper_swap::slot_catalog(static_cast<Transmog::TransmogSlot>(s));
                 for (const auto &e : cat)
                 {
                     if (!e.name.empty() && out.insert(to_lower(e.name)).second)
@@ -312,7 +313,7 @@ namespace Transmog
                 return false;
             // Accept-list (each ends with an underscore so the test does not pick up name collisions like `cdkey_*` or
             // `gimmickspecial_*`).
-            constexpr std::string_view k_accepts[] = {
+            constexpr std::string_view accepts[] = {
                 "cd_",
                 "gimmick_",
                 "collection_",
@@ -325,7 +326,7 @@ namespace Transmog
                 "docking_",
                 "item_rare_",
             };
-            for (const auto &p : k_accepts)
+            for (const auto &p : accepts)
             {
                 if (sl.size() >= p.size() && sl.substr(0, p.size()) == p)
                     return true;
@@ -337,13 +338,13 @@ namespace Transmog
         // vtable gate drops AND the non-cd_ families (gimmick, collection, craft, puzzle, etc.) that
         // prefab_wrapper_swap does not index at all. This only enriches the dumper's pool. prefab_wrapper_swap stays
         // untouched, so the live swap path and the UI picker keep their scope.
-        std::size_t enrich_pool_from_stringinfo(std::set<std::string> &out, uintptr_t stringArr, uint32_t stringCount)
+        std::size_t enrich_pool_from_stringinfo(std::set<std::string> &out, uintptr_t string_arr, uint32_t stringCount)
         {
             bool ok = false;
             std::size_t added = 0;
             for (uint32_t i = 0; i < stringCount; ++i)
             {
-                const uintptr_t wrap = read_qword_safe(stringArr + i * 8ull, ok);
+                const uintptr_t wrap = read_qword_safe(string_arr + i * 8ull, ok);
                 if (!ok || !wrap)
                     continue;
                 const std::string s = read_wrapper_string(wrap);
@@ -455,42 +456,43 @@ namespace Transmog
             }
         }
 
-        // Targeted phantom recovery. Once the pool passes above finish, an item whose iconPrefab is not in the pool
+        // Targeted phantom recovery. Once the pool passes above finish, an item whose icon_prefab is not in the pool
         // becomes a "phantom candidate". This walk crosses memory once and searches for the exact phantom strings
         // through a first-4-byte hash table - O(memory_size + N_phantoms) total. It catches a byte-scan miss where
         // the asset string lives in a region the chunked walker mis-handled, or where the prefix gate did not match.
-        std::size_t recover_phantoms_targeted(std::set<std::string> &pool, const std::vector<std::string> &phantomNames)
+        std::size_t
+        recover_phantoms_targeted(std::set<std::string> &pool, const std::vector<std::string> &phantom_names)
         {
-            if (phantomNames.empty())
+            if (phantom_names.empty())
                 return 0;
 
             // Index phantoms by first 4 bytes (lowercased).
-            std::unordered_map<uint32_t, std::vector<size_t>> byFirst4;
-            byFirst4.reserve(phantomNames.size() * 2);
-            for (size_t i = 0; i < phantomNames.size(); ++i)
+            std::unordered_map<uint32_t, std::vector<size_t>> by_first4;
+            by_first4.reserve(phantom_names.size() * 2);
+            for (size_t i = 0; i < phantom_names.size(); ++i)
             {
-                if (phantomNames[i].size() < 4)
+                if (phantom_names[i].size() < 4)
                     continue;
                 uint32_t k = 0;
-                std::memcpy(&k, phantomNames[i].data(), 4);
-                byFirst4[k].push_back(i);
+                std::memcpy(&k, phantom_names[i].data(), 4);
+                by_first4[k].push_back(i);
             }
-            if (byFirst4.empty())
+            if (by_first4.empty())
                 return 0;
 
-            std::vector<uint8_t> found(phantomNames.size(), 0);
+            std::vector<uint8_t> found(phantom_names.size(), 0);
             std::size_t recovered = 0;
 
             // Targeted recovery walks the FULL user address range, because asset string heap addresses shift between
             // reloads: the same string lands in a low or a high VA band, depending on allocation order. The per-byte
             // cost is one uint32 hash lookup, which is cheap enough to cover the whole VA in a single pass.
-            constexpr size_t k_chunk = 0x100000;
-            std::vector<char> scratch(k_chunk);
+            constexpr size_t chunk = 0x100000;
+            std::vector<char> scratch(chunk);
             // whole_process() is the one Region factory that queries no loader state. It reads the system's own
             // minimum and maximum application addresses, so the floor is not an assumption either.
-            const DMK::Region userSpace = DMK::Region::whole_process();
-            const uintptr_t addrEnd = userSpace.end().raw();
-            uintptr_t addr = userSpace.base.raw();
+            const DMK::Region user_space = DMK::Region::whole_process();
+            const uintptr_t addrEnd = user_space.end().raw();
+            uintptr_t addr = user_space.base.raw();
             while (addr < addrEnd)
             {
                 MEMORY_BASIC_INFORMATION mbi{};
@@ -502,9 +504,9 @@ namespace Transmog
                 {
                     const uintptr_t bs = reinterpret_cast<uintptr_t>(mbi.BaseAddress);
                     const size_t total = static_cast<size_t>(mbi.RegionSize);
-                    for (size_t off = 0; off < total; off += k_chunk)
+                    for (size_t off = 0; off < total; off += chunk)
                     {
-                        const size_t got = std::min<size_t>(k_chunk, total - off);
+                        const size_t got = std::min<size_t>(chunk, total - off);
                         if (got < 4)
                             continue;
                         // read_into fails the whole span, which is exactly the "skip this chunk" contract this walk
@@ -526,14 +528,14 @@ namespace Transmog
                         {
                             uint32_t key = 0;
                             std::memcpy(&key, scratch.data() + pos, 4);
-                            auto it = byFirst4.find(key);
-                            if (it == byFirst4.end())
+                            auto it = by_first4.find(key);
+                            if (it == by_first4.end())
                                 continue;
                             for (size_t pi : it->second)
                             {
                                 if (found[pi])
                                     continue;
-                                const auto &target = phantomNames[pi];
+                                const auto &target = phantom_names[pi];
                                 if (pos + target.size() > got)
                                     continue;
                                 if (std::memcmp(scratch.data() + pos, target.data(), target.size()) == 0)
@@ -557,8 +559,8 @@ namespace Transmog
         std::size_t enrich_pool_from_asset_pool(std::set<std::string> &out)
         {
             const std::size_t before = out.size();
-            constexpr size_t k_chunk = 0x100000;
-            std::vector<char> scratch(k_chunk);
+            constexpr size_t chunk = 0x100000;
+            std::vector<char> scratch(chunk);
             uintptr_t addr = ASSET_SCAN_START;
             while (addr < ASSET_SCAN_END)
             {
@@ -576,9 +578,9 @@ namespace Transmog
                 {
                     const uintptr_t bs = reinterpret_cast<uintptr_t>(mbi.BaseAddress);
                     const size_t total = static_cast<size_t>(mbi.RegionSize);
-                    for (size_t off = 0; off < total; off += k_chunk)
+                    for (size_t off = 0; off < total; off += chunk)
                     {
-                        const size_t want = std::min<size_t>(k_chunk, total - off);
+                        const size_t want = std::min<size_t>(chunk, total - off);
                         if (DMK::memory::read_into(
                                 DMK::Address{bs + off},
                                 std::as_writable_bytes(std::span{scratch.data(), want})
@@ -643,57 +645,57 @@ namespace Transmog
             return s;
         }
 
-        // Resolve the item's primary body-mesh prefab from its rule chain. With a non-empty @p iconStem, it returns
+        // Resolve the item's primary body-mesh prefab from its rule chain. With a non-empty @p icon_stem, it returns
         // the mesh whose rig-stripped name equals it - the same logical item in its actual wearer rig - which lets a
         // rig variant link to cd_phw / cd_pom instead of the shared cd_phm icon. A sub-part mesh (e.g.
         // `..._wire_0001_r`) has a different stem, so the walk drops it. For an ordinary item the matching mesh
         // equals the icon prefab, so the result is identical and only a genuine rig variant changes.
         //
-        // When @p iconStem is empty - the item's icon string is missing or a bare `ItemIcon_` stub, so there is
+        // When @p icon_stem is empty - the item's icon string is missing or a bare `ItemIcon_` stub, so there is
         // nothing to match against - fall back to the first asset-prefab mesh the rule chain names. The item still
         // owns a real mesh there, so this links it to its prefab instead of an orphan row. It returns "" only when
         // no usable mesh turns up, and the caller then keeps the icon-derived prefab.
         //
         // Not noexcept: it builds std::string values, so a bad_alloc must stay propagatable.
         std::string
-        resolve_rule_body_mesh(uintptr_t desc, uintptr_t stringArr, uint32_t stringCount, std::string_view iconStem)
+        resolve_rule_body_mesh(uintptr_t desc, uintptr_t string_arr, uint32_t stringCount, std::string_view icon_stem)
         {
-            if (!desc || !stringArr)
+            if (!desc || !string_arr)
                 return {};
             bool ok = false;
-            const uintptr_t ruleList = read_qword_safe(desc + OFF_DESC_RULE_LIST, ok);
-            const uint32_t ruleCount = read_u32_safe(desc + OFF_DESC_RULE_COUNT, ok);
-            if (!ruleList || ruleCount == 0 || ruleCount > RULE_SCAN_CAP)
+            const uintptr_t rule_list = read_qword_safe(desc + OFF_DESC_RULE_LIST, ok);
+            const uint32_t rule_count = read_u32_safe(desc + OFF_DESC_RULE_COUNT, ok);
+            if (!rule_list || rule_count == 0 || rule_count > RULE_SCAN_CAP)
                 return {};
-            std::string firstBodyMesh;
-            for (uint32_t r = 0; r < ruleCount; ++r)
+            std::string first_body_mesh;
+            for (uint32_t r = 0; r < rule_count; ++r)
             {
-                const uintptr_t rule = ruleList + static_cast<uintptr_t>(r) * RULE_STRIDE;
-                const uintptr_t meshArr = read_qword_safe(rule + OFF_RULE_MESH_ARR, ok);
-                const uint32_t meshCount = read_u32_safe(rule + OFF_RULE_MESH_COUNT, ok);
-                if (!meshArr || meshCount == 0 || meshCount > RULE_SCAN_CAP)
+                const uintptr_t rule = rule_list + static_cast<uintptr_t>(r) * RULE_STRIDE;
+                const uintptr_t mesh_arr = read_qword_safe(rule + OFF_RULE_MESH_ARR, ok);
+                const uint32_t mesh_count = read_u32_safe(rule + OFF_RULE_MESH_COUNT, ok);
+                if (!mesh_arr || mesh_count == 0 || mesh_count > RULE_SCAN_CAP)
                     continue;
-                for (uint32_t m = 0; m < meshCount; ++m)
+                for (uint32_t m = 0; m < mesh_count; ++m)
                 {
-                    const uint16_t mslot = read_u16_safe(meshArr + static_cast<uintptr_t>(m) * 2, ok);
+                    const uint16_t mslot = read_u16_safe(mesh_arr + static_cast<uintptr_t>(m) * 2, ok);
                     if (!ok || mslot == 0xFFFF || mslot >= stringCount)
                         continue;
-                    const uintptr_t wrap = read_qword_safe(stringArr + static_cast<uintptr_t>(mslot) * 8, ok);
+                    const uintptr_t wrap = read_qword_safe(string_arr + static_cast<uintptr_t>(mslot) * 8, ok);
                     std::string mesh = to_lower(read_wrapper_string(wrap));
                     if (mesh.empty())
                         continue;
-                    if (!iconStem.empty())
+                    if (!icon_stem.empty())
                     {
-                        if (strip_rig_prefix(mesh) == iconStem)
+                        if (strip_rig_prefix(mesh) == icon_stem)
                             return mesh;
                     }
-                    else if (firstBodyMesh.empty() && starts_with_asset_prefix(mesh))
+                    else if (first_body_mesh.empty() && starts_with_asset_prefix(mesh))
                     {
-                        firstBodyMesh = std::move(mesh);
+                        first_body_mesh = std::move(mesh);
                     }
                 }
             }
-            return firstBodyMesh;
+            return first_body_mesh;
         }
 
         // per-item record collected from iteminfo/stringinfo
@@ -706,7 +708,7 @@ namespace Transmog
         // stays clean.
         bool is_junk_rig_fragment(std::string_view name) noexcept
         {
-            static constexpr std::string_view k_rigs[] = {
+            static constexpr std::string_view rigs[] = {
                 "cd_phm_",
                 "cd_phw_",
                 "cd_pom_",
@@ -717,7 +719,7 @@ namespace Transmog
                 "cd_ndm_",
             };
             std::string_view tail;
-            for (const auto &rig : k_rigs)
+            for (const auto &rig : rigs)
             {
                 if (name.size() > rig.size() && name.substr(0, rig.size()) == rig)
                 {
@@ -763,10 +765,10 @@ namespace Transmog
             const uint32_t count = read_u32_safe(desc + off + OFF_DESC_VARIANT_COUNT_DELTA, ok);
             if (!ok || count == 0 || count > VARIANT_ENTRY_CAP)
                 return false;
-            const uintptr_t meshPtr = read_qword_safe(entries + OFF_ENTRY_MESH, ok);
-            if (!ok || !DMK::memory::is_plausible_ptr(DMK::Address{meshPtr}))
+            const uintptr_t mesh_ptr = read_qword_safe(entries + OFF_ENTRY_MESH, ok);
+            if (!ok || !DMK::memory::is_plausible_ptr(DMK::Address{mesh_ptr}))
                 return false;
-            const uintptr_t handle = read_qword_safe(meshPtr, ok);
+            const uintptr_t handle = read_qword_safe(mesh_ptr, ok);
             if (!ok)
                 return false;
             const uint16_t slot = static_cast<uint16_t>(handle & 0xFFFFu);
@@ -781,19 +783,19 @@ namespace Transmog
          *          coincidence. Drift reaches the log as a WARNING even though it self-corrected, so patch day is
          *          visible rather than silent.
          */
-        ptrdiff_t resolve_variant_list_offset(uintptr_t itemArr, uint32_t itemCount, uint32_t stringCount) noexcept
+        ptrdiff_t resolve_variant_list_offset(uintptr_t item_arr, uint32_t itemCount, uint32_t stringCount) noexcept
         {
             auto &logger = DMK::log();
-            constexpr uint32_t k_probeSamples = 8;   // distinct items an offset must satisfy
-            constexpr uint32_t k_probeScanCap = 512; // descriptors examined before giving up
+            constexpr uint32_t probe_samples = 8;    // distinct items an offset must satisfy
+            constexpr uint32_t probe_scan_cap = 512; // descriptors examined before giving up
 
             const auto score = [&](ptrdiff_t off) noexcept
             {
                 uint32_t hits = 0;
                 bool ok = false;
-                for (uint32_t id = 0; id < (std::min)(itemCount, k_probeScanCap) && hits < k_probeSamples; ++id)
+                for (uint32_t id = 0; id < (std::min)(itemCount, probe_scan_cap) && hits < probe_samples; ++id)
                 {
-                    const uintptr_t desc = read_qword_safe(itemArr + static_cast<uintptr_t>(id) * 8, ok);
+                    const uintptr_t desc = read_qword_safe(item_arr + static_cast<uintptr_t>(id) * 8, ok);
                     if (!ok || !DMK::memory::is_plausible_ptr(DMK::Address{desc}))
                         continue;
                     if (variant_list_shape_ok(desc, off, stringCount))
@@ -802,14 +804,14 @@ namespace Transmog
                 return hits;
             };
 
-            if (score(OFF_DESC_VARIANT_ENTRIES_NOMINAL) >= k_probeSamples)
+            if (score(OFF_DESC_VARIANT_ENTRIES_NOMINAL) >= probe_samples)
                 return OFF_DESC_VARIANT_ENTRIES_NOMINAL;
 
             for (ptrdiff_t off = OFF_DESC_VARIANT_PROBE_LOW; off <= OFF_DESC_VARIANT_PROBE_HIGH; off += 8)
             {
                 if (off == OFF_DESC_VARIANT_ENTRIES_NOMINAL)
                     continue;
-                if (score(off) >= k_probeSamples)
+                if (score(off) >= probe_samples)
                 {
                     (void)logger.try_log(
                         DMK::LogLevel::Warning,
@@ -839,24 +841,24 @@ namespace Transmog
          *          once per caller.
          * @note Not noexcept: std::call_once reports a failed first call through std::system_error.
          */
-        ptrdiff_t cached_variant_list_offset(uintptr_t itemArr, uint32_t itemCount, uint32_t stringCount)
+        ptrdiff_t cached_variant_list_offset(uintptr_t item_arr, uint32_t itemCount, uint32_t stringCount)
         {
             static std::once_flag once;
             static ptrdiff_t s_off = 0;
-            std::call_once(once, [&] { s_off = resolve_variant_list_offset(itemArr, itemCount, stringCount); });
+            std::call_once(once, [&] { s_off = resolve_variant_list_offset(item_arr, itemCount, stringCount); });
             return s_off;
         }
 
         // Not noexcept: it builds a std::vector<std::string>, so a bad_alloc must stay propagatable.
         std::vector<std::string>
-        resolve_variant_meshes(uintptr_t desc, uintptr_t stringArr, uint32_t stringCount, ptrdiff_t variantListOff)
+        resolve_variant_meshes(uintptr_t desc, uintptr_t string_arr, uint32_t stringCount, ptrdiff_t variant_list_off)
         {
             std::vector<std::string> meshes;
-            if (!desc || !stringArr || variantListOff == 0)
+            if (!desc || !string_arr || variant_list_off == 0)
                 return meshes;
             bool ok = false;
-            const uintptr_t entries = read_qword_safe(desc + variantListOff, ok);
-            const uint32_t count = read_u32_safe(desc + variantListOff + OFF_DESC_VARIANT_COUNT_DELTA, ok);
+            const uintptr_t entries = read_qword_safe(desc + variant_list_off, ok);
+            const uint32_t count = read_u32_safe(desc + variant_list_off + OFF_DESC_VARIANT_COUNT_DELTA, ok);
             if (!entries || count == 0 || count > VARIANT_ENTRY_CAP)
                 return meshes;
             for (uint32_t e = 0; e < count; ++e)
@@ -864,16 +866,16 @@ namespace Transmog
                 const uintptr_t entry = entries + static_cast<uintptr_t>(e) * VARIANT_ENTRY_STRIDE;
                 // entry+OFF_ENTRY_MESH points into the variant table at the entry's mesh handle. Deref it to get the
                 // handle whose low 16 bits index stringinfo.
-                const uintptr_t meshPtr = read_qword_safe(entry + OFF_ENTRY_MESH, ok);
-                if (!meshPtr)
+                const uintptr_t mesh_ptr = read_qword_safe(entry + OFF_ENTRY_MESH, ok);
+                if (!mesh_ptr)
                     continue;
-                const uintptr_t handle = read_qword_safe(meshPtr, ok);
+                const uintptr_t handle = read_qword_safe(mesh_ptr, ok);
                 if (!ok)
                     continue;
                 const uint16_t slot = static_cast<uint16_t>(handle & 0xFFFFu);
                 if (slot == 0xFFFF || slot >= stringCount)
                     continue;
-                const uintptr_t wrap = read_qword_safe(stringArr + static_cast<uintptr_t>(slot) * 8, ok);
+                const uintptr_t wrap = read_qword_safe(string_arr + static_cast<uintptr_t>(slot) * 8, ok);
                 std::string mesh = to_lower(read_wrapper_string(wrap));
                 if (mesh.empty() || !starts_with_asset_prefix(mesh) || mesh.find("dropitem") != std::string::npos)
                     continue;
@@ -885,67 +887,68 @@ namespace Transmog
 
         struct ItemEntry
         {
-            uint32_t runtimeIdx;
-            std::string internalName;
-            uint16_t iconSlot;
-            std::string fullIcon;   // raw stringinfo string, with or without the ItemIcon_Prefab_ prefix
-            std::string iconPrefab; // lowercased, prefix stripped
-            std::string base;       // last `_NNNN`-anchored prefix of iconPrefab
+            uint32_t runtime_idx;
+            std::string internal_name;
+            uint16_t icon_slot;
+            std::string full_icon;   // raw stringinfo string, with or without the ItemIcon_Prefab_ prefix
+            std::string icon_prefab; // lowercased, prefix stripped
+            std::string base;        // last `_NNNN`-anchored prefix of icon_prefab
             // Distinct player rig meshes (Kliff / Oongka / Damiane) recovered from the variant entry list. Empty when
             // the item has none. Links the male / orc / female body variants the icon-derived prefab cannot pair.
-            std::vector<std::string> variantMeshes;
+            std::vector<std::string> variant_meshes;
         };
     } // namespace
 
-    std::vector<std::string> variant_meshes_for_item(std::uint16_t itemId) noexcept
+    std::vector<std::string> variant_meshes_for_item(std::uint16_t item_id) noexcept
     {
         // Resolve the iteminfo + stringinfo registries once (same holders dump_itemmesh_tsv uses) and cache them -
         // they are stable for the session. Retry the AOB resolve while it fails (e.g. called before the
         // world/registries exist) so an early miss does not permanently disable the solver.
-        static std::mutex s_registryMtx;
-        static uintptr_t s_itemArr = 0;
-        static uintptr_t s_stringArr = 0;
-        static uint32_t s_itemCount = 0;
-        static uint32_t s_stringCount = 0;
+        static std::mutex s_registry_mtx;
+        static uintptr_t s_item_arr = 0;
+        static uintptr_t s_string_arr = 0;
+        static uint32_t s_item_count = 0;
+        static uint32_t s_string_count = 0;
         static bool s_ready = false;
 
         // Snapshot the cached registry handles under the lock so the per-item read below never races the one-shot
         // initialization on another thread. This function runs on both the game thread and the UI thread. The cached
         // statics are only ever written here, under this same lock.
-        uintptr_t itemArr = 0;
-        uintptr_t stringArr = 0;
+        uintptr_t item_arr = 0;
+        uintptr_t string_arr = 0;
         uint32_t itemCount = 0;
         uint32_t stringCount = 0;
         {
-            std::scoped_lock lk(s_registryMtx);
+            std::scoped_lock lk(s_registry_mtx);
             if (!s_ready)
             {
-                const uintptr_t iteminfoHolderAddr = ItemNameTable::instance().iteminfo_holder_addr();
-                const uintptr_t stringinfoHolderAddr = anchor_address(AnchorId::StringInfoRegistry);
+                const uintptr_t iteminfo_holder_addr = ItemNameTable::instance().iteminfo_holder_addr();
+                const uintptr_t stringinfo_holder_addr = anchor_address(AnchorId::StringInfoRegistry);
                 bool ok = false;
-                const uintptr_t iteminfoMgr = iteminfoHolderAddr ? read_qword_safe(iteminfoHolderAddr, ok) : 0;
-                const uintptr_t stringinfoMgr = stringinfoHolderAddr ? read_qword_safe(stringinfoHolderAddr, ok) : 0;
-                if (iteminfoMgr && stringinfoMgr)
+                const uintptr_t iteminfo_mgr = iteminfo_holder_addr ? read_qword_safe(iteminfo_holder_addr, ok) : 0;
+                const uintptr_t stringinfo_mgr =
+                    stringinfo_holder_addr ? read_qword_safe(stringinfo_holder_addr, ok) : 0;
+                if (iteminfo_mgr && stringinfo_mgr)
                 {
-                    s_itemCount = read_u32_safe(iteminfoMgr + OFF_REGISTRY_COUNT, ok);
-                    s_itemArr = read_qword_safe(iteminfoMgr + OFF_REGISTRY_ARRAY, ok);
-                    s_stringCount = read_u32_safe(stringinfoMgr + OFF_REGISTRY_COUNT, ok);
-                    s_stringArr = read_qword_safe(stringinfoMgr + OFF_REGISTRY_ARRAY, ok);
-                    s_ready = s_itemArr && s_stringArr && s_itemCount && s_stringCount;
+                    s_item_count = read_u32_safe(iteminfo_mgr + OFF_REGISTRY_COUNT, ok);
+                    s_item_arr = read_qword_safe(iteminfo_mgr + OFF_REGISTRY_ARRAY, ok);
+                    s_string_count = read_u32_safe(stringinfo_mgr + OFF_REGISTRY_COUNT, ok);
+                    s_string_arr = read_qword_safe(stringinfo_mgr + OFF_REGISTRY_ARRAY, ok);
+                    s_ready = s_item_arr && s_string_arr && s_item_count && s_string_count;
                 }
             }
             if (!s_ready)
                 return {};
-            itemArr = s_itemArr;
-            stringArr = s_stringArr;
-            itemCount = s_itemCount;
-            stringCount = s_stringCount;
+            item_arr = s_item_arr;
+            string_arr = s_string_arr;
+            itemCount = s_item_count;
+            stringCount = s_string_count;
         }
-        if (itemId >= itemCount)
+        if (item_id >= itemCount)
             return {};
 
         bool ok = false;
-        const uintptr_t desc = read_qword_safe(itemArr + static_cast<uint64_t>(itemId) * 8, ok);
+        const uintptr_t desc = read_qword_safe(item_arr + static_cast<uint64_t>(item_id) * 8, ok);
         if (!ok || !DMK::memory::is_plausible_ptr(DMK::Address{desc}))
             return {};
 
@@ -957,13 +960,13 @@ namespace Transmog
             // body mesh so the result is non-empty for any item that owns a real mesh.
             std::vector<std::string> meshes = resolve_variant_meshes(
                 desc,
-                stringArr,
+                string_arr,
                 stringCount,
-                cached_variant_list_offset(itemArr, itemCount, stringCount)
+                cached_variant_list_offset(item_arr, itemCount, stringCount)
             );
             if (meshes.empty())
             {
-                std::string primary = resolve_rule_body_mesh(desc, stringArr, stringCount, std::string_view{});
+                std::string primary = resolve_rule_body_mesh(desc, string_arr, stringCount, std::string_view{});
                 if (!primary.empty())
                     meshes.push_back(std::move(primary));
             }
@@ -980,7 +983,7 @@ namespace Transmog
         auto &logger = DMK::log();
 
         // Wait on the swap catalog before the prefab pool sources anything from it. The catalog pass reads
-        // PrefabWrapperSwap's slot catalog, which populate_slot_catalogs() builds after a world load (on the
+        // prefab_wrapper_swap's slot catalog, which populate_slot_catalogs() builds after a world load (on the
         // save-load tick, or lazily on first overlay open). Both dump triggers spawn this routine in a detached
         // thread the instant the dump flag is set, which can beat that build and leave the pool incomplete.
         //
@@ -989,11 +992,11 @@ namespace Transmog
         // that is normal and not failed. A poll until the catalog exists yields a complete dump whenever the world
         // finally loads, however long that takes. The wait is free, because this already runs off the main thread, and
         // the thread is reclaimed at process exit if a world is never entered.
-        if (!PrefabWrapperSwap::is_catalog_populated())
+        if (!prefab_wrapper_swap::is_catalog_populated())
         {
             logger.info("[itemprefab] waiting for swap catalog before dumping");
-            constexpr DWORD k_catalogPollMs = 500;
-            while (!PrefabWrapperSwap::is_catalog_populated())
+            constexpr DWORD catalog_poll_ms = 500;
+            while (!prefab_wrapper_swap::is_catalog_populated())
             {
                 // The catalog only populates once a world loads, so at the main menu this waits forever. Polling
                 // the stop token is what lets teardown reclaim this worker instead of the module staying mapped.
@@ -1002,7 +1005,7 @@ namespace Transmog
                     logger.info("[itemprefab] dump abandoned: shutdown requested while waiting for the catalog");
                     return;
                 }
-                Sleep(k_catalogPollMs);
+                Sleep(catalog_poll_ms);
             }
         }
 
@@ -1012,14 +1015,14 @@ namespace Transmog
         // call-graph walk, and the stringinfo holder IS the StringInfoRegistry slot - the same global under two
         // names. One indirection yields the registry struct (header, then the count at OFF_REGISTRY_COUNT, then the
         // entry array at OFF_REGISTRY_ARRAY).
-        const uintptr_t iteminfoHolderAddr = ItemNameTable::instance().iteminfo_holder_addr();
-        const uintptr_t stringinfoHolderAddr = anchor_address(AnchorId::StringInfoRegistry);
-        if (!iteminfoHolderAddr || !stringinfoHolderAddr)
+        const uintptr_t iteminfo_holder_addr = ItemNameTable::instance().iteminfo_holder_addr();
+        const uintptr_t stringinfo_holder_addr = anchor_address(AnchorId::StringInfoRegistry);
+        if (!iteminfo_holder_addr || !stringinfo_holder_addr)
         {
             logger.warning(
                 "[itemprefab] holder AOB resolve failed: iteminfo=0x{:X} stringinfo=0x{:X}",
-                iteminfoHolderAddr,
-                stringinfoHolderAddr
+                iteminfo_holder_addr,
+                stringinfo_holder_addr
             );
             return;
         }
@@ -1027,29 +1030,29 @@ namespace Transmog
         // `ok` is reused across these reads and its intermediate values are deliberately ignored: a faulted read yields
         // 0 via value_or(0), which the explicit null/zero checks below already reject.
         bool ok = false;
-        const uintptr_t iteminfoMgr = read_qword_safe(iteminfoHolderAddr, ok);
-        const uintptr_t stringinfoMgr = read_qword_safe(stringinfoHolderAddr, ok);
-        if (!iteminfoMgr || !stringinfoMgr)
+        const uintptr_t iteminfo_mgr = read_qword_safe(iteminfo_holder_addr, ok);
+        const uintptr_t stringinfo_mgr = read_qword_safe(stringinfo_holder_addr, ok);
+        if (!iteminfo_mgr || !stringinfo_mgr)
         {
             logger.warning(
                 "[itemprefab] registry holder null: iteminfo=0x{:X} stringinfo=0x{:X}",
-                iteminfoMgr,
-                stringinfoMgr
+                iteminfo_mgr,
+                stringinfo_mgr
             );
             return;
         }
-        const uint32_t itemCount = read_u32_safe(iteminfoMgr + OFF_REGISTRY_COUNT, ok);
-        const uintptr_t itemArr = read_qword_safe(iteminfoMgr + OFF_REGISTRY_ARRAY, ok);
-        const uint32_t stringCount = read_u32_safe(stringinfoMgr + OFF_REGISTRY_COUNT, ok);
-        const uintptr_t stringArr = read_qword_safe(stringinfoMgr + OFF_REGISTRY_ARRAY, ok);
+        const uint32_t itemCount = read_u32_safe(iteminfo_mgr + OFF_REGISTRY_COUNT, ok);
+        const uintptr_t item_arr = read_qword_safe(iteminfo_mgr + OFF_REGISTRY_ARRAY, ok);
+        const uint32_t stringCount = read_u32_safe(stringinfo_mgr + OFF_REGISTRY_COUNT, ok);
+        const uintptr_t string_arr = read_qword_safe(stringinfo_mgr + OFF_REGISTRY_ARRAY, ok);
         logger.info(
             "[itemprefab] iteminfo: count={} arr=0x{:X}  stringinfo: count={} arr=0x{:X}",
             itemCount,
-            itemArr,
+            item_arr,
             stringCount,
-            stringArr
+            string_arr
         );
-        if (itemCount == 0 || !itemArr || stringCount == 0 || !stringArr)
+        if (itemCount == 0 || !item_arr || stringCount == 0 || !string_arr)
         {
             logger.warning("[itemprefab] one of the registries is empty");
             return;
@@ -1061,30 +1064,30 @@ namespace Transmog
         // unfiltered because its own walker keys on the body-mesh slot tag and drops every entry without one, while
         // the dump wants them all for the gimmick/collection/lamp/puzzle families.
         const auto t0 = std::chrono::steady_clock::now();
-        std::set<std::string> poolSet;
-        const auto fromCatalog = build_pool_from_catalog(poolSet);
-        const auto fromStringinfo = enrich_pool_from_stringinfo(poolSet, stringArr, stringCount);
-        std::size_t fromLoader = 0;
-        PrefabWrapperSwap::for_each_loader_prefab_name(
+        std::set<std::string> pool_set;
+        const auto from_catalog = build_pool_from_catalog(pool_set);
+        const auto from_stringinfo = enrich_pool_from_stringinfo(pool_set, string_arr, stringCount);
+        std::size_t from_loader = 0;
+        prefab_wrapper_swap::for_each_loader_prefab_name(
             [&](std::string_view name)
             {
-                if (poolSet.insert(to_lower(name)).second)
-                    ++fromLoader;
+                if (pool_set.insert(to_lower(name)).second)
+                    ++from_loader;
             }
         );
-        const auto fromAssetPool = enrich_pool_from_asset_pool(poolSet);
+        const auto from_asset_pool = enrich_pool_from_asset_pool(pool_set);
         const auto t1 = std::chrono::steady_clock::now();
         logger.info(
             "[itemprefab] pool pre-targeted: {} catalog + {} stringinfo + "
             "{} loader-reg + {} asset-pool = {} total ({} ms)",
-            fromCatalog,
-            fromStringinfo,
-            fromLoader,
-            fromAssetPool,
-            poolSet.size(),
+            from_catalog,
+            from_stringinfo,
+            from_loader,
+            from_asset_pool,
+            pool_set.size(),
             std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count()
         );
-        if (poolSet.empty())
+        if (pool_set.empty())
         {
             logger.warning("[itemprefab] prefab pool empty - aborting dump.");
             return;
@@ -1093,9 +1096,9 @@ namespace Transmog
         // Live partprefab wrapper names (from the swap catalogs). The item walk consults them to link an item to the
         // `_dd` helm-variant wrapper the swap/carrier path actually matches, and the emit loop consults them to drop
         // the dead bare data-name.
-        std::set<std::string> liveWrapperSet;
-        const auto liveWrapperCount = collect_live_wrapper_names(liveWrapperSet);
-        logger.info("[itemprefab] live-wrapper set: {} names (for `_dd` helm-suffix linking)", liveWrapperCount);
+        std::set<std::string> live_wrapper_set;
+        const auto live_wrapper_count = collect_live_wrapper_names(live_wrapper_set);
+        logger.info("[itemprefab] live-wrapper set: {} names (for `_dd` helm-suffix linking)", live_wrapper_count);
 
         // Walk iteminfo and collect item entries with their icon-derived prefab and base. Emission runs later from
         // the pool's perspective, so this walk only collects.
@@ -1104,42 +1107,42 @@ namespace Transmog
         uint32_t skipped = 0;
         for (uint32_t id = 0; id < itemCount; ++id)
         {
-            const uintptr_t desc = read_qword_safe(itemArr + id * 8ull, ok);
+            const uintptr_t desc = read_qword_safe(item_arr + id * 8ull, ok);
             if (!desc)
             {
                 ++skipped;
                 continue;
             }
-            const uintptr_t nameWrap = read_qword_safe(desc + OFF_NAME, ok);
+            const uintptr_t name_wrap = read_qword_safe(desc + OFF_NAME, ok);
             // The name wrapper IS a StringRef directly (no icon-style +0x18 indirection), so read it as one.
-            std::string internalName = read_string_ref(nameWrap);
-            if (internalName.empty())
+            std::string internal_name = read_string_ref(name_wrap);
+            if (internal_name.empty())
             {
                 // Recover entries whose StringRef length field is unreadable or zero while the character pointer is
                 // still valid: read the pointer target with a fixed bound. read_cstr_safe stops at the first
                 // non-printable byte, so the bound cannot overrun.
-                const uintptr_t altPtr = read_qword_safe(nameWrap, ok);
-                if (ok && DMK::memory::is_plausible_ptr(DMK::Address{altPtr}))
-                    internalName = read_cstr_safe(reinterpret_cast<const char *>(altPtr), 128);
+                const uintptr_t alt_ptr = read_qword_safe(name_wrap, ok);
+                if (ok && DMK::memory::is_plausible_ptr(DMK::Address{alt_ptr}))
+                    internal_name = read_cstr_safe(reinterpret_cast<const char *>(alt_ptr), 128);
             }
-            if (internalName.empty())
+            if (internal_name.empty())
             {
                 ++skipped;
                 continue;
             }
-            const uintptr_t metaSub = read_qword_safe(desc + OFF_META_SUB, ok);
-            if (!metaSub)
+            const uintptr_t meta_sub = read_qword_safe(desc + OFF_META_SUB, ok);
+            if (!meta_sub)
             {
                 ++skipped;
                 continue;
             }
-            const uint16_t slot = read_u16_safe(metaSub, ok);
+            const uint16_t slot = read_u16_safe(meta_sub, ok);
             if (!ok || slot == 0xFFFF || slot >= stringCount)
             {
                 ++skipped;
                 continue;
             }
-            const uintptr_t wrap = read_qword_safe(stringArr + slot * 8ull, ok);
+            const uintptr_t wrap = read_qword_safe(string_arr + slot * 8ull, ok);
             const std::string full = read_wrapper_string(wrap);
             if (full.empty())
             {
@@ -1155,105 +1158,106 @@ namespace Transmog
             // Strip `itemicon_prefab_` first (cd_*), else strip only `itemicon_`, so the remainder is the underlying
             // mesh name (e.g. `collection_prop_doll_0001`) that the pool indexes. Otherwise items resolve to
             // themselves as phantoms.
-            std::string fullLower = to_lower(full);
-            std::string_view iconPrefab = fullLower;
-            constexpr std::string_view k_longPrefix = "itemicon_prefab_";
-            constexpr std::string_view k_shortPrefix = "itemicon_";
+            std::string full_lower = to_lower(full);
+            std::string_view icon_prefab = full_lower;
+            constexpr std::string_view long_prefix = "itemicon_prefab_";
+            constexpr std::string_view short_prefix = "itemicon_";
             // `itemicon_prefab_<mesh>` carries the real mesh name. A bare `itemicon_<name>` (e.g.
             // `ItemIcon_Lantern_On`) does not, so its stripped remainder is a non-mesh item name that the dump must
             // not trust as a prefab.
-            bool isPrefabIcon = false;
-            if (iconPrefab.size() >= k_longPrefix.size() && iconPrefab.substr(0, k_longPrefix.size()) == k_longPrefix)
+            bool is_prefab_icon = false;
+            if (icon_prefab.size() >= long_prefix.size() && icon_prefab.substr(0, long_prefix.size()) == long_prefix)
             {
-                iconPrefab = iconPrefab.substr(k_longPrefix.size());
-                isPrefabIcon = true;
+                icon_prefab = icon_prefab.substr(long_prefix.size());
+                is_prefab_icon = true;
             }
-            else if (iconPrefab.size() >= k_shortPrefix.size() &&
-                     iconPrefab.substr(0, k_shortPrefix.size()) == k_shortPrefix)
+            else if (icon_prefab.size() >= short_prefix.size() &&
+                     icon_prefab.substr(0, short_prefix.size()) == short_prefix)
             {
-                iconPrefab = iconPrefab.substr(k_shortPrefix.size());
+                icon_prefab = icon_prefab.substr(short_prefix.size());
             }
             // Prefer the item's actual rig mesh over the icon-derived prefab. The icon is shared across rig variants,
             // so the rule chain is the only place the real cd_phw / cd_pom mesh appears. For an ordinary item the rule
             // mesh equals the icon prefab and this is a no-op.
             // The variant entry list is the authoritative source of every mesh the item uses across bodies. Resolve
             // it once and reuse it for the primary-prefab recovery below and for the per-body-variant linkage.
-            std::vector<std::string> variantMeshes = resolve_variant_meshes(
+            std::vector<std::string> variant_meshes = resolve_variant_meshes(
                 desc,
-                stringArr,
+                string_arr,
                 stringCount,
-                cached_variant_list_offset(itemArr, itemCount, stringCount)
+                cached_variant_list_offset(item_arr, itemCount, stringCount)
             );
 
-            std::string bodyMesh = resolve_rule_body_mesh(desc, stringArr, stringCount, strip_rig_prefix(iconPrefab));
-            std::string resolvedPrefab;
-            if (!bodyMesh.empty())
+            std::string body_mesh =
+                resolve_rule_body_mesh(desc, string_arr, stringCount, strip_rig_prefix(icon_prefab));
+            std::string resolved_prefab;
+            if (!body_mesh.empty())
             {
-                resolvedPrefab = std::move(bodyMesh);
+                resolved_prefab = std::move(body_mesh);
             }
-            else if (isPrefabIcon)
+            else if (is_prefab_icon)
             {
-                resolvedPrefab = std::string(iconPrefab); // the `_Prefab_` icon already names the real mesh
+                resolved_prefab = std::string(icon_prefab); // the `_Prefab_` icon already names the real mesh
             }
             else
             {
-                // The icon is not a mesh, so the stripped iconPrefab is a bogus item name and the item drops out as
+                // The icon is not a mesh, so the stripped icon_prefab is a bogus item name and the item drops out as
                 // UI-only even though a mesh exists. Recover it from the variant entry list - held / non-body items
                 // (a lantern) keep their mesh in an untoken default entry there even when the rule chain is empty.
                 // Fall back to the icon name only when the item has no variant mesh.
-                resolvedPrefab = variantMeshes.empty() ? std::string(iconPrefab) : variantMeshes.front();
+                resolved_prefab = variant_meshes.empty() ? std::string(icon_prefab) : variant_meshes.front();
             }
             // Prefer the LIVE partprefab wrapper name. For helm variants the engine instantiates `<mesh>_dd`. The bare
             // `<mesh>` has no live wrapper, so the icon/rule-derived name never matches the swap/carrier path. Rewrite
             // to `_dd` only when the bare form is NOT itself a live wrapper but its `_dd` twin IS, so ordinary items
             // (whose bare name is the live wrapper) stay untouched. See the carrier_defaults.hpp Oongka-helm note.
-            if (liveWrapperSet.count(resolvedPrefab) == 0 && liveWrapperSet.count(resolvedPrefab + "_dd") != 0)
-                resolvedPrefab += "_dd";
-            for (auto &vm : variantMeshes)
+            if (live_wrapper_set.count(resolved_prefab) == 0 && live_wrapper_set.count(resolved_prefab + "_dd") != 0)
+                resolved_prefab += "_dd";
+            for (auto &vm : variant_meshes)
             {
-                if (liveWrapperSet.count(vm) == 0 && liveWrapperSet.count(vm + "_dd") != 0)
+                if (live_wrapper_set.count(vm) == 0 && live_wrapper_set.count(vm + "_dd") != 0)
                     vm += "_dd";
             }
             ItemEntry e;
-            e.runtimeIdx = id;
-            e.internalName = std::move(internalName);
-            e.iconSlot = slot;
-            e.fullIcon = full;
-            e.iconPrefab = std::move(resolvedPrefab);
-            e.base = extract_base_prefix(e.iconPrefab);
-            e.variantMeshes = std::move(variantMeshes);
+            e.runtime_idx = id;
+            e.internal_name = std::move(internal_name);
+            e.icon_slot = slot;
+            e.full_icon = full;
+            e.icon_prefab = std::move(resolved_prefab);
+            e.base = extract_base_prefix(e.icon_prefab);
+            e.variant_meshes = std::move(variant_meshes);
             items.push_back(std::move(e));
         }
         logger.info("[itemprefab] item-pass: {} entries collected, {} skipped", items.size(), skipped);
 
-        // Targeted phantom recovery. Find each item whose iconPrefab and base are not in the pool yet, then scan
+        // Targeted phantom recovery. Find each item whose icon_prefab and base are not in the pool yet, then scan
         // memory once for those exact strings through a first-4-byte hash table. SKIP an item whose FullIconString
         // lacks the `_Prefab_` infix. Those are UI-only icons, and without the skip the targeted search resolves
         // quest/abyssgear strings against unrelated quest-registry entries that share the post-strip name and are not
         // actual mesh prefabs.
         {
-            std::vector<std::string> phantomTargets;
+            std::vector<std::string> phantom_targets;
             for (const auto &e : items)
             {
-                if (e.iconPrefab.empty())
+                if (e.icon_prefab.empty())
                     continue;
-                if (poolSet.find(e.iconPrefab) != poolSet.end())
+                if (pool_set.find(e.icon_prefab) != pool_set.end())
                     continue;
-                const std::string fullLower = to_lower(e.fullIcon);
-                if (is_ui_only_icon(fullLower))
+                const std::string full_lower = to_lower(e.full_icon);
+                if (is_ui_only_icon(full_lower))
                     continue;
-                phantomTargets.push_back(e.iconPrefab);
+                phantom_targets.push_back(e.icon_prefab);
             }
-            std::sort(phantomTargets.begin(), phantomTargets.end());
-            phantomTargets.erase(std::unique(phantomTargets.begin(), phantomTargets.end()), phantomTargets.end());
-            const auto tT0 = std::chrono::steady_clock::now();
-            const auto recovered = recover_phantoms_targeted(poolSet, phantomTargets);
-            const auto tT1 = std::chrono::steady_clock::now();
+            std::sort(phantom_targets.begin(), phantom_targets.end());
+            phantom_targets.erase(std::unique(phantom_targets.begin(), phantom_targets.end()), phantom_targets.end());
+            const auto t_t_0 = std::chrono::steady_clock::now();
+            const auto recovered = recover_phantoms_targeted(pool_set, phantom_targets);
+            const auto t_t_1 = std::chrono::steady_clock::now();
             logger.info(
                 "[itemprefab] targeted recovery: {} phantom strings searched, {} found in memory ({} ms)",
-                phantomTargets.size(),
+                phantom_targets.size(),
                 recovered,
-                std::chrono::duration_cast<std::chrono::milliseconds>(tT1 - tT0).count()
+                std::chrono::duration_cast<std::chrono::milliseconds>(t_t_1 - t_t_0).count()
             );
         }
 
@@ -1262,10 +1266,10 @@ namespace Transmog
         // cached passes do not, so clean every entry through one chokepoint here. A re-insert into a set strips the
         // control chars and also collapses the dirty variant into its clean twin, so the writer cannot emit a split
         // row or a duplicate key for the same prefab.
-        std::set<std::string> cleanPool;
-        for (const auto &name : poolSet)
-            cleanPool.insert(tsv_sanitize(name));
-        std::vector<std::string> pool(cleanPool.begin(), cleanPool.end());
+        std::set<std::string> clean_pool;
+        for (const auto &name : pool_set)
+            clean_pool.insert(tsv_sanitize(name));
+        std::vector<std::string> pool(clean_pool.begin(), clean_pool.end());
 
         // Drop dead bare data-name prefabs superseded by a live `_dd` wrapper (helm variants). The bare `..._index01`
         // is a string/data entry with no live partprefab wrapper, so the swap path can never match it, and the item
@@ -1279,7 +1283,7 @@ namespace Transmog
                     pool.begin(),
                     pool.end(),
                     [&](const std::string &n)
-                    { return liveWrapperSet.count(n) == 0 && liveWrapperSet.count(n + "_dd") != 0; }
+                    { return live_wrapper_set.count(n) == 0 && live_wrapper_set.count(n + "_dd") != 0; }
                 ),
                 pool.end()
             );
@@ -1290,7 +1294,7 @@ namespace Transmog
                 );
         }
 
-        // Index for prefab-centric emission. exact_map maps a pool prefab to the item index whose iconPrefab equals
+        // Index for prefab-centric emission. exact_map maps a pool prefab to the item index whose icon_prefab equals
         // it, and base_map maps a base to every item index that shares it.
         std::unordered_map<std::string, size_t> exact_map;
         exact_map.reserve(items.size());
@@ -1300,61 +1304,58 @@ namespace Transmog
         // primary link in the loop below.
         for (size_t i = 0; i < items.size(); ++i)
         {
-            exact_map.emplace(items[i].iconPrefab, i);
+            exact_map.emplace(items[i].icon_prefab, i);
             base_map[items[i].base].push_back(i);
         }
         // Then link each item's body-mesh variants (human male / orc / female / NPC) from the variant entry list so
         // their prefab rows resolve to this item rather than orphan: the shared, rig-stripped icon can name only one.
         // emplace keeps the first claimant, so nothing overwrites a primary link, and a mesh that several items share
         // groups under its first owner.
-        uint32_t variantLinks = 0;
+        uint32_t variant_links = 0;
         for (size_t i = 0; i < items.size(); ++i)
         {
-            for (const auto &vm : items[i].variantMeshes)
+            for (const auto &vm : items[i].variant_meshes)
             {
-                if (vm.empty() || vm == items[i].iconPrefab)
+                if (vm.empty() || vm == items[i].icon_prefab)
                     continue;
                 if (exact_map.emplace(vm, i).second)
                 {
                     base_map[extract_base_prefix(vm)].push_back(i);
-                    ++variantLinks;
+                    ++variant_links;
                 }
             }
         }
-        logger.info("[itemprefab] body-mesh variants linked from the variant entry list: {}", variantLinks);
+        logger.info("[itemprefab] body-mesh variants linked from the variant entry list: {}", variant_links);
 
-        // Emit one row per pool prefab, plus one row for each item whose iconPrefab is NOT in the pool, so the dump
-        // never silently drops an item. `itemsCovered` records which items an emitted row already mentions, and the
+        // Emit one row per pool prefab, plus one row for each item whose icon_prefab is NOT in the pool, so the dump
+        // never silently drops an item. `items_covered` records which items an emitted row already mentions, and the
         // phantom loop after this one emits the rest.
-        const auto rtDir = runtime_dir_utf8();
-        if (rtDir.empty())
-        {
-            logger.warning("[itemprefab] runtime dir unavailable");
-            return;
-        }
-        const std::string path = rtDir + "CrimsonDesertLiveTransmog_itemprefabs.tsv";
+        // get_runtime_directory() falls back to the working directory and finally to a relative
+        // anchor, so there is no unavailable case left to guard.
+        const std::filesystem::path path = std::filesystem::path{DMK::filesystem::get_runtime_directory()} /
+                                           "CrimsonDesertLiveTransmog_itemprefabs.tsv";
         std::ofstream out(path, std::ios::out | std::ios::trunc);
         if (!out.is_open())
         {
-            logger.warning("[itemprefab] failed to open output file: {}", path);
+            logger.warning("[itemprefab] failed to open output file: {}", to_utf8(path));
             return;
         }
 
         out << "Prefab\tBase\tExactItemId\tExactItemName\tExactIconSlot\t"
                "SiblingItemIds\tSiblingItemNames\tFullIconString\tOrphan\n";
 
-        std::set<size_t> itemsCovered; // items mentioned in any emitted row
+        std::set<size_t> items_covered; // items mentioned in any emitted row
 
         auto emit_row = [&](std::string_view prefab,
-                            std::string_view rowBase,
+                            std::string_view row_base,
                             const ItemEntry *exact,
                             const std::vector<size_t> &siblings,
                             bool orphan)
         {
-            out << prefab << '\t' << rowBase << '\t';
+            out << prefab << '\t' << row_base << '\t';
             if (exact)
             {
-                out << exact->runtimeIdx << '\t' << exact->internalName << '\t' << exact->iconSlot;
+                out << exact->runtime_idx << '\t' << exact->internal_name << '\t' << exact->icon_slot;
             }
             else
             {
@@ -1365,44 +1366,44 @@ namespace Transmog
             {
                 if (i > 0)
                     out << ',';
-                out << items[siblings[i]].runtimeIdx;
+                out << items[siblings[i]].runtime_idx;
             }
             out << '\t';
             for (size_t i = 0; i < siblings.size(); ++i)
             {
                 if (i > 0)
                     out << ',';
-                out << items[siblings[i]].internalName;
+                out << items[siblings[i]].internal_name;
             }
             out << '\t';
             if (exact)
-                out << exact->fullIcon;
+                out << exact->full_icon;
             out << '\t' << (orphan ? "yes" : "no") << '\n';
         };
 
-        uint32_t rowsEmitted = 0;
-        uint32_t rowsExact = 0;
-        uint32_t rowsSiblingOnly = 0;
-        uint32_t rowsOrphan = 0;
-        uint32_t rowsJunkSkipped = 0;
+        uint32_t rows_emitted = 0;
+        uint32_t rows_exact = 0;
+        uint32_t rows_sibling_only = 0;
+        uint32_t rows_orphan = 0;
+        uint32_t rows_junk_skipped = 0;
         for (const auto &p : pool)
         {
-            const std::string rowBase = extract_base_prefix(p);
+            const std::string row_base = extract_base_prefix(p);
             const ItemEntry *exact = nullptr;
             if (auto it = exact_map.find(p); it != exact_map.end())
             {
                 exact = &items[it->second];
-                itemsCovered.insert(it->second);
+                items_covered.insert(it->second);
             }
             std::vector<size_t> siblings;
-            if (auto it = base_map.find(rowBase); it != base_map.end())
+            if (auto it = base_map.find(row_base); it != base_map.end())
             {
                 for (size_t idx : it->second)
                 {
                     if (exact && &items[idx] == exact)
                         continue;
                     siblings.push_back(idx);
-                    itemsCovered.insert(idx);
+                    items_covered.insert(idx);
                 }
             }
             const bool orphan = !exact && siblings.empty();
@@ -1411,43 +1412,43 @@ namespace Transmog
             // never dropped even if one somehow matched the shape.
             if (orphan && is_junk_rig_fragment(p))
             {
-                ++rowsJunkSkipped;
+                ++rows_junk_skipped;
                 continue;
             }
             if (exact)
-                ++rowsExact;
+                ++rows_exact;
             else if (!siblings.empty())
-                ++rowsSiblingOnly;
+                ++rows_sibling_only;
             else
-                ++rowsOrphan;
-            emit_row(p, rowBase, exact, siblings, orphan);
-            ++rowsEmitted;
+                ++rows_orphan;
+            emit_row(p, row_base, exact, siblings, orphan);
+            ++rows_emitted;
         }
 
-        // Phantom items - their iconPrefab never appeared in the pool, because the engine's stringinfo references a
-        // prefab that the asset-bundle walk missed. Emit ONE row per unique phantom iconPrefab with all sharing items
+        // Phantom items - their icon_prefab never appeared in the pool, because the engine's stringinfo references a
+        // prefab that the asset-bundle walk missed. Emit ONE row per unique phantom icon_prefab with all sharing items
         // grouped (first as exact, rest as siblings). This dump is PREFAB-based: an item only appears when it resolves
         // to a real mesh/world-object prefab. Mesh-less UI icons (quest/skill/stat/bespoke `ItemIcon_<name>` with no
         // asset-prefix mesh) are skipped. gimmick/collection/craft/puzzle ARE real prefabs and are kept (see
         // is_ui_only_icon).
-        uint32_t phantomRows = 0;
-        uint32_t uiSkipped = 0;
-        std::set<std::string> phantomIconsEmitted;
+        uint32_t phantom_rows = 0;
+        uint32_t ui_skipped = 0;
+        std::set<std::string> phantom_icons_emitted;
         for (size_t i = 0; i < items.size(); ++i)
         {
-            if (itemsCovered.count(i))
+            if (items_covered.count(i))
                 continue;
-            const std::string fullLower = to_lower(items[i].fullIcon);
-            if (is_ui_only_icon(fullLower))
+            const std::string full_lower = to_lower(items[i].full_icon);
+            if (is_ui_only_icon(full_lower))
             {
                 // Not a real mesh prefab (UI-only icon), so skip it. This dump is prefab-based.
-                ++uiSkipped;
+                ++ui_skipped;
                 continue;
             }
-            if (!phantomIconsEmitted.insert(items[i].iconPrefab).second)
+            if (!phantom_icons_emitted.insert(items[i].icon_prefab).second)
                 continue;
-            // Collect every other item that shares this iconPrefab via base_map. extract_base_prefix returns the
-            // iconPrefab itself when there is no `_NNNN` token, so the base lookup is the correct grouping key.
+            // Collect every other item that shares this icon_prefab via base_map. extract_base_prefix returns the
+            // icon_prefab itself when there is no `_NNNN` token, so the base lookup is the correct grouping key.
             std::vector<size_t> sharing;
             if (auto it = base_map.find(items[i].base); it != base_map.end())
             {
@@ -1455,28 +1456,28 @@ namespace Transmog
                 {
                     if (idx == i)
                         continue;
-                    if (items[idx].iconPrefab != items[i].iconPrefab)
+                    if (items[idx].icon_prefab != items[i].icon_prefab)
                         continue;
                     sharing.push_back(idx);
-                    itemsCovered.insert(idx);
+                    items_covered.insert(idx);
                 }
             }
-            emit_row(items[i].iconPrefab, items[i].base, &items[i], sharing, false);
-            ++phantomRows;
-            ++rowsEmitted;
+            emit_row(items[i].icon_prefab, items[i].base, &items[i], sharing, false);
+            ++phantom_rows;
+            ++rows_emitted;
         }
 
         logger.info(
             "[itemprefab] dumped {} rows: {} exact, {} sibling-only, "
             "{} orphan, {} phantom-item, {} UI-only skipped, {} junk-fragment skipped -> "
             "CrimsonDesertLiveTransmog_itemprefabs.tsv",
-            rowsEmitted,
-            rowsExact,
-            rowsSiblingOnly,
-            rowsOrphan,
-            phantomRows,
-            uiSkipped,
-            rowsJunkSkipped
+            rows_emitted,
+            rows_exact,
+            rows_sibling_only,
+            rows_orphan,
+            phantom_rows,
+            ui_skipped,
+            rows_junk_skipped
         );
     }
     namespace

@@ -15,7 +15,7 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace Transmog::ColorOverride::TokenTable
+namespace Transmog::color_override::token_table
 {
     /**
      * Trigger AOB-anchored token-slot discovery. Safe to call once at module init.
@@ -78,10 +78,10 @@ namespace Transmog::ColorOverride::TokenTable
     std::uint16_t permutations_token() noexcept;
 
     /**
-     * Update the cached permutations token. The publisher hook reads `*(mi + k_offMi_PermutTok)` per fire and forwards
-     * live values here so downstream `permutations_token()` consumers see the current id.
+     * Update the cached permutations token. The publisher hook reads `*(mi + MI_OFFSET_PERMUT_TOKEN)` per fire and
+     * forwards live values here so downstream `permutations_token()` consumers see the current id.
      */
     void set_permutations_token(std::uint16_t tok) noexcept;
-} // namespace Transmog::ColorOverride::TokenTable
+} // namespace Transmog::color_override::token_table
 
 #endif // TRANSMOG_COLOR_OVERRIDE_COLOR_TOKEN_TABLE_HPP

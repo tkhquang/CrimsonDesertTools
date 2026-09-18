@@ -26,14 +26,14 @@
 namespace Transmog
 {
 
-    void draw_header(bool pending, bool pendingSave)
+    void draw_header(bool pending, bool pending_save)
     {
         ImGui::TextUnformatted(MOD_NAME);
         ImGui::SameLine();
         ui_text_disabled("v%s", MOD_VERSION);
 
         // Standalone-only UI scale combo. Stacks on the init-time auto-DPI baseline. Session-only - not persisted.
-        if (s_standaloneMode)
+        if (s_standalone_mode)
         {
             static constexpr float scale_values[] = {0.5f, 0.75f, 0.85f, 1.0f, 1.25f, 1.5f, 1.75f, 2.0f};
             static constexpr const char *labels[] =
@@ -41,7 +41,7 @@ namespace Transmog
             constexpr int scale_count = static_cast<int>(sizeof(scale_values) / sizeof(scale_values[0]));
             int sel = 3; // default points at 1.0x
             for (int i = 0; i < scale_count; ++i)
-                if (s_uiScale == scale_values[i])
+                if (s_ui_scale == scale_values[i])
                 {
                     sel = i;
                     break;
@@ -54,7 +54,7 @@ namespace Transmog
             ImGui::SameLine();
             ImGui::SetNextItemWidth(ImGui::GetFontSize() * 6.0f);
             if (ImGui::Combo("##uiScale", &sel, labels, scale_count, -1))
-                s_uiScale = scale_values[sel];
+                s_ui_scale = scale_values[sel];
             if (ImGui::IsItemHovered())
                 ui_tooltip(
                     "UI scale (standalone overlay).\n"
@@ -68,7 +68,7 @@ namespace Transmog
             ui_text_colored(ImVec4(1.0f, 0.85f, 0.2f, 1.0f), "  [PENDING - click Apply All]");
         }
 
-        if (pendingSave)
+        if (pending_save)
         {
             ImGui::SameLine();
             ui_text_colored(ImVec4(1.0f, 0.55f, 0.25f, 1.0f), "  [UNSAVED - click Save]");
@@ -89,7 +89,7 @@ namespace Transmog
                 manual_clear();
         }
 
-        ImGui::Checkbox("Instant Apply", &s_autoApply);
+        ImGui::Checkbox("Instant Apply", &s_auto_apply);
         if (ImGui::IsItemHovered())
             ui_tooltip("Apply changes immediately on hover, pick, toggle, and clear - no Apply All needed");
         ImGui::SameLine();
@@ -101,7 +101,7 @@ namespace Transmog
             );
 
         ImGui::SameLine();
-        ImGui::Checkbox("Keep Search Text", &s_keepSearchText);
+        ImGui::Checkbox("Keep Search Text", &s_keep_search_text);
         if (ImGui::IsItemHovered())
             ui_tooltip("Preserve the search field when re-opening a slot picker");
 
@@ -138,7 +138,7 @@ namespace Transmog
 
             // Dropdown writes the editing character only. The pin engages automatically when editing differs from
             // controlled; picking the controlled character clears the pin. Apply is cross-body when pinned: the
-            // controlled body wears the editing character's preset items via PWS / carrier substitution. Gendered or
+            // controlled body wears the editing character's preset items via pws / carrier substitution. Gendered or
             // character-specific items may not have a renderable variant on the controlled body and silently no-op.
             ImGui::SetNextItemWidth(200.0f);
             if (ImGui::Combo("Character##char_picker", &selected_idx, cstrs, static_cast<int>(n), -1))
@@ -150,12 +150,12 @@ namespace Transmog
                     for (auto &m : slot_mappings())
                     {
                         m.active = false;
-                        m.targetItemId = 0;
+                        m.target_item_id = 0;
                     }
                     pm.apply_to_state();
                     // Retain last_applied_ids / real_damaged / last_applied_real_ids / last_applied_carrier_ids across
                     // the editing-character switch. apply_all_transmog's
-                    // Phase A tear-down uses `lastIds[slot] != 0 && !mods[slot].active` to detect stale carriers from
+                    // Phase A tear-down uses `last_ids[slot] != 0 && !mods[slot].active` to detect stale carriers from
                     // the outgoing character's preset; pre-wiping any of those arrays leaves stale fakes installed on
                     // the body.
                     manual_apply();
@@ -189,7 +189,7 @@ namespace Transmog
                     for (auto &m : slot_mappings())
                     {
                         m.active = false;
-                        m.targetItemId = 0;
+                        m.target_item_id = 0;
                     }
                     pm.apply_to_state();
                     // Retain last_applied_* arrays for the same Phase A tear-down reason documented in the dropdown
@@ -278,13 +278,13 @@ namespace Transmog
 
             const bool is_active = (i == active_index);
 
-            if (s_renameActive && s_renameIndex == i)
+            if (s_rename_active && s_rename_index == i)
             {
                 ImGui::SetNextItemWidth(140.0f);
                 if (ImGui::InputText(
                         "##rename",
-                        s_renamePresetBuf,
-                        sizeof(s_renamePresetBuf),
+                        s_rename_preset_buf,
+                        sizeof(s_rename_preset_buf),
                         ImGuiInputTextFlags_EnterReturnsTrue,
                         nullptr,
                         nullptr
@@ -292,22 +292,22 @@ namespace Transmog
                 {
                     pm.set_active_preset(i);
                     if (auto *p = pm.active_preset_mut())
-                        p->name = s_renamePresetBuf;
+                        p->name = s_rename_preset_buf;
                     pm.set_active_preset(active_index);
                     pm.save();
-                    s_renameActive = false;
-                    s_renameIndex = -1;
+                    s_rename_active = false;
+                    s_rename_index = -1;
                 }
                 ImGui::SameLine();
                 if (ImGui::Button("OK", ImVec2(0, 0)))
                 {
                     pm.set_active_preset(i);
                     if (auto *p = pm.active_preset_mut())
-                        p->name = s_renamePresetBuf;
+                        p->name = s_rename_preset_buf;
                     pm.set_active_preset(active_index);
                     pm.save();
-                    s_renameActive = false;
-                    s_renameIndex = -1;
+                    s_rename_active = false;
+                    s_rename_index = -1;
                 }
             }
             else
@@ -326,20 +326,20 @@ namespace Transmog
                     // Tear down any active body-mesh prefab picks BEFORE switching presets. Otherwise the hook keeps
                     // substituting the old src wrappers while the new preset's items are being equipped, which produces
                     // stale visuals across the transition.
-                    const auto hadPick = clear_all_picked_prefabs_and_deactivate();
+                    const auto had_pick = clear_all_picked_prefabs_and_deactivate();
                     pm.set_active_preset(i);
                     pm.apply_to_state();
                     // Post-apply_to_state reconciliation: for each slot where a body-mesh pick was just cleared AND the
                     // new preset's carrier equals last_applied (the early-out case), set the force-apply flag so the
-                    // dispatcher bypasses the `targetId == prevId` early-out while leaving lastIds intact. Phase A
+                    // dispatcher bypasses the `targetId == prev_id` early-out while leaving last_ids intact. Phase A
                     // `tear_down_fake` then runs against the prior carrier and the natpipe-hook cleans up the prior
                     // body-mesh tgt wrapper. When carriers differ the regular tear_down_fake path already handles
                     // cleanup naturally, so the flag is harmless.
-                    auto &lastIds = last_applied_ids();
+                    auto &last_ids = last_applied_ids();
                     auto &mods = slot_mappings();
-                    for (std::size_t s = 0; s < k_slotCount; ++s)
+                    for (std::size_t s = 0; s < SLOT_COUNT; ++s)
                     {
-                        if (hadPick[s] && mods[s].targetItemId == lastIds[s])
+                        if (had_pick[s] && mods[s].target_item_id == last_ids[s])
                         {
                             force_apply_pending()[s] = true;
                         }
@@ -350,11 +350,11 @@ namespace Transmog
 
                 if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0))
                 {
-                    s_renameActive = true;
-                    s_renameIndex = i;
+                    s_rename_active = true;
+                    s_rename_index = i;
                     std::snprintf(
-                        s_renamePresetBuf,
-                        sizeof(s_renamePresetBuf),
+                        s_rename_preset_buf,
+                        sizeof(s_rename_preset_buf),
                         "%s",
                         preset_list[static_cast<std::size_t>(i)].name.c_str()
                     );

@@ -1,19 +1,19 @@
 #ifndef TRANSMOG_COLOR_OVERRIDE_COLOR_STATE_HPP
 #define TRANSMOG_COLOR_OVERRIDE_COLOR_STATE_HPP
 
-// Per-slot apply-window state, batch gate, freeze flags, and timestamps shared across ColorOverride sub-modules.
+// Per-slot apply-window state, batch gate, freeze flags, and timestamps shared across color_override sub-modules.
 
 #include "shared_state.hpp"
 
 #include <atomic>
 #include <cstdint>
 
-namespace Transmog::ColorOverride::State
+namespace Transmog::color_override::state
 {
-    using ::Transmog::k_slotCount;
+    using ::Transmog::SLOT_COUNT;
 
-    constexpr std::int64_t k_batchApplyExtendMs = 3000;
-    constexpr std::int64_t k_hashSetBurstLockMs = 500;
+    constexpr std::int64_t BATCH_APPLY_EXTEND_MS = 3000;
+    constexpr std::int64_t HASH_SET_BURST_LOCK_MS = 500;
 
     std::int64_t now_ms() noexcept;
 
@@ -34,6 +34,6 @@ namespace Transmog::ColorOverride::State
     // Per-slot hash-set burst-lock timestamp. After 500ms with no new hash, the hash-set refuses to grow (ghost matInst
     // guard).
     std::atomic<std::int64_t> &hash_set_last_add_ms(int slot) noexcept;
-} // namespace Transmog::ColorOverride::State
+} // namespace Transmog::color_override::state
 
 #endif // TRANSMOG_COLOR_OVERRIDE_COLOR_STATE_HPP

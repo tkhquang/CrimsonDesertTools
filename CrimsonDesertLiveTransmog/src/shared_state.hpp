@@ -5,6 +5,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <filesystem>
 #include <string>
 
 namespace Transmog
@@ -13,12 +14,12 @@ namespace Transmog
 
     struct ResolvedAddresses
     {
-        uintptr_t slotPopulator = 0;
-        uintptr_t mapLookup = 0;           // IndexedStringA::lookup - resolves CD_* slot hashes at runtime
-        uintptr_t subTranslator = 0;       // Anchor for the iteminfo item-name table scan
-        uintptr_t safeTearDown = 0;        // Scene-graph tear-down real_part_tear_down drives
-        uintptr_t indexedStringLookup = 0; // IndexedStringA short to hash. ItemNameTable resolves it through a chain
-                                           // walk, because 50+ template siblings prevent a direct AOB
+        uintptr_t slot_populator = 0;
+        uintptr_t map_lookup = 0;            // IndexedStringA::lookup - resolves CD_* slot hashes at runtime
+        uintptr_t sub_translator = 0;        // Anchor for the iteminfo item-name table scan
+        uintptr_t safe_tear_down = 0;        // Scene-graph tear-down real_part_tear_down drives
+        uintptr_t indexed_string_lookup = 0; // IndexedStringA short to hash. ItemNameTable resolves it through a chain
+                                             // walk, because 50+ template siblings prevent a direct AOB
     };
 
     ResolvedAddresses &resolved_addrs();
@@ -68,24 +69,24 @@ namespace Transmog
         // Kliff and Damiane reject this slot (engine metadata does not include tag 0x15 for them) and the slot adds no
         // transmog value for the typical case. To re-enable, add an `OongkaRocket, // engine tag 0x15` row here AND
         // extend every per-slot table that indexes by TransmogSlot:
-        //   slot_metadata.hpp       (k_slotMetadata - master row:
-        //                            gameTag, displayName, partShowHashKey, enabled)
-        //   carrier_defaults.hpp    (k_carriers - one carrier item
+        //   slot_metadata.hpp       (SLOT_METADATA - master row:
+        //                            game_tag, display_name, part_show_hash_key, enabled)
+        //   carrier_defaults.hpp    (CARRIERS - one carrier item
         //                            per character per slot)
-        //   prefab_wrapper_swap.cpp (k_slotTagPatterns - registry
+        //   prefab_wrapper_swap.cpp (slot_tag_patterns - registry
         //                            classifier patterns)
         Count
     };
 
-    inline constexpr std::size_t k_slotCount = static_cast<std::size_t>(TransmogSlot::Count);
+    inline constexpr std::size_t SLOT_COUNT = static_cast<std::size_t>(TransmogSlot::Count);
 
     struct SlotMapping
     {
         bool active = false;
-        uint16_t targetItemId = 0;
+        uint16_t target_item_id = 0;
     };
 
-    std::array<SlotMapping, k_slotCount> &slot_mappings();
+    std::array<SlotMapping, SLOT_COUNT> &slot_mappings();
 
     /**
      * @brief Which protagonist owns this equip-slot component (`a1`), 1-based, or 0.
@@ -116,7 +117,7 @@ namespace Transmog
     [[nodiscard]] std::uint32_t char_idx_for_equip_slot_uncached(std::uintptr_t a1) noexcept;
 
     /// Upper bound on published protagonist bodies: the game has exactly three playable characters.
-    inline constexpr std::size_t k_bodyOwnerCap = 3;
+    inline constexpr std::size_t BODY_OWNER_CAP = 3;
 
     /**
      * @brief Republishes the table of protagonist bodies that @ref char_idx_for_equip_slot answers from.
@@ -135,12 +136,12 @@ namespace Transmog
      *          reach a publish entry point.
      *
      * @param ccoias   Protagonist CCOIA pointers, @p n entries.
-     * @param charIdxs Matching 1-based character indices (1 Kliff, 2 Damiane, 3 Oongka), @p n entries.
-     * @param n        Number of entries. The publish ignores anything past @ref k_bodyOwnerCap.
+     * @param char_idxs Matching 1-based character indices (1 Kliff, 2 Damiane, 3 Oongka), @p n entries.
+     * @param n        Number of entries. The publish ignores anything past @ref BODY_OWNER_CAP.
      * @note An empty snapshot publishes an empty table. Rows held from the previous publish name bodies the engine
      *       already freed and whose addresses it reissues.
      */
-    void publish_body_owner_table(const std::uintptr_t *ccoias, const std::uint32_t *charIdxs, std::size_t n) noexcept;
+    void publish_body_owner_table(const std::uintptr_t *ccoias, const std::uint32_t *char_idxs, std::size_t n) noexcept;
 
     /**
      * @brief Which character `slot_mappings()` currently describes: 1 Kliff, 2 Damiane, 3 Oongka, 0 unbound.
@@ -157,7 +158,7 @@ namespace Transmog
      * @brief Item IDs last written to slot_mappings, saved before a preset switch.
      * @details clear_all_transmog reads it to know what to unequip.
      */
-    std::array<uint16_t, k_slotCount> &last_applied_ids();
+    std::array<uint16_t, SLOT_COUNT> &last_applied_ids();
 
     /**
      * @brief Per-character tracking of the last-applied transmog snapshot.
@@ -166,7 +167,7 @@ namespace Transmog
      *          describe ONE body's installed state at a time. With multi-character auto-apply and the "Apply To
      *          Selected" feature, the worker applies to any of the three protagonists between hook events, so a
      *          single global snapshot conflates state across bodies. Phase A teardown of Damiane's fakes then uses
-     *          Kliff's `lastIds` as its truth source.
+     *          Kliff's `last_ids` as its truth source.
      *
      *          Each character's snapshot is buffered. Before each apply the worker hydrates the globals from the
      *          target character's buffered snapshot. After the apply finishes it captures the new globals back.
@@ -199,9 +200,9 @@ namespace Transmog
     std::atomic<bool> &shutdown_requested();
 
     /**
-     * @brief Master gate for the ColorOverride subsystem.
+     * @brief Master gate for the color_override subsystem.
      * @details It covers the publisher hook, the setter substitute, the host-scope owner-vfunc midhooks and the
-     *          picker UI. False by default. The `[Experimental] ColorOverride` INI key enables it. When false, LT
+     *          picker UI. False by default. The `[Experimental] color_override` INI key enables it. When false, LT
      *          installs none of those hooks and hides the picker UI.
      */
     std::atomic<bool> &flag_color_override();
@@ -240,17 +241,17 @@ namespace Transmog
     using SlotPopulatorFn = __int64(__fastcall *)(__int64 a1, unsigned __int16 *a2_itemData, __int64 a3_swapEntry);
     SlotPopulatorFn &slot_populator_fn();
 
-    // Rebuilds a single slot's visual. f(a1, slotA, slotB, swapEntry) - BOTH slot arguments must name the slot to
+    // Rebuilds a single slot's visual. f(a1, slot_a, slot_b, swap_entry) - BOTH slot arguments must name the slot to
     // refresh. SlotPopulator passes the item-derived slot for the first, which collapses the two halves of a paired
     // slot onto one. Null when the AOB scan missed.
-    using PartSlotRefreshFn = __int64(__fastcall *)(__int64 a1, __int16 slotA, __int16 slotB, __int64 a4_swapEntry);
+    using PartSlotRefreshFn = __int64(__fastcall *)(__int64 a1, __int16 slot_a, __int16 slot_b, __int64 a4_swapEntry);
     PartSlotRefreshFn &part_slot_refresh_fn();
 
     // Resolves a slot TAG to the slot HANDLE PartSlotRefresh needs for its second argument. Writes 0xFFFF when the
     // tag names no live part record.
     using SlotTagToHandleFn = std::uint16_t *(__fastcall *)(__int64 a1,
                                                             std::uint16_t *out,
-                                                            std::uint16_t slotTag,
+                                                            std::uint16_t slot_tag,
                                                             char flag);
     SlotTagToHandleFn &slot_tag_to_handle_fn();
 
@@ -258,7 +259,7 @@ namespace Transmog
     // bails on 0xFFFF, so it decides whether a carrier can be equipped at all. A carrier the engine refuses makes
     // SlotPopulator a silent no-op: it equips nothing and still returns a value that looks like success, so the
     // apply path asks this question itself rather than reading the answer out of SlotPopulator's return.
-    using ItemToSlotResolveFn = std::int64_t(__fastcall *)(std::int64_t a1, std::int16_t itemId);
+    using ItemToSlotResolveFn = std::int64_t(__fastcall *)(std::int64_t a1, std::int16_t item_id);
     ItemToSlotResolveFn &item_to_slot_resolve_fn();
 
     // Initializes a swap entry to defaults (all -1 and zeros).
@@ -271,7 +272,7 @@ namespace Transmog
 
     /**
      * @brief Recursion guard: set while LT is driving an apply, so its own engine calls are not treated as the
-     * player's. Read by SocketMeshOverride and the prefab-swap hooks.
+     * player's. Read by socket_mesh_override and the prefab-swap hooks.
      */
     std::atomic<bool> &in_transmog();
 
@@ -298,33 +299,33 @@ namespace Transmog
      * @details Phase B sets it when it tears down the real item. Once set, the fake==real skip path falls through to
      *          SlotPopulator so the engine restores the mesh. A full clear resets it.
      */
-    std::array<bool, k_slotCount> &real_damaged();
+    std::array<bool, SLOT_COUNT> &real_damaged();
 
     /**
-     * @brief Snapshot of the auth-table real itemId per slot at the last apply, indexed by TransmogSlot.
+     * @brief Snapshot of the auth-table real item_id per slot at the last apply, indexed by TransmogSlot.
      * @details The dispatcher compares it against live auth state to detect real-item swaps. It covers every
      *          supported slot, so a real-item change on an accessory or a weapon slot (e.g. the tool and the 2H sword
      *          that share engine slot tag 0x0D) triggers a re-apply. Slots LT does not manage stay zeroed.
      */
-    std::array<std::uint16_t, k_slotCount> &last_applied_real_ids();
+    std::array<std::uint16_t, SLOT_COUNT> &last_applied_real_ids();
 
     /**
      * @brief Carrier itemIds used in the last apply, indexed by TransmogSlot.
      * @details 0 means the apply used no carrier (direct apply). Tear-down Phase A reads it to find the correct
      *          scene-graph identity.
      */
-    std::array<std::uint16_t, k_slotCount> &last_applied_carrier_ids();
+    std::array<std::uint16_t, SLOT_COUNT> &last_applied_carrier_ids();
 
     /**
      * @brief Per-slot one-shot "force apply" flag.
-     * @details When true, the next apply for that slot bypasses the `targetId == prevId` early-out and forces
-     *          slotNeedsWork in apply_all_transmog. It leaves last_applied_ids[i] intact, so Phase A
+     * @details When true, the next apply for that slot bypasses the `targetId == prev_id` early-out and forces
+     *          slot_needs_work in apply_all_transmog. It leaves last_applied_ids[i] intact, so Phase A
      *          `tear_down_fake` still runs against the prior carrier. The body-mesh picker sets it when it re-picks a
      *          prefab on the same carrier (e.g. 0x1521 -> 0x1521 with a different src to tgt wrapper map). Without
      *          it, the dispatcher skips Phase A entirely and the engine's natural-pipeline hook never cleans up the
      *          prior body-mesh target wrapper. The dispatcher clears it after the read.
      */
-    std::array<bool, k_slotCount> &force_apply_pending();
+    std::array<bool, SLOT_COUNT> &force_apply_pending();
 
     /**
      * @brief When true, the debounce worker runs a clear in place of an apply.
@@ -343,7 +344,7 @@ namespace Transmog
 
     /**
      * @brief Slot index for a single-slot hover-apply.
-     * @details k_slotCount means "apply all", which is the default. A slot index scopes the next debounced apply to
+     * @details SLOT_COUNT means "apply all", which is the default. A slot index scopes the next debounced apply to
      *          that one slot and avoids full-gear flicker. The last writer wins: when manual_apply and
      *          manual_apply_slot race before the worker wakes, only the latest store takes effect, so the user's most
      *          recent action decides.
@@ -361,11 +362,16 @@ namespace Transmog
     }
 
     /**
-     * @brief Converts the wide runtime directory to a UTF-8 string with a trailing path separator.
-     * @return The directory, or an empty string on failure.
-     * @details The init and deferred-scan paths use it to locate sidecar data files.
+     * @brief Renders a path as UTF-8 for a log line or a message box.
+     * @param path Any path. Typically one built from DMK::filesystem::get_runtime_directory().
+     * @return The same path encoded in UTF-8.
+     * @details Not a DetourModKit gap. DMK exposes the runtime directory in UTF-8 and nothing more,
+     *          and this renders a path the caller already holds. It exists because the logger formats
+     *          through std::format, which has no formatter for std::filesystem::path before C++26, and
+     *          because path::string() would re-encode with the process ANSI codepage, which is the very
+     *          bug this file stopped having. Display only: open a file from the path itself.
      */
-    std::string runtime_dir_utf8();
+    [[nodiscard]] std::string to_utf8(const std::filesystem::path &path);
 
 } // namespace Transmog
 

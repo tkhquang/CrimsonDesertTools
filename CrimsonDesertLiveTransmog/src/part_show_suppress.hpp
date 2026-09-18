@@ -5,12 +5,12 @@
 #include <string>
 #include <unordered_map>
 
-namespace Transmog::PartShowSuppress
+namespace Transmog::part_show_suppress
 {
     /**
      * @brief Callback signature for the PartInOut direct-show entry point the PartAddShow anchor resolves.
      *
-     * The game routes transition-time visual adds through this function, which bypasses the RealPartTearDown
+     * The game routes transition-time visual adds through this function, which bypasses the real_part_tear_down
      * scene-graph removal. A hook on it stops stale real-helm frames from flashing through during glide exits,
      * landings, and effect spawns.
      *
@@ -19,7 +19,7 @@ namespace Transmog::PartShowSuppress
     using PartAddShowFn = __int64(__fastcall *)(
         __int64 a1,
         std::uint8_t a2,
-        std::uint64_t partHashPtr,
+        std::uint64_t part_hash_ptr,
         float blend,
         __int64 a5,
         __int64 a6,
@@ -32,7 +32,7 @@ namespace Transmog::PartShowSuppress
     __int64 __fastcall on_part_add_show(
         __int64 a1,
         std::uint8_t a2,
-        std::uint64_t partHashPtr,
+        std::uint64_t part_hash_ptr,
         float blend,
         __int64 a5,
         __int64 a6,
@@ -51,11 +51,11 @@ namespace Transmog::PartShowSuppress
 
     /**
      * @brief Flag an IndexedStringA hash as suppressed.
-     * @param partHash 32-bit IndexedStringA index (e.g. 0xADE8 for CD_Helm).
+     * @param part_hash 32-bit IndexedStringA index (e.g. 0xADE8 for CD_Helm).
      * @param suppressed true adds the hash to the table, false removes it.
      * @note The table matches the full 32-bit hash, so two hashes that share a low half stay independent.
      */
-    void set_hash_suppressed(std::uint32_t partHash, bool suppressed) noexcept;
+    void set_hash_suppressed(std::uint32_t part_hash, bool suppressed) noexcept;
 
     /**
      * @brief Wipe the entire suppression table.
@@ -68,25 +68,25 @@ namespace Transmog::PartShowSuppress
      * @brief Populate the suppression table from a slot category mask. Bit N marks TransmogSlot::N for suppression.
      * @details Clears the table first, then enables suppression for every part hash mapped to each set bit.
      */
-    void set_mask(std::uint32_t categoryMask) noexcept;
+    void set_mask(std::uint32_t category_mask) noexcept;
 
     /**
      * @brief Populate the slot to IndexedStringA hash table at runtime.
      *
-     * @param nameToHash Map from CD_* part name to IndexedStringA bucket index (produced by
+     * @param name_to_hash Map from CD_* part name to IndexedStringA bucket index (produced by
      *                   scan_indexed_string_table()).
      *
      * @details IndexedStringA buckets are volatile across game patches, so the slot hashes cannot be hardcoded. Call
      *          this before the first set_mask() or on_part_add_show() call. When the map is missing a slot name, that
      *          slot becomes unsuppressable for this session and the function logs a warning.
      *
-     * @return Number of slots resolved (out of k_slotCount).
+     * @return Number of slots resolved (out of SLOT_COUNT).
      */
-    std::size_t init_slot_hashes(const std::unordered_map<std::string, std::uint32_t> &nameToHash) noexcept;
+    std::size_t init_slot_hashes(const std::unordered_map<std::string, std::uint32_t> &name_to_hash) noexcept;
 
     /** @brief True if init_slot_hashes has populated at least one slot. */
     bool slot_hashes_ready() noexcept;
 
-} // namespace Transmog::PartShowSuppress
+} // namespace Transmog::part_show_suppress
 
 #endif // TRANSMOG_PART_SHOW_SUPPRESS_HPP

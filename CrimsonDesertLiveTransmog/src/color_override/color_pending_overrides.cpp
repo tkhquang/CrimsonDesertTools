@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 
-namespace Transmog::ColorOverride::PendingOverrides
+namespace Transmog::color_override::pending_overrides
 {
     namespace
     {
@@ -23,11 +23,11 @@ namespace Transmog::ColorOverride::PendingOverrides
 
         // Per-slot list. Linear scan on lookup - entries per slot typically <= 30 (number of dyeable submesh-token
         // pairs in an outfit), so a vector beats a hash map both for memory locality and code simplicity.
-        std::array<std::vector<Entry>, k_slotCount> g_entries;
+        std::array<std::vector<Entry>, SLOT_COUNT> g_entries;
 
         // Hot-path "does this slot have anything to check" gate so the setter doesn't pay map-access cost when nothing
         // was persisted for the slot.
-        std::array<std::atomic<bool>, k_slotCount> g_slotHas{};
+        std::array<std::atomic<bool>, SLOT_COUNT> g_slotHas{};
 
         // Single mutex for all slots: insert/clear paths are cold (load / preset switch / item swap). Lookup path is
         // hot but read-only under the lock for the brief vector scan.
@@ -38,7 +38,7 @@ namespace Transmog::ColorOverride::PendingOverrides
 
         bool valid_slot(int slot) noexcept
         {
-            return slot >= 0 && static_cast<std::size_t>(slot) < k_slotCount;
+            return slot >= 0 && static_cast<std::size_t>(slot) < SLOT_COUNT;
         }
     } // namespace
 
@@ -70,7 +70,7 @@ namespace Transmog::ColorOverride::PendingOverrides
         Entry e;
         e.submesh_name = submesh_name;
         e.token_name = token_name;
-        e.token_id_cached = TokenTable::token_id_for_name(token_name.c_str());
+        e.token_id_cached = token_table::token_id_for_name(token_name.c_str());
         e.r = r;
         e.g = g;
         e.b = b;
@@ -110,7 +110,7 @@ namespace Transmog::ColorOverride::PendingOverrides
             auto &e = *it;
             // Lazy late-resolve of token id when the snapshot was not ready at insert time (early boot).
             if (e.token_id_cached == 0)
-                e.token_id_cached = TokenTable::token_id_for_name(e.token_name.c_str());
+                e.token_id_cached = token_table::token_id_for_name(e.token_name.c_str());
             if (e.token_id_cached != token_id)
                 continue;
             if (e.submesh_name != submesh_name)
@@ -157,7 +157,7 @@ namespace Transmog::ColorOverride::PendingOverrides
             return false;
         }
         std::lock_guard<std::mutex> lk(g_mtx);
-        for (std::size_t s = 0; s < k_slotCount; ++s)
+        for (std::size_t s = 0; s < SLOT_COUNT; ++s)
         {
             if (!g_slotHas[s].load(std::memory_order_acquire))
                 continue;
@@ -166,7 +166,7 @@ namespace Transmog::ColorOverride::PendingOverrides
             {
                 // Lazy late-resolve of token id when the snapshot was not ready at insert time (early boot).
                 if (e.token_id_cached == 0)
-                    e.token_id_cached = TokenTable::token_id_for_name(e.token_name.c_str());
+                    e.token_id_cached = token_table::token_id_for_name(e.token_name.c_str());
                 if (e.token_id_cached != token_id)
                     continue;
                 if (e.submesh_name != submesh_name)
@@ -252,7 +252,7 @@ namespace Transmog::ColorOverride::PendingOverrides
     void clear_all() noexcept
     {
         std::lock_guard<std::mutex> lk(g_mtx);
-        for (std::size_t s = 0; s < k_slotCount; ++s)
+        for (std::size_t s = 0; s < SLOT_COUNT; ++s)
         {
             g_entries[s].clear();
             g_slotHas[s].store(false, std::memory_order_release);
@@ -272,4 +272,4 @@ namespace Transmog::ColorOverride::PendingOverrides
         };
     }
 
-} // namespace Transmog::ColorOverride::PendingOverrides
+} // namespace Transmog::color_override::pending_overrides

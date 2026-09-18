@@ -28,10 +28,10 @@
 #include <string>
 #include <vector>
 
-namespace Transmog::ColorOverride::SwatchTable
+namespace Transmog::color_override::swatch_table
 {
-    using ::Transmog::k_slotCount;
-    using ::Transmog::ColorOverride::k_dyeSwatchesPerSlot;
+    using ::Transmog::SLOT_COUNT;
+    using ::Transmog::color_override::DYE_SWATCHES_PER_SLOT;
 
     /**
      * Engine-observed row identity + cached engine-default RGBA. Setter-thread writes; UI thread reads (atomic loads
@@ -54,7 +54,7 @@ namespace Transmog::ColorOverride::SwatchTable
         std::atomic<std::uint8_t> def_seen_mask{0}; // bit0=RGB, bit1=A
         std::atomic<bool> def_a_captured{false};
 
-        // Reinit-pruned ghost row. Reinit::Finalize sets this true for an identity that the capture pass did not
+        // reinit-pruned ghost row. reinit::Finalize sets this true for an identity that the capture pass did not
         // see. While it is true, the setter substitute path bails on the row.
         std::atomic<bool> frozen_hidden{false};
     };
@@ -96,7 +96,7 @@ namespace Transmog::ColorOverride::SwatchTable
     using DyeRGB = SwatchOverride;
 
     /**
-     * Lookup-or-insert keyed by full identity tuple. Returns row index in [0..k_dyeSwatchesPerSlot) on success, -1 if
+     * Lookup-or-insert keyed by full identity tuple. Returns row index in [0..DYE_SWATCHES_PER_SLOT) on success, -1 if
      * the slot is full or frozen or any required field is 0. `expect_open` gates inserts (false means lookup-only).
      */
     int lookup_or_insert(
@@ -175,7 +175,7 @@ namespace Transmog::ColorOverride::SwatchTable
      * The substitute path uses this helper to re-route to the slot the user actually saved the placeholder in.
      *
      * Empty submesh_name bails, token_id 0 bails. Lowest-index slot wins on duplicates (deterministic). Linear scan,
-     * `k_slotCount * k_dyeSwatchesPerSlot` rows worst case - cheap enough for the hot path.
+     * `SLOT_COUNT * DYE_SWATCHES_PER_SLOT` rows worst case - cheap enough for the hot path.
      */
     int find_placeholder_slot(const char *submesh_name, std::uint16_t token_id) noexcept;
 
@@ -232,7 +232,7 @@ namespace Transmog::ColorOverride::SwatchTable
      */
     void clear_dye_state_for_slot(int slot) noexcept;
 
-    // Reinit-aware accessors
+    // reinit-aware accessors
 
     /**
      * Wipe ALL rows + override choices for slot. Use when the transmog target item changes so stale identities do not
@@ -254,7 +254,7 @@ namespace Transmog::ColorOverride::SwatchTable
      */
     void clear_explicit_wipe_flag(int slot) noexcept;
 
-    // Reinit gates (owned by SwatchTable, read by setter)
+    // reinit gates (owned by swatch_table, read by setter)
 
     /**
      * Post-reinit lock: once Finalize completes, the slot's identity set is closed. The setter's lookup_or_insert
@@ -263,7 +263,7 @@ namespace Transmog::ColorOverride::SwatchTable
     std::atomic<bool> &post_reinit_lock(int slot) noexcept;
 
     /**
-     * Reinit capture window: open during start..Finalize, closed at
+     * reinit capture window: open during start..Finalize, closed at
      * Finalize. While the post-reinit lock is true, this also gates any further inserts.
      */
     std::atomic<bool> &reinit_capture_open(int slot) noexcept;
@@ -287,7 +287,7 @@ namespace Transmog::ColorOverride::SwatchTable
     std::size_t snapshot_active_identities(int slot, SwatchIdentity *out, std::size_t out_cap) noexcept;
 
     /**
-     * Apply the keep-set computed by Reinit::Finalize. Rows whose identity matches an entry in `keep` get cleared of
+     * Apply the keep-set computed by reinit::Finalize. Rows whose identity matches an entry in `keep` get cleared of
      * `frozen_hidden` + `active_this_apply=true`; rows that do not match get `frozen_hidden=true` +
      * `active_this_apply=false`. Returns (kept_count, hidden_count).
      */
@@ -311,7 +311,7 @@ namespace Transmog::ColorOverride::SwatchTable
     // token)` pair and the slot context is known (the publisher's apply window). Entries are organized per-slot in
     // JSON; the runtime pending-overrides map keys by `(slot, submesh, token_id)` for setter-side O(1) lookup.
     //
-    // Independent of `DyeRecordInject::ChannelDye` (the ARMOR_MOD copy path under JSON key `dye_mods`); these entries
+    // Independent of `dye_record_inject::ChannelDye` (the ARMOR_MOD copy path under JSON key `dye_mods`); these entries
     // live under `swatch_overrides`.
     //
     // Compact triple used by both the "user override" and "captured default" persistence paths. The semantic meaning of
@@ -342,10 +342,10 @@ namespace Transmog::ColorOverride::SwatchTable
     std::vector<PersistEntry> get_persistable_palette(int slot) noexcept;
 
     /**
-     * Queue persisted user-override entries into the PendingOverrides map. The setter consults this map on every
+     * Queue persisted user-override entries into the pending_overrides map. The setter consults this map on every
      * successful insert/match and auto-applies the saved RGB. Defaults snapshot does NOT need to go through
-     * PendingOverrides because rows are seeded directly with their engine values via populate_from_persisted's defaults
-     * phase.
+     * pending_overrides because rows are seeded directly with their engine values via populate_from_persisted's
+     * defaults phase.
      */
     void restore_persisted_state(int slot, const std::vector<PersistEntry> &overrides) noexcept;
 
@@ -391,8 +391,8 @@ namespace Transmog::ColorOverride::SwatchTable
     void dump_all_slots() noexcept;
 
     /**
-     * Enforce the strict-init default: lock every slot so setter writes cannot add rows outside an explicit Reinit
-     * cycle. Called once from `ColorOverride::init()` after construction, before PresetManager::load() runs.
+     * Enforce the strict-init default: lock every slot so setter writes cannot add rows outside an explicit reinit
+     * cycle. Called once from `color_override::init()` after construction, before PresetManager::load() runs.
      * Idempotent.
      */
     void lock_all_slots() noexcept;
@@ -415,29 +415,29 @@ namespace Transmog::ColorOverride::SwatchTable
         std::size_t active_overrides = 0;
     };
     SlotCounts slot_counts(int slot) noexcept;
-} // namespace Transmog::ColorOverride::SwatchTable
+} // namespace Transmog::color_override::swatch_table
 
 // Per-slot DyeSlot storage exposed at the parent namespace so the picker can read `dye_state()[i].slot_enabled` and
 // `dye_state()[i].swatches[s]` directly.
-namespace Transmog::ColorOverride
+namespace Transmog::color_override
 {
     struct DyeSlot
     {
-        std::array<SwatchTable::DyeRGB, k_dyeSwatchesPerSlot> swatches{};
+        std::array<swatch_table::DyeRGB, DYE_SWATCHES_PER_SLOT> swatches{};
         bool slot_enabled = false;
     };
 
     /**
-     * Canonical per-slot DyeSlot storage. `PickerState::slot_enabled` and `SwatchTable`'s per-row override fields all
+     * Canonical per-slot DyeSlot storage. `PickerState::slot_enabled` and `swatch_table`'s per-row override fields all
      * alias into this array.
      */
-    std::array<DyeSlot, k_slotCount> &dye_state() noexcept;
+    std::array<DyeSlot, SLOT_COUNT> &dye_state() noexcept;
 
     /**
      * "Advanced view" toggle for the dye picker UI. Session-only; not currently persisted across runs.
      */
     bool dye_advanced_view_get() noexcept;
     void dye_advanced_view_set(bool v) noexcept;
-} // namespace Transmog::ColorOverride
+} // namespace Transmog::color_override
 
 #endif // TRANSMOG_COLOR_OVERRIDE_COLOR_SWATCH_TABLE_HPP

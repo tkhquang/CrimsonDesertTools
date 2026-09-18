@@ -4,6 +4,8 @@
 #include "shared_state.hpp"
 
 #include <cstdint>
+#include <filesystem>
+#include <functional>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -18,7 +20,7 @@ namespace Transmog
      *
      * Each item has an internal name string (e.g. "Kliff_PlateArmor_Helm", "Marni_Laser_Helm_Upgrade") stored in a
      * refcounted string wrapper at descriptor+8. The game bakes these names into its data, and they survive a game
-     * patch ORDERS OF MAGNITUDE more often than the raw uint16 itemId (which is a per-record descriptor index that
+     * patch ORDERS OF MAGNITUDE more often than the raw uint16 item_id (which is a per-record descriptor index that
      * can shift on any content patch).
      *
      * `resolve_chain` in item_name_table.cpp walks SubTranslator to the iteminfo global pointer holder and to
@@ -55,24 +57,24 @@ namespace Transmog
         /**
          * @brief Build the table from the item descriptor catalog.
          *
-         * @param subTranslatorAddr Address of SubTranslator (the SlotPopulator item-id translator), resolved via AOB.
+         * @param sub_translator_addr Address of SubTranslator (the SlotPopulator item-id translator), resolved via AOB.
          * @return BuildResult describing the outcome. `Deferred` is retryable. `Ok` and `Fatal` are final.
          *
          * On `Ok`, `size()` reflects the ingested entry count. On `Deferred`/`Fatal`, the table stays empty. A
          * background scan thread can call it safely. `m_mutex` guards the published state, so `ready()` and
          * `sorted_entries()` observe a consistent snapshot.
          */
-        [[nodiscard]] BuildResult build(uintptr_t subTranslatorAddr);
+        [[nodiscard]] BuildResult build(uintptr_t sub_translator_addr);
 
         /**
          * @brief Look up an item name by id. Returns an empty string if the id is unknown.
          */
-        [[nodiscard]] std::string name_of(uint16_t itemId) const;
+        [[nodiscard]] std::string name_of(uint16_t item_id) const;
 
         /**
          * @brief Resolve a previously-saved item name back to its current id. Returns std::nullopt on miss.
          */
-        [[nodiscard]] std::optional<uint16_t> id_of(const std::string &name) const;
+        [[nodiscard]] std::optional<uint16_t> id_of(std::string_view name) const;
 
         /**
          * @brief True if the item's descriptor has a non-sentinel pointer at the variant-metadata slot (see
@@ -89,43 +91,43 @@ namespace Transmog
          * address is hardcoded, so the detector self-heals across future .data shuffles. Returns false for unknown ids
          * or when the catalog is not yet built.
          */
-        [[nodiscard]] bool has_variant_meta(uint16_t itemId) const;
+        [[nodiscard]] bool has_variant_meta(uint16_t item_id) const;
 
         /**
          * @brief True if the item is safe to equip on the (male) player.
          *
-         * Kliff-centric: an item is player-safe unless the female body restricts it. `m_bodyByName` carries that
+         * Kliff-centric: an item is player-safe unless the female body restricts it. `m_body_by_name` carries that
          * restriction, keyed by lowercase internal name. An item wearable by both bodies or unrestricted is absent
          * from that map and counts as safe.
          *
          * Unknown ids default to `true`: the picker prefers to surface an item rather than hide it accidentally.
          */
-        [[nodiscard]] bool is_player_compatible(uint16_t itemId) const;
+        [[nodiscard]] bool is_player_compatible(uint16_t item_id) const;
 
         /// Returns true once build() published a non-empty catalog.
-        [[nodiscard]] bool ready() const noexcept { return !m_idToName.empty(); }
+        [[nodiscard]] bool ready() const noexcept { return !m_id_to_name.empty(); }
 
         /// Returns the number of catalog entries build() published.
-        [[nodiscard]] std::size_t size() const noexcept { return m_idToName.size(); }
+        [[nodiscard]] std::size_t size() const noexcept { return m_id_to_name.size(); }
 
         /**
          * @brief Read the live descriptor pointer for an item.
          *
-         * Dereferences the iteminfo global cached during build(), walks `*(globalPtr + ITEMINFO_PTR_ARRAY_OFFSET)`
-         * (ptrArray) and returns `ptrArray[itemId*8]`. Returns 0 on any fault or if the catalog is not yet built.
+         * Dereferences the iteminfo global cached during build(), walks `*(global_ptr + ITEMINFO_PTR_ARRAY_OFFSET)`
+         * (ptr_array) and returns `ptr_array[item_id*8]`. Returns 0 on any fault or if the catalog is not yet built.
          * Thread-safe. It reads only and never mutates.
          */
-        [[nodiscard]] uintptr_t descriptor_of(uint16_t itemId) const noexcept;
+        [[nodiscard]] uintptr_t descriptor_of(uint16_t item_id) const noexcept;
 
         /**
-         * @brief Live ptrArray base and entry count.
+         * @brief Live ptr_array base and entry count.
          *
-         * Returns {ptrArray, count}. Either or both can be 0 if the catalog global is not yet initialized. Callers MUST
-         * verify both > 0 before indexing.
+         * Returns {ptr_array, count}. Either or both can be 0 if the catalog global is not yet initialized. Callers
+         * MUST verify both > 0 before indexing.
          */
         struct CatalogInfo
         {
-            uintptr_t ptrArray = 0;
+            uintptr_t ptr_array = 0;
             uint32_t count = 0;
         };
         [[nodiscard]] CatalogInfo catalog_info() const noexcept;
@@ -164,7 +166,7 @@ namespace Transmog
          * An item rendered on the wrong body produces broken meshes, so the filter hides opposite-body items by
          * default.
          *
-         * `m_bodyByName` is the live source. It lists only single-body restricted items, so classification resolves
+         * `m_body_by_name` is the live source. It lists only single-body restricted items, so classification resolves
          * to Male, Female, or Generic. The remaining kinds stay as picker display vocabulary for a future mesh-based
          * classifier.
          *
@@ -190,12 +192,12 @@ namespace Transmog
             uint16_t id{};
             /// Transmog slot from the item's ItemGroupInfo membership, or Count for non-equipment.
             TransmogSlot category{TransmogSlot::Count};
-            bool hasVariantMeta{};
-            bool isPlayerCompatible{};
-            BodyKind bodyKind{BodyKind::Generic};
+            bool has_variant_meta{};
+            bool is_player_compatible{};
+            BodyKind body_kind{BodyKind::Generic};
             std::string name;
             /// Human-readable name from the display_names TSV.
-            std::string displayName;
+            std::string display_name;
         };
 
         /**
@@ -204,7 +206,7 @@ namespace Transmog
          * The first access after build() rebuilds it, and it is stable thereafter. Returned by const reference so the
          * overlay can hold onto it without a copy of the several thousand entries per frame.
          *
-         * @note This const method fills `m_sortedCache` under `m_mutex`.
+         * @note This const method fills `m_sorted_cache` under `m_mutex`.
          */
         [[nodiscard]] const std::vector<Entry> &sorted_entries() const;
 
@@ -213,7 +215,7 @@ namespace Transmog
          * @return The body kind, or `BodyKind::Generic` for an unknown name, so a future character gets a wide-open
          *         picker instead of an empty one.
          */
-        [[nodiscard]] static BodyKind body_kind_for_character(const std::string &charName) noexcept;
+        [[nodiscard]] static BodyKind body_kind_for_character(std::string_view char_name) noexcept;
 
         /**
          * @brief Single-body restriction for an item: BodyKind::Male / BodyKind::Female, or BodyKind::Generic when the
@@ -222,18 +224,18 @@ namespace Transmog
          * Unlike is_player_compatible (which is Kliff-centric), this returns the raw kind so callers can compare it
          * against a specific character's body - e.g. to decide whether the engine's own body/class check will accept
          * the item (and therefore pick the correct body variant) WITHOUT LT's char-class bypass. Sourced from the same
-         * display_names equip-eligibility column (m_bodyByName, keyed by lowercase internal name).
+         * display_names equip-eligibility column (m_body_by_name, keyed by lowercase internal name).
          *
          * Named to parallel body_kind_for_character(). It is distinct from PresetManager::body_kind_of(), which
          * returns a character's configured body as a string.
          */
-        [[nodiscard]] BodyKind body_kind_for_item(uint16_t itemId) const;
+        [[nodiscard]] BodyKind body_kind_for_item(uint16_t item_id) const;
 
         /**
          * @brief Look up the transmog slot for an item id.
          *
          * Resolved at catalog-build time in two steps: the item's ItemGroupInfo membership matched by GROUP NAME,
-         * then, for items whose groups name no slot (NPC and boss gear), a `typeCode -> slot` table LEARNED from the
+         * then, for items whose groups name no slot (NPC and boss gear), a `type_code -> slot` table LEARNED from the
          * items the first step classified. See the slot-classification block and `DESC_TYPE_CODE_OFFSET` in
          * item_name_table.cpp. Nothing is hardcoded to a type-code value, because those are row indices that renumber
          * on patches.
@@ -241,25 +243,25 @@ namespace Transmog
          * Anything not in a mapped group (shields aside, that means horse and pet gear, quest items, consumables) and
          * any unknown id returns `TransmogSlot::Count`.
          */
-        [[nodiscard]] TransmogSlot category_of(uint16_t itemId) const noexcept;
+        [[nodiscard]] TransmogSlot category_of(uint16_t item_id) const noexcept;
 
         /**
          * @brief `category_of` WITHOUT the runtime-observed override - the catalog's own answer.
          *
-         * Cross-checks the engine's live slot tags against `k_slotMetadata`. `category_of` consults `m_observedSlot`
+         * Cross-checks the engine's live slot tags against `SLOT_METADATA`. `category_of` consults `m_observed_slot`
          * first, and the same auth-table walk that performs the check writes that map. A comparison against it is
          * self-fulfilling and never reports drift.
          */
-        [[nodiscard]] TransmogSlot catalog_category_of(uint16_t itemId) const noexcept;
+        [[nodiscard]] TransmogSlot catalog_category_of(uint16_t item_id) const noexcept;
 
         /**
-         * @brief Record an observed `(itemId -> slot)` binding seen in the engine's live auth-table.
+         * @brief Record an observed `(item_id -> slot)` binding seen in the engine's live auth-table.
          *
          * `category_of()` consults the runtime map BEFORE the catalog classification, so ground truth classifies an
          * item the engine actually equipped. Slot == `TransmogSlot::Count` clears the entry. Thread-safe and cheap:
          * one hash insert per call.
          */
-        void record_observed_slot(std::uint16_t itemId, TransmogSlot slot) noexcept;
+        void record_observed_slot(std::uint16_t item_id, TransmogSlot slot) noexcept;
 
         /// Number of currently-recorded runtime slot observations. Diagnostic only.
         [[nodiscard]] std::size_t observed_slot_count() const noexcept;
@@ -273,54 +275,71 @@ namespace Transmog
         /**
          * @brief Load human-readable display names from a TSV file.
          *
-         * Each line is `internalName<TAB>displayName`. Keys are lowercased at load time for case-insensitive matching.
-         * Must be called after a successful build(). Invalidates the sorted cache so the next sorted_entries() picks up
-         * display names.
+         * Each line is `internal_name<TAB>display_name`. Keys are lowercased at load time for case-insensitive
+         * matching. Must be called after a successful build(). Invalidates the sorted cache so the next
+         * sorted_entries() picks up display names.
          *
-         * @param tsvPath Path to the display names TSV file.
+         * @param tsv_path Path to the display names TSV file. Build it from the wide runtime
+         *        directory so a non-ASCII install path still resolves.
          */
-        void load_display_names(const std::string &tsvPath);
+        void load_display_names(const std::filesystem::path &tsv_path);
 
         /**
          * @brief Look up a display name by internal name.
          *
-         * @param internalName The item's internal catalog name.
+         * @param internal_name The item's internal catalog name.
          * @return The human-readable display name, or empty string if no mapping exists.
          */
-        [[nodiscard]] std::string display_name_of(std::string_view internalName) const;
+        [[nodiscard]] std::string display_name_of(std::string_view internal_name) const;
 
     private:
         ItemNameTable() = default;
 
-        std::unordered_map<uint16_t, std::string> m_idToName;
-        std::unordered_map<std::string, uint16_t> m_nameToId;
-        std::unordered_map<uint16_t, uint8_t> m_variantFlag;
-        // `itemId -> TransmogSlot`, classified during build() from the item's ItemGroupInfo membership. Items that
+        /**
+         * @brief Hash that accepts any string-like key, so a lookup by view finds a std::string entry.
+         * @details std::unordered_map only allows a heterogeneous key when BOTH the hasher and the
+         *          comparator declare is_transparent. That pair is what keeps id_of's string_view
+         *          parameter from having to materialize a std::string on every call.
+         */
+        struct StringHash
+        {
+            using is_transparent = void;
+
+            [[nodiscard]] std::size_t operator()(std::string_view key) const noexcept
+            {
+                return std::hash<std::string_view>{}(key);
+            }
+        };
+
+        std::unordered_map<uint16_t, std::string> m_id_to_name;
+        std::unordered_map<std::string, uint16_t, StringHash, std::equal_to<>> m_name_to_id;
+        std::unordered_map<uint16_t, uint8_t> m_variant_flag;
+        // `item_id -> TransmogSlot`, classified during build() from the item's ItemGroupInfo membership. Items that
         // belong to no mapped group are ABSENT rather than stored as Count, so the map sizes to the equipment subset.
-        std::unordered_map<uint16_t, TransmogSlot> m_slotById;
-        // Runtime-learned `itemId -> TransmogSlot` map. Populated by `record_observed_slot` (called from the
+        std::unordered_map<uint16_t, TransmogSlot> m_slot_by_id;
+        // Runtime-learned `item_id -> TransmogSlot` map. Populated by `record_observed_slot` (called from the
         // slot-discovery dump when it observes live auth-table bindings). Authoritative override for the catalog
         // classification: if the engine actually equipped an item in a given slot, that beats any derivation.
         // Session-scoped, with no disk persistence.
-        std::unordered_map<uint16_t, TransmogSlot> m_observedSlot;
-        std::unordered_map<std::string, std::string> m_displayNames; // lowercase internal -> display
+        std::unordered_map<uint16_t, TransmogSlot> m_observed_slot;
+        std::unordered_map<std::string, std::string> m_display_names; // lowercase internal -> display
         // Wearer-body restriction, and the ONLY source of one. It loads from the optional 3rd column of the
         // display_names TSV, keyed by lowercase internal name. Only single-body-restricted items are present (Male /
         // Female). Absent -> unrestricted (BodyKind::Generic). It drives the per-character picker filter and
         // is_player_compatible. The descriptor rule-classifier token walk carries no usable body class, because a
         // game update re-keyed those tokens. Do not go back to it.
-        std::unordered_map<std::string, BodyKind> m_bodyByName;
-        mutable std::vector<Entry> m_sortedCache;
+        std::unordered_map<std::string, BodyKind> m_body_by_name;
+        mutable std::vector<Entry> m_sorted_cache;
 
         // Stability detector: it tracks the valid count from the previous build() attempt. The catalog is accepted
         // only when two consecutive scans produce the same count. An unchanged count means the game finished the
         // descriptor pointer array.
-        uint32_t m_lastBuildValid = 0;
+        uint32_t m_last_build_valid = 0;
 
         // The one lock this class takes, so there is no lock order to preserve. It serializes the build() publish
         // against every reader: name_of, id_of, has_variant_meta, is_player_compatible, body_kind_for_item,
         // category_of, catalog_category_of, record_observed_slot, observed_slot_count, sorted_entries and
-        // load_display_names. It is mutable, because the const sorted_entries() fills m_sortedCache under it.
+        // load_display_names. It is mutable, because the const sorted_entries() fills m_sorted_cache under it.
         mutable std::mutex m_mutex;
     };
 

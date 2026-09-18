@@ -30,10 +30,10 @@ namespace Transmog
         using DMK::anchor::AnchorKind;
         using DMK::scan::Pages;
 
-        constexpr std::size_t k_anchorCount = static_cast<std::size_t>(AnchorId::Count);
+        constexpr std::size_t ANCHOR_COUNT = static_cast<std::size_t>(AnchorId::Count);
 
         /// The host image every anchor resolves against, filled before the sweep and handed to each validator.
-        DMK::Region s_hostImage{};
+        DMK::Region s_host_image{};
 
         /**
          * @brief Post-resolve validator: the resolved value must land inside CrimsonDesert.exe.
@@ -81,262 +81,262 @@ namespace Transmog
         // Every row sets require_validator: an anchor that reaches a backend without a post-resolve predicate then
         // fails CLOSED instead of publishing an unchecked address. It is a no-op for the rows below, which all carry
         // one. It is there so a row ADDED later cannot quietly skip verification.
-        const Anchor k_anchors[] = {
+        const Anchor ANCHORS[] = {
             {
                 .label = "SlotPopulator",
                 .kind = AnchorKind::RipGlobal,
-                .site = k_slotPopulatorCandidates,
+                .site = SLOT_POPULATOR_CANDIDATES,
                 .validator = code_site,
-                .validator_context = &s_hostImage,
+                .validator_context = &s_host_image,
                 .require_validator = true,
                 .pages = Pages::Executable,
             },
             {
                 .label = "MapLookup",
                 .kind = AnchorKind::RipGlobal,
-                .site = CDCore::Anchors::k_mapLookupCandidates,
+                .site = CDCore::anchors::MAP_LOOKUP_CANDIDATES,
                 .validator = code_site,
-                .validator_context = &s_hostImage,
+                .validator_context = &s_host_image,
                 .require_validator = true,
                 .pages = Pages::Executable,
             },
             {
                 .label = "SubTranslator",
                 .kind = AnchorKind::RipGlobal,
-                .site = k_subTranslatorCandidates,
+                .site = SUB_TRANSLATOR_CANDIDATES,
                 .validator = code_site,
-                .validator_context = &s_hostImage,
+                .validator_context = &s_host_image,
                 .require_validator = true,
                 .pages = Pages::Executable,
             },
             {
                 .label = "SafeTearDown",
                 .kind = AnchorKind::RipGlobal,
-                .site = k_safeTearDownCandidates,
+                .site = SAFE_TEAR_DOWN_CANDIDATES,
                 .validator = code_site,
-                .validator_context = &s_hostImage,
+                .validator_context = &s_host_image,
                 .require_validator = true,
                 .pages = Pages::Executable,
             },
             {
                 .label = "InitSwapEntry",
                 .kind = AnchorKind::RipGlobal,
-                .site = k_initSwapEntryCandidates,
+                .site = INIT_SWAP_ENTRY_CANDIDATES,
                 .validator = code_site,
-                .validator_context = &s_hostImage,
+                .validator_context = &s_host_image,
                 .require_validator = true,
                 .pages = Pages::Executable,
             },
             {
                 .label = "PartSlotRefresh",
                 .kind = AnchorKind::RipGlobal,
-                .site = k_partSlotRefreshCandidates,
+                .site = PART_SLOT_REFRESH_CANDIDATES,
                 .validator = code_site,
-                .validator_context = &s_hostImage,
+                .validator_context = &s_host_image,
                 .require_validator = true,
                 .pages = Pages::Executable,
             },
             {
                 .label = "SlotTagToHandle",
                 .kind = AnchorKind::RipGlobal,
-                .site = k_slotTagToHandleCandidates,
+                .site = SLOT_TAG_TO_HANDLE_CANDIDATES,
                 .validator = code_site,
-                .validator_context = &s_hostImage,
+                .validator_context = &s_host_image,
                 .require_validator = true,
                 .pages = Pages::Executable,
             },
             {
                 .label = "PartAddShow",
                 .kind = AnchorKind::RipGlobal,
-                .site = CDCore::Anchors::k_partAddShowCandidates,
+                .site = CDCore::anchors::PART_ADD_SHOW_CANDIDATES,
                 .validator = code_site,
-                .validator_context = &s_hostImage,
+                .validator_context = &s_host_image,
                 .require_validator = true,
                 .pages = Pages::Executable,
             },
             {
                 .label = "WorldSystem",
                 .kind = AnchorKind::RipGlobal,
-                .site = CDCore::Anchors::k_worldSystemCandidates,
+                .site = CDCore::anchors::WORLD_SYSTEM_CANDIDATES,
                 // A data slot, not code: the entry-plausibility screen does not apply.
                 .validator = in_host_image,
-                .validator_context = &s_hostImage,
+                .validator_context = &s_host_image,
                 .require_validator = true,
                 .pages = Pages::Executable,
             },
             {
                 .label = "StringInfoRegistry",
                 .kind = AnchorKind::RipGlobal,
-                .site = k_stringInfoRegistryCandidates,
+                .site = STRING_INFO_REGISTRY_CANDIDATES,
                 .validator = in_host_image,
-                .validator_context = &s_hostImage,
+                .validator_context = &s_host_image,
                 .require_validator = true,
                 .pages = Pages::Executable,
             },
             {
                 .label = "StringInfoVtable",
                 .kind = AnchorKind::RipGlobal,
-                .site = k_stringInfoVtableCandidates,
+                .site = STRING_INFO_VTABLE_CANDIDATES,
                 // A vtable in .rdata, not code.
                 .validator = in_host_image,
-                .validator_context = &s_hostImage,
+                .validator_context = &s_host_image,
                 .require_validator = true,
                 .pages = Pages::Executable,
             },
             {
                 .label = "LoaderRegistry",
                 .kind = AnchorKind::RipGlobal,
-                .site = k_loaderRegistryCandidates,
+                .site = LOADER_REGISTRY_CANDIDATES,
                 .validator = in_host_image,
-                .validator_context = &s_hostImage,
+                .validator_context = &s_host_image,
                 .require_validator = true,
                 .pages = Pages::Executable,
             },
             {
                 .label = "StructCopy",
                 .kind = AnchorKind::RipGlobal,
-                .site = k_structCopyCandidates,
+                .site = STRUCT_COPY_CANDIDATES,
                 .validator = code_site,
-                .validator_context = &s_hostImage,
+                .validator_context = &s_host_image,
                 .require_validator = true,
                 .pages = Pages::Executable,
             },
             {
                 .label = "NaturalPipeline",
                 .kind = AnchorKind::RipGlobal,
-                .site = k_naturalPipelineCandidates,
+                .site = NATURAL_PIPELINE_CANDIDATES,
                 .validator = code_site,
-                .validator_context = &s_hostImage,
+                .validator_context = &s_host_image,
                 .require_validator = true,
                 .pages = Pages::Executable,
             },
             {
                 .label = "UnlinkByWrapper",
                 .kind = AnchorKind::RipGlobal,
-                .site = k_unlinkByWrapperCandidates,
+                .site = UNLINK_BY_WRAPPER_CANDIDATES,
                 .validator = code_site,
-                .validator_context = &s_hostImage,
+                .validator_context = &s_host_image,
                 .require_validator = true,
                 .pages = Pages::Executable,
             },
             {
                 .label = "PartListMerge",
                 .kind = AnchorKind::RipGlobal,
-                .site = k_partListMergeCandidates,
+                .site = PART_LIST_MERGE_CANDIDATES,
                 .validator = code_site,
-                .validator_context = &s_hostImage,
+                .validator_context = &s_host_image,
                 .require_validator = true,
                 .pages = Pages::Executable,
             },
             {
                 .label = "PartDescriptorBuild",
                 .kind = AnchorKind::RipGlobal,
-                .site = k_partDescriptorBuildCandidates,
+                .site = PART_DESCRIPTOR_BUILD_CANDIDATES,
                 .validator = code_site,
-                .validator_context = &s_hostImage,
+                .validator_context = &s_host_image,
                 .require_validator = true,
                 .pages = Pages::Executable,
             },
             {
                 .label = "DyeCopy",
                 .kind = AnchorKind::RipGlobal,
-                .site = k_dyeCopyCandidates,
+                .site = DYE_COPY_CANDIDATES,
                 .validator = code_site,
-                .validator_context = &s_hostImage,
+                .validator_context = &s_host_image,
                 .require_validator = true,
                 .pages = Pages::Executable,
             },
             {
                 .label = "DyeCopier",
                 .kind = AnchorKind::RipGlobal,
-                .site = k_dyeCopierCandidates,
+                .site = DYE_COPIER_CANDIDATES,
                 .validator = code_site,
-                .validator_context = &s_hostImage,
+                .validator_context = &s_host_image,
                 .require_validator = true,
                 .pages = Pages::Executable,
             },
             {
                 .label = "ColorPublisher",
                 .kind = AnchorKind::RipGlobal,
-                .site = k_colorPublisherCandidates,
+                .site = COLOR_PUBLISHER_CANDIDATES,
                 .validator = code_site,
-                .validator_context = &s_hostImage,
+                .validator_context = &s_host_image,
                 .require_validator = true,
                 .pages = Pages::Executable,
             },
             {
                 .label = "HostScopeVfunc1",
                 .kind = AnchorKind::RipGlobal,
-                .site = k_hostScopeVfunc1Candidates,
+                .site = HOST_SCOPE_VFUNC1_CANDIDATES,
                 .validator = code_site,
-                .validator_context = &s_hostImage,
+                .validator_context = &s_host_image,
                 .require_validator = true,
                 .pages = Pages::Executable,
             },
             {
                 .label = "HostScopeVfunc2",
                 .kind = AnchorKind::RipGlobal,
-                .site = k_hostScopeVfunc2Candidates,
+                .site = HOST_SCOPE_VFUNC2_CANDIDATES,
                 .validator = code_site,
-                .validator_context = &s_hostImage,
+                .validator_context = &s_host_image,
                 .require_validator = true,
                 .pages = Pages::Executable,
             },
             {
                 .label = "SetterByte",
                 .kind = AnchorKind::RipGlobal,
-                .site = k_setterByteCandidates,
+                .site = SETTER_BYTE_CANDIDATES,
                 .validator = code_site,
-                .validator_context = &s_hostImage,
+                .validator_context = &s_host_image,
                 .require_validator = true,
                 .pages = Pages::Executable,
             },
             {
                 .label = "ColorTokenInterner",
                 .kind = AnchorKind::RipGlobal,
-                .site = k_colorTokenInternerCandidates,
+                .site = COLOR_TOKEN_INTERNER_CANDIDATES,
                 .validator = code_site,
-                .validator_context = &s_hostImage,
+                .validator_context = &s_host_image,
                 .require_validator = true,
                 .pages = Pages::Executable,
             },
             {
                 .label = "GameAudioEffectVtable",
                 .kind = AnchorKind::RipGlobal,
-                .site = k_gameAudioEffectVtableCandidates,
+                .site = GAME_AUDIO_EFFECT_VTABLE_CANDIDATES,
                 // A vtable in .rdata, not code.
                 .validator = in_host_image,
-                .validator_context = &s_hostImage,
+                .validator_context = &s_host_image,
                 .require_validator = true,
                 .pages = Pages::Executable,
             },
             {
                 .label = "PlayerStatic",
                 .kind = AnchorKind::RipGlobal,
-                .site = k_playerStaticCandidates,
+                .site = PLAYER_STATIC_CANDIDATES,
                 .validator = in_host_image,
-                .validator_context = &s_hostImage,
+                .validator_context = &s_host_image,
                 .require_validator = true,
                 .pages = Pages::Executable,
             },
             {
                 .label = "HelmAudioRegistrar",
                 .kind = AnchorKind::RipGlobal,
-                .site = k_helmAudioRegistrarCandidates,
+                .site = HELM_AUDIO_REGISTRAR_CANDIDATES,
                 .validator = code_site,
-                .validator_context = &s_hostImage,
+                .validator_context = &s_host_image,
                 .require_validator = true,
                 .pages = Pages::Executable,
             },
         };
-        static_assert(std::size(k_anchors) == k_anchorCount, "k_anchors must hold one entry per AnchorId.");
+        static_assert(std::size(ANCHORS) == ANCHOR_COUNT, "ANCHORS must hold one entry per AnchorId.");
 
         // The per-anchor report and the ONLY store of a resolved address. anchor_address() serves out of it, and the
         // startup summary and the shutdown diagnostics snapshot roll it up instead of recomputing it. Written once by
         // resolve_all_anchors() on the init thread before any consumer reads, then read-only, so no synchronization
-        // is required. An index past s_reportCount stays default-constructed, so its status reads Unresolved.
-        std::array<DMK::anchor::ResolvedAnchor, k_anchorCount> s_report{};
-        std::size_t s_reportCount = 0;
+        // is required. An index past s_report_count stays default-constructed, so its status reads Unresolved.
+        std::array<DMK::anchor::ResolvedAnchor, ANCHOR_COUNT> s_report{};
+        std::size_t s_report_count = 0;
 
         /**
          * @brief Grades every candidate pattern in the table and reports the weak ones.
@@ -346,13 +346,13 @@ namespace Transmog
          *          stops resolving is usually one whose rungs were already weakly selective, and this says which,
          *          without a disassembler. RTTI candidates carry no byte pattern and are skipped.
          */
-        void report_signature_health(std::span<const Anchor> anchors)
+        void report_signature_health(std::span<const Anchor> anchor_table)
         {
             auto &logger = DMK::log();
             std::size_t fragile = 0;
             std::size_t unusable = 0;
 
-            for (const Anchor &entry : anchors)
+            for (const Anchor &entry : anchor_table)
             {
                 for (const DMK::scan::Candidate &candidate : entry.site)
                 {
@@ -410,28 +410,28 @@ namespace Transmog
         // Every Crimson Desert target lives in the host EXE, so the scan scope is that image: faster than a
         // whole-process walk, and immune to a generic-shaped candidate first-matching inside a sibling mod or an
         // overlay. The same region validates each resolved value.
-        s_hostImage = DMK::Region::host();
+        s_host_image = DMK::Region::host();
 
         // Offline grading first: it needs no game memory and says which rungs are structurally weak BEFORE the sweep
         // says which ones missed, so the two lines read together on a patch-day log.
-        report_signature_health(k_anchors);
+        report_signature_health(ANCHORS);
 
-        s_reportCount = DMK::anchor::resolve_all_parallel(k_anchors, s_report, s_hostImage);
+        s_report_count = DMK::anchor::resolve_all_parallel(ANCHORS, s_report, s_host_image);
 
         // The LAYOUT witness for the whole sweep. It folds the PE timestamp, SizeOfImage, and section table, so it
         // moves on a game patch and stays put under ASLR. It is what makes the per-anchor trust keys below comparable
         // between two launches.
-        const DMK::scan::ImageIdentity hostIdentity = DMK::scan::image_identity(s_hostImage);
+        const DMK::scan::ImageIdentity host_identity = DMK::scan::image_identity(s_host_image);
         logger.info(
             "Host image identity: timestamp {:#010x}, size {:#x}, sections {:#x}, token {:#x}",
-            hostIdentity.timestamp,
-            hostIdentity.size_of_image,
-            hostIdentity.section_digest,
-            hostIdentity.token()
+            host_identity.timestamp,
+            host_identity.size_of_image,
+            host_identity.section_digest,
+            host_identity.token()
         );
 
-        // resolve_all_parallel writes s_report[i] for k_anchors[i], so the report index IS the AnchorId.
-        for (std::size_t i = 0; i < s_reportCount; ++i)
+        // resolve_all_parallel writes s_report[i] for ANCHORS[i], so the report index IS the AnchorId.
+        for (std::size_t i = 0; i < s_report_count; ++i)
         {
             const DMK::anchor::ResolvedAnchor &entry = s_report[i];
             if (entry.status == DMK::anchor::AnchorStatus::Resolved)
@@ -445,7 +445,7 @@ namespace Transmog
                     DMK::format::format_address(static_cast<std::uintptr_t>(entry.value)),
                     DMK::anchor::result_domain_to_string(entry.domain),
                     DMK::anchor::physical_source_to_string(entry.witness.source),
-                    DMK::anchor::anchor_trust_fingerprint(k_anchors[i], hostIdentity)
+                    DMK::anchor::anchor_trust_fingerprint(ANCHORS[i], host_identity)
                 );
             }
             else
@@ -471,7 +471,7 @@ namespace Transmog
     std::uintptr_t anchor_address(AnchorId id) noexcept
     {
         const auto index = static_cast<std::size_t>(id);
-        if (index >= k_anchorCount)
+        if (index >= ANCHOR_COUNT)
         {
             return 0;
         }
@@ -485,12 +485,7 @@ namespace Transmog
 
     std::span<const DMK::anchor::ResolvedAnchor> anchor_report() noexcept
     {
-        return std::span<const DMK::anchor::ResolvedAnchor>(s_report.data(), s_reportCount);
-    }
-
-    DMK::scan::Pattern claim_walk_site_pattern()
-    {
-        return Pattern::literal("48 8B 43 08 48 8B 48 28 48 85 C9");
+        return std::span<const DMK::anchor::ResolvedAnchor>(s_report.data(), s_report_count);
     }
 
 } // namespace Transmog

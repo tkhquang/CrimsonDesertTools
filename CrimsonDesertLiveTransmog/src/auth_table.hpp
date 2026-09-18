@@ -4,7 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace Transmog::AuthTable
+namespace Transmog::auth_table
 {
     /**
      * @brief Memory geometry of the engine's authoritative equip table, hanging off ClientEquipSlotActorComponent.
@@ -13,10 +13,10 @@ namespace Transmog::AuthTable
      * UNIT on patch day, so splitting it across the files that walk it (transmog.cpp, transmog_apply.cpp,
      * real_part_tear_down.cpp) leaves a partial edit one missed grep away. A partial edit fails silently.
      *
-     *     component + k_containerPtrOffset        -> container
-     *     container + k_containerArrayBaseOffset  -> entry array base
-     *     container + k_containerCountOffset      -> live entry count (dword)
-     *     arrayBase + index * k_entryStride       -> entry
+     *     component + CONTAINER_PTR_OFFSET        -> container
+     *     container + CONTAINER_ARRAY_BASE_OFFSET  -> entry array base
+     *     container + CONTAINER_COUNT_OFFSET      -> live entry count (dword)
+     *     array_base + index * ENTRY_STRIDE       -> entry
      *
      * The engine states the walk itself, with the component in the base register:
      *     mov rax,[<comp>+0x90] ; mov rdx,[rax+08] ; mov eax,[rax+10]
@@ -35,22 +35,22 @@ namespace Transmog::AuthTable
      * @note The item id sits at +0x08.
      * @note Slot tag VALUES are stable (see slot_metadata.hpp). Only their POSITION within the entry shifts.
      */
-    inline constexpr std::ptrdiff_t k_containerPtrOffset = 0x90;
-    inline constexpr std::ptrdiff_t k_containerArrayBaseOffset = 0x08;
-    inline constexpr std::ptrdiff_t k_containerCountOffset = 0x10;
+    inline constexpr std::ptrdiff_t CONTAINER_PTR_OFFSET = 0x90;
+    inline constexpr std::ptrdiff_t CONTAINER_ARRAY_BASE_OFFSET = 0x08;
+    inline constexpr std::ptrdiff_t CONTAINER_COUNT_OFFSET = 0x10;
 
-    inline constexpr std::ptrdiff_t k_entryStride = 0xD0;
+    inline constexpr std::ptrdiff_t ENTRY_STRIDE = 0xD0;
 
     /// Primary item word. 0xFFFF or 0 marks an empty entry.
-    inline constexpr std::ptrdiff_t k_entryItemIdOffset = 0x08;
+    inline constexpr std::ptrdiff_t ENTRY_ITEM_ID_OFFSET = 0x08;
 
     /// Live-entry gate. A live entry holds a non-zero value here.
-    inline constexpr std::ptrdiff_t k_entryGateOffset = 0x10;
+    inline constexpr std::ptrdiff_t ENTRY_GATE_OFFSET = 0x10;
 
-    inline constexpr std::ptrdiff_t k_entrySlotTagOffset = 0xC8;
+    inline constexpr std::ptrdiff_t ENTRY_SLOT_TAG_OFFSET = 0xC8;
 
     static_assert(
-        k_entrySlotTagOffset + 0x08 == k_entryStride,
+        ENTRY_SLOT_TAG_OFFSET + 0x08 == ENTRY_STRIDE,
         "auth-table entry stride and slot-tag offset move together by 8. Update both, not one "
         "(0xC8/0xC0 and 0xD0/0xC8 are the two shapes the engine alternates between)."
     );
@@ -58,8 +58,8 @@ namespace Transmog::AuthTable
     /// Address of entry `index`. Arithmetic only, so the caller still owns the guarded read.
     [[nodiscard]] inline constexpr std::uintptr_t entry_at(std::uintptr_t array_base, std::size_t index) noexcept
     {
-        return array_base + index * static_cast<std::uintptr_t>(k_entryStride);
+        return array_base + index * static_cast<std::uintptr_t>(ENTRY_STRIDE);
     }
-} // namespace Transmog::AuthTable
+} // namespace Transmog::auth_table
 
 #endif // TRANSMOG_AUTH_TABLE_HPP

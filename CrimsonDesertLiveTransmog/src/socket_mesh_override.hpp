@@ -24,7 +24,7 @@
  * keyed by SOCKET and works for any incoming item without registering its meshes first.
  */
 
-namespace Transmog::SocketMeshOverride
+namespace Transmog::socket_mesh_override
 {
     /**
      * @brief Resolve and hook PartDescriptorBuild.
@@ -35,6 +35,6 @@ namespace Transmog::SocketMeshOverride
 
     /// Descriptors rewritten so far. Diagnostic.
     [[nodiscard]] unsigned overridden_count() noexcept;
-} // namespace Transmog::SocketMeshOverride
+} // namespace Transmog::socket_mesh_override
 
 #endif // TRANSMOG_SOCKET_MESH_OVERRIDE_HPP

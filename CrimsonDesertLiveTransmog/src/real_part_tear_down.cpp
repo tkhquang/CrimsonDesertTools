@@ -18,9 +18,10 @@
 #include <cstdint>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
-namespace Transmog::RealPartTearDown
+namespace Transmog::real_part_tear_down
 {
     namespace
     {
@@ -41,26 +42,26 @@ namespace Transmog::RealPartTearDown
          *          the cost this gate exists to avoid, so a sweep that fails to detach is fixed as a sweep bug rather
          *          than hidden behind a tear-down.
          *
-         * @param gameSlotTag Engine slot tag under consideration.
+         * @param game_slot_tag Engine slot tag under consideration.
          * @return true when the caller must run the engine tear-down for this slot.
          *
          * @note A backpack's strap and holder belong to neither carrier nor target, because an item emits exactly one
          *       mesh, and the engine attaches them whenever a bag is worn. They are live parts, so no tear-down
          *       removes them and none must.
          */
-        [[nodiscard]] bool tear_down_needed_for_slot(std::uint16_t gameSlotTag) noexcept
+        [[nodiscard]] bool tear_down_needed_for_slot(std::uint16_t game_slot_tag) noexcept
         {
-            const auto tmSlot = Transmog::slot_from_game_slot(static_cast<std::int16_t>(gameSlotTag));
-            if (!tmSlot.has_value())
+            const auto tm_slot = Transmog::slot_from_game_slot(static_cast<std::int16_t>(game_slot_tag));
+            if (!tm_slot.has_value())
             {
                 // Unknown tag - no mapping owns it, so LT is not filling it. Treat as empty and tear down: a skip
                 // risks leaving a visual with nothing tracking it.
                 return true;
             }
 
-            const auto idx = static_cast<std::size_t>(*tmSlot);
+            const auto idx = static_cast<std::size_t>(*tm_slot);
             const auto &mapping = Transmog::slot_mappings()[idx];
-            if (!mapping.active || mapping.targetItemId == 0)
+            if (!mapping.active || mapping.target_item_id == 0)
                 return true;
 
             return Transmog::last_applied_ids()[idx] == 0;
@@ -70,7 +71,7 @@ namespace Transmog::RealPartTearDown
         // init()):
         //
         // SafeTearDown - engine scene-graph tear-down. It calls an internal scene-detach primitive. It does NOT
-        //   mutate the authoritative equip table at a1+AuthTable::k_containerPtrOffset. The function is AOB-resolved,
+        //   mutate the authoritative equip table at a1+auth_table::CONTAINER_PTR_OFFSET. The function is AOB-resolved,
         //   so a reader who cross-checks against a disassembler database must match the byte pattern in
         //   safe_tear_down(), never a name.
         //
@@ -81,9 +82,9 @@ namespace Transmog::RealPartTearDown
 
         // SafeTearDown's second argument is the resolved 32-bit descriptor hash, never the 16-bit item id. Passing
         // the id makes the call a silent no-op: it matches no part, detaches nothing, and still returns normally.
-        using SafeTearDownFn = std::int64_t(__fastcall *)(std::int64_t a1, std::uint32_t hash, std::int16_t slotTag);
+        using SafeTearDownFn = std::int64_t(__fastcall *)(std::int64_t a1, std::uint32_t hash, std::int16_t slot_tag);
 
-        using IndexedStringLookupFn = void *(__fastcall *)(const std::uint16_t *slotIdPtr);
+        using IndexedStringLookupFn = void *(__fastcall *)(const std::uint16_t *slot_id_ptr);
 
         /**
          * @brief Warn when SafeTearDown is about to run against a part list that is already empty.
@@ -97,15 +98,15 @@ namespace Transmog::RealPartTearDown
         void log_safe_tear_down_state(
             std::uintptr_t a1,
             std::uint32_t hash,
-            std::uint16_t gameSlotTag,
+            std::uint16_t game_slot_tag,
             const char *site
         ) noexcept
         {
             const auto comp = DMK::memory::read<std::uintptr_t>(DMK::Address{a1 + 0x08}).value_or(0);
             const auto sub = comp ? DMK::memory::read<std::uintptr_t>(DMK::Address{comp + 0x68}).value_or(0) : 0;
-            const auto listHead = sub ? DMK::memory::read<std::uintptr_t>(DMK::Address{sub + 0x40}).value_or(0) : 0;
+            const auto list_head = sub ? DMK::memory::read<std::uintptr_t>(DMK::Address{sub + 0x40}).value_or(0) : 0;
 
-            if (listHead == 0)
+            if (list_head == 0)
             {
                 // try_log, not warning(): this helper runs on the apply path and is noexcept, so a formatting or
                 // sink failure must not escape into the engine's frame.
@@ -114,7 +115,7 @@ namespace Transmog::RealPartTearDown
                     "[dispatch] {} slot={:#06x} hash={:#010x} comp={:#x} sub={:#x} listHead=0 - the engine exits "
                     "without detaching, whatever the arguments say",
                     site,
-                    gameSlotTag,
+                    game_slot_tag,
                     hash,
                     comp,
                     sub
@@ -150,23 +151,23 @@ namespace Transmog::RealPartTearDown
         // three files walk it.
         //
         // The plausibility bounds below are local: they gate values read OUT of that table, and the sanity checks
-        // (pointers through memory::is_plausible_ptr, count <= k_maxPlausibleEntries, slotTag in range) bail out
+        // (pointers through memory::is_plausible_ptr, count <= MAX_PLAUSIBLE_ENTRIES, slot_tag in range) bail out
         // before touching anything dangerous if a future patch reshapes the struct.
         //
         // The alt item word at +0x88 used by older layouts is no longer read; the primary word is sufficient.
 
-        constexpr std::uint32_t k_maxPlausibleEntries = 0x1000;
+        constexpr std::uint32_t MAX_PLAUSIBLE_ENTRIES = 0x1000;
         // Slot-tag range covers the full engine taxonomy. This is a plausibility gate on a value read out of the auth
         // table, not a list of tags LT manages, so it stays inclusive of tags that map to no TransmogSlot. The upper
         // bound must cover the highest tag the engine emits, not the highest LT acts on: a tag above the bound is
         // rejected with a warning, so a bound left behind the engine turns a newly added slot into a confusing
         // rejection rather than a clean no-op. Re-read it from the auth-table dump when the engine gains a slot.
-        constexpr std::uint16_t k_minPlausibleSlotTag = 0x0000;
-        constexpr std::uint16_t k_maxPlausibleSlotTag = 0x0018;
+        constexpr std::uint16_t MIN_PLAUSIBLE_SLOT_TAG = 0x0000;
+        constexpr std::uint16_t MAX_PLAUSIBLE_SLOT_TAG = 0x0018;
 
         [[nodiscard]] bool plausible_slot_tag(std::uint16_t tag) noexcept
         {
-            return tag >= k_minPlausibleSlotTag && tag <= k_maxPlausibleSlotTag;
+            return tag >= MIN_PLAUSIBLE_SLOT_TAG && tag <= MAX_PLAUSIBLE_SLOT_TAG;
         }
 
         /// A live auth-table entry holds a real item word and a non-zero gate. This is the only copy of the rule.
@@ -179,12 +180,12 @@ namespace Transmog::RealPartTearDown
          * @brief Structural view of the auth table hanging off one ClientEquipSlotActorComponent.
          * @details `container` stays 0 when the component itself reads back implausible, which lets a caller tell a
          *          bad component apart from a reshaped container. `valid` additionally requires a plausible array
-         *          base and a count inside `[1, k_maxPlausibleEntries]`.
+         *          base and a count inside `[1, MAX_PLAUSIBLE_ENTRIES]`.
          */
         struct AuthTableView
         {
             std::uintptr_t container{};
-            std::uintptr_t arrayBase{};
+            std::uintptr_t array_base{};
             std::uint32_t count{};
             bool valid{};
         };
@@ -202,18 +203,18 @@ namespace Transmog::RealPartTearDown
                 return view;
 
             const auto container =
-                DMK::memory::read<std::uintptr_t>(DMK::Address{a1 + AuthTable::k_containerPtrOffset}).value_or(0);
+                DMK::memory::read<std::uintptr_t>(DMK::Address{a1 + auth_table::CONTAINER_PTR_OFFSET}).value_or(0);
             if (!DMK::memory::is_plausible_ptr(DMK::Address{container}))
                 return view;
             view.container = container;
 
-            view.arrayBase =
-                DMK::memory::read<std::uintptr_t>(DMK::Address{container + AuthTable::k_containerArrayBaseOffset})
+            view.array_base =
+                DMK::memory::read<std::uintptr_t>(DMK::Address{container + auth_table::CONTAINER_ARRAY_BASE_OFFSET})
                     .value_or(0);
-            view.count = DMK::memory::read<std::uint32_t>(DMK::Address{container + AuthTable::k_containerCountOffset})
+            view.count = DMK::memory::read<std::uint32_t>(DMK::Address{container + auth_table::CONTAINER_COUNT_OFFSET})
                              .value_or(0);
-            view.valid = DMK::memory::is_plausible_ptr(DMK::Address{view.arrayBase}) && view.count >= 1 &&
-                         view.count <= k_maxPlausibleEntries;
+            view.valid = DMK::memory::is_plausible_ptr(DMK::Address{view.array_base}) && view.count >= 1 &&
+                         view.count <= MAX_PLAUSIBLE_ENTRIES;
             return view;
         }
 
@@ -221,40 +222,41 @@ namespace Transmog::RealPartTearDown
         struct AuthEntry
         {
             std::uintptr_t address{};
-            std::uint16_t itemId{};
+            std::uint16_t item_id{};
             bool found{};
         };
 
         /**
          * @brief Locate the live entry the engine holds for one slot tag.
          * @param view A view @ref read_auth_table already validated.
-         * @param gameSlotTag Engine slot tag to match.
+         * @param game_slot_tag Engine slot tag to match.
          * @return The entry address and its raw item word, or `found == false` when no live entry carries the tag.
          */
-        [[nodiscard]] AuthEntry find_auth_entry(const AuthTableView &view, std::uint16_t gameSlotTag) noexcept
+        [[nodiscard]] AuthEntry find_auth_entry(const AuthTableView &view, std::uint16_t game_slot_tag) noexcept
         {
             for (std::uint32_t i = 0; i < view.count; ++i)
             {
-                const auto entry = AuthTable::entry_at(view.arrayBase, i);
+                const auto entry = auth_table::entry_at(view.array_base, i);
 
                 const auto primary =
-                    DMK::memory::read<std::uint16_t>(DMK::Address{entry + AuthTable::k_entryItemIdOffset}).value_or(0);
+                    DMK::memory::read<std::uint16_t>(DMK::Address{entry + auth_table::ENTRY_ITEM_ID_OFFSET})
+                        .value_or(0);
                 const auto gate =
-                    DMK::memory::read<std::uint64_t>(DMK::Address{entry + AuthTable::k_entryGateOffset}).value_or(0);
+                    DMK::memory::read<std::uint64_t>(DMK::Address{entry + auth_table::ENTRY_GATE_OFFSET}).value_or(0);
                 if (!entry_is_live(primary, gate))
                     continue;
 
                 const auto tag =
-                    DMK::memory::read<std::uint16_t>(DMK::Address{entry + AuthTable::k_entrySlotTagOffset});
-                if (!tag.has_value() || *tag != gameSlotTag)
+                    DMK::memory::read<std::uint16_t>(DMK::Address{entry + auth_table::ENTRY_SLOT_TAG_OFFSET});
+                if (!tag.has_value() || *tag != game_slot_tag)
                     continue;
 
-                return AuthEntry{.address = entry, .itemId = primary, .found = true};
+                return AuthEntry{.address = entry, .item_id = primary, .found = true};
             }
             return AuthEntry{};
         }
 
-        // Engine-only slot tags absent from `TransmogSlot` (and therefore from `slot_metadata.hpp::k_slotMetadata`) but
+        // Engine-only slot tags absent from `TransmogSlot` (and therefore from `slot_metadata.hpp::SLOT_METADATA`) but
         // still part of the engine taxonomy. Kept here so the dump emits a readable label instead of "?".
         // `is_documented_slot` deliberately returns false for these so the dump still flags them as NEW SLOT TAG
         // candidates the mod has not lifted into TransmogSlot yet.
@@ -278,7 +280,7 @@ namespace Transmog::RealPartTearDown
         [[nodiscard]] const char *known_slot_name(std::uint16_t tag) noexcept
         {
             if (const auto s = slot_from_game_tag(static_cast<std::int16_t>(tag)))
-                return slot_meta(*s).displayName;
+                return slot_meta(*s).display_name;
             return engine_only_slot_name(tag);
         }
 
@@ -304,39 +306,40 @@ namespace Transmog::RealPartTearDown
         /**
          * @brief Log the whole auth table once per (a1, count, content) change.
          *
-         * @details Walks every live entry and logs (index, slotTag, primary, gate-non-null) plus the resolved item
-         *          name and LT-classified category. The caller validates arrayBase and count first. The cost is
-         *          bounded: at most k_maxPlausibleEntries iterations, and one log line per live entry. Item-name
+         * @details Walks every live entry and logs (index, slot_tag, primary, gate-non-null) plus the resolved item
+         *          name and LT-classified category. The caller validates array_base and count first. The cost is
+         *          bounded: at most MAX_PLAUSIBLE_ENTRIES iterations, and one log line per live entry. Item-name
          *          resolution falls back to "<unresolved>" when ItemNameTable is not built yet, for example early in
          *          load.
          *
          * @param a1 ClientEquipSlotActorComponent pointer, part of the dedupe key.
-         * @param arrayBase Entry array base.
+         * @param array_base Entry array base.
          * @param count Entry array capacity.
          *
          * @note Two terms in the emitted counters. A NEW SLOT TAG entry is a candidate for a TransmogSlot enum
          *       extension: the engine fills that tag but the mod has no enumerator for it. runtime_obs_total counts
-         *       the session-wide (itemId -> slot) bindings the picker now uses to override the static type-code
+         *       the session-wide (item_id -> slot) bindings the picker now uses to override the static type-code
          *       mapping.
          */
-        void dump_full_auth_table_if_changed(std::uintptr_t a1, std::uintptr_t arrayBase, std::uint32_t count) noexcept
+        void dump_full_auth_table_if_changed(std::uintptr_t a1, std::uintptr_t array_base, std::uint32_t count) noexcept
         {
             // Cheap pre-pass: FNV-1a 64-bit hash over the primary IDs so equip and unequip events, which leave count
             // unchanged, stay visible to the dedupe gate. Two bytes hashed per entry, so the cost is negligible.
-            std::uint64_t contentHash = 0xCBF29CE484222325ULL;
+            std::uint64_t content_hash = 0xCBF29CE484222325ULL;
             for (std::uint32_t i = 0; i < count; ++i)
             {
-                const auto entry = AuthTable::entry_at(arrayBase, i);
+                const auto entry = auth_table::entry_at(array_base, i);
                 const auto primary =
-                    DMK::memory::read<std::uint16_t>(DMK::Address{entry + AuthTable::k_entryItemIdOffset}).value_or(0);
-                contentHash ^= static_cast<std::uint64_t>(primary);
-                contentHash *= 0x100000001B3ULL;
+                    DMK::memory::read<std::uint16_t>(DMK::Address{entry + auth_table::ENTRY_ITEM_ID_OFFSET})
+                        .value_or(0);
+                content_hash ^= static_cast<std::uint64_t>(primary);
+                content_hash *= 0x100000001B3ULL;
             }
 
-            const auto prevA1 = g_lastDumpedA1.load(std::memory_order_acquire);
-            const auto prevCount = g_lastDumpedCount.load(std::memory_order_acquire);
-            const auto prevHash = g_lastDumpedContentHash.load(std::memory_order_acquire);
-            if (prevA1 == a1 && prevCount == count && prevHash == contentHash)
+            const auto prev_a_1 = g_lastDumpedA1.load(std::memory_order_acquire);
+            const auto prev_count = g_lastDumpedCount.load(std::memory_order_acquire);
+            const auto prev_hash = g_lastDumpedContentHash.load(std::memory_order_acquire);
+            if (prev_a_1 == a1 && prev_count == count && prev_hash == content_hash)
                 return;
 
             // Stamp the dedupe tracker only when ItemNameTable is ready. Otherwise the first dump fires from the early
@@ -345,53 +348,55 @@ namespace Transmog::RealPartTearDown
             // through the load window. The cost is one log batch per tick, and the FINAL emission carries full item
             // names.
             auto &logger = DMK::log();
-            auto &itemTable = ItemNameTable::instance();
-            const bool itemTableReady = itemTable.size() > 0;
-            if (itemTableReady)
+            auto &item_table = ItemNameTable::instance();
+            const bool item_table_ready = item_table.size() > 0;
+            if (item_table_ready)
             {
                 g_lastDumpedA1.store(a1, std::memory_order_release);
                 g_lastDumpedCount.store(count, std::memory_order_release);
-                g_lastDumpedContentHash.store(contentHash, std::memory_order_release);
+                g_lastDumpedContentHash.store(content_hash, std::memory_order_release);
             }
 
             logger.trace(
                 "[slot-discovery] auth-table dump begin a1=0x{:X} arrayBase=0x{:X} count={} stride={:#x} "
                 "slotTag@+{:#x} ItemNameTable={}",
                 static_cast<std::uint64_t>(a1),
-                static_cast<std::uint64_t>(arrayBase),
+                static_cast<std::uint64_t>(array_base),
                 count,
-                static_cast<std::uint64_t>(AuthTable::k_entryStride),
-                static_cast<std::uint64_t>(AuthTable::k_entrySlotTagOffset),
-                itemTableReady ? "ready" : "not-ready"
+                static_cast<std::uint64_t>(auth_table::ENTRY_STRIDE),
+                static_cast<std::uint64_t>(auth_table::ENTRY_SLOT_TAG_OFFSET),
+                item_table_ready ? "ready" : "not-ready"
             );
 
             std::uint32_t live = 0;
             std::uint32_t documented = 0;
-            std::uint32_t newTags = 0;
+            std::uint32_t new_tags = 0;
             for (std::uint32_t i = 0; i < count; ++i)
             {
-                const auto entry = AuthTable::entry_at(arrayBase, i);
+                const auto entry = auth_table::entry_at(array_base, i);
                 const auto primary =
-                    DMK::memory::read<std::uint16_t>(DMK::Address{entry + AuthTable::k_entryItemIdOffset}).value_or(0);
+                    DMK::memory::read<std::uint16_t>(DMK::Address{entry + auth_table::ENTRY_ITEM_ID_OFFSET})
+                        .value_or(0);
                 const auto gate =
-                    DMK::memory::read<std::uint64_t>(DMK::Address{entry + AuthTable::k_entryGateOffset}).value_or(0);
+                    DMK::memory::read<std::uint64_t>(DMK::Address{entry + auth_table::ENTRY_GATE_OFFSET}).value_or(0);
                 if (!entry_is_live(primary, gate))
                     continue;
 
                 const auto tag =
-                    DMK::memory::read<std::uint16_t>(DMK::Address{entry + AuthTable::k_entrySlotTagOffset}).value_or(0);
+                    DMK::memory::read<std::uint16_t>(DMK::Address{entry + auth_table::ENTRY_SLOT_TAG_OFFSET})
+                        .value_or(0);
 
                 ++live;
-                const bool documentedTag = is_documented_slot(tag);
-                if (documentedTag)
+                const bool documented_tag = is_documented_slot(tag);
+                if (documented_tag)
                     ++documented;
                 else
-                    ++newTags;
+                    ++new_tags;
 
                 const char *tagName = known_slot_name(tag);
-                const char *newTagMarker = documentedTag ? "" : "  *** NEW SLOT TAG ***";
+                const char *new_tag_marker = documented_tag ? "" : "  *** NEW SLOT TAG ***";
 
-                if (!itemTableReady)
+                if (!item_table_ready)
                 {
                     // Catalog not built yet. Skip the resolved fields entirely, because they are all default-init
                     // noise (cat=Other), and print the raw engine-side fields only. This branch re-fires on the next
@@ -402,18 +407,18 @@ namespace Transmog::RealPartTearDown
                         tag,
                         tagName,
                         primary,
-                        newTagMarker
+                        new_tag_marker
                     );
                     continue;
                 }
 
-                std::string itemName = itemTable.name_of(primary);
-                if (itemName.empty())
-                    itemName = "<unresolved>";
+                std::string item_name = item_table.name_of(primary);
+                if (item_name.empty())
+                    item_name = "<unresolved>";
 
-                const char *categoryStr = transmog_category_str(itemTable.category_of(primary));
+                const char *category_str = transmog_category_str(item_table.category_of(primary));
 
-                // Auto-record (itemId -> TransmogSlot) for the picker catalog. The auth-table tag states which slot
+                // Auto-record (item_id -> TransmogSlot) for the picker catalog. The auth-table tag states which slot
                 // this item belongs in. That is ground truth, and it overrides the catalog classification. A tag with
                 // no TransmogSlot mapping records nothing (for example tag 0x15 OongkaRocket, which is intentionally
                 // outside TransmogSlot).
@@ -427,14 +432,14 @@ namespace Transmog::RealPartTearDown
                 // classification keeps such an item in the list it belongs to.
                 const auto tslot = slot_from_game_slot(static_cast<std::int16_t>(tag));
 
-                // Patch-day drift check on `k_slotMetadata`'s gameTag column.
+                // Patch-day drift check on `SLOT_METADATA`'s game_tag column.
                 //
                 // Those tags index the character's equip-slot enum and have not moved across any game version this mod
                 // has shipped against, so the mod does NOT derive them at runtime the way it derives the item
                 // taxonomy. It also cannot: the auth table only lists FILLED slots, so a live derivation could never
                 // cover the table LT needs at apply time.
                 //
-                // What is free is verification. The engine states `(tag, itemId)` here, and the catalog independently
+                // What is free is verification. The engine states `(tag, item_id)` here, and the catalog independently
                 // classifies that item by group NAME, so the two must agree. A stale tag column otherwise fails
                 // silently and routes an apply into the wrong slot.
                 //
@@ -442,7 +447,7 @@ namespace Transmog::RealPartTearDown
                 // same loop records, so the check confirms its own writes and never fires.
                 if (tslot.has_value())
                 {
-                    const TransmogSlot cataloged = itemTable.catalog_category_of(primary);
+                    const TransmogSlot cataloged = item_table.catalog_category_of(primary);
                     // Paired and overflow slots legitimately disagree. Both halves of a pair share one item type, so
                     // the catalog reports the first half for either. The engine parks a weapon in an overflow slot
                     // whenever its primary is taken, so a bow cataloged as Ranged can sit in Ranged2.
@@ -452,9 +457,9 @@ namespace Transmog::RealPartTearDown
                     {
                         logger.warning(
                             "[slot-discovery] TAG DRIFT: engine put \"{}\" (item {:#06x}) in tag {:#06x}, "
-                            "which k_slotMetadata calls {}, but the catalog classifies it as {}. "
+                            "which SLOT_METADATA calls {}, but the catalog classifies it as {}. "
                             "Re-verify the gameTag column in slot_metadata.hpp.",
-                            itemName,
+                            item_name,
                             primary,
                             tag,
                             slot_name(*tslot),
@@ -465,7 +470,7 @@ namespace Transmog::RealPartTearDown
 
                 if (tslot.has_value() && Transmog::slot_enabled(*tslot))
                 {
-                    itemTable.record_observed_slot(primary, *tslot);
+                    item_table.record_observed_slot(primary, *tslot);
                 }
 
                 logger.trace(
@@ -474,9 +479,9 @@ namespace Transmog::RealPartTearDown
                     tag,
                     tagName,
                     primary,
-                    categoryStr,
-                    itemName,
-                    newTagMarker
+                    category_str,
+                    item_name,
+                    new_tag_marker
                 );
             }
 
@@ -484,8 +489,8 @@ namespace Transmog::RealPartTearDown
                 "[slot-discovery] auth-table dump end live={} documented={} new_tags={} runtime_obs_total={}",
                 live,
                 documented,
-                newTags,
-                itemTableReady ? itemTable.observed_slot_count() : std::size_t{0}
+                new_tags,
+                item_table_ready ? item_table.observed_slot_count() : std::size_t{0}
             );
         }
     } // namespace
@@ -495,9 +500,9 @@ namespace Transmog::RealPartTearDown
         return g_ready.load(std::memory_order_acquire);
     }
 
-    bool is_actor_apply_ready(void *a1Raw) noexcept
+    bool is_actor_apply_ready(void *a1_raw) noexcept
     {
-        const auto a1 = reinterpret_cast<std::uintptr_t>(a1Raw);
+        const auto a1 = reinterpret_cast<std::uintptr_t>(a1_raw);
 
         // Stage 1: structural. Every hop is guarded on its own, so a bad link fails closed without a frame unwind.
         const auto view = read_auth_table(a1);
@@ -516,22 +521,22 @@ namespace Transmog::RealPartTearDown
         // The CCC instance is located by MSVC RTTI mangled name rather than by a fixed slot offset, so the slot drift
         // documented in CDCore controlled_char does not affect this probe. Only the +0x130 sub-handler offset lives in
         // LT. The a1 -> CCOIA -> p1 chain offsets live inside CDCore.
-        constexpr std::ptrdiff_t k_offCccSubHandler = 0x130;
+        constexpr std::ptrdiff_t off_ccc_sub_handler = 0x130;
         // Generation-checked: the cache re-validates itself when the engine rebuilds the world, so a stale
         // vtable pointer from a previous save-load can never satisfy a lookup.
-        static DMK::rtti::PointerTableCache s_cccVt;
-        static constexpr std::string_view k_cccName = ".?AVClientCharacterControlActorComponent@pa@@";
+        static DMK::rtti::PointerTableCache s_ccc_vt;
+        static constexpr std::string_view ccc_name = ".?AVClientCharacterControlActorComponent@pa@@";
 
-        const auto cccAddr = CDCore::find_component_for_equipslot(a1, k_cccName, s_cccVt);
-        if (!DMK::memory::is_plausible_ptr(DMK::Address{cccAddr}))
+        const auto ccc_addr = CDCore::find_component_for_equipslot(a1, ccc_name, s_ccc_vt);
+        if (!DMK::memory::is_plausible_ptr(DMK::Address{ccc_addr}))
             return false;
 
-        const auto subHandler =
-            DMK::memory::read<std::uintptr_t>(DMK::Address{cccAddr + k_offCccSubHandler}).value_or(0);
-        if (!DMK::memory::is_plausible_ptr(DMK::Address{subHandler}))
+        const auto sub_handler =
+            DMK::memory::read<std::uintptr_t>(DMK::Address{ccc_addr + off_ccc_sub_handler}).value_or(0);
+        if (!DMK::memory::is_plausible_ptr(DMK::Address{sub_handler}))
             return false;
 
-        dump_full_auth_table_if_changed(a1, view.arrayBase, view.count);
+        dump_full_auth_table_if_changed(a1, view.array_base, view.count);
         return true;
     }
 
@@ -540,15 +545,15 @@ namespace Transmog::RealPartTearDown
         auto &logger = DMK::log();
 
         const auto &addrs = resolved_addrs();
-        const auto safeAddr = addrs.safeTearDown;
-        const auto lookupAddr = addrs.indexedStringLookup;
+        const auto safe_addr = addrs.safe_tear_down;
+        const auto lookup_addr = addrs.indexed_string_lookup;
 
-        if (!safeAddr)
+        if (!safe_addr)
         {
             logger.warning("[dispatch] tear_down: safeTearDown address not resolved (AOB scan failed in init)");
             return false;
         }
-        if (!lookupAddr)
+        if (!lookup_addr)
         {
             logger.warning(
                 "[dispatch] tear_down: indexedStringLookup address not resolved (ItemNameTable chain walk has not "
@@ -557,53 +562,53 @@ namespace Transmog::RealPartTearDown
             return false;
         }
 
-        // safeTearDown needs no prologue check here. Its anchor row carries the code_site validator with
+        // safe_tear_down needs no prologue check here. Its anchor row carries the code_site validator with
         // require_validator set, and that validator already calls scan::is_likely_function_prologue, so a rejected
-        // site arrives as 0 and the test above catches it. indexedStringLookup comes from the ItemNameTable chain
+        // site arrives as 0 and the test above catches it. indexed_string_lookup comes from the ItemNameTable chain
         // walk rather than from an anchor, so it is the one address that still needs its own proof.
-        std::array<std::byte, 8> lookupBytes{};
-        if (!DMK::memory::read_into(DMK::Address{lookupAddr}, lookupBytes))
+        std::array<std::byte, 8> lookup_bytes{};
+        if (!DMK::memory::read_into(DMK::Address{lookup_addr}, lookup_bytes))
         {
             logger.warning(
                 "[dispatch] tear_down: cannot read indexedStringLookup@{:#x}",
-                static_cast<std::uint64_t>(lookupAddr)
+                static_cast<std::uint64_t>(lookup_addr)
             );
             return false;
         }
 
-        std::vector<int> lookupDump;
-        lookupDump.reserve(lookupBytes.size());
-        for (const auto b : lookupBytes)
-            lookupDump.push_back(static_cast<int>(b));
+        std::vector<int> lookup_dump;
+        lookup_dump.reserve(lookup_bytes.size());
+        for (const auto b : lookup_bytes)
+            lookup_dump.push_back(static_cast<int>(b));
 
         logger.trace(
             "[dispatch] tear_down bytes: lookup@{:#x}={}",
-            static_cast<std::uint64_t>(lookupAddr),
-            DMK::format::format_int_vector(lookupDump)
+            static_cast<std::uint64_t>(lookup_addr),
+            DMK::format::format_int_vector(lookup_dump)
         );
 
-        if (!DMK::scan::is_likely_function_prologue(DMK::Address{lookupAddr}))
+        if (!DMK::scan::is_likely_function_prologue(DMK::Address{lookup_addr}))
         {
             logger.warning("[dispatch] tear_down: indexedStringLookup prologue reject");
             return false;
         }
 
-        g_safeTearDown.store(reinterpret_cast<SafeTearDownFn>(safeAddr), std::memory_order_release);
-        g_indexedStringLookup.store(reinterpret_cast<IndexedStringLookupFn>(lookupAddr), std::memory_order_release);
+        g_safeTearDown.store(reinterpret_cast<SafeTearDownFn>(safe_addr), std::memory_order_release);
+        g_indexedStringLookup.store(reinterpret_cast<IndexedStringLookupFn>(lookup_addr), std::memory_order_release);
 
         g_ready.store(true, std::memory_order_release);
 
         logger.trace(
             "[dispatch] tear_down helpers resolved: safe={:#x} lookup={:#x}",
-            static_cast<std::uint64_t>(safeAddr),
-            static_cast<std::uint64_t>(lookupAddr)
+            static_cast<std::uint64_t>(safe_addr),
+            static_cast<std::uint64_t>(lookup_addr)
         );
         return true;
     }
 
-    bool tear_down_real_part(void *a1Raw, std::uint16_t gameSlotTag) noexcept
+    bool tear_down_real_part(void *a1_raw, std::uint16_t game_slot_tag) noexcept
     {
-        if (!tear_down_needed_for_slot(gameSlotTag))
+        if (!tear_down_needed_for_slot(game_slot_tag))
             return false; // see tear_down_needed_for_slot
 
         auto &logger = DMK::log();
@@ -611,22 +616,22 @@ namespace Transmog::RealPartTearDown
         if (!g_ready.load(std::memory_order_acquire))
             return false;
 
-        const auto safeFn = g_safeTearDown.load(std::memory_order_acquire);
-        const auto lookupFn = g_indexedStringLookup.load(std::memory_order_acquire);
-        if (!safeFn || !lookupFn)
+        const auto safe_fn = g_safeTearDown.load(std::memory_order_acquire);
+        const auto lookup_fn = g_indexedStringLookup.load(std::memory_order_acquire);
+        if (!safe_fn || !lookup_fn)
             return false;
 
-        const auto a1 = reinterpret_cast<std::uintptr_t>(a1Raw);
+        const auto a1 = reinterpret_cast<std::uintptr_t>(a1_raw);
         if (!DMK::memory::is_plausible_ptr(DMK::Address{a1}))
             return false;
 
-        if (!plausible_slot_tag(gameSlotTag))
+        if (!plausible_slot_tag(game_slot_tag))
         {
             logger.warning(
                 "[dispatch] tear_down: slot tag {:#06x} outside plausible range [{:#x}..{:#x}] - rejecting",
-                gameSlotTag,
-                k_minPlausibleSlotTag,
-                k_maxPlausibleSlotTag
+                game_slot_tag,
+                MIN_PLAUSIBLE_SLOT_TAG,
+                MAX_PLAUSIBLE_SLOT_TAG
             );
             return false;
         }
@@ -641,7 +646,7 @@ namespace Transmog::RealPartTearDown
                 logger.warning(
                     "[dispatch] tear_down: container sanity failed (arrayBase=0x{:X} count={}) - layout may have "
                     "shifted",
-                    static_cast<std::uint64_t>(view.arrayBase),
+                    static_cast<std::uint64_t>(view.array_base),
                     view.count
                 );
             }
@@ -653,13 +658,13 @@ namespace Transmog::RealPartTearDown
         if (g_loggedFirstEntry.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
         {
             const auto p0 =
-                DMK::memory::read<std::uint16_t>(DMK::Address{view.arrayBase + AuthTable::k_entryItemIdOffset})
+                DMK::memory::read<std::uint16_t>(DMK::Address{view.array_base + auth_table::ENTRY_ITEM_ID_OFFSET})
                     .value_or(0);
             const auto t0 =
-                DMK::memory::read<std::uint16_t>(DMK::Address{view.arrayBase + AuthTable::k_entrySlotTagOffset})
+                DMK::memory::read<std::uint16_t>(DMK::Address{view.array_base + auth_table::ENTRY_SLOT_TAG_OFFSET})
                     .value_or(0);
             const auto g0 =
-                DMK::memory::read<std::uint64_t>(DMK::Address{view.arrayBase + AuthTable::k_entryGateOffset})
+                DMK::memory::read<std::uint64_t>(DMK::Address{view.array_base + auth_table::ENTRY_GATE_OFFSET})
                     .value_or(0);
             logger.trace(
                 "[dispatch] tear_down first-entry sanity: count={} primary={:#06x} slotTag={:#06x}@+{:#x} "
@@ -667,7 +672,7 @@ namespace Transmog::RealPartTearDown
                 view.count,
                 p0,
                 t0,
-                static_cast<std::uint64_t>(AuthTable::k_entrySlotTagOffset),
+                static_cast<std::uint64_t>(auth_table::ENTRY_SLOT_TAG_OFFSET),
                 static_cast<std::uint64_t>(g0)
             );
         }
@@ -675,14 +680,14 @@ namespace Transmog::RealPartTearDown
         // Verbose slot-discovery dump: enumerates every live entry so additional slot tags (lower body, mask, neck,
         // etc.) populated by the engine for the active character become visible. One-shot per distinct (a1, count)
         // pair.
-        dump_full_auth_table_if_changed(a1, view.arrayBase, view.count);
+        dump_full_auth_table_if_changed(a1, view.array_base, view.count);
 
-        const auto found = find_auth_entry(view, gameSlotTag);
+        const auto found = find_auth_entry(view, game_slot_tag);
         if (!found.found)
         {
             logger.trace(
                 "[dispatch] tear_down slot={:#06x} entryFound=false (walked {} entries)",
-                gameSlotTag,
+                game_slot_tag,
                 view.count
             );
             return false;
@@ -695,25 +700,25 @@ namespace Transmog::RealPartTearDown
         __try
         {
             // Resolve hash via the engine's interner.
-            std::uint16_t localWord = found.itemId;
-            void *hashPtr = lookupFn(&localWord);
-            if (!hashPtr)
+            std::uint16_t local_word = found.item_id;
+            void *hash_ptr = lookup_fn(&local_word);
+            if (!hash_ptr)
             {
                 logger.trace(
                     "[dispatch] tear_down slot={:#06x} entryFound=true primary={:#06x} hash=<lookup_null>",
-                    gameSlotTag,
-                    found.itemId
+                    game_slot_tag,
+                    found.item_id
                 );
                 return false;
             }
             hash =
-                DMK::memory::read<std::uint32_t>(DMK::Address{reinterpret_cast<std::uintptr_t>(hashPtr)}).value_or(0);
+                DMK::memory::read<std::uint32_t>(DMK::Address{reinterpret_cast<std::uintptr_t>(hash_ptr)}).value_or(0);
             if (hash == 0 || hash == 0xFFFFFFFF)
             {
                 logger.trace(
                     "[dispatch] tear_down slot={:#06x} entryFound=true primary={:#06x} hash={:#010x} <rejected>",
-                    gameSlotTag,
-                    found.itemId,
+                    game_slot_tag,
+                    found.item_id,
                     hash
                 );
                 return false;
@@ -721,115 +726,115 @@ namespace Transmog::RealPartTearDown
 
             // Safe scene-graph tear-down. It routes through the engine's scene-detach primitive and does NOT mutate
             // the authoritative entry array, so the apply dispatcher can call it.
-            log_safe_tear_down_state(a1, hash, gameSlotTag, "tear_down");
+            log_safe_tear_down_state(a1, hash, game_slot_tag, "tear_down");
             // Log the engine's return rather than a constant. A tear-down that matched nothing and one that
             // detached a part both come back normally, so the return is the only thing that tells them apart.
-            rc = safeFn(static_cast<std::int64_t>(a1), hash, static_cast<std::int16_t>(gameSlotTag));
+            rc = safe_fn(static_cast<std::int64_t>(a1), hash, static_cast<std::int16_t>(game_slot_tag));
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
-            logger.trace("[dispatch] tear_down slot={:#06x} SEH caught fault", gameSlotTag);
+            logger.trace("[dispatch] tear_down slot={:#06x} SEH caught fault", game_slot_tag);
             return false;
         }
 
         logger.trace(
             "[dispatch] tear_down slot={:#06x} entryFound=true primary={:#06x} hash={:#010x} engineRc={:#x}",
-            gameSlotTag,
-            found.itemId,
+            game_slot_tag,
+            found.item_id,
             hash,
             static_cast<std::uint64_t>(rc)
         );
         return true;
     }
 
-    std::uint16_t get_real_item_id(void *a1Raw, std::uint16_t gameSlotTag) noexcept
+    std::uint16_t get_real_item_id(void *a1_raw, std::uint16_t game_slot_tag) noexcept
     {
-        const auto a1 = reinterpret_cast<std::uintptr_t>(a1Raw);
+        const auto a1 = reinterpret_cast<std::uintptr_t>(a1_raw);
         if (!DMK::memory::is_plausible_ptr(DMK::Address{a1}))
             return 0;
 
-        if (!plausible_slot_tag(gameSlotTag))
+        if (!plausible_slot_tag(game_slot_tag))
             return 0;
 
         const auto view = read_auth_table(a1);
         if (!view.valid)
             return 0;
 
-        const auto found = find_auth_entry(view, gameSlotTag);
-        return found.found ? found.itemId : 0;
+        const auto found = find_auth_entry(view, game_slot_tag);
+        return found.found ? found.item_id : 0;
     }
 
-    bool tear_down_by_item_id(void *a1Raw, std::uint16_t itemId, std::uint16_t gameSlotTag) noexcept
+    bool tear_down_by_item_id(void *a1_raw, std::uint16_t item_id, std::uint16_t game_slot_tag) noexcept
     {
-        if (!tear_down_needed_for_slot(gameSlotTag))
+        if (!tear_down_needed_for_slot(game_slot_tag))
             return false; // see tear_down_needed_for_slot
 
         auto &logger = DMK::log();
 
-        if (!g_ready.load(std::memory_order_acquire) || itemId == 0)
+        if (!g_ready.load(std::memory_order_acquire) || item_id == 0)
             return false;
 
-        const auto safeFn = g_safeTearDown.load(std::memory_order_acquire);
-        const auto lookupFn = g_indexedStringLookup.load(std::memory_order_acquire);
-        if (!safeFn || !lookupFn)
+        const auto safe_fn = g_safeTearDown.load(std::memory_order_acquire);
+        const auto lookup_fn = g_indexedStringLookup.load(std::memory_order_acquire);
+        if (!safe_fn || !lookup_fn)
             return false;
 
-        const auto a1 = reinterpret_cast<std::uintptr_t>(a1Raw);
+        const auto a1 = reinterpret_cast<std::uintptr_t>(a1_raw);
         if (!DMK::memory::is_plausible_ptr(DMK::Address{a1}))
             return false;
 
         std::uint32_t hash = 0;
-        std::int64_t engineRc = 0;
+        std::int64_t engine_rc = 0;
         bool result = false;
 
         // The two engine calls keep their own SEH frame. Every read around them is guarded on its own.
         __try
         {
-            std::uint16_t localWord = itemId;
-            void *hashPtr = lookupFn(&localWord);
-            if (!hashPtr)
+            std::uint16_t local_word = item_id;
+            void *hash_ptr = lookup_fn(&local_word);
+            if (!hash_ptr)
             {
                 logger.trace(
                     "[dispatch] tear_down_fake slot={:#06x} itemId={:#06x} hash=<lookup_null>",
-                    gameSlotTag,
-                    itemId
+                    game_slot_tag,
+                    item_id
                 );
                 return false;
             }
 
             hash =
-                DMK::memory::read<std::uint32_t>(DMK::Address{reinterpret_cast<std::uintptr_t>(hashPtr)}).value_or(0);
+                DMK::memory::read<std::uint32_t>(DMK::Address{reinterpret_cast<std::uintptr_t>(hash_ptr)}).value_or(0);
             if (hash == 0 || hash == 0xFFFFFFFF)
             {
                 logger.trace(
                     "[dispatch] tear_down_fake slot={:#06x} itemId={:#06x} hash={:#010x} <rejected>",
-                    gameSlotTag,
-                    itemId,
+                    game_slot_tag,
+                    item_id,
                     hash
                 );
                 return false;
             }
 
-            log_safe_tear_down_state(a1, hash, gameSlotTag, "tear_down_fake");
+            log_safe_tear_down_state(a1, hash, game_slot_tag, "tear_down_fake");
             // Kept for the summary line below. A tear-down that matched nothing and one that detached a part both
             // return normally, so the engine's return is the only thing that tells them apart.
-            engineRc = safeFn(static_cast<std::int64_t>(a1), hash, static_cast<std::int16_t>(gameSlotTag));
+            engine_rc = safe_fn(static_cast<std::int64_t>(a1), hash, static_cast<std::int16_t>(game_slot_tag));
             result = true;
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
-            logger.trace("[dispatch] tear_down_fake slot={:#06x} SEH caught fault", gameSlotTag);
+            logger.trace("[dispatch] tear_down_fake slot={:#06x} SEH caught fault", game_slot_tag);
             return false;
         }
 
         logger.trace(
             "[dispatch] tear_down_fake slot={:#06x} itemId={:#06x} hash={:#010x} result={} engineRc={:#x}",
-            gameSlotTag,
-            itemId,
+            game_slot_tag,
+            item_id,
             hash,
             result,
-            static_cast<std::uint64_t>(engineRc)
+            static_cast<std::uint64_t>(engine_rc)
         );
         return result;
     }
-} // namespace Transmog::RealPartTearDown
+} // namespace Transmog::real_part_tear_down

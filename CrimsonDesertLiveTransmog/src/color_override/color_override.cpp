@@ -14,7 +14,7 @@
 
 #include <atomic>
 
-namespace Transmog::ColorOverride
+namespace Transmog::color_override
 {
     namespace
     {
@@ -29,33 +29,33 @@ namespace Transmog::ColorOverride
         auto &log = DMK::log();
         log.info("[color-override] init");
 
-        // Every slot starts LOCKED. Setter inserts happen only inside an explicit Reinit capture window so unrelated
+        // Every slot starts LOCKED. Setter inserts happen only inside an explicit reinit capture window so unrelated
         // property writes cannot bloat the swatch table outside the apply path.
-        SwatchTable::lock_all_slots();
+        swatch_table::lock_all_slots();
 
-        TokenTable::bootstrap_snapshot();
+        token_table::bootstrap_snapshot();
 
-        // The setter mid-hook is installed separately by `SetterSubstitute::init()` from the top-level startup path;
+        // The setter mid-hook is installed separately by `setter_substitute::init()` from the top-level startup path;
         // this entry point only wires the publisher hook.
-        const bool pubOk = PublisherHook::init(hooks);
+        const bool pub_ok = publisher_hook::init(hooks);
 
-        log.info("[color-override] hook install: publisher={}", pubOk);
+        log.info("[color-override] hook install: publisher={}", pub_ok);
 
         g_initDone.store(true, std::memory_order_release);
-        return pubOk;
+        return pub_ok;
     }
 
     void mark_apply_begin(int slot) noexcept
     {
         if (!::Transmog::flag_color_override().load(std::memory_order_acquire))
             return;
-        State::active_apply_slot().store(slot, std::memory_order_release);
-        State::active_apply_valid_until_ms().store(
-            State::now_ms() + State::k_batchApplyExtendMs,
+        state::active_apply_slot().store(slot, std::memory_order_release);
+        state::active_apply_valid_until_ms().store(
+            state::now_ms() + state::BATCH_APPLY_EXTEND_MS,
             std::memory_order_release
         );
-        State::hash_set_last_add_ms(slot).store(0, std::memory_order_release);
-        SwatchTable::mark_all_inactive(slot);
+        state::hash_set_last_add_ms(slot).store(0, std::memory_order_release);
+        swatch_table::mark_all_inactive(slot);
     }
 
     void mark_apply_end() noexcept
@@ -63,18 +63,18 @@ namespace Transmog::ColorOverride
         if (!::Transmog::flag_color_override().load(std::memory_order_acquire))
             return;
         // The active slot is NOT cleared here. The publisher fires per-frame asynchronously after the synchronous
-        // slotPop returns; clearing the slot would cause every async publisher fire to bail at the slot=-1 gate and
+        // slot_pop returns; clearing the slot would cause every async publisher fire to bail at the slot=-1 gate and
         // miss legitimate captures. Window validity is instead governed by `active_apply_valid_until_ms`, set to `now +
         // 3s` in mark_apply_begin - the publisher's window check rejects late fires without needing the slot field to
         // flip.
         log_counters();
-        const int slot = State::active_apply_slot().load(std::memory_order_acquire);
+        const int slot = state::active_apply_slot().load(std::memory_order_acquire);
         if (slot >= 0)
         {
             // A non-zero `placeholders` count after the apply means saved (submesh, token) pairs never matched a live
-            // engine write - the user's colors will not substitute until the player re-runs Reinit to capture fresh
+            // engine write - the user's colors will not substitute until the player re-runs reinit to capture fresh
             // engine writes for those rows.
-            const auto sc = SwatchTable::slot_counts(slot);
+            const auto sc = swatch_table::slot_counts(slot);
             DMK::log().info(
                 "[swatch-summary] slot={} total={} promoted={} placeholders={} active_overrides={}",
                 slot,
@@ -83,7 +83,7 @@ namespace Transmog::ColorOverride
                 sc.placeholders,
                 sc.active_overrides
             );
-            SwatchTable::dump_slot(slot);
+            swatch_table::dump_slot(slot);
         }
     }
 
@@ -91,13 +91,13 @@ namespace Transmog::ColorOverride
     {
         if (!::Transmog::flag_color_override().load(std::memory_order_acquire))
             return;
-        CarrierSet::clear_slot(slot);
-        SwatchTable::clear_slot(slot);
-        MatInstOwner::clear_for_slot(slot);
-        // PendingOverrides is deliberately NOT cleared here. wipe_slot fires on every preset-driven slot rebuild;
+        carrier_set::clear_slot(slot);
+        swatch_table::clear_slot(slot);
+        mat_inst_owner::clear_for_slot(slot);
+        // pending_overrides is deliberately NOT cleared here. wipe_slot fires on every preset-driven slot rebuild;
         // clearing pending would drop persisted user picks the moment a preset is applied, before the setter has a
         // chance to consume them. The pending map is only cleared by reset_all() on explicit preset / character switch.
-        State::block_publisher_inserts_until_ms().store(State::now_ms() + 500, std::memory_order_release);
+        state::block_publisher_inserts_until_ms().store(state::now_ms() + 500, std::memory_order_release);
     }
 
     void reset_all() noexcept
@@ -107,23 +107,23 @@ namespace Transmog::ColorOverride
         DMK::log().debug(
             "[color-override] reset_all - wiping all slot swatch tables + pending overrides (preset / character switch)"
         );
-        CarrierSet::clear_all();
-        SwatchTable::clear_all();
-        MatInstOwner::clear_all();
+        carrier_set::clear_all();
+        swatch_table::clear_all();
+        mat_inst_owner::clear_all();
         // Pending overrides ARE cleared here. The new preset's entries must replace (not augment) the old set;
         // PresetManager calls restore_swatches_from() immediately after, which repopulates the pending map via
-        // SwatchTable::restore_persisted_state.
-        PendingOverrides::clear_all();
+        // swatch_table::restore_persisted_state.
+        pending_overrides::clear_all();
         // Zero the "last applied transmog target" tracking too - the apply pass that follows a preset switch otherwise
         // sees (last_target != new_target) inside notify_transmog_target and calls wipe_swatch_table_for_slot, which
         // would destroy the placeholders just seeded for the new preset.
-        Reinit::reset_target_tracking();
+        reinit::reset_target_tracking();
     }
 
     void log_counters() noexcept
     {
-        const auto p = PublisherHook::snapshot_stats();
-        const auto pe = PendingOverrides::snapshot_stats();
+        const auto p = publisher_hook::snapshot_stats();
+        const auto pe = pending_overrides::snapshot_stats();
         DMK::log().info(
             "[color-override] pub[entries={} inserts={} batch={} window={} "
             "host={} arec={}] pending[entries={} hits={} misses={}]",
@@ -138,4 +138,4 @@ namespace Transmog::ColorOverride
             pe.lookups_miss
         );
     }
-} // namespace Transmog::ColorOverride
+} // namespace Transmog::color_override

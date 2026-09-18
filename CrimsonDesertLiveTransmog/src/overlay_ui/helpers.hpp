@@ -16,7 +16,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <string>
+#include <string_view>
 
 struct ImVec4;
 
@@ -57,20 +57,20 @@ namespace Transmog
     /**
      * @brief Case-insensitive substring search over an ASCII name.
      * @param hay The string to search.
-     * @param needle The substring to find. An empty or null needle matches everything.
+     * @param needle The substring to find. An empty needle matches everything.
      * @return True when @p needle is empty or occurs anywhere in @p hay.
      * @note The fold is ASCII-only and locale-independent, which is what the rest of the catalog assumes.
      */
-    [[nodiscard]] bool name_contains_ci(const std::string &hay, const char *needle) noexcept;
+    [[nodiscard]] bool name_contains_ci(std::string_view hay, std::string_view needle) noexcept;
 
     /**
-     * @brief Mirrors a picker-committed override into PendingOverrides.
+     * @brief Mirrors a picker-committed override into pending_overrides.
      * @param slot Picker slot index.
      * @param idx Row index inside that slot.
      * @param r Red component of the picked color.
      * @param g Green component of the picked color.
      * @param b Blue component of the picked color.
-     * @details The slot-agnostic substitute path in color_override/setter_substitute.cpp reads PendingOverrides on
+     * @details The slot-agnostic substitute path in color_override/setter_substitute.cpp reads pending_overrides on
      *          the next engine write, so the mirror is what makes the edit reach the renderer. The helper reads
      *          `submesh_name` from the row's SwatchOverride and `token_id` from its SwatchEntry.
      * @note A missing field makes this a silent no-op.
@@ -98,13 +98,13 @@ namespace Transmog
      * @brief Reports whether the overlay holds edits that no Save wrote back into the JSON preset.
      * @return True when slot_mappings differs from the active preset's persisted slots.
      * @details The Save button tints on true, so unsaved work stays visible. Prefab picks are session-only, so the
-     *          comparison reads SlotUIState::priorCarrierActive and priorCarrierItemId for a slot that holds one.
+     *          comparison reads SlotUIState::prior_carrier_active and prior_carrier_item_id for a slot that holds one.
      */
     [[nodiscard]] bool has_pending_save() noexcept;
 
     /**
      * @brief Forces every slot that holds a session-only prefab pick onto the active character's default carrier.
-     * @details The defaults come from carrier_defaults.hpp. PWS swaps key on the source wrapper that THAT
+     * @details The defaults come from carrier_defaults.hpp. pws swaps key on the source wrapper that THAT
      *          character's body emits, so the matching carrier must be resident at apply time or the swap silently
      *          no-ops.
      */
@@ -117,12 +117,12 @@ namespace Transmog
      *          equip and the hook cannot substitute against the old src wrappers. Capture Outfit calls it too,
      *          because it replaces the current state with the live equipped outfit and session-only prefab picks
      *          must surrender to that.
-     * @note The caller owns the post-apply_to_state lastIds reconciliation. For each cleared slot whose new preset
-     *       carrier equals lastIds[i], zero lastIds[i] so the apply pass tears down the prior body-mesh fake,
-     *       because the natural-pipeline cleanup hook does not fire for it. When the carriers differ, lastIds stays
+     * @note The caller owns the post-apply_to_state last_ids reconciliation. For each cleared slot whose new preset
+     *       carrier equals last_ids[i], zero last_ids[i] so the apply pass tears down the prior body-mesh fake,
+     *       because the natural-pipeline cleanup hook does not fire for it. When the carriers differ, last_ids stays
      *       intact and the regular tear_down_fake path runs.
      */
-    std::array<bool, k_slotCount> clear_all_picked_prefabs_and_deactivate();
+    std::array<bool, SLOT_COUNT> clear_all_picked_prefabs_and_deactivate();
 
     /**
      * @brief Audits a submesh's dye-property channel coverage and writes a tooltip body that lists the gaps.

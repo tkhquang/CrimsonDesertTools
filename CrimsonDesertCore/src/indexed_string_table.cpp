@@ -7,7 +7,7 @@
 #include <excpt.h>
 
 #include <chrono>
-#include <cstring>
+#include <string_view>
 
 namespace CDCore
 {
@@ -37,8 +37,7 @@ namespace CDCore
         std::size_t read_table_entry(
             std::uintptr_t table_array,
             std::uint32_t hash,
-            const char *prefix,
-            std::size_t prefix_len,
+            std::string_view prefix,
             char *buf,
             std::size_t buf_size
         ) noexcept
@@ -54,7 +53,7 @@ namespace CDCore
 
                 // A test of the terminator alongside the mismatch is what stops the compare one byte past the end of
                 // a string shorter than the prefix. An empty prefix skips the loop, so every entry is a candidate.
-                for (std::size_t i = 0; i < prefix_len; ++i)
+                for (std::size_t i = 0; i < prefix.size(); ++i)
                 {
                     const char c = src[i];
                     if (c == '\0' || c != prefix[i])
@@ -79,20 +78,20 @@ namespace CDCore
     } // namespace
 
     std::unordered_map<std::string, std::uint32_t>
-    scan_indexed_string_table(std::uintptr_t mapLookupFunc, const IndexedStringScanConfig &cfg)
+    scan_indexed_string_table(std::uintptr_t map_lookup_func, const IndexedStringScanConfig &cfg)
     {
         auto &logger = DMK::log();
         std::unordered_map<std::string, std::uint32_t> name_to_hash;
 
-        if (!mapLookupFunc)
+        if (!map_lookup_func)
             return name_to_hash;
 
-        // Locate `mov rax, [rip+disp32]` inside the first 0x40 bytes of mapLookupFunc and resolve its target. The
+        // Locate `mov rax, [rip+disp32]` inside the first 0x40 bytes of map_lookup_func and resolve its target. The
         // resolver skips a decoy occurrence whose displacement lands on an implausible or unreadable address and
         // reports the last concrete decode failure, so a compiler shuffle that moves the real instruction later in the
         // prologue still resolves. Global uniqueness is irrelevant here: the search window is one known function.
         const auto resolved = DMK::scan::find_and_resolve_rip_relative(
-            DMK::Region{DMK::Address{mapLookupFunc}, RIP_ANCHOR_SEARCH_BYTES},
+            DMK::Region{DMK::Address{map_lookup_func}, RIP_ANCHOR_SEARCH_BYTES},
             DMK::scan::PREFIX_MOV_RAX_RIP,
             7
         );
@@ -101,9 +100,9 @@ namespace CDCore
             logger.warning(
                 "{}: `48 8B 05` rip-instruction did not resolve in the first 0x{:X} bytes of "
                 "mapLookupFunc (0x{:X}): {}",
-                cfg.logLabel,
+                cfg.log_label,
                 RIP_ANCHOR_SEARCH_BYTES,
-                mapLookupFunc,
+                map_lookup_func,
                 resolved.error().message()
             );
             return name_to_hash;
@@ -115,44 +114,44 @@ namespace CDCore
         const auto global_ptr = DMK::memory::read<std::uintptr_t>(DMK::Address{global_ptr_addr}).value_or(0);
         if (!DMK::memory::is_plausible_ptr(DMK::Address{global_ptr}))
         {
-            logger.trace("{}: global pointer not yet initialized (0x{:X})", cfg.logLabel, global_ptr);
+            logger.trace("{}: global pointer not yet initialized (0x{:X})", cfg.log_label, global_ptr);
             return name_to_hash;
         }
 
         // The global is a live game heap pointer that can tear or relocate across a world reload. A faulting read
         // yields 0 and routes to the "offset moved" warning below instead of a crash in the caller.
         const auto table_array =
-            DMK::memory::read<std::uintptr_t>(DMK::Address{global_ptr + cfg.tableArrayOffset}).value_or(0);
+            DMK::memory::read<std::uintptr_t>(DMK::Address{global_ptr + cfg.table_array_offset}).value_or(0);
         if (!DMK::memory::is_plausible_ptr(DMK::Address{table_array}))
         {
             logger.warning(
                 "{}: tableArray is null/invalid (0x{:X}) - offset 0x{:X} inside globalPtr may have moved",
-                cfg.logLabel,
+                cfg.log_label,
                 table_array,
-                static_cast<std::int64_t>(cfg.tableArrayOffset)
+                static_cast<std::int64_t>(cfg.table_array_offset)
             );
             return name_to_hash;
         }
 
         logger.trace(
             "{}: globalPtr=0x{:X} tableArray=0x{:X} range=0x{:X}-0x{:X}",
-            cfg.logLabel,
+            cfg.log_label,
             global_ptr,
             table_array,
-            cfg.tableScanMin,
-            cfg.tableScanMax
+            cfg.table_scan_min,
+            cfg.table_scan_max
         );
 
-        const char *prefix = cfg.prefix ? cfg.prefix : "";
-        const std::size_t prefix_len = std::strlen(prefix);
+        // A view is never null, so the old null guard is gone and an empty prefix matches every entry.
+        const std::string_view prefix = cfg.prefix;
 
         const auto scan_start = std::chrono::steady_clock::now();
         std::uint32_t entries = 0;
         char buf[MAX_STRING_LEN + 1];
 
-        for (std::uint32_t hash = cfg.tableScanMin; hash <= cfg.tableScanMax; ++hash)
+        for (std::uint32_t hash = cfg.table_scan_min; hash <= cfg.table_scan_max; ++hash)
         {
-            const auto len = read_table_entry(table_array, hash, prefix, prefix_len, buf, sizeof(buf));
+            const auto len = read_table_entry(table_array, hash, prefix, buf, sizeof(buf));
             if (len == 0 || len >= MAX_STRING_LEN)
                 continue;
 
@@ -168,10 +167,10 @@ namespace CDCore
             logger.warning(
                 "{}: 0 entries matching prefix '{}' found in range "
                 "0x{:X}..0x{:X} - table not yet populated or prefix missing from this build; deferring feature",
-                cfg.logLabel,
+                cfg.log_label,
                 prefix,
-                cfg.tableScanMin,
-                cfg.tableScanMax
+                cfg.table_scan_min,
+                cfg.table_scan_max
             );
         }
         else
@@ -181,11 +180,11 @@ namespace CDCore
             // decision points.
             logger.trace(
                 "{}: {} entries for prefix '{}' in range 0x{:X}..0x{:X} in {}ms",
-                cfg.logLabel,
+                cfg.log_label,
                 entries,
                 prefix,
-                cfg.tableScanMin,
-                cfg.tableScanMax,
+                cfg.table_scan_min,
+                cfg.table_scan_max,
                 ms
             );
         }

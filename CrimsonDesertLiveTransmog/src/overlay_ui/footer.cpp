@@ -1,7 +1,7 @@
 // overlay_ui/footer.cpp
 //
 // Bottom-of-Transmog-tab UI: action buttons row + status footer. Lives at draw_overlay_content depth 1; closures
-// captured via the caller-supplied (pending, pendingSave, PresetManager) tuple.
+// captured via the caller-supplied (pending, pending_save, PresetManager) tuple.
 
 #include "overlay_ui/footer.hpp"
 #include "overlay_ui/helpers.hpp"
@@ -22,7 +22,7 @@
 namespace Transmog
 {
 
-    void draw_action_buttons(bool pending, bool pendingSave, PresetManager &pm)
+    void draw_action_buttons(bool pending, bool pending_save, PresetManager &pm)
     {
         // Gate on WorldSystem so we do not spam "player not found" before the first world load.
         const bool world_ready = Transmog::is_world_ready();
@@ -37,8 +37,8 @@ namespace Transmog
         // Body-mesh catalog is populated asynchronously by a boot thread (heap walk ~1-5s). If the user has any
         // body-mesh selection while the catalog is still loading, block Apply - the swap map cannot resolve source
         // wrappers without the catalog and an apply would silently produce a no-op (or worse, partial substitution).
-        namespace PWS = Transmog::PrefabWrapperSwap;
-        const bool catalog_loading = PWS::has_any_selection() && !PWS::is_catalog_populated();
+        namespace pws = Transmog::prefab_wrapper_swap;
+        const bool catalog_loading = pws::has_any_selection() && !pws::is_catalog_populated();
 
         ImGui::BeginDisabled(catalog_loading);
         if (ImGui::Button(pending ? "Apply All *" : "Apply All", ImVec2(0, 0)))
@@ -70,31 +70,31 @@ namespace Transmog
         {
             // Capture replaces the current state with the live equipped outfit, so any session-only prefab picks must
             // surrender too - otherwise the cyan label hides the captured gear and a later "(none) prefab" would
-            // restore the stale pre-capture carrier from `priorCarrierItemId`. Clears PWS + s_slotUI state in one shot;
-            // capture_outfit then writes fresh mappings.
+            // restore the stale pre-capture carrier from `prior_carrier_item_id`. Clears pws + s_slot_ui state in one
+            // shot; capture_outfit then writes fresh mappings.
             clear_all_picked_prefabs_and_deactivate();
             capture_outfit();
         }
 
         ImGui::SameLine();
 
-        if (pendingSave)
+        if (pending_save)
         {
             ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.80f, 0.40f, 0.15f, 1.0f));
             ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.95f, 0.52f, 0.20f, 1.0f));
             ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(1.00f, 0.60f, 0.25f, 1.0f));
         }
-        if (ImGui::Button(pendingSave ? "Save *" : "Save", ImVec2(0, 0)))
+        if (ImGui::Button(pending_save ? "Save *" : "Save", ImVec2(0, 0)))
         {
             pm.replace_current_from_state();
             pm.save();
         }
-        if (pendingSave)
+        if (pending_save)
             ImGui::PopStyleColor(3);
         if (ImGui::IsItemHovered())
             ui_tooltip(
-                pendingSave ? "Commit current slot rows into the active preset (unsaved edits pending)."
-                            : "Commit current slot rows into the active preset."
+                pending_save ? "Commit current slot rows into the active preset (unsaved edits pending)."
+                             : "Commit current slot rows into the active preset."
             );
 
         ImGui::EndDisabled();
@@ -118,13 +118,13 @@ namespace Transmog
 
         auto &mappings = slot_mappings();
         int active_count = 0;
-        for (std::size_t i = 0; i < k_slotCount; ++i)
+        for (std::size_t i = 0; i < SLOT_COUNT; ++i)
         {
-            if (mappings[i].active && mappings[i].targetItemId != 0)
+            if (mappings[i].active && mappings[i].target_item_id != 0)
                 ++active_count;
         }
 
-        ui_text("Active slots: %d / %zu", active_count, k_slotCount);
+        ui_text("Active slots: %d / %zu", active_count, SLOT_COUNT);
     }
 
 } // namespace Transmog

@@ -15,7 +15,7 @@
 #include <utility>
 #include <vector>
 
-namespace Transmog::ClaimWalkGuard
+namespace Transmog::claim_walk_guard
 {
     namespace
     {
@@ -27,10 +27,10 @@ namespace Transmog::ClaimWalkGuard
          * register context, with no way to tell which site it fired for), so the count is fixed at compile time. Sized
          * above the expected two to absorb a build that splits or duplicates a walker.
          */
-        constexpr std::size_t k_maxSites = 4;
+        constexpr std::size_t MAX_SITES = 4;
 
         /// Hook name per site index, so the install loop never builds one at runtime.
-        constexpr std::array<const char *, k_maxSites> k_siteNames{
+        constexpr std::array<const char *, MAX_SITES> SITE_NAMES{
             "ClaimWalkGuard_0",
             "ClaimWalkGuard_1",
             "ClaimWalkGuard_2",
@@ -42,7 +42,7 @@ namespace Transmog::ClaimWalkGuard
          * store and the callback reads it relaxed, so the value a live detour redirects RIP to rests on a language
          * guarantee rather than on the incidental fence inside the arming sequence.
          */
-        std::array<std::atomic<std::uintptr_t>, k_maxSites> g_continueAddr{};
+        std::array<std::atomic<std::uintptr_t>, MAX_SITES> g_continueAddr{};
 
         /**
          * @brief Skip a claim entry whose owner is mid-erase.
@@ -61,7 +61,7 @@ namespace Transmog::ClaimWalkGuard
         }
 
         /// One callback per site index, so a site's continue address needs no lookup on the per-entry path.
-        constexpr std::array<DMK::hook::MidHookFn, k_maxSites> k_callbacks{
+        constexpr std::array<DMK::hook::MidHookFn, MAX_SITES> CALLBACKS{
             &on_claim_walk<0>,
             &on_claim_walk<1>,
             &on_claim_walk<2>,
@@ -93,16 +93,15 @@ namespace Transmog::ClaimWalkGuard
                 return false;
             }
 
-            const auto pattern = claim_walk_site_pattern();
-
             // Multi-match by design: more than one walker carries this shape and each needs guarding. See the anchor's
             // documentation in aob_resolver.hpp for why it is not a resolution ladder. The occurrence sweep is
             // page-gated to executable pages, so an identical run in .rdata cannot be mistaken for a walker and an
             // unmapped hole in the image is skipped rather than faulted through.
             std::vector<std::uintptr_t> sites;
-            for (std::size_t occurrence = 1; occurrence <= k_maxSites + 1; ++occurrence)
+            for (std::size_t occurrence = 1; occurrence <= MAX_SITES + 1; ++occurrence)
             {
-                const auto hit = DMK::scan::scan(pattern, host, occurrence, DMK::scan::Pages::Executable);
+                const auto hit =
+                    DMK::scan::scan(CLAIM_WALK_SITE_PATTERN, host, occurrence, DMK::scan::Pages::Executable);
                 if (!hit)
                     break;
                 sites.push_back(hit->raw());
@@ -119,31 +118,31 @@ namespace Transmog::ClaimWalkGuard
                 return false;
             }
 
-            if (sites.size() != k_claimWalkExpectedSites)
+            if (sites.size() != CLAIM_WALK_EXPECTED_SITES)
             {
                 (void)log.try_log(
                     DMK::LogLevel::Warning,
                     "[claim-guard] expected {} claim-walk sites, found {} - hooking anyway; "
                     "re-verify the walk survey against this build",
-                    k_claimWalkExpectedSites,
+                    CLAIM_WALK_EXPECTED_SITES,
                     sites.size()
                 );
             }
 
             for (std::size_t i = 0; i < sites.size(); ++i)
             {
-                if (i >= k_maxSites)
+                if (i >= MAX_SITES)
                 {
                     (void)log.try_log(
                         DMK::LogLevel::Warning,
                         "[claim-guard] more than {} sites found; {} left unguarded",
-                        k_maxSites,
-                        sites.size() - k_maxSites
+                        MAX_SITES,
+                        sites.size() - MAX_SITES
                     );
                     break;
                 }
 
-                const auto site = sites[i] + k_claimWalkDerefOffset;
+                const auto site = sites[i] + CLAIM_WALK_DEREF_OFFSET;
 
                 // Decode this site's own `jz rel8` to find where the engine continues when it rejects an entry, which
                 // is exactly where a skipped entry resumes. A read out of the instruction stream keeps the guard free
@@ -153,20 +152,20 @@ namespace Transmog::ClaimWalkGuard
                 // anchor on one retires the row silently). It is validated here instead: a site whose branch is not
                 // the expected 2-byte `jz rel8` is skipped with a log line rather than mis-decoded into a bogus
                 // continue address.
-                const auto jzAddr = sites[i] + k_claimWalkJzOffset;
-                const auto jzOpcode = DMK::memory::read<std::uint8_t>(DMK::Address{jzAddr}).value_or(0);
-                if (jzOpcode != 0x74)
+                const auto jz_addr = sites[i] + CLAIM_WALK_JZ_OFFSET;
+                const auto jz_opcode = DMK::memory::read<std::uint8_t>(DMK::Address{jz_addr}).value_or(0);
+                if (jz_opcode != 0x74)
                 {
                     (void)log.try_log(
                         DMK::LogLevel::Warning,
                         "[claim-guard] site {:#x}: expected jz at +{}, saw {:#04x} - skipped",
                         site,
-                        k_claimWalkJzOffset,
-                        jzOpcode
+                        CLAIM_WALK_JZ_OFFSET,
+                        jz_opcode
                     );
                     continue;
                 }
-                const auto rel8 = DMK::memory::read<std::int8_t>(DMK::Address{jzAddr + 1});
+                const auto rel8 = DMK::memory::read<std::int8_t>(DMK::Address{jz_addr + 1});
                 if (!rel8.has_value())
                 {
                     (void)log.try_log(
@@ -177,19 +176,19 @@ namespace Transmog::ClaimWalkGuard
                     continue;
                 }
                 // rel8 is measured from the byte AFTER the 2-byte branch.
-                const auto branchEnd = static_cast<std::int64_t>(jzAddr + 2);
-                const auto continueAddr = static_cast<std::uintptr_t>(branchEnd + static_cast<std::int64_t>(*rel8));
-                g_continueAddr[i].store(continueAddr, std::memory_order_release);
+                const auto branch_end = static_cast<std::int64_t>(jz_addr + 2);
+                const auto continue_addr = static_cast<std::uintptr_t>(branch_end + static_cast<std::int64_t>(*rel8));
+                g_continueAddr[i].store(continue_addr, std::memory_order_release);
 
                 // The handle goes into the module hook stack, so teardown removes it newest-first on unload. A
                 // hand-written stub owns its own lifetime and leaves the site jumping into freed memory across a hot
                 // reload.
                 auto guard = DMK::hook::mid_at(
                     DMK::hook::MidRequest{
-                        .name = k_siteNames[i],
+                        .name = SITE_NAMES[i],
                         .target = DMK::Address{site},
                     },
-                    k_callbacks[i]
+                    CALLBACKS[i]
                 );
                 if (!guard)
                 {
@@ -218,7 +217,7 @@ namespace Transmog::ClaimWalkGuard
                     DMK::LogLevel::Info,
                     "[claim-guard] guarded claim walk at {:#x} (continue {:#x})",
                     site,
-                    continueAddr
+                    continue_addr
                 );
             }
         }
@@ -239,4 +238,4 @@ namespace Transmog::ClaimWalkGuard
     {
         return g_patched.load(std::memory_order_acquire);
     }
-} // namespace Transmog::ClaimWalkGuard
+} // namespace Transmog::claim_walk_guard

@@ -62,7 +62,7 @@
  *   Oongka)
  *      -> CDCore::classify_appearance_by_path()
  *      -> {Kliff, Damiane, Oongka, Unknown}
- *   isProtagonist = actor in {Kliff, Damiane, Oongka}
+ *   is_protagonist = actor in {Kliff, Damiane, Oongka}
  *
  * Why protagonist-set, not controlled-only: all 3 protagonist voices must play unmuffled even when not driven. A
  * Damiane body that spawns as a roster NPC alongside a Kliff-driven player still needs her muffle stripped, so the
@@ -93,7 +93,7 @@
  *     and network sync. Out of scope for a per-actor mod.
  */
 
-namespace Transmog::HelmAudioFilter
+namespace Transmog::helm_audio_filter
 {
     /**
      * @brief Resolve dependencies and install the passive-skill registrar inline hook.
@@ -104,7 +104,7 @@ namespace Transmog::HelmAudioFilter
      *      `game_audio_effect_vtable()`)
      *   3. engine player static, the root of the Kliff init-race fallback chain (see `player_static()`). On
      *      AOB failure the hook still installs. Only the first-frame Kliff fallback goes dark.
-     *   4. the engine tag resolver for the chain walk (see `k_skillTagResolverBodyAob`, picked by RTTI class name).
+     *   4. the engine tag resolver for the chain walk (see `SKILL_TAG_RESOLVER_BODY_AOB`, picked by RTTI class name).
      *      This one binds lazily on the first registrar call, because its scan needs a live pa::SkillInfoManager.
      *
      * On any required AOB or hook install failure, logs a warning and leaves the feature disabled. The rest of LT
@@ -114,6 +114,6 @@ namespace Transmog::HelmAudioFilter
      */
     bool init(DetourModKit::hook::HookStack &hooks);
 
-} // namespace Transmog::HelmAudioFilter
+} // namespace Transmog::helm_audio_filter
 
 #endif // TRANSMOG_HELM_AUDIO_FILTER_HPP

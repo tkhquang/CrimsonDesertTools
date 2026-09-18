@@ -42,31 +42,31 @@ namespace Transmog
 {
 
     bool draw_item_picker_popup(
-        const char *popupId,
+        const char *popup_id,
         SlotUIState &ui,
-        Transmog::TransmogSlot slotCategory,
-        uint16_t &targetItemId,
-        bool autoApply,
-        std::size_t slotIdx,
-        int *outPrefabIdx
+        Transmog::TransmogSlot slot_category,
+        uint16_t &target_item_id,
+        bool auto_apply,
+        std::size_t slot_idx,
+        int *out_prefab_idx
     )
     {
         bool committed = false;
-        if (!ImGui::BeginPopup(popupId))
+        if (!ImGui::BeginPopup(popup_id))
             return false;
 
         // Reset hover-debounce state on the first frame, so stale state from a previous open does not suppress or
         // prematurely fire an apply.
         if (ImGui::IsWindowAppearing())
         {
-            ui.hoverPendingId = targetItemId;
-            ui.hoverAppliedId = targetItemId;
-            ui.hoverStartMs = 0;
+            ui.hover_pending_id = target_item_id;
+            ui.hover_applied_id = target_item_id;
+            ui.hover_start_ms = 0;
             // Prefab-mode equivalent: seed both pending and applied with the popup-slot's current pick so the anchor
             // row does not trigger a redundant re-apply on open.
-            ui.hoverPendingPrefab = ui.pickedPrefabName;
-            ui.hoverAppliedPrefab = ui.pickedPrefabName;
-            ui.hoverPrefabStartMs = 0;
+            ui.hover_pending_prefab = ui.picked_prefab_name;
+            ui.hover_applied_prefab = ui.picked_prefab_name;
+            ui.hover_prefab_start_ms = 0;
         }
 
         ui_text_disabled("Item picker");
@@ -77,7 +77,7 @@ namespace Transmog
         // Exact: only show items whose auto-detected category matches
         //        this slot (helm-suffixed items for the helm slot, etc.)
         // Hide variants: hide items flagged by has_variant_meta() (see
-        //        item_name_table.cpp::k_descVariantMetaOffset for the
+        //        item_name_table.cpp::DESC_VARIANT_META_OFFSET for the
         //        per-version descriptor offset); all tested samples in
         //        that bucket failed to render via runtime transmog, so
         //        hiding them by default keeps the picker free of
@@ -85,18 +85,18 @@ namespace Transmog
         // Body-aware filters only matter for the 5 armor slots (Helm/Chest/ Cloak/Gloves/Boots) where the body-mesh
         // family is gender-specific (cd_phm_* vs cd_phw_*). Accessory + weapon slots share their mesh families across
         // genders, so the filter has no effect there and the checkboxes just create confusion - hide them.
-        const bool isArmorSlotPickerHeader = Transmog::slot_meta(slotCategory).partShowHashKey != nullptr;
-        if (!ui.prefabMode)
+        const bool is_armor_slot_picker_header = Transmog::slot_meta(slot_category).part_show_hash_key != nullptr;
+        if (!ui.prefab_mode)
         {
-            ImGui::Checkbox("Exact", &ui.exactFilter);
-            if (isArmorSlotPickerHeader)
+            ImGui::Checkbox("Exact", &ui.exact_filter);
+            if (is_armor_slot_picker_header)
             {
                 ImGui::SameLine();
-                ImGui::Checkbox("Safe only", &ui.hideIncompatible);
+                ImGui::Checkbox("Safe only", &ui.hide_incompatible);
                 ImGui::SameLine();
-                ImGui::Checkbox("Hide variants", &ui.hideVariants);
+                ImGui::Checkbox("Hide variants", &ui.hide_variants);
                 ImGui::SameLine();
-                ImGui::Checkbox("Hide cross-body", &ui.hideBodyMismatch);
+                ImGui::Checkbox("Hide cross-body", &ui.hide_body_mismatch);
                 if (ImGui::IsItemHovered())
                     ui_tooltip(
                         "Hide items whose body type (male/female) "
@@ -108,14 +108,14 @@ namespace Transmog
         {
             ui_text_disabled("Prefabs mode (cross-slot)");
             ImGui::SameLine();
-            ImGui::Checkbox("Exact##prefab_exact", &ui.prefabExactFilter);
+            ImGui::Checkbox("Exact##prefab_exact", &ui.prefab_exact_filter);
             if (ImGui::IsItemHovered())
                 ui_tooltip(
                     "Limit the list to prefabs whose body-mesh family "
                     "matches this slot. Untick to browse the full cross-slot catalog."
                 );
             ImGui::SameLine();
-            ImGui::Checkbox("Keep open##prefab_keep_open", &ui.prefabKeepOpenOnPick);
+            ImGui::Checkbox("Keep open##prefab_keep_open", &ui.prefab_keep_open_on_pick);
             if (ImGui::IsItemHovered())
                 ui_tooltip(
                     "Keep the picker open after each pick so you can quickly compare prefabs. Untick to close on click."
@@ -138,55 +138,55 @@ namespace Transmog
         if (ImGui::IsWindowAppearing())
         {
             ImGui::SetKeyboardFocusHere();
-            ui.navIndex = -1;
+            ui.nav_index = -1;
         }
         ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(ImGui::GetStyle().FramePadding.x, 6.0f));
-        const bool searchEdited =
-            ImGui::InputTextWithHint("##search", "Search by name or id...", ui.searchBuf, sizeof(ui.searchBuf));
+        const bool search_edited =
+            ImGui::InputTextWithHint("##search", "Search by name or id...", ui.search_buf, sizeof(ui.search_buf));
         ImGui::PopStyleVar();
-        if (searchEdited)
-            ui.navIndex = 0;
+        if (search_edited)
+            ui.nav_index = 0;
 
         ImGui::SameLine();
         if (ImGui::SmallButton("Clear##search"))
         {
-            ui.searchBuf[0] = '\0';
-            ui.navIndex = 0;
+            ui.search_buf[0] = '\0';
+            ui.nav_index = 0;
         }
 
         // Navigation buttons: move the highlight through the visible list. Placed next to the search bar so they are
         // always reachable without scrolling. Enter commits the highlighted item.
         ImGui::SameLine();
-        ui.navMoved = false;
+        ui.nav_moved = false;
         {
-            const int maxNav = ui.lastVisibleCount - 1;
+            const int max_nav = ui.last_visible_count - 1;
             // Up/Down arrow keys mirror the GUI nav buttons. ImGui's single-line InputText (the search box) does not
             // consume vertical arrows, so this is safe even when the search box has keyboard focus.
-            const bool keyUp = ImGui::IsKeyPressed(ImGuiKey_UpArrow);
-            const bool keyDown = ImGui::IsKeyPressed(ImGuiKey_DownArrow);
-            if (ImGui::SmallButton("^##nav_up") || keyUp)
+            const bool key_up = ImGui::IsKeyPressed(ImGuiKey_UpArrow);
+            const bool key_down = ImGui::IsKeyPressed(ImGuiKey_DownArrow);
+            if (ImGui::SmallButton("^##nav_up") || key_up)
             {
-                ui.navIndex = (ui.navIndex > 0) ? ui.navIndex - 1 : 0;
-                ui.navMoved = true;
+                ui.nav_index = (ui.nav_index > 0) ? ui.nav_index - 1 : 0;
+                ui.nav_moved = true;
             }
             ImGui::SameLine();
-            if (ImGui::SmallButton("v##nav_down") || keyDown)
+            if (ImGui::SmallButton("v##nav_down") || key_down)
             {
-                ui.navIndex = (ui.navIndex < maxNav) ? ui.navIndex + 1 : (maxNav >= 0 ? maxNav : 0);
-                ui.navMoved = true;
+                ui.nav_index = (ui.nav_index < max_nav) ? ui.nav_index + 1 : (max_nav >= 0 ? max_nav : 0);
+                ui.nav_moved = true;
             }
         }
         // Prefabs toggle: only meaningful for slots that have a body-mesh carrier. The source comes from the slot's
         // carrier item in carrier_defaults.hpp, resolved to a rig mesh at runtime. A slot with no carrier named there
         // gets -1 from selection_src_index and the toggle is hidden - there is no point browsing prefabs from a slot
-        // that can never receive one. Force prefabMode off for those slots so a pre-existing true value does not blank
+        // that can never receive one. Force prefab_mode off for those slots so a pre-existing true value does not blank
         // the popup.
         {
-            const bool slotHasCarrier = (Transmog::PrefabWrapperSwap::selection_src_index(slotCategory) >= 0);
-            if (slotHasCarrier)
+            const bool slot_has_carrier = (Transmog::prefab_wrapper_swap::selection_src_index(slot_category) >= 0);
+            if (slot_has_carrier)
             {
                 ImGui::SameLine();
-                ImGui::Checkbox("Prefabs##picker_prefab_mode", &ui.prefabMode);
+                ImGui::Checkbox("Prefabs##picker_prefab_mode", &ui.prefab_mode);
                 if (ImGui::IsItemHovered())
                     ui_tooltip(
                         "Browse all body-mesh prefabs across every "
@@ -194,19 +194,19 @@ namespace Transmog
                         "merged prefab list. Picking applies to the prefab's native slot."
                     );
             }
-            else if (ui.prefabMode)
+            else if (ui.prefab_mode)
             {
-                ui.prefabMode = false;
+                ui.prefab_mode = false;
             }
         }
 
         const auto &table = Transmog::ItemNameTable::instance();
         const auto &entries = table.sorted_entries();
 
-        const float rowH = ImGui::GetTextLineHeightWithSpacing();
-        const float lineH = ImGui::GetTextLineHeight();
+        const float row_h = ImGui::GetTextLineHeightWithSpacing();
+        const float line_h = ImGui::GetTextLineHeight();
         // Two-line row: display name + smaller internal name line.
-        const float twoLineH = lineH * 2.0f + 4.0f;
+        const float two_line_h = line_h * 2.0f + 4.0f;
 
         // Fixed-height scrollable region so the popup does not resize per keystroke as the filter narrows.
         //
@@ -214,31 +214,31 @@ namespace Transmog
         // item names without leaving a wide empty band. The previous DPI-linear value scaled past 1800px on 4K screens
         // and dominated the row. Reshade mode keeps a fixed 560px because its host UI already constrains the parent
         // window.
-        const float popupW = s_standaloneMode ? (ImGui::CalcTextSize("M").x * 60.0f) : 560.0f;
-        ImGui::BeginChild("##itemlist", ImVec2(popupW, twoLineH * 12.0f), true);
+        const float popup_w = s_standalone_mode ? (ImGui::CalcTextSize("M").x * 60.0f) : 560.0f;
+        ImGui::BeginChild("##itemlist", ImVec2(popup_w, two_line_h * 12.0f), true);
 
         // Increase vertical spacing between items for easier click/hover targets. Pushed INSIDE BeginChild so the
         // popup-level spacing stays default - otherwise the popup's own scroll region may capture mouse wheel events
         // instead of the child.
-        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(ImGui::GetStyle().ItemSpacing.x, rowH * 0.35f));
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(ImGui::GetStyle().ItemSpacing.x, row_h * 0.35f));
 
         // "None" / clear entry at the top of the scroll region. Hover-preview shows bare head/body (empty slot) via the
-        // active+none path in apply_single_slot. Suppressed in prefabMode where the popup is a prefab-browser only.
-        if (!ui.prefabMode)
+        // active+none path in apply_single_slot. Suppressed in prefab_mode where the popup is a prefab-browser only.
+        if (!ui.prefab_mode)
         {
-            const bool selected = (targetItemId == 0);
+            const bool selected = (target_item_id == 0);
             if (ImGui::Selectable("(none - id 0)##picker_none", selected, 0, ImVec2(0, 0)))
             {
-                targetItemId = 0;
+                target_item_id = 0;
                 committed = true;
                 ImGui::CloseCurrentPopup();
             }
             if (selected)
                 ImGui::SetItemDefaultFocus();
-            if (autoApply && ImGui::IsItemHovered() && ui.hoverPendingId != 0)
+            if (auto_apply && ImGui::IsItemHovered() && ui.hover_pending_id != 0)
             {
-                ui.hoverPendingId = 0;
-                ui.hoverStartMs = Transmog::steady_ms();
+                ui.hover_pending_id = 0;
+                ui.hover_start_ms = Transmog::steady_ms();
             }
         }
 
@@ -247,27 +247,27 @@ namespace Transmog
         ImDrawList *const dl = ImGui::GetWindowDrawList();
 
         // Semantic color constants for the two-line item display.
-        static constexpr ImU32 k_colorCrashRisk = IM_COL32(255, 89, 89, 255);
-        static constexpr ImU32 k_colorCarrier = IM_COL32(128, 217, 255, 255);
+        static constexpr ImU32 color_crash_risk = IM_COL32(255, 89, 89, 255);
+        static constexpr ImU32 color_carrier = IM_COL32(128, 217, 255, 255);
         // Orange - carrier path works but body type mismatched. Item will equip and may display with minor mesh
         // artifacts; we show it when the user disables "Hide cross-body".
-        static constexpr ImU32 k_colorCrossBody = IM_COL32(255, 176, 64, 255);
+        static constexpr ImU32 color_cross_body = IM_COL32(255, 176, 64, 255);
         // Amber - item has humanoid-range classifier tokens but none are in the male/female body set (e.g. NPC
         // variants like Antumbra/Badran gloves with only `0x012F`). Equip goes through the carrier path but render
         // fidelity is inconsistent - some items resolve correctly, others show as broken meshes.
-        static constexpr ImU32 k_colorAmbiguous = IM_COL32(230, 210, 120, 255);
-        static constexpr ImU32 k_colorDimmed = IM_COL32(160, 160, 160, 200);
+        static constexpr ImU32 color_ambiguous = IM_COL32(230, 210, 120, 255);
+        static constexpr ImU32 color_dimmed = IM_COL32(160, 160, 160, 200);
 
         // Active character's body kind. Stable for the entire popup invocation: PresetManager state cannot mutate
         // between picker frames on the render thread, so resolving it once here avoids ~6k redundant PresetManager +
         // string comparisons per frame inside the filter loop. The catalog's body families come from the
-        // equip-eligibility column of the display_names TSV (item_name_table.cpp::m_bodyByName):
+        // equip-eligibility column of the display_names TSV (item_name_table.cpp::m_body_by_name):
         //   Horse / pet / wagon / dragon: separate token pools with
         //     zero overlap with humanoid. Flagged as NonHumanoid and
         //     hidden unconditionally - these never render on a human
         //     skeleton (horse saddles, cat backpacks, etc.).
         using BK = Transmog::ItemNameTable::BodyKind;
-        BK charBody;
+        BK char_body;
         {
             const auto &pm = Transmog::PresetManager::instance();
             // The picker filter follows the editing character: the user is populating that character's preset and wants
@@ -275,13 +275,13 @@ namespace Transmog
             // is unpinned because the two axes are identical in that state.
             const std::string ov = pm.body_kind_of(pm.editing_character());
             if (ov == "Male")
-                charBody = BK::Male;
+                char_body = BK::Male;
             else if (ov == "Female")
-                charBody = BK::Female;
+                char_body = BK::Female;
             else if (ov == "Both")
-                charBody = BK::Both;
+                char_body = BK::Both;
             else // "Auto" or unrecognized
-                charBody = Transmog::ItemNameTable::body_kind_for_character(pm.editing_character());
+                char_body = Transmog::ItemNameTable::body_kind_for_character(pm.editing_character());
         }
 
         // Two-pass filter+draw. Pass 1 collects matching catalog indices; pass 2 renders. The split lets the post-loop
@@ -298,17 +298,17 @@ namespace Transmog
         static std::vector<std::size_t> s_filtered;
         s_filtered.clear();
         s_filtered.reserve(entries.size());
-        int filteredByCategory = 0;
-        int filteredByUnsafe = 0;
+        int filtered_by_category = 0;
+        int filtered_by_unsafe = 0;
         int shown = 0;
         // Body-aware filters (Safe / Hide variants / Hide cross-body) only apply to the 5 armor slots
         // (Helm/Chest/Cloak/Gloves/Boots) where the body-mesh family is gender-specific (cd_phm_* vs cd_phw_*).
         // Earrings/Necklace/Rings/Lantern/Glasses/Mask/Backpack/Bracelet and weapons share their mesh families across
-        // genders, so the gender / body-kind filter just hides perfectly-good options. partShowHashKey is non-null
+        // genders, so the gender / body-kind filter just hides perfectly-good options. part_show_hash_key is non-null
         // exactly for the 5 armor slots in slot_metadata.hpp - reuse that table as the gate.
-        const bool isArmorSlot = Transmog::slot_meta(slotCategory).partShowHashKey != nullptr;
+        const bool is_armor_slot = Transmog::slot_meta(slot_category).part_show_hash_key != nullptr;
 
-        if (!ui.prefabMode)
+        if (!ui.prefab_mode)
         {
             for (std::size_t idx = 0; idx < entries.size(); ++idx)
             {
@@ -316,33 +316,33 @@ namespace Transmog
                 // Exact filter accepts the slot itself OR its picker partner (Earring1/2, Ring1/2, MainHand/OffHand
                 // share items because their descriptor typeCodes are identical - see ItemNameTable::category_of which
                 // returns the lower-indexed half for these pairs).
-                if (ui.exactFilter && !Transmog::slots_share_picker(e.category, slotCategory))
+                if (ui.exact_filter && !Transmog::slots_share_picker(e.category, slot_category))
                 {
-                    ++filteredByCategory;
+                    ++filtered_by_category;
                     continue;
                 }
-                const bool nonHumanoid = (e.bodyKind == BK::NonHumanoid);
-                const bool incompatible = (e.category == Transmog::TransmogSlot::Count) || nonHumanoid;
-                if (isArmorSlot && ui.hideIncompatible && incompatible)
+                const bool non_humanoid = (e.body_kind == BK::NonHumanoid);
+                const bool incompatible = (e.category == Transmog::TransmogSlot::Count) || non_humanoid;
+                if (is_armor_slot && ui.hide_incompatible && incompatible)
                 {
-                    ++filteredByUnsafe;
+                    ++filtered_by_unsafe;
                     continue;
                 }
-                const bool ambiguousBody = (e.bodyKind == BK::Ambiguous);
-                const bool bodyMatches =
-                    !nonHumanoid && (ambiguousBody || (e.bodyKind == BK::Generic) || (e.bodyKind == BK::Both) ||
-                                     (charBody == BK::Generic) || (e.bodyKind == charBody));
-                if (isArmorSlot && ui.hideBodyMismatch && !bodyMatches)
+                const bool ambiguous_body = (e.body_kind == BK::Ambiguous);
+                const bool body_matches =
+                    !non_humanoid && (ambiguous_body || (e.body_kind == BK::Generic) || (e.body_kind == BK::Both) ||
+                                      (char_body == BK::Generic) || (e.body_kind == char_body));
+                if (is_armor_slot && ui.hide_body_mismatch && !body_matches)
                 {
-                    ++filteredByUnsafe;
+                    ++filtered_by_unsafe;
                     continue;
                 }
-                if (isArmorSlot && ui.hideVariants && e.hasVariantMeta)
+                if (is_armor_slot && ui.hide_variants && e.has_variant_meta)
                 {
-                    ++filteredByUnsafe;
+                    ++filtered_by_unsafe;
                     continue;
                 }
-                if (!name_contains_ci(e.name, ui.searchBuf) && !name_contains_ci(e.displayName, ui.searchBuf))
+                if (!name_contains_ci(e.name, ui.search_buf) && !name_contains_ci(e.display_name, ui.search_buf))
                     continue;
                 s_filtered.push_back(idx);
             }
@@ -350,55 +350,55 @@ namespace Transmog
             shown = static_cast<int>(s_filtered.size());
 
             // Anchor nav on the popup-slot's current item pick so Up/Down starts stepping from the user's prior
-            // selection rather than the top of the filtered list. Only runs on frames where navIndex was freshly reset
+            // selection rather than the top of the filtered list. Only runs on frames where nav_index was freshly reset
             // (popup-open via IsWindowAppearing, or filter edit). Falls back to row 0 when there is no selection
-            // (targetItemId==0) or the selection is hidden by the current filters / search.
-            if (ui.navIndex == -1 && shown > 0)
+            // (target_item_id==0) or the selection is hidden by the current filters / search.
+            if (ui.nav_index == -1 && shown > 0)
             {
-                int anchorRow = 0;
-                if (targetItemId != 0)
+                int anchor_row = 0;
+                if (target_item_id != 0)
                 {
                     for (int row = 0; row < shown; ++row)
                     {
-                        if (entries[s_filtered[static_cast<std::size_t>(row)]].id == targetItemId)
+                        if (entries[s_filtered[static_cast<std::size_t>(row)]].id == target_item_id)
                         {
-                            anchorRow = row;
+                            anchor_row = row;
                             break;
                         }
                     }
                 }
-                ui.navIndex = anchorRow;
+                ui.nav_index = anchor_row;
                 // Piggyback on the existing nav-move scroll path so the popup scrolls the anchor row into view on first
-                // appearance. navMoved is a "highlight just shifted, scroll to it" signal regardless of whether the
+                // appearance. nav_moved is a "highlight just shifted, scroll to it" signal regardless of whether the
                 // shift came from a button or from the anchor block.
-                ui.navMoved = true;
+                ui.nav_moved = true;
             }
 
-            // Pass 2: render the filtered rows. bodyMatches is recomputed here rather than cached from pass 1 because
+            // Pass 2: render the filtered rows. body_matches is recomputed here rather than cached from pass 1 because
             // the per-item flag also drives the color tier and the carrier/crash-risk tag - recomputation is cheaper
             // than a parallel side-vector allocation.
             for (int row = 0; row < shown; ++row)
             {
                 const auto &e = entries[s_filtered[row]];
-                const bool nonHumanoid = (e.bodyKind == BK::NonHumanoid);
-                const bool ambiguousBody = (e.bodyKind == BK::Ambiguous);
+                const bool non_humanoid = (e.body_kind == BK::NonHumanoid);
+                const bool ambiguous_body = (e.body_kind == BK::Ambiguous);
                 // Body-mesh family is gender-specific only for the 5 armor slots (cd_phm_* vs cd_phw_*). Accessory +
                 // weapon slots share their meshes across genders, so a "BODY MISMATCH" or "UNCERTAIN BODY" tag would be
                 // misleading. Treat every entry as body-matching for non-armor slots so the color/tag flow below
-                // collapses to plain `usesCarrier` (cyan) or untagged.
-                const bool bodyMatches =
-                    !isArmorSlot ||
-                    (!nonHumanoid && (ambiguousBody || (e.bodyKind == BK::Generic) || (e.bodyKind == BK::Both) ||
-                                      (charBody == BK::Generic) || (e.bodyKind == charBody)));
+                // collapses to plain `uses_carrier` (cyan) or untagged.
+                const bool body_matches =
+                    !is_armor_slot ||
+                    (!non_humanoid && (ambiguous_body || (e.body_kind == BK::Generic) || (e.body_kind == BK::Both) ||
+                                       (char_body == BK::Generic) || (e.body_kind == char_body)));
 
                 // Tag items with visible badges:
-                //   - "CRASH RISK"  -> !isPlayerCompatible (red)
-                //   - "carrier"     -> hasVariantMeta, rendered via carrier
+                //   - "CRASH RISK"  -> !is_player_compatible (red)
+                //   - "carrier"     -> has_variant_meta, rendered via carrier
                 //                      + char-class bypass (cyan)
                 const char *tag = nullptr;
-                // NPC variant items (hasVariantMeta) are humanoid and now render via carrier + char-class bypass. True
-                // crash risks are non-player items WITHOUT variant meta (horse tack, etc).
-                const bool usesCarrier = e.hasVariantMeta;
+                // NPC variant items (has_variant_meta) are humanoid and now render via carrier + char-class bypass.
+                // True crash risks are non-player items WITHOUT variant meta (horse tack, etc).
+                const bool uses_carrier = e.has_variant_meta;
                 // Color tiers:
                 //   red    CRASH RISK         - rule list rejects this body,
                 //                               no carrier path rescue.
@@ -410,91 +410,91 @@ namespace Transmog
                 //                               may not resolve correctly.
                 //   blue   carrier            - NPC variant, same-body match,
                 //                               reliable carrier path.
-                const bool crashRisk = !bodyMatches && !e.hasVariantMeta;
-                const bool crossBodyCarrier = !bodyMatches && e.hasVariantMeta;
+                const bool crash_risk = !body_matches && !e.has_variant_meta;
+                const bool cross_body_carrier = !body_matches && e.has_variant_meta;
                 // Only flag ambiguous when it is actually a carrier item and not already bucketed as cross-body (it
-                // is not - ambiguous passes bodyMatches above). Suppressed entirely on non-armor slots where body kind
+                // is not - ambiguous passes body_matches above). Suppressed entirely on non-armor slots where body kind
                 // is irrelevant.
-                const bool ambiguousCarrier = isArmorSlot && ambiguousBody && e.hasVariantMeta;
-                if (crashRisk)
+                const bool ambiguous_carrier = is_armor_slot && ambiguous_body && e.has_variant_meta;
+                if (crash_risk)
                     tag = "non-player - CRASH RISK";
-                else if (crossBodyCarrier)
+                else if (cross_body_carrier)
                     tag = "carrier - BODY MISMATCH";
-                else if (ambiguousCarrier)
+                else if (ambiguous_carrier)
                     tag = "carrier - UNCERTAIN BODY";
-                else if (usesCarrier)
+                else if (uses_carrier)
                     tag = "carrier";
 
-                const bool isNavTarget = (row == ui.navIndex);
-                const bool highlighted = (targetItemId == e.id) || isNavTarget;
+                const bool is_nav_target = (row == ui.nav_index);
+                const bool highlighted = (target_item_id == e.id) || is_nav_target;
 
                 // Two-line selectable: hidden label, custom text overlay.
-                char hiddenId[32];
-                std::snprintf(hiddenId, sizeof(hiddenId), "##picker_%04X", e.id);
+                char hidden_id[32];
+                std::snprintf(hidden_id, sizeof(hidden_id), "##picker_%04X", e.id);
                 ImVec2 pos = ImGui::GetCursorScreenPos();
-                if (crashRisk)
+                if (crash_risk)
                     ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.4f, 0.1f, 0.1f, 0.6f));
-                else if (crossBodyCarrier)
+                else if (cross_body_carrier)
                     ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.45f, 0.28f, 0.08f, 0.6f));
-                else if (ambiguousCarrier)
+                else if (ambiguous_carrier)
                     ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.38f, 0.32f, 0.12f, 0.6f));
-                else if (usesCarrier)
+                else if (uses_carrier)
                     ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.1f, 0.2f, 0.35f, 0.6f));
-                if (ImGui::Selectable(hiddenId, highlighted, 0, ImVec2(0, twoLineH)))
+                if (ImGui::Selectable(hidden_id, highlighted, 0, ImVec2(0, two_line_h)))
                 {
-                    targetItemId = e.id;
+                    target_item_id = e.id;
                     committed = true;
                     ImGui::CloseCurrentPopup();
                 }
 
                 // Overlay text on top of the selectable region.
-                const bool hasDisplay = !e.displayName.empty();
-                const char *primaryName = hasDisplay ? e.displayName.c_str() : e.name.c_str();
+                const bool has_display = !e.display_name.empty();
+                const char *primary_name = has_display ? e.display_name.c_str() : e.name.c_str();
 
                 // Line 1: display name (or internal name fallback) + tag.
                 char line1[256];
                 if (tag)
-                    std::snprintf(line1, sizeof(line1), "%s  (%s)", primaryName, tag);
+                    std::snprintf(line1, sizeof(line1), "%s  (%s)", primary_name, tag);
                 else
-                    std::snprintf(line1, sizeof(line1), "%s", primaryName);
+                    std::snprintf(line1, sizeof(line1), "%s", primary_name);
 
-                const ImU32 mainColor = crashRisk          ? k_colorCrashRisk
-                                        : crossBodyCarrier ? k_colorCrossBody
-                                        : ambiguousCarrier ? k_colorAmbiguous
-                                        : usesCarrier      ? k_colorCarrier
-                                                           : ImGui::GetColorU32(ImGuiCol_Text);
+                const ImU32 main_color = crash_risk           ? color_crash_risk
+                                         : cross_body_carrier ? color_cross_body
+                                         : ambiguous_carrier  ? color_ambiguous
+                                         : uses_carrier       ? color_carrier
+                                                              : ImGui::GetColorU32(ImGuiCol_Text);
 
-                dl->AddText(ImVec2(pos.x + 2.0f, pos.y + 1.0f), mainColor, line1);
+                dl->AddText(ImVec2(pos.x + 2.0f, pos.y + 1.0f), main_color, line1);
 
                 // Line 2: internal name + hex id (dimmed).
                 char line2[256];
-                if (hasDisplay)
+                if (has_display)
                     std::snprintf(line2, sizeof(line2), "  %s  [0x%04X]", e.name.c_str(), e.id);
                 else
                     std::snprintf(line2, sizeof(line2), "  [0x%04X]", e.id);
-                dl->AddText(ImVec2(pos.x + 2.0f, pos.y + lineH + 2.0f), k_colorDimmed, line2);
+                dl->AddText(ImVec2(pos.x + 2.0f, pos.y + line_h + 2.0f), color_dimmed, line2);
 
                 // Scroll the nav-highlighted row into view and handle
                 // Enter to commit.
-                if (isNavTarget)
+                if (is_nav_target)
                 {
-                    if (ui.navMoved)
+                    if (ui.nav_moved)
                         ImGui::SetScrollHereY();
                     if (ImGui::IsKeyPressed(ImGuiKey_Enter) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter))
                     {
-                        targetItemId = e.id;
+                        target_item_id = e.id;
                         committed = true;
                         ImGui::CloseCurrentPopup();
                     }
                     // Feed nav target into hover-apply debounce so button navigation previews items when auto-apply is
                     // on.
-                    if (autoApply && ui.hoverPendingId != e.id)
+                    if (auto_apply && ui.hover_pending_id != e.id)
                     {
-                        ui.hoverPendingId = e.id;
-                        ui.hoverStartMs = Transmog::steady_ms();
+                        ui.hover_pending_id = e.id;
+                        ui.hover_start_ms = Transmog::steady_ms();
                     }
                 }
-                else if (targetItemId == e.id)
+                else if (target_item_id == e.id)
                 {
                     // Scroll to the currently selected item on popup open so it is visible without manual scrolling.
                     ImGui::SetItemDefaultFocus();
@@ -502,22 +502,22 @@ namespace Transmog
 
                 // Live preview: record the mouse-hovered item and start the debounce timer. Sync nav cursor to mouse so
                 // the highlight follows the cursor.
-                if (autoApply && ImGui::IsItemHovered() && ui.hoverPendingId != e.id)
+                if (auto_apply && ImGui::IsItemHovered() && ui.hover_pending_id != e.id)
                 {
-                    ui.hoverPendingId = e.id;
-                    ui.hoverStartMs = Transmog::steady_ms();
-                    ui.navIndex = row;
+                    ui.hover_pending_id = e.id;
+                    ui.hover_start_ms = Transmog::steady_ms();
+                    ui.nav_index = row;
                 }
 
-                if (crashRisk || crossBodyCarrier || ambiguousCarrier || usesCarrier)
+                if (crash_risk || cross_body_carrier || ambiguous_carrier || uses_carrier)
                     ImGui::PopStyleColor(); // Header color
             }
 
             if (shown == 0)
             {
-                if (ui.exactFilter && filteredByCategory > 0)
+                if (ui.exact_filter && filtered_by_category > 0)
                     ui_text_disabled("no matches in this category - uncheck Exact to widen");
-                else if ((ui.hideIncompatible || ui.hideVariants || ui.hideBodyMismatch) && filteredByUnsafe > 0)
+                else if ((ui.hide_incompatible || ui.hide_variants || ui.hide_body_mismatch) && filtered_by_unsafe > 0)
                     ui_text_disabled("no matches - uncheck filters to show more items");
                 else
                     ui_text_disabled("no matches");
@@ -529,14 +529,14 @@ namespace Transmog
         // Mirrors the carrier picker but for raw body-mesh prefabs. Picking an entry here is equivalent to setting a
         // body-mesh override on the slot: the engine still equips the player's actual carrier item, but the body-mesh
         // hook substitutes the wrapper at apply time so the visible mesh becomes the chosen prefab. The source wrapper
-        // comes from the slot's INI source pair, that is the Kliff carrier defaults. A null outPrefabIdx means the
+        // comes from the slot's INI source pair, that is the Kliff carrier defaults. A null out_prefab_idx means the
         // caller wants no prefab section, so the whole block is skipped for it.
-        if (outPrefabIdx != nullptr)
+        if (out_prefab_idx != nullptr)
         {
-            namespace PWS = Transmog::PrefabWrapperSwap;
+            namespace pws = Transmog::prefab_wrapper_swap;
 
             ImGui::Separator();
-            if (ui.prefabMode)
+            if (ui.prefab_mode)
             {
                 // Cross-slot prefab browser
                 //
@@ -550,63 +550,63 @@ namespace Transmog
                 //
                 // Pass 1 builds a flat index of catalog positions matching the search filter; pass 2 manually clips to
                 // the visible scroll window (see manual virtualization comment below).
-                const auto &cat0 = PWS::slot_catalog(static_cast<Transmog::TransmogSlot>(0));
-                const std::size_t catalogedTotal = cat0.size();
+                const auto &cat0 = pws::slot_catalog(static_cast<Transmog::TransmogSlot>(0));
+                const std::size_t cataloged_total = cat0.size();
 
-                static std::vector<std::uint32_t> s_prefabFlat;
-                s_prefabFlat.clear();
+                static std::vector<std::uint32_t> s_prefab_flat;
+                s_prefab_flat.clear();
                 for (std::size_t pi = 0; pi < cat0.size(); ++pi)
                 {
-                    if (!name_contains_ci(cat0[pi].name, ui.searchBuf))
+                    if (!name_contains_ci(cat0[pi].name, ui.search_buf))
                         continue;
-                    if (ui.prefabExactFilter)
+                    if (ui.prefab_exact_filter)
                     {
                         auto derived = Transmog::slot_for_prefab_name(cat0[pi].name);
-                        if (!derived.has_value() || !Transmog::slots_share_prefab_family(*derived, slotCategory))
+                        if (!derived.has_value() || !Transmog::slots_share_prefab_family(*derived, slot_category))
                             continue;
                     }
-                    s_prefabFlat.push_back(static_cast<std::uint32_t>(pi));
+                    s_prefab_flat.push_back(static_cast<std::uint32_t>(pi));
                 }
-                const std::size_t totalShown = s_prefabFlat.size();
+                const std::size_t total_shown = s_prefab_flat.size();
 
                 // Anchor nav on the popup-slot's current prefab pick so Up/Down starts stepping from the user's prior
                 // selection rather than the top of the filtered prefab list. Mirrors the items-mode anchor block above.
                 // Falls back to row 0 when there is no selection or the picked prefab was filtered out by Exact /
                 // search.
-                if (ui.navIndex == -1 && totalShown > 0)
+                if (ui.nav_index == -1 && total_shown > 0)
                 {
-                    int anchorRow = 0;
-                    if (!ui.pickedPrefabName.empty())
+                    int anchor_row = 0;
+                    if (!ui.picked_prefab_name.empty())
                     {
-                        for (std::size_t i = 0; i < totalShown; ++i)
+                        for (std::size_t i = 0; i < total_shown; ++i)
                         {
-                            const auto pi = static_cast<std::size_t>(s_prefabFlat[i]);
-                            if (cat0[pi].name == ui.pickedPrefabName)
+                            const auto pi = static_cast<std::size_t>(s_prefab_flat[i]);
+                            if (cat0[pi].name == ui.picked_prefab_name)
                             {
-                                anchorRow = static_cast<int>(i);
+                                anchor_row = static_cast<int>(i);
                                 break;
                             }
                         }
                     }
-                    ui.navIndex = anchorRow;
+                    ui.nav_index = anchor_row;
                     // Piggyback on the scroll-into-view path so the virtualized window opens centered on the anchor row
                     // rather than at the top.
-                    ui.navMoved = true;
+                    ui.nav_moved = true;
                 }
 
                 // Header label with live counts. Shows "(matched / total)" when the search/filter narrows the visible
                 // set; collapses to "(total)" when everything is shown.
                 {
                     char hdr[96];
-                    if (totalShown == catalogedTotal)
-                        std::snprintf(hdr, sizeof(hdr), "All Prefabs across all slots (%zu)", catalogedTotal);
+                    if (total_shown == cataloged_total)
+                        std::snprintf(hdr, sizeof(hdr), "All Prefabs across all slots (%zu)", cataloged_total);
                     else
                         std::snprintf(
                             hdr,
                             sizeof(hdr),
                             "All Prefabs across all slots (%zu / %zu)",
-                            totalShown,
-                            catalogedTotal
+                            total_shown,
+                            cataloged_total
                         );
                     ui_text_disabled(hdr);
                 }
@@ -617,7 +617,7 @@ namespace Transmog
                 auto label_for_prefab = [&](const std::string &name) -> const char *
                 {
                     if (auto slot = Transmog::slot_for_prefab_name(name))
-                        return Transmog::slot_meta(*slot).displayName;
+                        return Transmog::slot_meta(*slot).display_name;
                     return "?";
                 };
 
@@ -625,99 +625,99 @@ namespace Transmog
                 // the clipper's symbols clash between imgui_lib and the ReShade SDK function-table thunks (it sits on
                 // the boundary the overlay_ui_obj OBJECT lib is meant to exclude). Skip off-screen rows by emitting a
                 // top/ bottom Dummy spacer of the right height and only call
-                // Selectable() on the visible window. Net cost per frame: O(visible_rows) instead of O(totalShown);
+                // Selectable() on the visible window. Net cost per frame: O(visible_rows) instead of O(total_shown);
                 // measured ~5000 emits -> ~30 on the live catalog.
-                const float prefabRowH = ImGui::GetTextLineHeightWithSpacing();
-                float scrollY = ImGui::GetScrollY();
-                const float winH = ImGui::GetWindowHeight();
-                const int total = static_cast<int>(totalShown);
+                const float prefab_row_h = ImGui::GetTextLineHeightWithSpacing();
+                float scroll_y = ImGui::GetScrollY();
+                const float win_h = ImGui::GetWindowHeight();
+                const int total = static_cast<int>(total_shown);
 
                 // Scroll-into-view for nav-button-moved highlight. Done BEFORE the visible-range computation so the
-                // moved-to row actually lands inside [firstVis, lastVis) and renders with the selected highlight on the
-                // same frame.
-                if (ui.navMoved && ui.navIndex >= 0 && ui.navIndex < total)
+                // moved-to row actually lands inside [first_vis, last_vis) and renders with the selected highlight on
+                // the same frame.
+                if (ui.nav_moved && ui.nav_index >= 0 && ui.nav_index < total)
                 {
-                    const float navTopY = ui.navIndex * prefabRowH;
-                    const float navBotY = navTopY + prefabRowH;
-                    if (navTopY < scrollY)
+                    const float nav_top_y = ui.nav_index * prefab_row_h;
+                    const float nav_bot_y = nav_top_y + prefab_row_h;
+                    if (nav_top_y < scroll_y)
                     {
-                        ImGui::SetScrollY(navTopY);
-                        scrollY = navTopY;
+                        ImGui::SetScrollY(nav_top_y);
+                        scroll_y = nav_top_y;
                     }
-                    else if (navBotY > scrollY + winH)
+                    else if (nav_bot_y > scroll_y + win_h)
                     {
-                        const float newScrollY = navBotY - winH;
-                        ImGui::SetScrollY(newScrollY);
-                        scrollY = newScrollY;
+                        const float new_scroll_y = nav_bot_y - win_h;
+                        ImGui::SetScrollY(new_scroll_y);
+                        scroll_y = new_scroll_y;
                     }
                 }
 
-                int firstVis = static_cast<int>(scrollY / prefabRowH) - 1;
-                int lastVis = static_cast<int>((scrollY + winH) / prefabRowH) + 2;
-                if (firstVis < 0)
-                    firstVis = 0;
-                if (lastVis > total)
-                    lastVis = total;
-                if (firstVis > total)
-                    firstVis = total;
+                int first_vis = static_cast<int>(scroll_y / prefab_row_h) - 1;
+                int last_vis = static_cast<int>((scroll_y + win_h) / prefab_row_h) + 2;
+                if (first_vis < 0)
+                    first_vis = 0;
+                if (last_vis > total)
+                    last_vis = total;
+                if (first_vis > total)
+                    first_vis = total;
 
                 // Commit helper shared by mouse click, keyboard Enter, and nav-driven auto-apply. Returns true on a
-                // successful adopt. previewOnly=true is the auto-apply path: it lets the caller run its full commit
-                // chain (PWS::set_selection
+                // successful adopt. preview_only=true is the auto-apply path: it lets the caller run its full commit
+                // chain (pws::set_selection
                 // + force-carrier + manual_apply) but suppresses the popup
                 // close so the user can keep auditioning prefabs. Click /
-                // Enter pass previewOnly=false and still honor KeepOpen.
-                auto commit_prefab_at = [&](std::size_t pi, bool previewOnly = false) -> bool
+                // Enter pass preview_only=false and still honor KeepOpen.
+                auto commit_prefab_at = [&](std::size_t pi, bool preview_only = false) -> bool
                 {
                     // Per-slot catalogs were identical right after populate_slot_catalogs seeded them from the shared
                     // StringInfo walk, but enumerate_loader_registry_into_catalog adds slot-specific NPC entries
                     // (helm-only to Helm, chest-only to Chest, etc.) and re-sorts each slot independently. Indexing a
                     // popup-slot selection by cat0's pi therefore points at a DIFFERENT prefab in the popup slot's
                     // catalog and the row label drifts off the row the user actually clicked. Resolve by name through
-                    // adopt_into_slot_and_select, which finds the matching entry in slotCategory's catalog (or inserts
-                    // a copy when the prefab is unique to cat0) and returns the index that is valid for slotCategory
+                    // adopt_into_slot_and_select, which finds the matching entry in slot_category's catalog (or inserts
+                    // a copy when the prefab is unique to cat0) and returns the index that is valid for slot_category
                     // specifically.
                     const auto &pe = cat0[pi];
                     if (!pe.is_loaded)
                         return false;
-                    const auto adoptedIdx = PWS::adopt_into_slot_and_select(
-                        slotCategory,
+                    const auto adopted_idx = pws::adopt_into_slot_and_select(
+                        slot_category,
                         static_cast<Transmog::TransmogSlot>(0),
                         static_cast<int>(pi)
                     );
-                    if (adoptedIdx < 0)
+                    if (adopted_idx < 0)
                         return false;
-                    if (outPrefabIdx)
-                        *outPrefabIdx = adoptedIdx;
+                    if (out_prefab_idx)
+                        *out_prefab_idx = adopted_idx;
                     committed = true;
                     DMK::log().info(
                         "[picker] prefabs-mode pick: popupSlot={} label={} adoptedIdx={} name='{}'",
-                        Transmog::slot_name(slotCategory),
+                        Transmog::slot_name(slot_category),
                         label_for_prefab(pe.name),
-                        adoptedIdx,
+                        adopted_idx,
                         pe.name.c_str()
                     );
-                    if (!previewOnly && !ui.prefabKeepOpenOnPick)
+                    if (!preview_only && !ui.prefab_keep_open_on_pick)
                         ImGui::CloseCurrentPopup();
                     return true;
                 };
 
-                if (firstVis > 0)
-                    ImGui::Dummy(ImVec2(0.0f, firstVis * prefabRowH));
+                if (first_vis > 0)
+                    ImGui::Dummy(ImVec2(0.0f, first_vis * prefab_row_h));
                 {
-                    for (int row = firstVis; row < lastVis; ++row)
+                    for (int row = first_vis; row < last_vis; ++row)
                     {
-                        const auto pi = static_cast<std::size_t>(s_prefabFlat[static_cast<std::size_t>(row)]);
+                        const auto pi = static_cast<std::size_t>(s_prefab_flat[static_cast<std::size_t>(row)]);
                         const auto &pe = cat0[pi];
-                        const char *natName = label_for_prefab(pe.name);
-                        char pickerId[224];
+                        const char *nat_name = label_for_prefab(pe.name);
+                        char picker_id[224];
                         if (pe.is_loaded)
                         {
                             std::snprintf(
-                                pickerId,
-                                sizeof(pickerId),
+                                picker_id,
+                                sizeof(picker_id),
                                 "[%s] %s##all_prefab_%zu",
-                                natName,
+                                nat_name,
                                 pe.name.c_str(),
                                 pi
                             );
@@ -725,10 +725,10 @@ namespace Transmog
                         else
                         {
                             std::snprintf(
-                                pickerId,
-                                sizeof(pickerId),
+                                picker_id,
+                                sizeof(picker_id),
                                 "[%s] %s  (unloaded)##all_prefab_%zu",
-                                natName,
+                                nat_name,
                                 pe.name.c_str(),
                                 pi
                             );
@@ -736,90 +736,91 @@ namespace Transmog
                         // Highlight the prefab currently selected on the popup slot OR the row the Up/Down nav buttons
                         // last moved to. Matches the items list's combined "current selection + nav cursor" highlight
                         // rule.
-                        const bool isNavTarget = (row == ui.navIndex);
-                        const bool isCurrent = !ui.pickedPrefabName.empty() && ui.pickedPrefabName == pe.name;
-                        const bool selected = isCurrent || isNavTarget;
-                        if (ImGui::Selectable(pickerId, selected, 0, ImVec2(0, 0)))
+                        const bool is_nav_target = (row == ui.nav_index);
+                        const bool is_current = !ui.picked_prefab_name.empty() && ui.picked_prefab_name == pe.name;
+                        const bool selected = is_current || is_nav_target;
+                        if (ImGui::Selectable(picker_id, selected, 0, ImVec2(0, 0)))
                         {
                             commit_prefab_at(pi);
                         }
                         // Auto-apply on nav only - when the Up/Down nav cursor (GUI buttons or arrow keys) lands on a
-                        // new row, feed its name into the prefab-mode hover-apply debounce. After k_hoverDebounceMs of
-                        // dwell the commit fires with previewOnly=true so the popup stays open. Mouse hover does NOT
+                        // new row, feed its name into the prefab-mode hover-apply debounce. After HOVER_DEBOUNCE_MS of
+                        // dwell the commit fires with preview_only=true so the popup stays open. Mouse hover does NOT
                         // trigger here: a body-mesh preview fans out to a full multi-actor manual_apply, which is too
                         // disruptive to chain off casual cursor motion.
-                        if (autoApply && isNavTarget && ui.hoverPendingPrefab != pe.name)
+                        if (auto_apply && is_nav_target && ui.hover_pending_prefab != pe.name)
                         {
-                            ui.hoverPendingPrefab = pe.name;
-                            ui.hoverPrefabStartMs = Transmog::steady_ms();
+                            ui.hover_pending_prefab = pe.name;
+                            ui.hover_prefab_start_ms = Transmog::steady_ms();
                         }
                     }
                 }
-                if (lastVis < total)
-                    ImGui::Dummy(ImVec2(0.0f, (total - lastVis) * prefabRowH));
+                if (last_vis < total)
+                    ImGui::Dummy(ImVec2(0.0f, (total - last_vis) * prefab_row_h));
 
                 // Keyboard Enter commits the nav-targeted row. Mirrors the items-list Enter behavior above, routed
                 // through commit_prefab_at so the keep-open policy applies.
-                if (ui.navIndex >= 0 && ui.navIndex < total &&
+                if (ui.nav_index >= 0 && ui.nav_index < total &&
                     (ImGui::IsKeyPressed(ImGuiKey_Enter) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter)))
                 {
-                    const auto pi = static_cast<std::size_t>(s_prefabFlat[static_cast<std::size_t>(ui.navIndex)]);
+                    const auto pi = static_cast<std::size_t>(s_prefab_flat[static_cast<std::size_t>(ui.nav_index)]);
                     commit_prefab_at(pi);
                 }
 
                 // Auto-apply debounce. Fires the prefab commit when the nav cursor has rested on the same row for
-                // k_hoverDebounceMs. previewOnly=true keeps the popup open across the re-equip so the user can continue
-                // browsing. The cat0 scan resolves the pending name back to a catalog index because the row loop has
-                // already ended and pi is no longer in scope. A side-cache of pi next to the name would skip this scan
-                // but the worst-case cost (~5000 entries x ~3 Hz = ~15us per 300ms) does not justify adding another
-                // SlotUIState field.
-                if (autoApply && ui.hoverPendingPrefab != ui.hoverAppliedPrefab && !ui.hoverPendingPrefab.empty() &&
-                    ui.hoverPrefabStartMs != 0 && (Transmog::steady_ms() - ui.hoverPrefabStartMs) >= k_hoverDebounceMs)
+                // HOVER_DEBOUNCE_MS. preview_only=true keeps the popup open across the re-equip so the user can
+                // continue browsing. The cat0 scan resolves the pending name back to a catalog index because the row
+                // loop has already ended and pi is no longer in scope. A side-cache of pi next to the name would skip
+                // this scan but the worst-case cost (~5000 entries x ~3 Hz = ~15us per 300ms) does not justify adding
+                // another SlotUIState field.
+                if (auto_apply && ui.hover_pending_prefab != ui.hover_applied_prefab &&
+                    !ui.hover_pending_prefab.empty() && ui.hover_prefab_start_ms != 0 &&
+                    (Transmog::steady_ms() - ui.hover_prefab_start_ms) >= HOVER_DEBOUNCE_MS)
                 {
-                    std::size_t targetPi = 0;
+                    std::size_t target_pi = 0;
                     bool found = false;
                     for (std::size_t i = 0; i < cat0.size(); ++i)
                     {
-                        if (cat0[i].name == ui.hoverPendingPrefab)
+                        if (cat0[i].name == ui.hover_pending_prefab)
                         {
-                            targetPi = i;
+                            target_pi = i;
                             found = true;
                             break;
                         }
                     }
-                    if (found && commit_prefab_at(targetPi, true))
+                    if (found && commit_prefab_at(target_pi, true))
                     {
-                        ui.hoverAppliedPrefab = ui.hoverPendingPrefab;
+                        ui.hover_applied_prefab = ui.hover_pending_prefab;
                     }
                 }
 
                 // Hand the visible count off to the outer clamp so the nav buttons + clamp logic at end-of-function
                 // operate on the prefab-mode count instead of the (zeroed) items count.
                 shown = total;
-                if (catalogedTotal == 0)
+                if (cataloged_total == 0)
                 {
                     ui_text_disabled("no prefabs cataloged yet - catalog may still be populating, try Refresh");
                 }
-                else if (totalShown == 0)
+                else if (total_shown == 0)
                 {
                     ui_text_disabled("no matches");
                 }
             }
             else
             {
-                // Prefab catalog rendering is gated to prefabMode=true (the cross-slot browser block above). The
-                // per-slot prefab list otherwise bloats the items dropdown, so when prefabMode is OFF we render no
+                // Prefab catalog rendering is gated to prefab_mode=true (the cross-slot browser block above). The
+                // per-slot prefab list otherwise bloats the items dropdown, so when prefab_mode is OFF we render no
                 // prefab rows; only the clear-override option appears when an active prefab selection exists, so it can
-                // be undone without flipping the prefabMode toggle on first.
-                const int curTgt = PWS::selection_tgt_index(slotCategory);
-                if (curTgt >= 0)
+                // be undone without flipping the prefab_mode toggle on first.
+                const int cur_tgt = pws::selection_tgt_index(slot_category);
+                if (cur_tgt >= 0)
                 {
-                    char clrLabel[64];
-                    std::snprintf(clrLabel, sizeof(clrLabel), "(clear active prefab override)##prefab_clr");
-                    if (ImGui::Selectable(clrLabel, false, 0, ImVec2(0, 0)))
+                    char clr_label[64];
+                    std::snprintf(clr_label, sizeof(clr_label), "(clear active prefab override)##prefab_clr");
+                    if (ImGui::Selectable(clr_label, false, 0, ImVec2(0, 0)))
                     {
-                        if (outPrefabIdx)
-                            *outPrefabIdx = -2;
+                        if (out_prefab_idx)
+                            *out_prefab_idx = -2;
                         committed = true;
                         ImGui::CloseCurrentPopup();
                     }
@@ -829,23 +830,23 @@ namespace Transmog
 
         // Clamp nav index to the actual visible count so stale values from a wider filter do not point past the end of
         // the list.
-        ui.lastVisibleCount = shown;
-        if (ui.navIndex >= shown)
-            ui.navIndex = shown > 0 ? shown - 1 : -1;
+        ui.last_visible_count = shown;
+        if (ui.nav_index >= shown)
+            ui.nav_index = shown > 0 ? shown - 1 : -1;
 
         ImGui::PopStyleVar(); // ItemSpacing
         ImGui::EndChild();
 
         // Hover-apply debounce
-        // Fire manual_apply_slot() only after the cursor has rested on the same item for k_hoverDebounceMs. Uses the
+        // Fire manual_apply_slot() only after the cursor has rested on the same item for HOVER_DEBOUNCE_MS. Uses the
         // slot-scoped apply path so only this slot re-equips - other slots are untouched and do not flicker.
-        if (autoApply && ui.hoverPendingId != ui.hoverAppliedId && ui.hoverStartMs != 0 &&
-            (Transmog::steady_ms() - ui.hoverStartMs) >= k_hoverDebounceMs)
+        if (auto_apply && ui.hover_pending_id != ui.hover_applied_id && ui.hover_start_ms != 0 &&
+            (Transmog::steady_ms() - ui.hover_start_ms) >= HOVER_DEBOUNCE_MS)
         {
-            targetItemId = ui.hoverPendingId;
-            ui.hoverAppliedId = ui.hoverPendingId;
+            target_item_id = ui.hover_pending_id;
+            ui.hover_applied_id = ui.hover_pending_id;
             Transmog::flag_enabled().store(true, std::memory_order_relaxed);
-            Transmog::manual_apply_slot(slotIdx);
+            Transmog::manual_apply_slot(slot_idx);
         }
 
         ImGui::EndPopup();

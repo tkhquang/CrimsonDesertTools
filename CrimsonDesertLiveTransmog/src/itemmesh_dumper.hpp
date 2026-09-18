@@ -19,10 +19,10 @@ namespace Transmog
      * resolvable mesh. Every read runs under a fault guard, and the call is safe from the game thread and from the UI
      * thread.
      *
-     * It lets PrefabWrapperSwap derive the body-mesh swap SOURCE from the carrier's itemId at runtime instead of a
+     * It lets prefab_wrapper_swap derive the body-mesh swap SOURCE from the carrier's item_id at runtime instead of a
      * hardcoded prefab name in carrier_defaults.hpp.
      */
-    [[nodiscard]] std::vector<std::string> variant_meshes_for_item(std::uint16_t itemId) noexcept;
+    [[nodiscard]] std::vector<std::string> variant_meshes_for_item(std::uint16_t item_id) noexcept;
 
     /**
      * @brief Write the item-prefab TSV next to the plugin DLL, once the swap catalog exists.

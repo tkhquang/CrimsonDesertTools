@@ -14,7 +14,7 @@ namespace Transmog
      *
      * @return true if the thread was started successfully.
      */
-    [[nodiscard]] bool init_dx_overlay();
+    [[nodiscard]] bool init_dx_overlay() noexcept;
 
     /**
      * @brief Signal the render thread to exit and wait for it to finish.

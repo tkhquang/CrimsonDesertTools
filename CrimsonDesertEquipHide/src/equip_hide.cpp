@@ -43,13 +43,13 @@ namespace EquipHide
 {
     // Indexed by truncated part hash. The gate-skip lock (the In/Out selector forced to Out) stops PartInOut from a
     // re-run of the transition dispatch after the first vis=2 frame.
-    static uint8_t s_hideLocked[0x10000]{};
+    static uint8_t s_hide_locked[0x10000]{};
 
     // Brief guard window after any hotkey toggle. It stops a cascade from another armor slot (shield or helm) from a
     // brief hide of the legs.
-    static std::atomic<int> s_flushGuard{0};
+    static std::atomic<int> s_flush_guard{0};
 
-    static constexpr CategoryMask k_cascadeBodyMask =
+    static constexpr CategoryMask CASCADE_BODY_MASK =
         category_bit(Category::Legs) | category_bit(Category::Gloves) | category_bit(Category::Boots);
 
     /**
@@ -67,14 +67,14 @@ namespace EquipHide
      *          2 is the engine's own no-transition selector: the transition function early-returns on it before it
      *          ever reaches this call, so it cannot collide with a live In or Out pass.
      */
-    static constexpr uintptr_t k_selectorSkipGate = 2;
+    static constexpr uintptr_t SELECTOR_SKIP_GATE = 2;
 
     /**
      * @brief Prologue window searched for the `mov rax, [rip+disp32]` that names the IndexedStringA global.
      * @details The instruction sits early in MapLookup, but the compiler is free to schedule other setup ahead of it,
      *          so the window covers the whole prologue rather than one fixed offset.
      */
-    static constexpr std::size_t k_mapLookupPrologueBytes = 0x40;
+    static constexpr std::size_t MAP_LOOKUP_PROLOGUE_BYTES = 0x40;
 
     // Every hook the mod installs. A HookStack restores newest first, the only safe order for layered hooks on
     // one target. In any other order an older layer's restore clobbers a prologue that a newer layer's live
@@ -82,7 +82,7 @@ namespace EquipHide
     static DMK::hook::HookStack s_hooks;
 
     /// Latched when a hooked prologue fails the restore proof. The dev loader refuses the unmap on it.
-    static std::atomic<bool> s_hookRestoreFailed{false};
+    static std::atomic<bool> s_hook_restore_failed{false};
 
     // Binds every INI item and hotkey, loads the file, then arms the auto-reload watcher.
     static void load_config(DMK::Session &session)
@@ -98,7 +98,7 @@ namespace EquipHide
         general.bind<bool>("IndependentToggle", "Independent Toggle", flag_independent_toggle(), false);
         general.bind<bool>("CascadeFix", "Cascade Fix", flag_cascade_fix(), false);
 
-        // Advanced: rtti_dissect self-heal search radius (bytes, per side) for the manager->userActor offset recovery
+        // Advanced: rtti_dissect self-heal search radius (bytes, per side) for the manager->user_actor offset recovery
         // in CDCore. The default 0x200 leaves about ten times the margin of the largest drift to date. Raise it
         // toward MAX_HEAL_WINDOW only if a game patch shifts the field further. Not for normal users.
         advanced.bind<int>("SelfHealWindow", "Self Heal Window", CDCore::heal_window_setting(), 0x200);
@@ -157,15 +157,15 @@ namespace EquipHide
 
             // Per-character Parts overrides: [Section:Kliff], [Section:Damiane], [Section:Oongka]. Empty value (section
             // missing) inherits from base.
-            for (std::size_t charIdx = 0; charIdx < k_charIdxCount; ++charIdx)
+            for (std::size_t char_idx = 0; char_idx < CHAR_IDX_COUNT; ++char_idx)
             {
-                const std::string charName{character_name_for_idx(charIdx)};
-                const std::string logLabel = section + " Parts (" + charName + ")";
-                const DMK::config::SectionBinder perCharacter = DMK::config::section(section + ":" + charName);
-                perCharacter.bind_string(
+                const std::string char_name{character_name_for_idx(char_idx)};
+                const std::string log_label = section + " Parts (" + char_name + ")";
+                const DMK::config::SectionBinder per_character = DMK::config::section(section + ":" + char_name);
+                per_character.bind_string(
                     "Parts",
-                    logLabel,
-                    [cat, charIdx](std::string_view val) { set_per_char_parts(cat, charIdx, std::string{val}); },
+                    log_label,
+                    [cat, char_idx](std::string_view val) { set_per_char_parts(cat, char_idx, std::string{val}); },
                     ""
                 );
             }
@@ -173,8 +173,8 @@ namespace EquipHide
 
         // Auto-reload toggle. Off-by-default forces a relaunch for every INI tweak. On-by-default keeps the iteration
         // loop tight. Setters invoked from the watcher thread are idempotent.
-        static std::atomic<bool> s_autoReload{true};
-        general.bind<bool>("AutoReloadConfig", "Auto-Reload Config", s_autoReload, true);
+        static std::atomic<bool> s_auto_reload{true};
+        general.bind<bool>("AutoReloadConfig", "Auto-Reload Config", s_auto_reload, true);
 
         // config::press_combo registers every hotkey binding (Toggle/Show/Hide per category plus ShowAll/HideAll)
         // and fuses the INI key binding with the input press registration. It must precede the INI load so the
@@ -188,12 +188,12 @@ namespace EquipHide
         build_part_lookup();
         update_hidden_mask();
 
-        if (s_autoReload.load(std::memory_order_relaxed))
+        if (s_auto_reload.load(std::memory_order_relaxed))
         {
             // Per-setter callbacks refresh the visibility atomics inline. The reload tail re-derives cached
             // hidden-state masks and hands the actual vis-byte commit to the game thread via needs_direct_write, the
             // same primitive that drives character-swap re-application. A direct write from the watcher thread
-            // contends with the game thread's vis_write_mutex (try_lock bails silently) and skips the s_hideLocked
+            // contends with the game thread's vis_write_mutex (try_lock bails silently) and skips the s_hide_locked
             // clear that the mid-hook performs alongside its writes. The next mid-hook frame then sees stale locks and
             // refuses to re-transition. The Parts= setter populates the inactive lookup buffer but does not flip
             // s_activeMap. rebuild_part_lookup() rebuilds from the stored per-category strings, honors per-character
@@ -214,8 +214,8 @@ namespace EquipHide
                     update_hidden_mask();
 
                     auto &ps = player_state();
-                    for (int i = 0; i < k_maxProtagonists; ++i)
-                        ps.armorInjected[i].store(false, std::memory_order_relaxed);
+                    for (int i = 0; i < MAX_PROTAGONISTS; ++i)
+                        ps.armor_injected[i].store(false, std::memory_order_relaxed);
 
                     needs_direct_write().store(true, std::memory_order_release);
 
@@ -232,10 +232,10 @@ namespace EquipHide
 
     // Store the PartInOut visibility byte through the strict per-frame write. It never changes page protection, so a
     // stale or read-only target fails closed with no byte changed instead of faulting into the wrapper below.
-    static void write_vis_byte(uintptr_t partInOut, uint8_t value) noexcept
+    static void write_vis_byte(uintptr_t part_in_out, uint8_t value) noexcept
     {
         (void)DMK::memory::write_in_place<std::uint8_t>(
-            DMK::Address{partInOut}.offset(static_cast<std::ptrdiff_t>(vis_byte_offset())),
+            DMK::Address{part_in_out}.offset(static_cast<std::ptrdiff_t>(vis_byte_offset())),
             value
         );
     }
@@ -245,14 +245,14 @@ namespace EquipHide
         // The relaxed load is a cheap filter. The exchange that claims the work is the synchronizing edge: it must
         // acquire against the arming store, or this thread can claim the flag and still read the previous
         // part-lookup buffer and hidden-state masks. Every site that arms the flag therefore stores it with
-        // release, including the worker tails that publish a rebuilt part map and a rebuilt visCtrl set.
+        // release, including the worker tails that publish a rebuilt part map and a rebuilt vis_ctrl set.
         if (needs_direct_write().load(std::memory_order_relaxed) &&
             needs_direct_write().exchange(false, std::memory_order_acquire))
         {
             // Clear stale locks on vis ctrl change (save load, zone transition) so chest gets a fresh first-frame
             // transition.
             if (flag_cascade_fix().load(std::memory_order_relaxed))
-                std::memset(s_hideLocked, 0, sizeof(s_hideLocked));
+                std::memset(s_hide_locked, 0, sizeof(s_hide_locked));
 
             inject_armor_entries();
             apply_direct_vis_write();
@@ -261,19 +261,19 @@ namespace EquipHide
         // Equipment change re-sync with debounce (CascadeFix only).
         if (flag_cascade_fix().load(std::memory_order_relaxed))
         {
-            static int64_t s_equipPending = 0;
+            static int64_t s_equip_pending = 0;
             if (consume_equip_change())
-                s_equipPending = steady_ms();
+                s_equip_pending = steady_ms();
 
-            if (s_equipPending > 0)
+            if (s_equip_pending > 0)
             {
-                static uint32_t s_debTick = 0;
-                if ((++s_debTick & 0x3F) == 0 && (steady_ms() - s_equipPending) > 500)
+                static uint32_t s_deb_tick = 0;
+                if ((++s_deb_tick & 0x3F) == 0 && (steady_ms() - s_equip_pending) > 500)
                 {
                     for (int i = 0; i < 0x10000; ++i)
-                        if (s_hideLocked[i] == 1)
-                            s_hideLocked[i] = 2;
-                    s_equipPending = 0;
+                        if (s_hide_locked[i] == 1)
+                            s_hide_locked[i] = 2;
+                    s_equip_pending = 0;
                 }
             }
         }
@@ -284,12 +284,12 @@ namespace EquipHide
         if (lazy_probe_pending().load(std::memory_order_relaxed))
         {
             launch_lazy_probe();
-            static std::atomic<uint32_t> s_probeCounter{0};
-            if ((s_probeCounter.fetch_add(1, std::memory_order_relaxed) & 0xFFF) == 0)
+            static std::atomic<uint32_t> s_probe_counter{0};
+            if ((s_probe_counter.fetch_add(1, std::memory_order_relaxed) & 0xFFF) == 0)
             {
                 const auto now = steady_ms();
                 auto prev = lazy_probe_signal().load(std::memory_order_relaxed);
-                if (prev == 0 || (now - prev) >= k_lazyProbeIntervalMs)
+                if (prev == 0 || (now - prev) >= LAZY_PROBE_INTERVAL_MS)
                     lazy_probe_signal().store(now, std::memory_order_relaxed);
             }
         }
@@ -304,21 +304,21 @@ namespace EquipHide
         // rejects the value, this handler returns before reaching any of the logic below, and the cascade fix goes
         // dead with the hook still reporting installed.
         // See the register map on equip_vis_check() in aob_resolver.hpp.
-        const auto hashPtr = DMK::hook::gpr(ctx, DMK::hook::Gpr::Rdx);
-        if (!DMK::memory::is_plausible_ptr(DMK::Address{hashPtr}))
+        const auto hash_ptr = DMK::hook::gpr(ctx, DMK::hook::Gpr::Rdx);
+        if (!DMK::memory::is_plausible_ptr(DMK::Address{hash_ptr}))
             return;
 
         // Guarded read of the engine's key word. A plausible but unmapped pointer fails closed here instead of
         // faulting into the wrapper below.
-        const auto hashRead = DMK::memory::read<std::uint32_t>(DMK::Address{hashPtr});
-        if (!hashRead)
+        const auto hash_read = DMK::memory::read<std::uint32_t>(DMK::Address{hash_ptr});
+        if (!hash_read)
             return;
-        const auto partHash = *hashRead;
+        const auto part_hash = *hash_read;
 
-        if (!needs_classification(partHash))
+        if (!needs_classification(part_hash))
             return;
 
-        const auto mask = classify_part(partHash);
+        const auto mask = classify_part(part_hash);
         if (mask == 0)
             return;
 
@@ -328,25 +328,25 @@ namespace EquipHide
         // heap pointer, so it passes memory::is_plausible_ptr() and a read of the wrong register does not fail
         // loudly. The mid-hook then writes the visibility byte inside the context struct instead.
         // See the register map on equip_vis_check() in aob_resolver.hpp.
-        const auto partInOut = DMK::hook::gpr(ctx, DMK::hook::Gpr::R8);
-        if (!DMK::memory::is_plausible_ptr(DMK::Address{partInOut}))
+        const auto part_in_out = DMK::hook::gpr(ctx, DMK::hook::Gpr::R8);
+        if (!DMK::memory::is_plausible_ptr(DMK::Address{part_in_out}))
             return;
 
-        const bool cascadeOn = flag_cascade_fix().load(std::memory_order_relaxed);
-        const auto hashIdx = static_cast<uint16_t>(partHash);
-        const bool isChest = (mask & category_bit(Category::Chest)) != 0;
+        const bool cascade_on = flag_cascade_fix().load(std::memory_order_relaxed);
+        const auto hash_idx = static_cast<uint16_t>(part_hash);
+        const bool is_chest = (mask & category_bit(Category::Chest)) != 0;
 
         // Protect legs from cascade during the brief window after a hotkey toggle. Without this guard, a shield
         // show/hide triggers a re-evaluation that flashes the pants.
-        if (cascadeOn)
+        if (cascade_on)
         {
-            auto guard = s_flushGuard.load(std::memory_order_relaxed);
-            if (guard > 0 && s_flushGuard.compare_exchange_strong(guard, guard - 1, std::memory_order_relaxed))
+            auto guard = s_flush_guard.load(std::memory_order_relaxed);
+            if (guard > 0 && s_flush_guard.compare_exchange_strong(guard, guard - 1, std::memory_order_relaxed))
             {
-                if ((mask & k_cascadeBodyMask) != 0 && !is_any_category_hidden(mask) &&
+                if ((mask & CASCADE_BODY_MASK) != 0 && !is_any_category_hidden(mask) &&
                     is_category_hidden(Category::Chest))
                 {
-                    DMK::hook::gpr(ctx, DMK::hook::Gpr::R9) = k_selectorSkipGate;
+                    DMK::hook::gpr(ctx, DMK::hook::Gpr::R9) = SELECTOR_SKIP_GATE;
                     return;
                 }
             }
@@ -355,16 +355,16 @@ namespace EquipHide
         // Chest lock state machine, evaluated before the player filter. 0 = unlocked, the first frame lets the gate
         // pass. 1 = locked, the handler forces the skip-gate selector and the engine publishes no decision.
         // 2 = re-equip, the handler forces vis=0 so the In pass recreates the scene nodes.
-        if (cascadeOn && isChest && s_hideLocked[hashIdx] && is_any_category_hidden(mask))
+        if (cascade_on && is_chest && s_hide_locked[hash_idx] && is_any_category_hidden(mask))
         {
-            if (s_hideLocked[hashIdx] == 2)
+            if (s_hide_locked[hash_idx] == 2)
             {
-                write_vis_byte(partInOut, 0);
-                s_hideLocked[hashIdx] = 0;
+                write_vis_byte(part_in_out, 0);
+                s_hide_locked[hash_idx] = 0;
                 return;
             }
-            write_vis_byte(partInOut, 2);
-            DMK::hook::gpr(ctx, DMK::hook::Gpr::R9) = k_selectorSkipGate;
+            write_vis_byte(part_in_out, 2);
+            DMK::hook::gpr(ctx, DMK::hook::Gpr::R9) = SELECTOR_SKIP_GATE;
             return;
         }
 
@@ -379,50 +379,50 @@ namespace EquipHide
         // write per-character, so an INI override that excludes a hash for one protagonist does not get hidden by the
         // mid-hook on that protagonist's frames.
         //
-        // The vis-ctrl scan is O(n) where n is at most k_maxProtagonists, so the added cost is a handful of relaxed
+        // The vis-ctrl scan is O(n) where n is at most MAX_PROTAGONISTS, so the added cost is a handful of relaxed
         // atomic loads + one extra flat-table lookup per call. Relaxed ordering is sufficient: the resolve poll thread
-        // publishes consistent (visCtrls[i], visCharIdx[i]) pairs on each pass, and a torn read produces at worst one
-        // stale per-char idx for a single frame, well within the existing swap-detect timing tolerance.
-        int charIdx = -1;
+        // publishes consistent (vis_ctrls[i], vis_char_idx[i]) pairs on each pass, and a torn read produces at worst
+        // one stale per-char idx for a single frame, well within the existing swap-detect timing tolerance.
+        int char_idx = -1;
         {
             auto &ps = player_state();
-            const auto vcCount = ps.count.load(std::memory_order_relaxed);
-            for (int i = 0; i < vcCount; ++i)
+            const auto vc_count = ps.count.load(std::memory_order_relaxed);
+            for (int i = 0; i < vc_count; ++i)
             {
-                if (ps.visCtrls[i].load(std::memory_order_relaxed) == a1)
+                if (ps.vis_ctrls[i].load(std::memory_order_relaxed) == a1)
                 {
-                    charIdx = ps.visCharIdx[i].load(std::memory_order_relaxed);
+                    char_idx = ps.vis_char_idx[i].load(std::memory_order_relaxed);
                     break;
                 }
             }
         }
 
-        // Refine the hide decision against the per-character part map. charIdx == -1 (untracked actor) preserves the
+        // Refine the hide decision against the per-character part map. char_idx == -1 (untracked actor) preserves the
         // legacy behavior and falls back to the global mask computed earlier.
-        CategoryMask charMask = mask;
-        if (charIdx >= 0 && charIdx < static_cast<int>(k_charIdxCount))
+        CategoryMask char_mask = mask;
+        if (char_idx >= 0 && char_idx < static_cast<int>(CHAR_IDX_COUNT))
         {
-            charMask = classify_part_for(partHash, charIdx);
-            if (charMask == 0)
+            char_mask = classify_part_for(part_hash, char_idx);
+            if (char_mask == 0)
                 return; // hash excluded from this character's effective Parts
         }
 
-        if (is_any_category_hidden_for(charMask, charIdx))
+        if (is_any_category_hidden_for(char_mask, char_idx))
         {
-            write_vis_byte(partInOut, 2);
-            if (cascadeOn && isChest)
+            write_vis_byte(part_in_out, 2);
+            if (cascade_on && is_chest)
             {
                 // A locked frame must not publish a second transition, so close the gate instead of re-arming it.
-                if (s_hideLocked[hashIdx])
-                    DMK::hook::gpr(ctx, DMK::hook::Gpr::R9) = k_selectorSkipGate;
+                if (s_hide_locked[hash_idx])
+                    DMK::hook::gpr(ctx, DMK::hook::Gpr::R9) = SELECTOR_SKIP_GATE;
                 else
-                    s_hideLocked[hashIdx] = 1;
+                    s_hide_locked[hash_idx] = 1;
             }
         }
         else
         {
-            if (cascadeOn && isChest)
-                s_hideLocked[hashIdx] = 0;
+            if (cascade_on && is_chest)
+                s_hide_locked[hash_idx] = 0;
         }
     }
 
@@ -438,8 +438,8 @@ namespace EquipHide
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
-            static std::atomic<bool> s_crashLogged{false};
-            if (!s_crashLogged.exchange(true, std::memory_order_relaxed))
+            static std::atomic<bool> s_crash_logged{false};
+            if (!s_crash_logged.exchange(true, std::memory_order_relaxed))
                 (void)DMK::log().try_log(
                     DMK::LogLevel::Warning,
                     "EquipVisCheck: SEH caught crash in the mid-hook. Verify the register map against this build."
@@ -467,25 +467,25 @@ namespace EquipHide
         // a site that cannot begin an instruction.
         resolve_all_anchors();
 
-        addrs.worldSystem = anchor_address(AnchorId::WorldSystem);
-        addrs.childActorVtbl = anchor_address(AnchorId::ChildActorVtbl);
-        addrs.mapLookup = anchor_address(AnchorId::MapLookup);
-        addrs.mapInsert = anchor_address(AnchorId::MapInsert);
+        addrs.world_system = anchor_address(AnchorId::WorldSystem);
+        addrs.child_actor_vtbl = anchor_address(AnchorId::ChildActorVtbl);
+        addrs.map_lookup = anchor_address(AnchorId::MapLookup);
+        addrs.map_insert = anchor_address(AnchorId::MapInsert);
 
         // Resolve the IndexedStringA global from MapLookup: `mov rax, [rip+disp]` inside the prologue. The resolver
         // skips a decoy occurrence whose displacement lands on an implausible or unreadable address, so a compiler
         // shuffle inside the prologue still resolves.
-        if (addrs.mapLookup)
+        if (addrs.map_lookup)
         {
             const auto resolved = DMK::scan::find_and_resolve_rip_relative(
-                DMK::Region{DMK::Address{addrs.mapLookup}, k_mapLookupPrologueBytes},
+                DMK::Region{DMK::Address{addrs.map_lookup}, MAP_LOOKUP_PROLOGUE_BYTES},
                 DMK::scan::PREFIX_MOV_RAX_RIP,
                 7
             );
             if (resolved)
             {
-                addrs.indexedStringGlobal = resolved->raw();
-                logger.info("IndexedStringA global resolved at 0x{:X}", addrs.indexedStringGlobal);
+                addrs.indexed_string_global = resolved->raw();
+                logger.info("IndexedStringA global resolved at 0x{:X}", addrs.indexed_string_global);
             }
             else
             {
@@ -497,7 +497,7 @@ namespace EquipHide
             }
         }
 
-        if (!addrs.worldSystem || !addrs.childActorVtbl)
+        if (!addrs.world_system || !addrs.child_actor_vtbl)
         {
             flag_fallback_mode().store(true, std::memory_order_relaxed);
             logger.info("Player identification: type byte fallback (global chain AOB unavailable)");
@@ -507,7 +507,7 @@ namespace EquipHide
             logger.info("Player identification: global pointer chain");
         }
 
-        if (!addrs.mapLookup)
+        if (!addrs.map_lookup)
         {
             logger.warning("MapLookup not resolved, cannot scan IndexedStringA table");
         }
@@ -517,22 +517,22 @@ namespace EquipHide
         // Initial IndexedStringA scan plus the deferred-launch decision. Commit the sync attempt so the mod is
         // immediately functional, then launch the deferred worker unless the table resolves fully on the first try.
         // The worker converges on scan stability, not on a coverage percentage.
-        if (addrs.mapLookup)
+        if (addrs.map_lookup)
         {
-            auto runtimeHashes = scan_indexed_string_table(addrs.mapLookup);
-            const auto initialResolved = runtimeHashes.size();
-            const auto totalExpected = total_part_count();
+            auto runtime_hashes = scan_indexed_string_table(addrs.map_lookup);
+            const auto initial_resolved = runtime_hashes.size();
+            const auto total_expected = total_part_count();
 
-            if (initialResolved > 0)
-                set_runtime_hashes(std::move(runtimeHashes));
+            if (initial_resolved > 0)
+                set_runtime_hashes(std::move(runtime_hashes));
 
-            const bool fullyResolved = totalExpected > 0 && initialResolved == totalExpected;
-            if (!fullyResolved)
+            const bool fully_resolved = total_expected > 0 && initial_resolved == total_expected;
+            if (!fully_resolved)
             {
                 logger.info(
                     "IndexedStringA scan: {}/{} entries at init, starting deferred scan thread (stability-check mode)",
-                    initialResolved,
-                    totalExpected
+                    initial_resolved,
+                    total_expected
                 );
                 deferred_scan_pending().store(true, std::memory_order_relaxed);
                 launch_deferred_scan();
@@ -541,14 +541,14 @@ namespace EquipHide
             {
                 logger.info(
                     "IndexedStringA scan: {}/{} entries at init (fully resolved, no deferred retry)",
-                    initialResolved,
-                    totalExpected
+                    initial_resolved,
+                    total_expected
                 );
             }
 
             // Rebuild the part lookup against whatever subset got committed so the active map reflects the
             // partial-or-full hash set. The deferred worker will rebuild again when it converges.
-            if (initialResolved > 0)
+            if (initial_resolved > 0)
                 rebuild_part_lookup();
         }
 
@@ -559,8 +559,8 @@ namespace EquipHide
         // this site, every original-bytes candidate fails on rescan and the resolver retries each Direct candidate
         // with its prologue rebuilt as a near JMP. The retry keeps the candidate's walk-back, so the returned address
         // still lands on the original instruction.
-        const auto hookAddr = anchor_address(AnchorId::EquipVisCheck);
-        if (!hookAddr)
+        const auto hook_addr = anchor_address(AnchorId::EquipVisCheck);
+        if (!hook_addr)
         {
             logger.error("No AOB pattern matched. The mod may be outdated for this game version.");
             return std::unexpected(DMK::Error{DMK::ErrorCode::NoMatch, "EquipHide::init"});
@@ -570,37 +570,37 @@ namespace EquipHide
         // EquipVisCheck instruction by AOB, and it must run before enable() patches that site.
         (void)vis_byte_offset();
 
-        auto visCheck = DMK::hook::mid_at(
+        auto vis_check = DMK::hook::mid_at(
             DMK::hook::MidRequest{
                 .name = "EquipVisCheck",
-                .target = DMK::Address{hookAddr},
+                .target = DMK::Address{hook_addr},
             },
             &on_vis_check
         );
-        if (!visCheck)
+        if (!vis_check)
         {
-            logger.error("Hook creation failed at 0x{:X}: {}", hookAddr, visCheck.error().message());
-            return std::unexpected(visCheck.error());
+            logger.error("Hook creation failed at 0x{:X}: {}", hook_addr, vis_check.error().message());
+            return std::unexpected(vis_check.error());
         }
-        if (auto armed = visCheck->enable(); !armed)
+        if (auto armed = vis_check->enable(); !armed)
         {
-            logger.error("Hook could not be armed at 0x{:X}: {}", hookAddr, armed.error().message());
+            logger.error("Hook could not be armed at 0x{:X}: {}", hook_addr, armed.error().message());
             return std::unexpected(armed.error());
         }
-        s_hooks.push(std::move(*visCheck));
-        logger.info("Hook installed at 0x{:X}", hookAddr);
+        s_hooks.push(std::move(*vis_check));
+        logger.info("Hook installed at 0x{:X}", hook_addr);
 
         // Prevents hidden parts from flashing during state transitions (gliding exit).
         if (flag_gliding_fix().load(std::memory_order_relaxed))
         {
-            const auto partAddShowAddr = anchor_address(AnchorId::PartAddShow);
+            const auto part_add_show_addr = anchor_address(AnchorId::PartAddShow);
 
-            if (partAddShowAddr)
+            if (part_add_show_addr)
             {
                 auto hook = DMK::hook::inline_at(
                     DMK::hook::InlineRequest{
                         .name = "PartAddShow",
-                        .target = DMK::Address{partAddShowAddr},
+                        .target = DMK::Address{part_add_show_addr},
                     },
                     &on_part_add_show
                 );
@@ -630,24 +630,24 @@ namespace EquipHide
         // Keeps the hair when a helmet or cloak is hidden. The hook temporarily sets bit 19 in item+0x70 bitmasks
         // per-call, so PostfixEval sees inactive priority and no hair rule matches. A call-graph landmark separates
         // player invocations from NPC invocations: NPC PostfixEval calls always traverse one specific caller, and an
-        // AOB resolves that caller's return address (npcPfeReturnAddr). The hook scans its own stack window for that
+        // AOB resolves that caller's return address (npc_pfe_return_addr). The hook scans its own stack window for that
         // landmark and rejects NPC calls.
         if (flag_bald_fix().load(std::memory_order_relaxed))
         {
-            const auto postfixEvalAddr = anchor_address(AnchorId::PostfixEval);
+            const auto postfix_eval_addr = anchor_address(AnchorId::PostfixEval);
 
             // The row's own walk-back already reaches the byte after the rule-eval call, so the resolved value IS the
             // return address an NPC stack frame carries. Do NOT add a fixup here. The offset belongs in the
             // candidate row, and a second application yields an address no call ever pushes, which makes
             // is_npc_call_stack() reject every call while the install still logs "bald fix active".
-            addrs.npcPfeReturnAddr = anchor_address(AnchorId::NpcPfeReturnAddr);
+            addrs.npc_pfe_return_addr = anchor_address(AnchorId::NpcPfeReturnAddr);
 
-            if (postfixEvalAddr && addrs.npcPfeReturnAddr)
+            if (postfix_eval_addr && addrs.npc_pfe_return_addr)
             {
                 auto hook = DMK::hook::inline_at(
                     DMK::hook::InlineRequest{
                         .name = "PostfixEval",
-                        .target = DMK::Address{postfixEvalAddr},
+                        .target = DMK::Address{postfix_eval_addr},
                     },
                     &on_postfix_eval
                 );
@@ -670,13 +670,13 @@ namespace EquipHide
                         s_hooks.push(std::move(*hook));
                         logger.info(
                             "PostfixEval inline hook installed at 0x{:X}, npc-caller landmark 0x{:X} - bald fix active",
-                            postfixEvalAddr,
-                            addrs.npcPfeReturnAddr
+                            postfix_eval_addr,
+                            addrs.npc_pfe_return_addr
                         );
                     }
                 }
             }
-            else if (!postfixEvalAddr)
+            else if (!postfix_eval_addr)
             {
                 logger.warning("PostfixEval AOB scan failed - bald fix disabled");
             }
@@ -697,13 +697,13 @@ namespace EquipHide
         // the new gear gets a fresh Out transition.
         if (flag_cascade_fix().load(std::memory_order_relaxed))
         {
-            const auto vecAddr = anchor_address(AnchorId::VisualEquipChange);
-            if (vecAddr)
+            const auto vec_addr = anchor_address(AnchorId::VisualEquipChange);
+            if (vec_addr)
             {
                 auto hook = DMK::hook::inline_at(
                     DMK::hook::InlineRequest{
                         .name = "VisualEquipChange",
-                        .target = DMK::Address{vecAddr},
+                        .target = DMK::Address{vec_addr},
                     },
                     &on_visual_equip_change
                 );
@@ -721,13 +721,13 @@ namespace EquipHide
                 }
             }
 
-            const auto vesAddr = anchor_address(AnchorId::VisualEquipSwap);
-            if (vesAddr)
+            const auto ves_addr = anchor_address(AnchorId::VisualEquipSwap);
+            if (ves_addr)
             {
                 auto hook = DMK::hook::inline_at(
                     DMK::hook::InlineRequest{
                         .name = "VisualEquipSwap",
-                        .target = DMK::Address{vesAddr},
+                        .target = DMK::Address{ves_addr},
                     },
                     &on_visual_equip_swap
                 );
@@ -751,14 +751,14 @@ namespace EquipHide
         // user-bound mouse-wheel combo books its permanent keepalive against that module instead of this one and the
         // logic DLL stays unmappable. Without a host (the production ASI, and a dev loader whose host failed to
         // start) the local message hook is the correct backend and takes that keepalive here.
-        DMK::input::Input::Settings inputSettings{};
+        DMK::input::Input::Settings input_settings{};
         if (wheel_host != nullptr)
         {
-            inputSettings.wheel_backend = DMK::input::Input::WheelBackend::ExternalHost;
-            inputSettings.wheel_host = wheel_host;
-            inputSettings.wheel_host_required = false;
+            input_settings.wheel_backend = DMK::input::Input::WheelBackend::ExternalHost;
+            input_settings.wheel_host = wheel_host;
+            input_settings.wheel_host_required = false;
         }
-        if (auto started = session.input().start(inputSettings); !started)
+        if (auto started = session.input().start(input_settings); !started)
         {
             logger.warning("Input engine did not start: {} - hotkeys are inactive", started.error().message());
         }
@@ -794,7 +794,7 @@ namespace EquipHide
     void arm_flush_guard() noexcept
     {
         if (flag_cascade_fix().load(std::memory_order_relaxed))
-            s_flushGuard.store(500, std::memory_order_relaxed);
+            s_flush_guard.store(500, std::memory_order_relaxed);
     }
 
     bool shutdown()
@@ -865,18 +865,18 @@ namespace EquipHide
         // carries caller-requested leaks from elsewhere. Each detour body snapshots its trampoline pointer at entry
         // and falls back to a benign default when the snapshot is null, which defends the drain window between the
         // restore and the DLL unmap.
-        const auto pinsBefore = DMK::diagnostics::intentional_leak_count(DMK::diagnostics::LeakSubsystem::HookManager);
+        const auto pins_before = DMK::diagnostics::intentional_leak_count(DMK::diagnostics::LeakSubsystem::HookManager);
         s_hooks.clear();
         const bool restored =
-            DMK::diagnostics::intentional_leak_count(DMK::diagnostics::LeakSubsystem::HookManager) == pinsBefore;
+            DMK::diagnostics::intentional_leak_count(DMK::diagnostics::LeakSubsystem::HookManager) == pins_before;
         if (!restored)
         {
-            s_hookRestoreFailed.store(true, std::memory_order_relaxed);
+            s_hook_restore_failed.store(true, std::memory_order_relaxed);
             logger.error("{} shutdown: a hooked prologue could not be restored and stays pinned", MOD_NAME);
         }
         logger.info("{} shutdown complete", MOD_NAME);
         logger.flush();
-        return restored && !s_hookRestoreFailed.load(std::memory_order_relaxed);
+        return restored && !s_hook_restore_failed.load(std::memory_order_relaxed);
     }
 
 } // namespace EquipHide

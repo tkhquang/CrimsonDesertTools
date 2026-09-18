@@ -9,7 +9,7 @@
 #include <cstdint>
 #include <cstring>
 
-namespace Transmog::ColorOverride::TokenTable
+namespace Transmog::color_override::token_table
 {
     namespace
     {
@@ -20,15 +20,15 @@ namespace Transmog::ColorOverride::TokenTable
 
     void bootstrap_snapshot()
     {
-        TokenSlotDiscovery::run();
-        DMK::log().info("[color-tokens] slot discovery: {} slot(s) recorded", TokenSlotDiscovery::slot_count());
+        token_slot_discovery::run();
+        DMK::log().info("[color-tokens] slot discovery: {} slot(s) recorded", token_slot_discovery::slot_count());
         // Hook the engine's string interner so we capture every (name, token) pair the engine intern-resolves. Catches
-        // tokens not covered by the static registrar tables that TokenSlotDiscovery walks.
-        const bool internerOk = InternerHook::init();
+        // tokens not covered by the static registrar tables that token_slot_discovery walks.
+        const bool interner_ok = interner_hook::init();
         // ready=false here is expected: the engine publishes the interner state lazily, so it is captured on first
         // interner use via the setter retry path rather than at startup.
         DMK::log()
-            .info("[color-tokens] interner hook: ready={} captured={}", internerOk, InternerHook::capture_count());
+            .info("[color-tokens] interner hook: ready={} captured={}", interner_ok, interner_hook::capture_count());
     }
 
     namespace
@@ -84,12 +84,12 @@ namespace Transmog::ColorOverride::TokenTable
     int token_layer(std::uint32_t tok) noexcept
     {
         // Primary: AOB-discovered static slot.
-        const auto disc = TokenSlotDiscovery::classify_layer(tok);
+        const auto disc = token_slot_discovery::classify_layer(tok);
         if (disc >= 0)
             return disc;
         // Fallback: look up name via interner dump, classify by prefix. Catches tokens from name families our static
         // discovery does not cover (e.g. `_scratchTintColor*`).
-        const auto *name = InternerHook::name_for_token(tok);
+        const auto *name = interner_hook::name_for_token(tok);
         if (name == nullptr)
             return -1;
         return classify_by_name(name, nullptr);
@@ -97,10 +97,10 @@ namespace Transmog::ColorOverride::TokenTable
 
     int channel_kind(std::uint32_t tok) noexcept
     {
-        const auto disc = TokenSlotDiscovery::classify_channel(tok);
+        const auto disc = token_slot_discovery::classify_channel(tok);
         if (disc >= 0)
             return disc;
-        const auto *name = InternerHook::name_for_token(tok);
+        const auto *name = interner_hook::name_for_token(tok);
         if (name == nullptr)
             return -1;
         int ch = -1;
@@ -111,11 +111,11 @@ namespace Transmog::ColorOverride::TokenTable
     const char *token_label_for(std::uint16_t tok) noexcept
     {
         // Primary: AOB-discovered slot's name (covers Table A/B entries we statically located).
-        const auto from_disc = TokenSlotDiscovery::name_for_token(static_cast<std::uint32_t>(tok));
+        const auto from_disc = token_slot_discovery::name_for_token(static_cast<std::uint32_t>(tok));
         if (from_disc != nullptr)
             return from_disc;
         // Fallback: interner-hook capture (covers tokens registered through any other engine code path).
-        return InternerHook::name_for_token(static_cast<std::uint32_t>(tok));
+        return interner_hook::name_for_token(static_cast<std::uint32_t>(tok));
     }
 
     const char *layer_long_name(int layer) noexcept
@@ -156,11 +156,11 @@ namespace Transmog::ColorOverride::TokenTable
     {
         if (name == nullptr || name[0] == '\0')
             return 0;
-        const auto v = TokenSlotDiscovery::lookup_token_for_name(name);
+        const auto v = token_slot_discovery::lookup_token_for_name(name);
         if (v != 0)
             return static_cast<std::uint16_t>(v & 0xFFFFu);
         // Fallback: interner-hook capture.
-        const auto vi = InternerHook::token_for_name(name);
+        const auto vi = interner_hook::token_for_name(name);
         return static_cast<std::uint16_t>(vi & 0xFFFFu);
     }
 
@@ -174,4 +174,4 @@ namespace Transmog::ColorOverride::TokenTable
         if (tok != 0)
             g_tokPermutations.store(tok, std::memory_order_release);
     }
-} // namespace Transmog::ColorOverride::TokenTable
+} // namespace Transmog::color_override::token_table

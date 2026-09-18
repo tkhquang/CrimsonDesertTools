@@ -50,7 +50,7 @@
 // Init flow:
 //   From any thread, call current_controlled_character() etc. - the resolver walks the chain on every call
 //   (SEH-guarded). No hooks, no learning caches, no broadcast subscriptions. The player-base slot is AOB-resolved
-//   lazily on first use via CDCore::Anchors::client_actor_manager_global() (a 2-row ladder across the only two
+//   lazily on first use via CDCore::anchors::client_actor_manager_global() (a 2-row ladder across the only two
 //   instructions that reference the slot).
 //
 // Thread safety:
@@ -70,34 +70,34 @@ namespace CDCore
      *              AOB).
      *            - LiveTransmog transmog_worker.cpp (resolve_player_component / read_*_actor_ptr_seh) and
      *            - EquipHide background_threads.cpp (controlled-actor poll) - both root at the WorldSystem holder
-     *              (k_worldSystemToActorManager) instead.
+     *              (WORLD_SYSTEM_TO_ACTOR_MANAGER) instead.
      *          The two roots are independent anchors that resolve to the SAME pa::ClientActorManager, so they share
-     *          k_actorManagerToUserActor downstream. The WorldSystem-rooted walks then read k_userActorToControlled
+     *          ACTOR_MANAGER_TO_USER_ACTOR downstream. The WorldSystem-rooted walks then read USER_ACTOR_TO_CONTROLLED
      *          directly and reach the same controlled CCOIA the CDCore chain resolves indirectly through the
      *          sub-manager (+0x38).
      *
-     *          A game update that re-lays-out pa::ClientActorManager moves k_actorManagerToUserActor. It is the
+     *          A game update that re-lays-out pa::ClientActorManager moves ACTOR_MANAGER_TO_USER_ACTOR. It is the
      *          offset most likely to change on a patch, which is why it lives here once rather than inline at each
      *          call site.
      *          See CrimsonDesertCore/include/cdcore/anchors.hpp for the AOB that resolves the manager itself.
      */
-    namespace ActorChainOffsets
+    namespace actor_chain_offsets
     {
         /// Offset from pa::ClientActorManager to pa::ClientUserActor.
-        inline constexpr std::ptrdiff_t k_actorManagerToUserActor = 0x58;
+        inline constexpr std::ptrdiff_t ACTOR_MANAGER_TO_USER_ACTOR = 0x58;
         /// Offset from the WorldSystem holder qword to pa::ClientActorManager.
-        inline constexpr std::ptrdiff_t k_worldSystemToActorManager = 0x30;
+        inline constexpr std::ptrdiff_t WORLD_SYSTEM_TO_ACTOR_MANAGER = 0x30;
         /// Offset from pa::ClientUserActor to the controlled CCOIA.
-        inline constexpr std::ptrdiff_t k_userActorToControlled = 0xD8;
-    } // namespace ActorChainOffsets
+        inline constexpr std::ptrdiff_t USER_ACTOR_TO_CONTROLLED = 0xD8;
+    } // namespace actor_chain_offsets
 
     /**
      * @brief INI-tunable search radius (bytes, per side) for the rtti_dissect self-heal that recovers the
-     *        manager->userActor offset after a patch shifts the struct layout.
+     *        manager->user_actor offset after a patch shifts the struct layout.
      * @details Returns the atomic a consumer binds with DMK::config::bind("Advanced", "SelfHealWindow", ...). The
      *          heal reads it once per attempt (not a hot path) and clamps it to DMK::rtti::MAX_HEAL_WINDOW. A
      *          non-positive value falls back to the built-in default. A wider window reaches a larger insertion before
-     *          the userActor slot. This is a single independent landmark, but the manager references
+     *          the user_actor slot. This is a single independent landmark, but the manager references
      *          pa::ClientUserActor exactly once (the next pointer to it is megabytes away), so the 0x200 default is
      *          decoy-free across the whole heal range. Raise it via the INI only when a real patch shifts the field
      *          further.
@@ -221,13 +221,13 @@ namespace CDCore
 
     /**
      * @brief One entry in a live player-CCOIA snapshot.
-     * @details charIdx uses the same 1-based encoding as current_controlled_character_idx(): 1 for Kliff, 2 for
+     * @details char_idx uses the same 1-based encoding as current_controlled_character_idx(): 1 for Kliff, 2 for
      *          Damiane, 3 for Oongka. body is the CCOIA pointer.
      */
     struct BodyCacheEntry
     {
         std::uintptr_t body{};
-        std::uint32_t charIdx{};
+        std::uint32_t char_idx{};
     };
 
     /**
@@ -284,15 +284,15 @@ namespace CDCore
     struct ActorListDebugSummary
     {
         std::uintptr_t mgr = 0;
-        std::uintptr_t userActor = 0;
-        std::uintptr_t subMgr = 0;
-        std::uintptr_t kliffCcoia = 0;
+        std::uintptr_t user_actor = 0;
+        std::uintptr_t sub_mgr = 0;
+        std::uintptr_t kliff_ccoia = 0;
         std::uintptr_t controlled = 0;
-        std::uintptr_t vecData = 0;
-        std::uintptr_t childContainer = 0;
-        std::uintptr_t actorList = 0;
+        std::uintptr_t vec_data = 0;
+        std::uintptr_t child_container = 0;
+        std::uintptr_t actor_list = 0;
         /// Number of entries written to the caller's buffer.
-        std::size_t rawEntries = 0;
+        std::size_t raw_entries = 0;
     };
 
     /**
@@ -338,42 +338,43 @@ namespace CDCore
      *          identifies the target through each non-null slot's vtable -> RTTICompleteObjectLocator ->
      *          TypeDescriptor and an exact compare of the mangled name.
      *
-     *          The vtable address of the first match is cached in the caller-supplied @p vtableCache, so a later call
+     *          The vtable address of the first match is cached in the caller-supplied @p vtable_cache, so a later call
      *          fast-paths on a single qword compare per slot. The cache lives for the process lifetime because the
      *          vtables are image-resident. The caller declares one `std::atomic<std::uintptr_t>` static per component
      *          class.
      *
-     *          SEH-guarded. Returns 0 on a torn read, a missing class, or an invalid @p p1 / @p rttiName.
+     *          SEH-guarded. Returns 0 on a torn read, a missing class, or an invalid @p p1 / @p rtti_name.
      *
      * @param p1            Component-pointer table base
      *                      (CCOIA + 0x68 typically).
-     * @param rttiName      MSVC-mangled type-descriptor name, e.g.
+     * @param rtti_name      MSVC-mangled type-descriptor name, e.g.
      *                      ".?AVClientCharacterControlActorComponent@pa@@".
-     * @param vtableCache   Caller-owned cache, dedicated to one @p rttiName. The generation-checked cache drops its
+     * @param vtable_cache   Caller-owned cache, dedicated to one @p rtti_name. The generation-checked cache drops its
      *                      snapshot when the image generation changes, so a dev-build module reload cannot serve a
      *                      stale vtable from the previous generation.
      * @returns Slot pointer (the component instance) or 0.
      */
     [[nodiscard]] std::uintptr_t find_component_in_table(
         std::uintptr_t p1,
-        std::string_view rttiName,
-        DetourModKit::rtti::PointerTableCache &vtableCache
+        std::string_view rtti_name,
+        DetourModKit::rtti::PointerTableCache &vtable_cache
     ) noexcept;
 
     /**
-     * @brief Locate a component on the actor whose ClientEquipSlotActorComponent is @p equipSlot.
+     * @brief Locate a component on the actor whose ClientEquipSlotActorComponent is @p equip_slot.
      * @details Walks the equip-slot's CCOIA back-pointer and the CCOIA's component-pointer table internally, then
-     *          RTTI-matches @p rttiName. Encapsulates the a1->CCOIA->p1 chain offsets inside CDCore so callers carry no
-     *          engine offsets. SEH-guarded end-to-end. A readiness probe uses it to inspect a specific sibling
-     *          component of any protagonist, not only the controlled character.
-     * @param equipSlot ClientEquipSlotActorComponent pointer (the same a1 the SlotPopulator pipeline carries).
-     * @param rttiName  MSVC-mangled type-descriptor name.
-     * @param vtableCache Caller-owned cache slot per rttiName.
+     *          RTTI-matches @p rtti_name. Encapsulates the a1->CCOIA->p1 chain offsets inside CDCore so
+     *          callers carry no engine offsets. SEH-guarded end-to-end. A readiness probe uses it to
+     *          inspect a specific sibling component of any protagonist, not only the controlled
+     *          character.
+     * @param equip_slot ClientEquipSlotActorComponent pointer (the same a1 the SlotPopulator pipeline carries).
+     * @param rtti_name  MSVC-mangled type-descriptor name.
+     * @param vtable_cache Caller-owned cache slot per rtti_name.
      */
     [[nodiscard]] std::uintptr_t find_component_for_equipslot(
-        std::uintptr_t equipSlot,
-        std::string_view rttiName,
-        DetourModKit::rtti::PointerTableCache &vtableCache
+        std::uintptr_t equip_slot,
+        std::string_view rtti_name,
+        DetourModKit::rtti::PointerTableCache &vtable_cache
     ) noexcept;
 
 } // namespace CDCore

@@ -1,0 +1,10 @@
+# Generated tables are owned by their generator, not by the formatter.
+#
+# CrimsonDesertLiveTransmog/src/generated/* is written by scripts/gen_dye_color_table.js and
+# scripts/gen_material_palette_table.js. Letting clang-format reshape the output puts the formatter and
+# the generator in a tug of war: every regeneration undoes the formatting and every format run dirties
+# files nobody edited. The generators emit CRLF, stay inside 120 columns and follow the naming rules, so
+# the output is compliant without a formatting pass.
+#
+# Edit the generator, then re-run it. Never edit these files directly.
+CrimsonDesertLiveTransmog/src/generated/*
