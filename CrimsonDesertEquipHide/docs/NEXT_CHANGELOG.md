@@ -1,5 +1,3 @@
-## [Title for next release]
+## Update resilience
 
-- New feature
-- Bug fix
-- Improvement
+- Made the mod's game-code detection more tolerant of game updates

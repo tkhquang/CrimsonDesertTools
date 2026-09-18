@@ -27,8 +27,8 @@
  * once, including walkers a future patch adds, without a per-site guard table.
  *
  * One job at a time, on purpose. The debounce already coalesces requests into one apply, and a queue would only let
- * a stale apply run after a newer one had been requested. The worker is the only poster today; posting is
- * serialized anyway so a second caller cannot clobber a posted job.
+ * a stale apply run after a newer one had been requested. The worker is the only poster. Posting is serialized
+ * anyway, so a second caller cannot clobber a posted job.
  *
  * Failure modes are explicit. Without the hook (the anchor missed on a new build, or the install failed) the caller
  * learns that from @ref RunResult::Unavailable and decides whether to run inline. A job no frame picks up (no frame
@@ -69,7 +69,10 @@ namespace Transmog::game_thread
      */
     [[nodiscard]] bool install(DetourModKit::hook::HookStack &hooks) noexcept;
 
-    /// True while the frame hook is armed and @ref shutdown has not run.
+    /**
+     * @brief True while the frame hook is armed and @ref shutdown has not run.
+     * @note Callback-safe: two atomic reads.
+     */
     [[nodiscard]] bool available() noexcept;
 
     /**
@@ -97,7 +100,7 @@ namespace Transmog::game_thread
      * @brief Stops accepting jobs, withdraws an unclaimed one, and waits (bounded) for a running one to finish.
      * @details Call it after shutdown_requested() is raised and BEFORE the posting workers are joined: a worker
      *          blocked in @ref run_blocking wakes up here and returns, which is what lets its join complete. The hook
-     *          itself stays armed until the hook stack is cleared; nothing is posted after this call.
+     *          itself stays armed until the hook stack is cleared, and nothing is posted after this call.
      * @note Setup/control-plane only.
      */
     void shutdown() noexcept;

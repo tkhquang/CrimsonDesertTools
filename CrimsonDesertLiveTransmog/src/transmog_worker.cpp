@@ -1105,18 +1105,22 @@ namespace Transmog
         run_debounced_apply();
     }
 
-    // Longest the worker waits for a frame to pick an apply up before it withdraws the job and re-arms. One frame is
-    // the norm; the bound only matters while no frame runs (a load hitch, a minimized window) and it keeps the worker
-    // responsive to shutdown.
+    /**
+     * @brief Longest the worker waits for a frame to pick an apply up before it withdraws the job and re-arms.
+     * @details One frame is the norm. The bound only matters while no frame runs (a load hitch, a minimized window),
+     *          and it keeps the worker responsive to shutdown.
+     */
     static constexpr std::uint32_t GAME_THREAD_CLAIM_TIMEOUT_MS = 2000;
 
-    // Re-arm delay after a withdrawn apply. Short enough that the apply lands within a few frames once frames resume.
+    /// Re-arm delay after a withdrawn apply, short enough that the apply lands within a few frames once frames resume.
     static constexpr std::uint64_t GAME_THREAD_RETRY_MS = 200;
 
-    // Runs one apply pass on the game thread and blocks until it has finished, so the worker keeps its one-apply-at-
-    // a-time contract. A pass no frame claimed did not run at all (nothing is half-applied), so it is simply
-    // re-armed. Without a frame hook the pass runs here, on the worker, as it did before game_thread existed; that
-    // reopens the claim-erase race window (see game_thread.hpp), so the log says so once.
+    /**
+     * @brief Runs one apply pass on the game thread and blocks until it has finished.
+     * @details The block keeps the worker's one-apply-at-a-time contract. A pass no frame claimed did not run at all,
+     *          so nothing is half-applied and it is simply re-armed. Without a frame hook the pass runs here, on the
+     *          worker, which reopens the claim-erase race window (see game_thread.hpp), so the log says so once.
+     */
     static void dispatch_debounced_apply() noexcept
     {
         using game_thread::RunResult;
@@ -1128,7 +1132,8 @@ namespace Transmog
         case RunResult::Shutdown:
             return;
         case RunResult::Timeout:
-            DMK::log().debug(
+            (void)DMK::log().try_log(
+                DMK::LogLevel::Debug,
                 "[game-thread] apply not claimed by a frame within {} ms; re-arming",
                 GAME_THREAD_CLAIM_TIMEOUT_MS
             );
@@ -1137,7 +1142,8 @@ namespace Transmog
         case RunResult::Unavailable:
             if (!s_inline_warned.exchange(true, std::memory_order_acq_rel))
             {
-                DMK::log().warning(
+                (void)DMK::log().try_log(
+                    DMK::LogLevel::Warning,
                     "[game-thread] frame hook unavailable; running applies on the worker thread "
                     "(claim-erase race window open)"
                 );
@@ -1632,26 +1638,20 @@ namespace Transmog
                             real_damaged().fill(false);
                             last_applied_real_ids().fill(0);
                             last_applied_carrier_ids().fill(0);
+                            // The previous body keeps its restored parts; its bucket, captured at its last
+                            // apply, keeps their record.
+                            restored_real_ids().fill(0);
                         }
                         logger.info("Char swap detected: {} -> {}", old_name, live_name);
                         if (flag_enabled().load(std::memory_order_relaxed))
                             schedule_transmog_ms(200);
                         pm.save();
                     }
-                            // The previous body keeps its restored parts; its bucket, captured at its last
-                            // apply, keeps their record.
-                            restored_real_ids().fill(0);
                 }
             }
 
             auto comp = resolve_player_component();
 
-            // Detect change: new component appeared or address changed.
-            if (plausible_engine_ptr(comp) && comp != prev_comp)
-            {
-                // Resolve identity WITHOUT invalidating any CDCore cache. The focus-broadcast resolver stamps Tier-0 on
-                // every engine focus event, so a stale read here is self-correcting within one tick. Calling
-                // an inline invalidate_controlled_character() forces an Unknown window on saves whose first broadcast
             // Retract a real part LT rebuilt in a released slot once the game has taken that item off. Nothing else
             // observes an unequip: LT hooks no equip event, and a released slot gives the apply worker no other reason
             // to run. The check reads the auth table only for slots that carry a restored part, and it runs whether or
@@ -1680,6 +1680,12 @@ namespace Transmog
                 }
             }
 
+            // Detect change: new component appeared or address changed.
+            if (plausible_engine_ptr(comp) && comp != prev_comp)
+            {
+                // Resolve identity WITHOUT invalidating any CDCore cache. The focus-broadcast resolver stamps Tier-0 on
+                // every engine focus event, so a stale read here is self-correcting within one tick. Calling
+                // an inline invalidate_controlled_character() forces an Unknown window on saves whose first broadcast
                 // has not arrived yet (Prologue / post-cutscene resume), gating the auto-apply indefinitely.
                 const std::string live_char = current_controlled_character_name();
 
@@ -1721,13 +1727,13 @@ namespace Transmog
                     last_applied_real_ids().fill(0);
                     last_applied_carrier_ids().fill(0);
                     real_damaged().fill(false);
+                    restored_real_ids().fill(0);
                 }
 
                 if (!flag_enabled().load(std::memory_order_relaxed))
                     continue;
 
                 // Retry through the debounce worker. The game's visual state is not ready immediately after load detect
-                    restored_real_ids().fill(0);
                 // - the first attempt often faults because the PartDef array and scene graph are still being
                 // populated. The loop retries with exponential backoff up to ~90s total and exits once the apply lands
                 // (no SEH fault).
