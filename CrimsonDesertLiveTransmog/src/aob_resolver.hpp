@@ -279,11 +279,15 @@ namespace Transmog
          "49 8B F1 41 0F B7 D8 0F B7 FA 4C 8B F1 48 8D 8D ?? ?? ?? ?? E8 ?? ?? ?? ?? 90 41 8B 96 ?? ?? ?? ??",
          ResolveMode::Direct, -0x2D, 0},
 
-        // P3 -- the part-record search loop, which encodes the structure rather than the frame: index to r8d, the
-        // `lea rax,[rcx+rcx*2]` triple-scale, and the WORD compare of `[r9+rax*8]` against the wanted tag. Survives a
-        // prologue reshuffle that would sink both rows above. Stops before the loop's `jz`/`jb`, because a short Jcc
-        // flips encoding freely (aob-signatures.md section 9).
-        {"PartSlotRefresh_P3_RecordSearchLoop", "41 8B C8 48 8D 04 49 66 41 39 3C C1", ResolveMode::Direct, -0x70, 0},
+        // P3 -- the part-record search loop, which encodes the structure rather than the frame: the index copy, the
+        // `lea rcx,[rax+rax*2]` triple-scale and the `lea rcx,[rcx*8]` that completes the 0x18 record stride, then
+        // the WORD compare of the record's tag against the wanted one. Survives a prologue reshuffle that would sink
+        // both rows above. Stops before the loop's `jz`/`jb`, because a short Jcc flips encoding freely
+        // (aob-signatures.md section 9). The scale-index lea carries a disp32 the compiler may fold a record offset
+        // into, so it is wildcarded.
+        {"PartSlotRefresh_P3_RecordSearchLoop",
+         "41 8B C0 48 8D 0C 40 48 8D 0C CD ?? ?? ?? ?? 66 42 39 3C 09",
+         ResolveMode::Direct, -0x70, 0},
     };
 
     /**
@@ -535,9 +539,13 @@ namespace Transmog
         // container's layout and moves on its own while every other byte in the window stays put, so a pinned form
         // silently matches nothing. The `04 00` high half stays literal: a displacement in the 0x0004xxxx range is
         // what keeps the compare distinguishable from an ordinary small-offset one.
+        //
+        // Both register-carrying bytes after the `EB 03` are nibble-wildcarded: the `mov r64,r64` that feeds the
+        // compare and the compare's own base register are compiler-assigned and have moved independently of the
+        // store itself, which is the part this row is actually anchored on.
         {"LoaderRegistry_P3_InitStoreSite",
-         "48 89 03 48 89 1D ?? ?? ?? ?? EB 03 48 8B DF "
-         "48 3B 9E ?? ?? 04 00",
+         "48 89 03 48 89 1D ?? ?? ?? ?? EB 03 4? 8B D? "
+         "48 3B 9? ?? ?? 04 00",
          ResolveMode::RipRelative, 6, 10},
     };
 
@@ -689,29 +697,47 @@ namespace Transmog
     /**
      * @brief PartDescriptorBuild -- builds the part descriptor for ONE socket and appends it to the rebuild request.
      *
-     * `sub_14081DD40(a1, &partId, slotTag, a4, a5, record, outList)`. It expands the part to mesh ids
-     * (`sub_142074920`), and for each one takes the canonical wrapper (`sub_1403120F0(meshId) + 0x18`) into the
-     * descriptor's FIRST field before appending the 112-byte descriptor to `outList` through `sub_14037EC40`.
+     * Signature `f(a1, int16_t *partId, uint16_t slotTag, uint32_t *a4, char a5, int64_t record, uint64_t *outList)`.
+     * The first four arrive in registers and the last three on the stack; the body reads them back at rbp+0x230,
+     * rbp+0x238 and rbp+0x240. It expands the part to mesh ids, and for each one takes the canonical wrapper
+     * (interned wrapper + 0x18) into the descriptor's FIRST field before appending the 112-byte descriptor to
+     * `outList`.
      *
      * That first field is the mesh that will be attached to the socket, which makes this the override point: the
      * slot tag is an argument here, whereas the append itself (already hooked as StructCopy) cannot tell which
      * socket it is serving.
      */
     inline constexpr AddrCandidate k_partDescriptorBuildCandidates[] = {
-        // P1 -- full prologue: the `mov rax,rsp` frame plus four argument spills and 8 pushes. One match module-wide.
+        // P1 -- the full prologue: the `mov rax,rsp` frame plus four argument spills, eight pushes, and the frame
+        // setup pair that follows. The pushes alone are NOT enough; that shorter window also matches an unrelated
+        // function, so the row has to reach the `lea rbp,[rax-disp32]` / `sub rsp,imm32` pair to be singular. Both
+        // displacements are wildcarded because the compiler sizes the frame. Match lands on the function start.
         {"PartDescriptorBuild_P1_FullPrologue",
          "48 8B C4 4C 89 48 20 66 44 89 40 18 48 89 50 10 48 89 48 08 "
-         "55 53 56 57 41 54 41 55 41 56 41 57",
+         "55 53 56 57 41 54 41 55 41 56 41 57 48 8D A8 ?? ?? ?? ?? 48 81 EC ?? ?? ?? ??",
          ResolveMode::Direct, 0, 0},
 
-        // P2 -- post-frame argument shuffle plus the item-id sentinel test. Anchors past the prologue entirely, so a
-        // spill reorder or a frame resize that sinks P1 leaves this row standing. Shape: the four argument moves
-        // (r9->rbx, r8w->esi, rdx->r13, rcx->r14), the xor/spill of the loop counter, then `mov eax,0FFFFh` and the
-        // WORD compare against `*partId` that decides whether there is anything to build. The frame displacement is
-        // wildcarded; the 0xFFFF sentinel is semantic and stays literal. Anchors at function start + 0x33.
+        // P2 -- post-frame argument shuffle plus the item-id sentinel test. Anchors past the prologue and past the
+        // xmm spills entirely, so a spill reorder or a frame resize that sinks P1 leaves this row standing. Shape:
+        // the four argument moves (r9 -> rbx, r8w -> the slot-tag register, rdx -> the partId register, rcx -> the
+        // context register), the zeroed loop counter and its two frame spills, then `mov eax,0FFFFh` and the WORD
+        // compare against `*partId` that decides whether there is anything to build. The two frame displacements
+        // are wildcarded; the 0xFFFF sentinel is semantic and stays literal.
+        //
+        // The walk-back to the function start spans the xmm spill block, whose width is a compiler choice, so it is
+        // as build-specific as the pattern itself. Re-measure it on every patch, do not carry it forward.
         {"PartDescriptorBuild_P2_ArgShuffleSentinelTest",
-         "49 8B D9 41 0F B7 F0 4C 8B EA 4C 8B F1 33 FF 89 7C 24 ?? B8 FF FF 00 00 66 3B 02",
-         ResolveMode::Direct, -0x33, 0},
+         "49 8B D9 45 0F B7 F8 48 8B F2 4C 8B F1 33 FF 8B C7 89 44 24 ?? 89 44 24 ?? B8 FF FF 00 00 66 39 02",
+         ResolveMode::Direct, -0x3D, 0},
+
+        // P3 -- the sentinel test and the early-out branch, then the two zeroed out-slot spills and the name-table
+        // lookup call the build opens with. It shares only the sentinel bytes with P2 and nothing at all with P1,
+        // and it is downstream of the whole argument shuffle, so a register reallocation across that shuffle -- the
+        // part of this function that moves most readily -- cannot take it down. Both frame displacements and the
+        // call target are wildcarded. Walk back 0x56 to the function start.
+        {"PartDescriptorBuild_P3_SentinelToNameLookup",
+         "B8 FF FF 00 00 66 39 02 0F 84 ?? ?? ?? ?? 48 89 7C 24 ?? 48 89 7C 24 ?? 48 8B CA E8",
+         ResolveMode::Direct, -0x56, 0},
     };
 
     /**
@@ -1102,15 +1128,19 @@ namespace Transmog
          ResolveMode::Direct, -0x0F, 0},
 
         // P3 -- the owner-container vtable dispatch, entirely past the prologue. Shape: form `lea rdx,[rbx+8]`,
-        // test the owner for null, `cmovz` to the fallback, load the vtable and call through `[vtbl+0x320]`.
-        // Walk-back -0x3B to function start.
+        // test the owner for null, `cmovz` to the fallback, load the vtable and call through a slot in its 0x3xx
+        // range. Walk-back -0x3B to function start.
         //
         // The trailing `mov rbx,rax ; lea rdx,[rdi+8]` is load-bearing, not padding: the same
         // lea/test/cmovz/vtable-call shape repeats a second time later in this very function, and without the tail
         // the row matches both and fails require_unique.
+        //
+        // The vtable slot's low displacement byte is wildcarded because a slot inserted anywhere ahead of it in the
+        // interface shifts every later slot by 8. Keeping `03 00 00` literal holds the match to the 0x300 range and
+        // is what stops the looser form from spreading to unrelated dispatches.
         {"HostScopeVfunc2_P3_OwnerVtableDispatch",
          "48 8D 53 08 48 85 DB 49 0F 44 D6 48 8B 06 48 8B CE "
-         "FF 90 20 03 00 00 48 8B D8 48 8D 57 08",
+         "FF 90 ?? 03 00 00 48 8B D8 48 8D 57 08",
          ResolveMode::Direct, -0x3B, 0},
     };
 
@@ -1391,96 +1421,44 @@ namespace Transmog
      * metadata ptr) in its first qword. The chain walk in helm_audio_filter.cpp resolves a tag's skill record ->
      * per-level entry array -> first entry, then reads `*entry` and compares against the value resolved here.
      *
-     * Resolution strategy: AOB on the class's CONSTRUCTOR's final vtable assignment (which lives in `.text`), then use
-     * RipRelative mode to read the constructor's RIP-rel disp32 to compute the absolute vtable address. Direct AOB scan
-     * on the vtable bytes themselves cannot work because DetourModKit's `scan_executable_regions` filters by
-     * READABLE_EXEC_FLAGS only (scanner.cpp:669) and `.rdata` (PAGE_READONLY) is skipped.
+     * Resolution strategy: AOB on the class's CONSTRUCTOR, then RipRelative mode over the constructor's
+     * `lea rax,[rip+disp32]` to compute the absolute vtable address. A direct AOB scan on the vtable bytes cannot
+     * work: `scan_executable_regions` accepts only execute-readable pages, and `.rdata` is not one.
      *
-     * Constructor tail:
-     *   48 89 91 88 00 00 00         mov [rcx+88h], rdx        ; parent ctor fill
-     *   48 8D 05 ?? ?? ?? ??         lea rax, [rip+disp32]     ; load vtable addr
-     *   48 89 01                     mov [rcx], rax            ; store at obj[0]
-     *   C6 81 90 00 00 00 03         mov byte ptr [rcx+90h], 3 ; init audio_class byte
-     *   48 8B C1                     mov rax, rcx              ; this-return
-     *   C3                           ret
+     * The constructor TAIL cannot identify this class on its own. A sibling effect-buff class is emitted with a
+     * byte-for-byte identical constructor from the `[rcx+0x78]` fill through the vtable store and the `[rcx+0x90]`
+     * audio-class byte, so any tail-anchored window matches both and resolves to whichever sorts first, which is
+     * the sibling's vtable. Widening the tail does not help; the bytes are the same however far back it reaches.
      *
-     * The 28-byte signature is unique module-wide. The disp32 is wildcarded for build-portability.
-     * RipRelative decode:
-     *   - disp_offset    = 10  (offset of the disp32 from match start. The LEA is at match+7, the opcode
-     *                          `48 8D 05` is 3 bytes, so the disp32 starts at match+10.)
-     *   - instr_end_offset = 14 (the next instruction begins 7 bytes after the LEA start. The LEA is 7 bytes, so
-     *                          match+7+7 = match+14.)
-     * Resolved address = match + 14 + sign_extend(disp32). The 0x90-byte audio_class init right after the vtable store
-     * anchors the pattern specifically to GameAudioEffectBuffData. Other ctors that do similar vtable assignments have
-     * different post-vtable field initialization shapes.
-     *
-     * P2 extends the anchor one instruction earlier (the parent ctor's +0x84 state-init byte write) to add a stable
-     * 7-byte discriminator upstream of the vtable LEA. The disp_offset shifts to 17 and instr_end_offset to 21 to
-     * follow the LEA's new position within the window. P3 walks back another 17 bytes to also include the `[rcx+0x78]`
-     * qword fill and the `[rcx+0x80]` dword fill that GameAudioEffectBuffData's parent ctor performs immediately
-     * before the +0x84 byte. That gives the widest sub-frame-shaped fingerprint without dragging in calls that vary
-     * across builds.
+     * What separates them sits at the constructor HEAD: the class id written to `[rcx+8]` and the flag byte at
+     * `[rcx+0xA]`. The byte row below therefore spans head to vtable LEA in one window. That span is deliberate --
+     * it keeps the LEA's disp32 inside the matched bytes, so a field added anywhere in the constructor breaks the
+     * match loudly instead of leaving the displacement pointing mid-instruction at a plausible wrong address.
      */
     inline constexpr AddrCandidate k_gameAudioEffectVtableCandidates[] = {
         // Primary -- resolve by RTTI mangled name. Every pa::GameAudioEffectBuffData instance stores its primary
-        // (COL.offset == 0) vtable base in its first qword, which is exactly what the byte ctor-LEA tiers below
-        // recover. Resolving by the patch-stable mangled name self-heals across the vtable relocations that move those
-        // byte anchors between builds. The backend is unique-only and fails closed, so an absent name falls through to
-        // the byte tiers.
+        // (COL.offset == 0) vtable base in its first qword, which is exactly what the byte row below recovers.
+        // Resolving by the patch-stable mangled name self-heals across the vtable relocations and the constructor
+        // reshuffles that move that byte anchor between builds. The backend is unique-only and fails closed, so an
+        // absent name falls through to the byte row.
         {"GameAudioEffectVtable_RTTI", ".?AVGameAudioEffectBuffData@pa@@", ResolveMode::RttiVtable},
 
-        // P1 -- constructor tail with RIP-rel LEA. One match module-wide. The resolved target is the vfunc[0] address,
-        // which is the value objects store in their first qword.
-        {"GameAudioEffectVtable_P1_CtorLea",
-         "48 89 91 88 00 00 00 "
-         "48 8D 05 ?? ?? ?? ?? "
-         "48 89 01 "
-         "C6 81 90 00 00 00 03 "
-         "48 8B C1 "
-         "C3",
-         ResolveMode::RipRelative, 10, 14},
-
-        // P2 -- extend P1 backwards by the parent ctor's +0x84 state-init byte:
-        //   C6 81 84 00 00 00 03   mov  byte ptr [rcx+0x84], 3
-        //   48 89 91 88 00 00 00   mov  [rcx+0x88], rdx
-        //   48 8D 05 ?? ?? ?? ??   lea  rax, [rip+disp32]  ; vtable
-        //   48 89 01               mov  [rcx], rax
-        //   C6 81 90 00 00 00 03   mov  byte ptr [rcx+0x90], 3
-        //   48 8B C1               mov  rax, rcx
-        //   C3                     ret
-        // The dual `byte ptr [..0x84]=3` + `byte ptr [..0x90]=3` state-byte pair flanks the LEA and pins this ctor
-        // against sibling effect-buff ctors that init only one of the two bytes. LEA now sits 7 bytes deeper into the
-        // pattern, so disp_offset = 10 + 7 = 17, instr_end_offset = 14 + 7 = 21.
-        {"GameAudioEffectVtable_P2_CtorStatePair",
-         "C6 81 84 00 00 00 03 "
-         "48 89 91 88 00 00 00 "
-         "48 8D 05 ?? ?? ?? ?? "
-         "48 89 01 "
-         "C6 81 90 00 00 00 03 "
-         "48 8B C1 "
-         "C3",
-         ResolveMode::RipRelative, 17, 21},
-
-        // P3 -- extend P2 backwards by the parent ctor's earlier payload writes at [rcx+0x78] (qword) and [rcx+0x80]
-        // (dword):
-        //   48 89 51 78            mov  [rcx+0x78], rdx
-        //   89 91 80 00 00 00      mov  [rcx+0x80], edx
-        //   ... (P2 body) ...
-        // These two writes capture the parent ctor's signature packing of `rdx` into three sequential fields (qword at
-        // 0x78, dword at 0x80, byte at 0x84) -- a layout shape specific to this effect-buff family. LEA shifts a
-        // further 10 bytes (the P2 backward extension is 7, and P3 adds 10), so disp_offset = 17 + 10 = 27 and
-        // instr_end_offset = 21 + 10 = 31.
-        {"GameAudioEffectVtable_P3_CtorFullPayload",
-         "48 89 51 78 "
-         "89 91 80 00 00 00 "
-         "C6 81 84 00 00 00 03 "
-         "48 89 91 88 00 00 00 "
-         "48 8D 05 ?? ?? ?? ?? "
-         "48 89 01 "
-         "C6 81 90 00 00 00 03 "
-         "48 8B C1 "
-         "C3",
-         ResolveMode::RipRelative, 27, 31},
+        // Byte tier -- constructor head (class id + flag byte) through the vtable LEA and the audio-class byte
+        // that follows the store. Both `lea` displacements are wildcarded; every other byte is a field-init opcode
+        // of this one constructor. The resolved target is the vfunc[0] address, which is the value instances store
+        // in their first qword.
+        //
+        // There is no second byte tier. A shorter window has to drop either the head discriminator (and then it
+        // matches the sibling class too) or the LEA (and then there is no displacement to decode), so a second row
+        // could only be one that provably resolves to the wrong vtable. The RTTI row above is the redundancy.
+        {"GameAudioEffectVtable_P1_CtorHeadToVtableLea",
+         "66 C7 41 08 56 02 C6 41 0A 01 33 D2 48 89 51 0C 66 C7 41 14 03 06 "
+         "48 89 51 18 48 89 51 20 48 89 51 28 48 8D 05 ?? ?? ?? ?? 48 89 41 30 "
+         "B8 FF FF 00 00 66 89 41 38 88 51 3A 48 C7 41 3C FF FF FF FF 66 89 51 44 "
+         "48 89 51 48 48 89 51 50 C7 41 58 FF FF FF FF 48 89 51 60 48 89 51 68 "
+         "48 89 51 70 48 89 51 78 89 91 80 00 00 00 C6 81 84 00 00 00 03 "
+         "48 89 91 88 00 00 00 48 8D 05 ?? ?? ?? ?? 48 89 01 C6 81 90 00 00 00 03",
+         ResolveMode::RipRelative, 0x7B, 0x7F},
     };
 
     // -----------------------------------------------------------------------

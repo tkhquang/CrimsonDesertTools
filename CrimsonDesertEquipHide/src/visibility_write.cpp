@@ -45,13 +45,13 @@ namespace EquipHide
         return a.addr < b.addr;
     }
 
-    /* Self-healing PartInOut vis-byte offset. The hooked EquipVisCheck instruction reads the vis byte as `movzx eax,
-       byte [rax+0x20]` on v1.13.00 (was `byte [r12+0x20]` on v1.08..v1.12; the decode is register-agnostic so either
-       shape self-heals), and the engine builds the decision struct that instruction sees by copying the IndexedString
-       map entry field-for-field (the +0x20 vis byte included), so the displacement in that one instruction is the
-       vis-byte offset shared by both the mid-hook write (partInOut) and the direct-write path (map entry). Decoding it
-       value-agnostically lets a future PartInOut re-layout self-correct; 0x20 is the validated nominal kept on any
-       miss. Mirrors the BatchEquip stride/slot self-heal in cascade_suppress.cpp. */
+    /* Self-healing PartInOut vis-byte offset. The hooked EquipVisCheck instruction reads the vis byte as
+       `movzx <reg>, byte [<reg>+disp]`; which registers it picks is a compiler choice, so the decode reads only the
+       displacement. The engine builds the decision struct that instruction sees by copying the IndexedString map
+       entry field-for-field (the vis byte included), so that one displacement is the vis-byte offset shared by both
+       the mid-hook write (partInOut) and the direct-write path (map entry). Decoding it value-agnostically lets a
+       PartInOut re-layout self-correct; 0x20 is the validated nominal kept on any miss. Mirrors the BatchEquip
+       stride/slot self-heal in cascade_suppress.cpp. */
     std::size_t vis_byte_offset() noexcept
     {
         static const std::size_t value = []() noexcept -> std::size_t
@@ -95,7 +95,7 @@ namespace EquipHide
     // Reject a mapBase that passed the plausible-pointer gate but does not look like a real part-visibility hashtable
     // (stale/reallocated descriptor -> oversized count, or a bucket pointer into the image instead of the heap). The
     // game reads [mapBase+0] as the bucket modulus, [mapBase+4] as capacity, [mapBase+0x10] as the bucket array (see
-    // MapLookup); part-vis maps are tiny per-character tables. Mirrors armor_injection.cpp. v1.13.00 chain drift.
+    // MapLookup); part-vis maps are tiny per-character tables. Mirrors armor_injection.cpp.
     static bool part_vis_map_looks_valid(std::uintptr_t mapBase) noexcept
     {
         // Exact fields the game's map primitives dereference: bucket modulus [+0], entry count [+4], capacity [+8],
@@ -146,37 +146,33 @@ namespace EquipHide
                semantics. */
             const int charIdx = ps.visCharIdx[i].load(std::memory_order_relaxed);
 
-            // Resolve the part-info descriptor and its part-visibility map. Two v1.13.00 drifts (live-verified vs two
-            // protagonists): the vis-ctrl -> ClientCharacterControlActorComponent (CCC) link moved +0x30 (0x58 -> 0x88,
-            // RTTI-confirmed), and the part-vis map moved descriptor+0x20 -> descriptor+0x28 (game "PartInOutSocket"
-            // parser now emits `lea rcx,[r14+0x28]` at its MapInsert call site). The CCC -> descriptor link is
-            // UNCHANGED at CCC+0x218. So: desc = *(*(vc+0x88)+0x218); mapBase = desc + 0x28; seh_read_chain derefs
-            // the terminal +0x218 link, so `*desc` (the optional unwrap) IS the descriptor pointer.
-            auto desc = DMKMemory::seh_read_chain<std::uintptr_t>(vc, {0x88, 0x218});
+            // Resolve the part-info descriptor and its part-visibility map. Offsets and the re-verification recipe
+            // live on the k_visCtrl* constants in visibility_write.hpp; armor_injection.cpp walks the same three.
+            // seh_read_chain dereferences the terminal link, so `*desc` (the optional unwrap) IS the descriptor
+            // pointer.
+            auto desc = DMKMemory::seh_read_chain<std::uintptr_t>(vc, {k_visCtrlToCccOffset, k_cccToDescriptorOffset});
             if (!desc)
             {
-                logger.trace("DirectWrite [{}]: vc=0x{:X} descriptor=NULL "
-                             "(+0x88 -> +0x218)",
-                             i, vc);
+                logger.trace("DirectWrite [{}]: vc=0x{:X} descriptor=NULL (+{:#x} -> +{:#x})", i, vc,
+                             k_visCtrlToCccOffset, k_cccToDescriptorOffset);
                 continue;
             }
-            auto mapBase = *desc + 0x28;
+            auto mapBase = *desc + k_descriptorToPartVisMapOffset;
 
-            // A drifted +0x88 / +0x218 chain offset can yield a non-faulting garbage mapBase (the SEH chain read only
-            // traps an actual fault, not a wrong-but-mapped pointer). Reject an implausible base so a future layout
-            // shift skips just this vis-controller instead of letting the per-part lookup walk a wrong map -- or fault
-            // and abort the whole pass for every character.
+            // A drifted chain offset can yield a non-faulting garbage mapBase (the SEH chain read only traps an
+            // actual fault, not a wrong-but-mapped pointer). Reject an implausible base so a future layout shift
+            // skips just this vis-controller instead of letting the per-part lookup walk a wrong map -- or fault and
+            // abort the whole pass for every character.
             if (!DMKMemory::plausible_userspace_ptr(mapBase))
             {
-                logger.trace("DirectWrite [{}]: vc=0x{:X} implausible mapBase=0x{:X} "
-                             "(+0x88 -> +0x218 -> +0x28)",
-                             i, vc, mapBase);
+                logger.trace("DirectWrite [{}]: vc=0x{:X} implausible mapBase=0x{:X} (+{:#x} -> +{:#x} -> +{:#x})", i,
+                             vc, mapBase, k_visCtrlToCccOffset, k_cccToDescriptorOffset,
+                             k_descriptorToPartVisMapOffset);
                 continue;
             }
 
             // A stale/reallocated descriptor (companion despawned between resolve passes) can pass the plausible-ptr
             // gate yet point at a non-map; walking it in lookup() below faults. Skip it.
-            // See v1.13.00 armor-inject drift.
             if (!part_vis_map_looks_valid(mapBase))
             {
                 logger.trace("DirectWrite [{}]: vc=0x{:X} mapBase=0x{:X} not a valid part-vis map "
