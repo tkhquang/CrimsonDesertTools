@@ -72,9 +72,9 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
             // Single DLL, one Session per run, so the default Truncate gives one log per game launch. The dev loader
             // needs Append instead, because it keeps every generation's teardown records in one file.
             .log_open_mode = DMK::LogOpenMode::Truncate,
-            // Keep the [file:line] stamp only where it earns its place: Trace records are the ones read while actively
-            // debugging, and every higher level renders clean.
-            .log_source_stamp_mode = DMK::LogSourceStampMode::at_or_below(DMK::LogLevel::Trace),
+            // No [file:line] stamp in a shipped build: this log is read by players and by whoever handles a bug
+            // report, and a source path is noise to both. The dev loader keeps the Trace stamp for debugging.
+            .log_source_stamp_mode = DMK::LogSourceStampMode::never(),
         };
 
         // A gate refusal (wrong process, a duplicate load already holding the mutex) is a reason for this DLL to go
