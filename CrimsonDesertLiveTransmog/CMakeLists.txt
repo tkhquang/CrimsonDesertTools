@@ -100,6 +100,7 @@ set(COMMON_SOURCES
     src/real_part_tear_down.cpp
     src/prefab_wrapper_swap.cpp
     src/claim_walk_guard.cpp
+    src/game_thread.cpp
     src/socket_mesh_override.cpp
     src/helm_audio_filter.cpp
     src/color_override/host_scope.cpp

@@ -3,6 +3,7 @@
 #include "part_show_suppress.hpp"
 #include "prefab_wrapper_swap.hpp"
 #include "constants.hpp"
+#include "game_thread.hpp"
 #include "item_name_table.hpp"
 #include "itemmesh_dumper.hpp"
 #include "preset_manager.hpp"
@@ -465,7 +466,7 @@ namespace Transmog
     //
     // Apply one character's preset against an explicit equip-slot a1, bypassing the controlled-char-only path that
     // run_debounced_apply normally takes. Mutates the same global axes (active_character, slot_mappings,
-    // last_applied_*) that the single-char path does, so the caller must invoke it from the apply worker thread only
+    // last_applied_*) that the single-char path does, so the caller must invoke it from the apply job only
     // (no concurrent writer). Logs failures at debug level since idle (non-controlled) protagonists have engine-zeroed
     // component fields that cause expected chain faults. Returns true if the apply ran (regardless of outcome), false
     // if the body was not yet ready and the caller must re-arm the multi-apply pending flag to retry later.
@@ -863,7 +864,10 @@ namespace Transmog
     }
 
     // One apply/clear pass. Pulled out of the worker body so the SEH frame does not share scope with the
-    // condition-variable unique_lock (MSVC C2712 forbids __try with objects requiring unwinding).
+    // condition-variable unique_lock (MSVC C2712 forbids __try with objects requiring unwinding). The worker never
+    // calls it directly: dispatch_debounced_apply hands it to the game thread, so every engine call below
+    // (SlotPopulator, SafeTearDown, the prefab-swap unlink) runs inside the frame, on the thread the engine mutates
+    // its scene graph from.
     static void run_debounced_apply() noexcept
     {
         auto &logger = DMK::log();
@@ -1093,8 +1097,56 @@ namespace Transmog
         }
     }
 
+    /// game_thread job adapter: the apply body takes no context.
+    static void run_debounced_apply_job(void * /*context*/) noexcept
+    {
+        run_debounced_apply();
+    }
+
+    // Longest the worker waits for a frame to pick an apply up before it withdraws the job and re-arms. One frame is
+    // the norm; the bound only matters while no frame runs (a load hitch, a minimized window) and it keeps the worker
+    // responsive to shutdown.
+    static constexpr std::uint32_t GAME_THREAD_CLAIM_TIMEOUT_MS = 2000;
+
+    // Re-arm delay after a withdrawn apply. Short enough that the apply lands within a few frames once frames resume.
+    static constexpr std::uint64_t GAME_THREAD_RETRY_MS = 200;
+
+    // Runs one apply pass on the game thread and blocks until it has finished, so the worker keeps its one-apply-at-
+    // a-time contract. A pass no frame claimed did not run at all (nothing is half-applied), so it is simply
+    // re-armed. Without a frame hook the pass runs here, on the worker, as it did before game_thread existed; that
+    // reopens the claim-erase race window (see game_thread.hpp), so the log says so once.
+    static void dispatch_debounced_apply() noexcept
+    {
+        using game_thread::RunResult;
+        static std::atomic<bool> s_inline_warned{false};
+
+        switch (game_thread::run_blocking(&run_debounced_apply_job, nullptr, GAME_THREAD_CLAIM_TIMEOUT_MS))
+        {
+        case RunResult::Ran:
+        case RunResult::Shutdown:
+            return;
+        case RunResult::Timeout:
+            DMK::log().debug(
+                "[game-thread] apply not claimed by a frame within {} ms; re-arming",
+                GAME_THREAD_CLAIM_TIMEOUT_MS
+            );
+            schedule_transmog_ms(GAME_THREAD_RETRY_MS);
+            return;
+        case RunResult::Unavailable:
+            if (!s_inline_warned.exchange(true, std::memory_order_acq_rel))
+            {
+                DMK::log().warning(
+                    "[game-thread] frame hook unavailable; running applies on the worker thread "
+                    "(claim-erase race window open)"
+                );
+            }
+            run_debounced_apply();
+            return;
+        }
+    }
+
     // Persistent debounce worker. Sleeps on a condition variable until schedule_transmog bumps the deadline, then waits
-    // out any remaining debounce window before invoking run_debounced_apply.
+    // out any remaining debounce window before handing run_debounced_apply to the game thread.
     static void apply_worker_fn(std::stop_token stop) noexcept
     {
         std::unique_lock<std::mutex> lk(s_apply_cv_mtx);
@@ -1140,7 +1192,7 @@ namespace Transmog
             s_apply_pending.store(false, std::memory_order_release);
             lk.unlock();
 
-            run_debounced_apply();
+            dispatch_debounced_apply();
 
             lk.lock();
         }
@@ -1628,7 +1680,7 @@ namespace Transmog
                 // Reset cached apply state so the early-out in apply_all_transmog does not suppress the re-apply. The
                 // scene graph is fresh after reload - old fake meshes are gone even though the IDs do not change.
                 //
-                // Held under s_apply_cv_mtx to prevent racing with an in-flight apply on the worker thread, which reads
+                // Held under s_apply_cv_mtx to prevent racing with an in-flight apply, which reads
                 // and writes these same non-atomic arrays.
                 {
                     std::lock_guard<std::mutex> lk(s_apply_cv_mtx);

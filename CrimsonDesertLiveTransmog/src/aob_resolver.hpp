@@ -1146,8 +1146,9 @@ namespace Transmog
      *
      * The claim erase nulls owner slots while they are still inside the count and only decrements the count once its
      * shift finishes, so a walk overlapping an erase reads a null owner here. Nothing locks: the engine is safe only
-     * because its own erases and walks are scheduled as jobs that never overlap. LT drives erases from its apply
-     * worker, so they can. See claim_walk_guard.hpp for the guard and the reasoning.
+     * because its own erases and walks run on the main thread in an order its scheduler fixes. LT runs its erases
+     * there too, through game_thread, and the guard covers the inline fallback. See claim_walk_guard.hpp for the guard
+     * and the reasoning.
      *
      * Patch day: the guard logs the site count it found and warns when it is not the expected two. The list carries
      * only the RBX-based encoding. A walker allocated to another register needs its site branch-checked by hand
@@ -1170,6 +1171,113 @@ namespace Transmog
 
     /// Offset from the match to the loop-continue `jz rel8`, whose target the guard decodes.
     inline constexpr std::size_t CLAIM_WALK_JZ_OFFSET = 11;
+
+    /**
+     * @brief FrameUpdate - the per-frame update step of the game's main loop.
+     *
+     * The main-loop body calls it once per frame on the main thread, ahead of that frame's scene-graph work (the
+     * appearance assembly and its claim-vector walks run deeper in the same step). game_thread hooks its ENTRY with a
+     * mid-hook and drains a one-slot mailbox there, which is how the apply worker gets its engine calls (SlotPopulator,
+     * SafeTearDown, the prefab-swap unlink) executed on the thread the engine mutates its scene graph from. See
+     * game_thread.hpp for why the thread matters.
+     *
+     * Shape: a `mov rax,rsp` frame-pointer prologue, spills of rbx and rcx into the caller's home slots, a
+     * seven-register push run, `lea rbp,[rax-disp32]`, a disp32 stack frame, five AVX callee-save spills (xmm6-xmm10),
+     * then three argument captures into xmm9/xmm10/xmm6, `mov rsi,rcx` and `xor r14d,r14d`. The body walks
+     * `[rcx+0x60] -> +0x1080` and calls into it, passes 4 to a second callee, and bumps a frame counter
+     * (`inc dword [rax]`) reached through a `[rsi+disp32]` field.
+     *
+     * @warning Every row carries the AVX register-capture triple (`vmovaps xmm9,xmm3 / xmm10,xmm2 / xmm6,xmm1`) or the
+     *          `[rcx+0x60] -> +0x1080` walk. Those are this function's identity; the capture triple alone is unique
+     *          module-wide. A row built from the prologue alone (mov rax,rsp; spills; pushes; lea rbp; sub rsp) matches
+     *          dozens of large frame functions.
+     * @warning This anchor gates a hook that RUNS ENGINE CALLS: a wrong match would execute the apply inside an
+     *          unrelated function on an unknown thread. function_entry_site guards the walk-back, and game_thread logs
+     *          the thread its first job ran on so the log shows which thread carries it.
+     */
+    inline const Candidate FRAME_UPDATE_CANDIDATES[] = {
+        // P1 - full prologue through the argument captures. Wildcards the frame displacements (lea rbp, sub rsp) and
+        // each AVX spill's stack offset. Zero walk-back: the match IS the entry.
+
+        // 48 8B C4                  mov rax, rsp
+        // 48 89 58 18               mov [rax+0x18], rbx
+        // 48 89 48 08               mov [rax+0x08], rcx
+        // 55                        push rbp
+        // 56                        push rsi
+        // 57                        push rdi
+        // 41 54                     push r12
+        // 41 55                     push r13
+        // 41 56                     push r14
+        // 41 57                     push r15
+        // 48 8D A8 ?? ?? FF FF      lea rbp, [rax-disp32]
+        // 48 81 EC ?? ?? 00 00      sub rsp, imm32
+        // C5 F8 29 70 ??            vmovaps [rax-d8], xmm6
+        // C5 F8 29 78 ??            vmovaps [rax-d8], xmm7
+        // C5 78 29 40 ??            vmovaps [rax-d8], xmm8
+        // C5 78 29 48 ??            vmovaps [rax-d8], xmm9
+        // C5 78 29 90 ?? ?? FF FF   vmovaps [rax-disp32], xmm10
+        // C5 78 28 CB               vmovaps xmm9, xmm3
+        // C5 78 28 D2               vmovaps xmm10, xmm2
+        // C5 F8 28 F1               vmovaps xmm6, xmm1
+        // 48 8B F1                  mov rsi, rcx
+        // 45 33 F6                  xor r14d, r14d
+        Candidate::direct(
+            "FrameUpdate_P1_FullPrologue",
+            Pattern::literal(
+                "48 8B C4 48 89 58 18 48 89 48 08 55 56 57 41 54 41 55 41 56 41 57 48 8D A8 ?? ?? FF FF "
+                "48 81 EC ?? ?? 00 00 C5 F8 29 70 ?? C5 F8 29 78 ?? C5 78 29 40 ?? C5 78 29 48 ?? "
+                "C5 78 29 90 ?? ?? FF FF C5 78 28 CB C5 78 28 D2 C5 F8 28 F1 48 8B F1 45 33 F6"
+            )
+        ),
+
+        // P2 - entry and push run, then ONE bounded gap over the frame setup and the callee-save spills, closed by the
+        // register-capture triple. The gap absorbs a frame that shrinks to disp8 forms (lea/sub 4 bytes each, spills 5
+        // bytes each) or grows by an extra xmm spill, so a stack-layout change alone cannot retire the row. `[24-64]`
+        // holds four to six spills in either displacement width plus the two frame instructions. Zero walk-back: the
+        // match IS the entry.
+
+        // 48 8B C4                  mov rax, rsp
+        // 48 89 58 18               mov [rax+0x18], rbx
+        // 48 89 48 08               mov [rax+0x08], rcx
+        // 55 56 57                  push rbp / push rsi / push rdi
+        // 41 54 41 55 41 56 41 57   push r12 / push r13 / push r14 / push r15
+        // [24-64]                   lea rbp,[rax-disp] ; sub rsp,imm ; vmovaps spills of xmm6..xmm10
+        // C5 78 28 CB               vmovaps xmm9, xmm3
+        // C5 78 28 D2               vmovaps xmm10, xmm2
+        // C5 F8 28 F1               vmovaps xmm6, xmm1
+        // 48 8B F1                  mov rsi, rcx
+        // 45 33 F6                  xor r14d, r14d
+        Candidate::direct(
+            "FrameUpdate_P2_GapTolerantPrologue",
+            Pattern::literal(
+                "48 8B C4 48 89 58 18 48 89 48 08 55 56 57 41 54 41 55 41 56 41 57 [24-64] "
+                "C5 78 28 CB C5 78 28 D2 C5 F8 28 F1 48 8B F1 45 33 F6"
+            )
+        ),
+
+        // P3 - first body block, past every prologue byte. The `[rcx+0x60] -> +0x1080` subsystem walk, the `mov edx,4`
+        // second call and the frame-counter `inc dword [rax]` are the function-defining behavior. Walk-back -0x52 to
+        // the entry across the fixed-length prologue above. Survives a prologue reshuffle at equal length; a prologue
+        // that changes LENGTH retires the row through function_entry_site instead of hooking mid-instruction.
+
+        // 48 8B 49 60               mov rcx, [rcx+0x60]
+        // 48 8B 89 ?? ?? 00 00      mov rcx, [rcx+disp32]
+        // E8 ?? ?? ?? ??            call <subsystem step>
+        // BA 04 00 00 00            mov edx, 4
+        // 48 8B 4E ??               mov rcx, [rsi+d8]
+        // E8 ?? ?? ?? ??            call <second step>
+        // 48 8B 86 ?? ?? 00 00      mov rax, [rsi+disp32]
+        // FF 00                     inc dword [rax]
+        // 48 8B 5E 60               mov rbx, [rsi+0x60]
+        Candidate::direct(
+            "FrameUpdate_P3_UpdateStepBody",
+            Pattern::literal(
+                "48 8B 49 60 48 8B 89 ?? ?? 00 00 E8 ?? ?? ?? ?? BA 04 00 00 00 48 8B 4E ?? E8 ?? ?? ?? ?? "
+                "48 8B 86 ?? ?? 00 00 FF 00 48 8B 5E 60"
+            ),
+            -0x52
+        ),
+    };
 
     /**
      * @brief StructCopy - 0x40-byte struct-copy hotpath.
@@ -2507,6 +2615,8 @@ namespace Transmog
         PlayerStatic,
         /// Passive-skill registrar entry, the helm-audio hook site (code).
         HelmAudioRegistrar,
+        /// Per-frame update step of the main loop, the game-thread mailbox hook site (code).
+        FrameUpdate,
         /// Vtable of HOST_SCOPE_VFUNC1_BIND_TYPE, the RTTI witness for HostScopeVfunc1 (data, .rdata).
         HostScopeVfunc1Vtable,
         /// Vtable of HOST_SCOPE_VFUNC2_BIND_TYPE, the RTTI witness for HostScopeVfunc2 (data, .rdata).

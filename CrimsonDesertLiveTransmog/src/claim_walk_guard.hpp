@@ -17,15 +17,18 @@
  * neither the erase, nor the walkers, nor the tear-down above them takes a lock. The engine survives it because its
  * scheduler never runs its own erases and walks concurrently.
  *
- * LT drives equips and tear-downs from its apply worker, and engine scene-graph code runs inline on whichever thread
- * calls it. Those erases therefore overlap the engine's own job-thread walks, and the fault is reachable. It is not
- * specific to any one removal primitive - every path that erases a claim opens the same window, including the
+ * Engine scene-graph code runs inline on whichever thread calls it, so an equip or a tear-down issued off the main
+ * thread performs its erases while the main thread may be walking the same vector, and the fault is reachable. It is
+ * not specific to any one removal primitive - every path that erases a claim opens the same window, including the
  * erases the engine performs inside a plain equip.
  *
- * The engine's job scheduler is not open to us, and an atomic erase means a reimplementation of refcounted removal
- * against several engine globals. This guard takes the other side: it makes the WALK tolerate the window, which is
- * the smaller and safer intervention. A null owner means "this entry is being erased", and a skip matches what the
- * walker observes a moment later, once the count catches up.
+ * LT closes that window at the source: game_thread runs the whole apply on the main thread at the top of the frame,
+ * so LT's own erases never overlap a walk, at any walker. This guard is therefore NOT armed (transmog.cpp does not
+ * call install). It stays in the tree as the fallback for a build whose FrameUpdate ladder missed, where the apply
+ * runs on the worker again: armed, it makes the WALK at the two sites it matches tolerate the window, which is the
+ * smaller and safer intervention there. A null owner means "this entry is being erased", and a skip matches what the
+ * walker observes a moment later, once the count catches up. An atomic erase would mean reimplementing refcounted
+ * removal against several engine globals, so neither layer attempts it.
  *
  * The guard is a managed mid-hook rather than a hand-written stub. A stub costs less per entry - these sites sit
  * inside per-entry loops that run during the frame, and a mid-hook pays a full context save and restore where a stub

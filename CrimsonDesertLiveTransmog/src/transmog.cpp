@@ -8,7 +8,7 @@
 #include "dye_record_inject.hpp"
 #include "color_override/setter_substitute.hpp"
 #include "generated/dye_color_table.hpp"
-#include "claim_walk_guard.hpp"
+#include "game_thread.hpp"
 #include "socket_mesh_override.hpp"
 #include "prefab_wrapper_swap.hpp"
 #include "constants.hpp"
@@ -1012,11 +1012,16 @@ namespace Transmog
             }
         }
 
-        // Install BEFORE anything can drive an equip or a tear-down. The guard makes the engine's claim-vector walks
-        // tolerate the null-owner window its own non-atomic erase opens. Until it is in place, any erase that
-        // overlaps a walk on a job thread can fault. See claim_walk_guard.hpp.
-        // install() logs its own failure and the mod still runs without the guard, so the result is discarded here.
-        (void)claim_walk_guard::install(s_hooks);
+        // Route the apply body onto the game thread. The worker keeps the debounce; the frame hook runs the engine
+        // calls (SlotPopulator, SafeTearDown, the prefab-swap unlink) at the top of the frame, where no claim-vector
+        // walk is in flight. Armed before the apply worker starts so its first job finds the hook. install() logs its
+        // own failure; without the hook the worker runs the apply inline and warns once. See game_thread.hpp.
+        //
+        // claim_walk_guard is deliberately NOT armed. It makes two of the engine's claim-vector walks tolerate the
+        // null-owner window an erase opens, which only matters while LT erases off the main thread. With the apply on
+        // the game thread that window is closed at the source for every walker, and the guard would add a full-context
+        // mid-hook per claim entry per walk for cover on the inline fallback path alone.
+        (void)game_thread::install(s_hooks);
 
         // init() logs its own failure. Without the swap the mod applies carriers but never redirects their meshes.
         (void)prefab_wrapper_swap::init(s_hooks);
@@ -1151,6 +1156,11 @@ namespace Transmog
 
         shutdown_requested().store(true, std::memory_order_release);
 
+        // Stop handing work to the frame hook before the workers are joined. The apply worker may be blocked inside
+        // game_thread::run_blocking; this wakes it (an unclaimed job is withdrawn, a running one is waited out) so the
+        // join in stop_apply_worker() completes.
+        game_thread::shutdown();
+
         // Drain workers before the hooks they call into come down. Every spawned worker calls raw game functions
         // under SEH (apply_all_transmog -> SlotPopulator, debounce worker -> real_part_tear_down -> safe_tear_down).
         // Join them first to guarantee that no worker sits mid-call inside a trampoline when the trampoline pages are
@@ -1168,9 +1178,10 @@ namespace Transmog
 
         prefab_wrapper_swap::shutdown();
 
-        // Newest-first teardown of every hook this mod owns (PartAddShow, the claim-walk guard, the socket-mesh
-        // override and the rest). Each detour body snapshots its trampoline pointer at entry and bails to a benign
-        // default if the snapshot is null, which defends the brief drain window between restore and DLL unmap.
+        // Newest-first teardown of every hook this mod owns (PartAddShow, the frame hook, the socket-mesh override
+        // and the rest). Each detour body snapshots its trampoline pointer at entry and bails to
+        // a benign default if the snapshot is null, which defends the brief drain window between restore and DLL
+        // unmap.
         //
         // A hook that cannot prove it restored its target pins its backend, and that pin books one leak against
         // LeakSubsystem::HookManager, so the delta across the clear IS the unmap authorization the dev loader needs.

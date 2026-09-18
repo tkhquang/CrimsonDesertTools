@@ -361,6 +361,15 @@ namespace Transmog
                 .require_validator = true,
                 .pages = Pages::Executable,
             },
+            {
+                .label = "FrameUpdate",
+                .kind = AnchorKind::RipGlobal,
+                .site = FRAME_UPDATE_CANDIDATES,
+                .validator = function_entry_site,
+                .validator_context = &s_host_image,
+                .require_validator = true,
+                .pages = Pages::Executable,
+            },
             // RTTI witnesses: class vtables resolved by mangled name through the RTTI records in .rdata. Each one
             // holds a mid-hook target in a known slot, and corroborate_vtable_slots() reads that slot after the sweep.
             // A vtable is data, so in_host_image is the whole contract.
