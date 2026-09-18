@@ -90,14 +90,17 @@ namespace CDCore::Anchors
         {"WorldSystem_P2_StructField", "80 B8 ?? ?? ?? ?? 00 ?? ?? 48 8B 05 ?? ?? ?? ?? 48 8B 88 D8 00 00 00",
          ResolveMode::RipRelative, 12, 16},
 
-        // P3 -- shortest anchor: a `mov rcx, [rip+disp32] ; mov rcx,[rcx+X] ; call ; test al,al ; sete al` site. It
-        // shares no bytes with P1 or P2 and crosses no branch, so it survives both the branch-widening that sinks P1
-        // and the entry-block rewrite that sinks P2.
+        // P3 -- a consumer site that walks the global to `+0x58` and passes the result straight into a call. It
+        // shares no bytes with P1 or P2, and it crosses neither a branch nor a call, so it survives both the
+        // branch-widening that sinks P1 and the entry-block rewrite that sinks P2. Only the outbound frame slot is
+        // wildcarded.
         //
-        // This is the shape of the standalone getter that P1's site inlines, so it only resolves on a build that
-        // still emits one somewhere. Treat it as an opportunistic tier, not a guaranteed fallback, and re-verify it
-        // in the disassembler rather than assuming the cascade has three live rows.
-        {"WorldSystem_P3_InnerLoad", "48 8B 0D ?? ?? ?? ?? 48 8B 49 ?? E8 ?? ?? ?? ?? 84 C0 0F 94 C0",
+        // The window has to reach `mov rcx,rbx` to be usable. Stopping at the `lea` leaves a shape that also matches
+        // a neighboring global's walk, and that near-miss resolves to a DIFFERENT global rather than failing, which
+        // require_unique would not catch because each site matches only once. Verify the decoded target, not just
+        // the match count, whenever this row is re-derived.
+        {"WorldSystem_P3_ContainerWalkToCall",
+         "48 8B 05 ?? ?? ?? ?? 48 8B 58 58 48 8D 54 24 ?? 48 8B CB",
          ResolveMode::RipRelative, 3, 7},
     };
 
@@ -121,9 +124,18 @@ namespace CDCore::Anchors
         {"MapLookup_P2_HashBody", "8B 48 ?? 48 03 D2 44 8B 5C D1 ?? 41 8B 08 85 C9 ?? ?? 33 D2 41 8B C3 F7 F1",
          ResolveMode::Direct, -0x24, 0},
 
-        // P3 -- hash-loop anchor (even deeper). Last-resort fallback. Offset -0x3D walks back to function start.
-        {"MapLookup_P3_HashLoop", "44 8B CA 33 D2 49 C1 E1 08 4D 03 48 ?? 45 8B 11 45 85 D2", ResolveMode::Direct,
-         -0x3D, 0},
+        // P3 -- a call-site anchor rather than a body anchor. This map primitive is a templated instantiation and
+        // the linker emits more than one copy: a sibling is byte-identical from the hash loop through the epilogue
+        // and differs only in the bucket-key fetch at the head, which P2 already covers. So no third row inside the
+        // function body can be unique, and a row that is not unique resolves to the sibling rather than to this
+        // instantiation. The way out for a cloned function is to anchor on a caller that IS unique and walk its
+        // `E8 disp32` to the callee.
+        //
+        // The caller is identified by its argument setup: a module global, `+0x28` to the owner, then the large
+        // `+0x10778` walk to the map. That displacement is the distinctive part and stays literal.
+        {"MapLookup_P3_CallerArgSetup",
+         "48 8B 05 ?? ?? ?? ?? 48 8B 48 28 48 8B 89 78 07 01 00 E8 ?? ?? ?? ?? 4C 8B E8",
+         ResolveMode::RipRelative, 19, 23},
     };
 
     // -----------------------------------------------------------------------

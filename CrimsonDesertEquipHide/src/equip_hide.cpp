@@ -22,14 +22,15 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <cstring>
 #include <string>
 #include <vector>
 
 namespace EquipHide
 {
-    // Indexed by truncated part hash. The R8B gate-skip lock prevents PartInOut from re-running the transition
-    // dispatch after the first vis=2 frame.
+    // Indexed by truncated part hash. The gate-skip lock (the In/Out selector forced to Out) prevents PartInOut
+    // from re-running the transition dispatch after the first vis=2 frame.
     static uint8_t s_hideLocked[0x10000]{};
 
     // Brief guard window after any hotkey toggle. Prevents cascade from other armor slots (shield/helm) from briefly
@@ -38,6 +39,23 @@ namespace EquipHide
 
     static constexpr CategoryMask k_cascadeBodyMask =
         category_bit(Category::Legs) | category_bit(Category::Gloves) | category_bit(Category::Boots);
+
+    /**
+     * @brief In/Out selector value that makes EquipVisCheck return "no opinion" instead of an alpha to publish.
+     * @details The decision function's fourth argument is the In/Out selector and the engine reads only its low
+     *          byte, at `test r9b,r9b`, `cmp r9b,1` and `cmp r9b,r11b`. Its caller publishes the returned alpha
+     *          only after `vcomiss xmm0,0 / jb`, so a negative return skips the publish entirely. That skip is the
+     *          gate the chest-lock state machine wants to close.
+     *
+     *          With the hidden visibility byte (2) written, the three outcomes are:
+     *          - selector 0 (In): 0.0f, published, the part hides. This is the normal hide path.
+     *          - selector 1 (Out): 1.0f, published, the part SHOWS. Never force this.
+     *          - selector >= 2: -1.0f, not published, the part keeps whatever it already is.
+     *
+     *          2 is the engine's own no-transition selector: the transition function early-returns on it before it
+     *          ever reaches this call, so it cannot collide with a live In or Out pass.
+     */
+    static constexpr uintptr_t k_selectorSkipGate = 2;
 
     // --- Config ---
     static void load_config()
@@ -214,18 +232,17 @@ namespace EquipHide
             }
         }
 
-        // Part-hash key pointer. The register that carries it moves between builds, so verify it against the
-        // disassembly instead of assuming. On the current build it is R15, and it is read as a pointer at BOTH
-        // comparison sites: the exclusion-list walk does `mov edx,[r15]` and the transition dispatch does
-        // `mov r8d,[r15]` before comparing against the list. That agreement is the check -- a register that only one
-        // of the two sites dereferences is the wrong one.
+        // Part-hash key pointer, the decision function's second argument. The register that carries it moves
+        // between builds, so verify it against the disassembly instead of assuming. On the current build it is RDX,
+        // and the exclusion walk dereferences it as `mov ecx,[rdx]` before comparing against each entry's first
+        // DWORD. That dereference is the check -- a register the walk does not read THROUGH is the wrong one.
         //
-        // Reading the wrong register here fails SILENTLY. The neighboring registers hold small integers (R15's
-        // neighbor R13 carries the walk's loop counter, `mov ecx,r13d` ... `inc ecx`), so
-        // `plausible_userspace_ptr` rejects the value, this handler returns before reaching any of the logic below,
-        // and the cascade fix goes dead with the hook still reporting installed.
+        // Reading the wrong register here fails SILENTLY. The neighboring registers hold small integers (R11 carries
+        // the visibility byte the hooked movzx just loaded, R10 the exclusion count), so `plausible_userspace_ptr`
+        // rejects the value, this handler returns before reaching any of the logic below, and the cascade fix goes
+        // dead with the hook still reporting installed.
         // See the register map on k_hookSiteCandidates in aob_resolver.hpp.
-        auto hashPtr = ctx.r15;
+        auto hashPtr = ctx.rdx;
         if (!DMK::Memory::plausible_userspace_ptr(hashPtr))
             return;
 
@@ -238,13 +255,13 @@ namespace EquipHide
         if (mask == 0)
             return;
 
-        // PartInOut struct pointer. The instruction ahead of the hook loads it from the frame slot as
-        // `mov rcx,[rbp+0x5F]`, the hooked `movzx eax, byte [rcx+0x20]` reads the visibility byte through it, and the
-        // engine reads it back at `cmp [rcx+3],r8b`. Take it from RCX, not from RAX. At the hook instant RAX holds
-        // the exclusion-list walk cursor, which is a live heap pointer. It passes plausible_userspace_ptr(), so a
-        // read of the wrong register does not fail loudly. The mid-hook then writes the visibility byte at +0x20
-        // inside an unrelated struct. See the register map on k_hookSiteCandidates in aob_resolver.hpp.
-        auto partInOut = ctx.rcx;
+        // PartInOut struct pointer, the decision function's third argument. The hooked `movzx r11d, byte [r8+0x20]`
+        // reads the visibility byte through it and the branch after the exclusion walk reads its transition byte at
+        // `cmp byte [r8+3],0`. Take it from R8, not from RCX: RCX carries the a1 context here, which is also a live
+        // heap pointer, so it passes plausible_userspace_ptr() and a read of the wrong register does not fail
+        // loudly. The mid-hook would then write the visibility byte inside the context struct instead.
+        // See the register map on k_hookSiteCandidates in aob_resolver.hpp.
+        auto partInOut = ctx.r8;
         if (!DMK::Memory::plausible_userspace_ptr(partInOut))
             return;
 
@@ -262,7 +279,7 @@ namespace EquipHide
                 if ((mask & k_cascadeBodyMask) != 0 && !is_any_category_hidden(mask) &&
                     is_category_hidden(Category::Chest))
                 {
-                    ctx.r8 = 1;
+                    ctx.r9 = k_selectorSkipGate;
                     return;
                 }
             }
@@ -270,7 +287,7 @@ namespace EquipHide
 
         // Chest lock state machine (BEFORE player filter):
         //   0 = unlocked -- first frame, let gate pass
-        //   1 = locked   -- R8B=1, skip gate
+        //   1 = locked   -- force the skip-gate selector, decision not published
         //   2 = re-equip -- force vis=0 (In, recreate scene nodes)
         if (cascadeOn && isChest && s_hideLocked[hashIdx] && is_any_category_hidden(mask))
         {
@@ -282,11 +299,13 @@ namespace EquipHide
                 return;
             }
             *visPtr = 2;
-            ctx.r8 = 1;
+            ctx.r9 = k_selectorSkipGate;
             return;
         }
 
-        auto a1 = *reinterpret_cast<uintptr_t *>(ctx.rbp + 0x4F);
+        // a1 visibility-control context, the decision function's first argument. check_player_filter() gates the
+        // pointer itself, so no separate plausibility check is needed here.
+        auto a1 = ctx.rcx;
         if (!check_player_filter(a1))
             return;
 
@@ -330,7 +349,7 @@ namespace EquipHide
             if (cascadeOn && isChest)
             {
                 if (s_hideLocked[hashIdx])
-                    ctx.r8 = 1; // gate skip on locked frames
+                    ctx.r9 = k_selectorSkipGate; // gate skip on locked frames
                 else
                     s_hideLocked[hashIdx] = 1;
             }
@@ -459,7 +478,7 @@ namespace EquipHide
         }
 
         // Mid-body scan with the host-EXE-scoped, prologue-fallback cascade resolver. Host scope bounds this
-        // safety-critical match -- its callback writes engine structs (visPtr, ctx.r8) -- to CrimsonDesert.exe, where
+        // safety-critical match -- its callback writes engine structs (visPtr, ctx.r9) -- to CrimsonDesert.exe, where
         // the real target lives. A generic-shaped candidate then cannot first-match elsewhere in the process image.
         // The prologue-fallback variant survives dev hot-reload: when a prior Logic-DLL load left a SafetyHook
         // detour-jump in place at this site, every original-bytes candidate fails on rescan, and the resolver retries
@@ -570,7 +589,7 @@ namespace EquipHide
             logger.info("BaldFix disabled in config -- hair-hiding rules will apply normally");
         }
 
-        // Equipment change detection for CascadeFix re-sync. Clears the R8B gate-skip locks when chest armor changes,
+        // Equipment change detection for CascadeFix re-sync. Clears the gate-skip locks when chest armor changes,
         // so the new gear gets a fresh Out transition.
         if (flag_cascade_fix().load(std::memory_order_relaxed))
         {

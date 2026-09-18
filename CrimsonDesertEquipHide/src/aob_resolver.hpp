@@ -163,49 +163,65 @@ namespace EquipHide
     };
 
     /**
-     * @brief Hook target: the visibility decision inside the PartInOut transition function.
+     * @brief Hook target: the equipment visibility decision the PartInOut transition runs per part.
      *
-     * Hook point: `movzx eax, byte ptr [rcx+0x20]` followed by `cmp al, 3`.
+     * The decision is a leaf function of its own: `float check(a1, const uint32_t *partHash, PartInOut *pio,
+     * uint8_t inOut)`. It returns the alpha the caller then publishes -- 1.0f show, 0.0f hide, -1.0f "no opinion",
+     * which the caller tests with `vcomiss xmm0,0 / jb` and skips the publish for. Every input arrives in a
+     * register; the function allocates no frame of its own.
+     *
+     * The compiler is free to inline this body back into its caller. If it does, the rows below stop matching and
+     * the anchors have to move to the caller's frame, where the same four values are spilled to fixed slots. That
+     * is a re-derivation, not a displacement fix: do not try to patch the offsets through it.
+     *
+     * Hook point: `movzx r11d, byte ptr [r8+0x20]` followed by `cmp r11b, 3`, the first two instructions after the
+     * single `mov [rsp+8],rbx` spill.
      *
      * Register layout at the hook point:
-     *   RCX = PartInOutSocket struct. The instruction before the hook loads it from [RBP+0x5F].
-     *   R15 = pointer to the part-hash DWORD, read at both comparison sites: the exclusion-list walk loads the key
-     *         as `mov edx,[r15]` and the transition dispatch loads it as `mov r8d,[r15]`. Both are loads THROUGH
-     *         the pointer, which is the test for identifying it -- a register only one of the two sites
-     *         dereferences is the wrong one.
-     *   R13 = the exclusion walk's loop counter (`mov ecx,r13d` ... `inc ecx`), not a pointer. Reading it as the
-     *         hash pointer yields a small integer that `plausible_userspace_ptr` rejects, so the handler returns
-     *         early and the cascade fix goes dead with the hook still reporting installed.
-     *   R8B = exclusion-list flag. The engine consumes it at `test r8b,r8b` and `cmp [rcx+3],r8b`.
-     *   [RBP+0x4F] = the a1 context pointer. It feeds the exclusion array at a1+0x78 and the count at a1+0x80,
-     *         with a 0x10-byte entry stride.
-     *   The socket visibility byte is at +0x20.
+     *   RCX = the a1 visibility-control context, which the caller loads from its own frame slot and passes in.
+     *         It owns the exclusion array at a1+0x78 and its count at a1+0x80, with a 0x10-byte entry stride.
+     *   RDX = pointer to the part-hash DWORD. The exclusion walk dereferences it as `mov ecx,[rdx]` before
+     *         comparing against each entry's first DWORD. A register the walk does not dereference is the wrong
+     *         one; verify against the disassembly rather than assuming.
+     *   R8  = the PartInOut struct. The hooked movzx reads its visibility byte at +0x20, and the branch after the
+     *         exclusion walk reads its transition byte at +3.
+     *   R9B = the In/Out selector the caller passes: 0 = In, 1 = Out. The engine consumes it at `test r9b,r9b`,
+     *         `cmp r9b,1` and `cmp r9b,r11b`. Writing the visibility byte alone does not decide the outcome --
+     *         visibility 2 hides only on the In pass (R9B = 0), visibility 1 only on the Out pass.
+     *   RBX, R10, R11 are scratch and hold nothing useful before the hooked instruction retires.
      *
-     * Read the socket pointer from RCX, not from RAX. At the hook instant RAX holds the exclusion-list walk cursor,
-     * which is a live heap pointer. It passes the plausible-pointer guard, so a wrong read does not fail loudly. It
-     * writes the visibility byte into an unrelated struct instead. See on_vis_check_impl in equip_hide.cpp.
+     * Do NOT write R8 to steer the decision: it carries the struct pointer, so a write replaces a live pointer
+     * with a small integer that the engine then dereferences. R9B is the only input that steers the outcome.
+     * See on_vis_check_impl in equip_hide.cpp.
      *
      * Cascade contract: each candidate must match exactly once in the scanned scope. A wide shape can still match
      * once while its displacement lands mid-instruction after a body shift. Verify the match count and the
      * match-to-hook displacement together when you add a candidate.
      */
     inline constexpr AddrCandidate k_hookSiteCandidates[] = {
-        // P1 -- exclusion-flag store, socket load, visibility read, decision compare.
-        // No branch sits between the first byte and the hook point, so a change of branch encoding cannot move the
-        // displacement. The two disp8 operands are wildcarded because the compiler assigns the frame slot and the
-        // visibility field offset. Hook lands on the movzx at match + 7.
-        {"PartInOut_P1_FlagStoreToVisRead", "41 B0 01 48 8B 4D ?? 0F B6 41 ?? 3C 03", ResolveMode::Direct, 7, 0},
+        // P1 -- the whole entry block: the single rbx spill, the visibility read, the context move, the sentinel
+        // compare, its branch, and the exclusion-array header. No frame arithmetic sits inside the window because
+        // this function allocates no frame, so nothing here moves when the compiler resizes a caller. The branch
+        // displacement and the visibility field offset are wildcarded; the exclusion offsets are engine layout and
+        // stay literal. Hook lands on the movzx at match + 5.
+        {"EquipVisCheck_P1_EntrySpillToExclusionHeader",
+         "48 89 5C 24 08 45 0F B6 58 ?? 48 8B D9 41 80 FB 03 0F 84 ?? ?? ?? ?? 48 8B 41 78 44 8B 91 80 00 00 00",
+         ResolveMode::Direct, 5, 0},
 
-        // P2 -- socket load, visibility read, decision compare.
-        // Same branch-free property as P1 with less context, so it survives a reshuffle of the flag store.
-        // Hook lands on the movzx at match + 4.
-        {"PartInOut_P2_SocketLoadVisRead", "48 8B 4D ?? 0F B6 41 ?? 3C 03", ResolveMode::Direct, 4, 0},
+        // P2 -- same window with the prologue spill dropped, so a change to which register is saved on entry (or a
+        // move to a push) cannot take this row down with P1. Match lands directly on the movzx, offset 0.
+        {"EquipVisCheck_P2_VisReadToExclusionHeader",
+         "45 0F B6 58 ?? 48 8B D9 41 80 FB 03 0F 84 ?? ?? ?? ?? 48 8B 41 78 44 8B 91 80 00 00 00 49 C1 E2 04",
+         ResolveMode::Direct, 0, 0},
 
-        // P3 -- exclusion-list setup: array base at a1+0x78, count at a1+0x80, the 0x10-byte stride shift.
-        // It anchors upstream of the decision block that P1 and P2 both depend on, so it survives a rewrite of that
-        // block. The displacement spans the exclusion loop, which contains short branches, so a change of branch
-        // encoding moves the hook point. Order it last for that reason. Hook lands on the movzx at match + 0x31.
-        {"PartInOut_P3_ExclusionListSetup", "48 8B 41 78 8B 89 80 00 00 00 48 C1 E1 04", ResolveMode::Direct, 0x31, 0},
+        // P3 -- the exclusion walk alone: array base at a1+0x78, count at a1+0x80, the 0x10-byte stride shift, the
+        // empty-list test, and the first key compare through the hash pointer. It shares no pattern byte with P1 or
+        // P2, so a rewrite of the entry block leaves it standing. It is not independent of that block, though: the
+        // -0x12 walk-back is measured across the sentinel compare and its rel32 branch, so widening or narrowing
+        // that branch resolves the row SHORT. Re-measure whenever the entry block changes; order it last.
+        {"EquipVisCheck_P3_ExclusionWalk",
+         "48 8B 41 78 44 8B 91 80 00 00 00 49 C1 E2 04 4C 03 D0 49 3B C2 74 ?? 8B 0A 39 08",
+         ResolveMode::Direct, -0x12, 0},
     };
 
     /**

@@ -65,7 +65,7 @@ namespace EquipHide
     // yield a garbage map -- an oversized count, a bucket pointer that lands in the image .rdata instead of the heap --
     // and inserting into it faults inside the game's MapInsert (SEH would catch it, but noisily, every frame). The game
     // reads [mapBase+0] as the bucket modulus, [mapBase+4] as capacity, [mapBase+0x10] as the bucket array (see
-    // MapLookup); part-vis maps are tiny per-character tables. Introduced with the v1.13.00 vis-ctrl chain drift.
+    // MapLookup); part-vis maps are tiny per-character tables.
     static bool part_vis_map_looks_valid(std::uintptr_t mapBase) noexcept
     {
         // Mirror exactly the fields the game's MapInsert dereferences (verified from its disassembly): bucket modulus
@@ -368,31 +368,28 @@ namespace EquipHide
             /* Per-player SEH so one bad pointer does not skip the rest. */
             __try
             {
-                // Resolve the part-info descriptor and its part-visibility map. Two v1.13.00 drifts, both live-verified
-                // against two protagonists: (1) the vis-ctrl -> ClientCharacterControlActorComponent (CCC) link moved
-                // +0x30 (0x58 -> 0x88, RTTI-confirmed); (2) the descriptor's part-vis map moved descriptor+0x20 ->
-                // descriptor+0x28 (the game's "PartInOutSocket" parser, sub_141FAA040 equiv, now emits
-                // `lea rcx,[r14+0x28]` at its MapInsert call site vs `a1+0x20` on v1.05). The CCC -> descriptor link is
-                // UNCHANGED at CCC+0x218. So: desc = *(*(vc+0x88)+0x218); mapBase = desc + 0x28. seh_read_chain derefs
-                // the terminal +0x218 link, so `*desc` (the optional unwrap) IS the descriptor pointer.
-                auto desc = DMKMemory::seh_read_chain<std::uintptr_t>(vc, {0x88, 0x218});
+                // Resolve the part-info descriptor and its part-visibility map. Offsets and the re-verification
+                // recipe live on the k_visCtrl* constants in visibility_write.hpp; the direct-write pass walks the
+                // same three. seh_read_chain dereferences the terminal link, so `*desc` (the optional unwrap) IS the
+                // descriptor pointer.
+                auto desc =
+                    DMKMemory::seh_read_chain<std::uintptr_t>(vc, {k_visCtrlToCccOffset, k_cccToDescriptorOffset});
                 if (!desc)
                 {
-                    logger.trace("ArmorInject [{}]: vc=0x{:X} descriptor=NULL "
-                                 "(+0x88 -> +0x218)",
-                                 i, vc);
+                    logger.trace("ArmorInject [{}]: vc=0x{:X} descriptor=NULL (+{:#x} -> +{:#x})", i, vc,
+                                 k_visCtrlToCccOffset, k_cccToDescriptorOffset);
                     continue;
                 }
-                auto mapBase = *desc + 0x28;
+                auto mapBase = *desc + k_descriptorToPartVisMapOffset;
 
-                // Reject a non-faulting garbage mapBase from a drifted +0x88 / +0x218 chain (the SEH read only traps an
-                // actual fault, not a wrong-but-mapped pointer). Skip this vis-controller rather than inject into a
-                // wrong map.
+                // Reject a non-faulting garbage mapBase from a drifted chain (the SEH read only traps an actual
+                // fault, not a wrong-but-mapped pointer). Skip this vis-controller rather than inject into a wrong
+                // map.
                 if (!DMKMemory::plausible_userspace_ptr(mapBase))
                 {
-                    logger.trace("ArmorInject [{}]: vc=0x{:X} implausible mapBase=0x{:X} "
-                                 "(+0x88 -> +0x218 -> +0x28)",
-                                 i, vc, mapBase);
+                    logger.trace("ArmorInject [{}]: vc=0x{:X} implausible mapBase=0x{:X} (+{:#x} -> +{:#x} -> +{:#x})",
+                                 i, vc, mapBase, k_visCtrlToCccOffset, k_cccToDescriptorOffset,
+                                 k_descriptorToPartVisMapOffset);
                     continue;
                 }
 
