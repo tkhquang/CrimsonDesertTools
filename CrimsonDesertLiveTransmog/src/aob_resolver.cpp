@@ -370,6 +370,18 @@ namespace Transmog
                 .require_validator = true,
                 .pages = Pages::Executable,
             },
+            {
+                .label = "FrameUpdateXref",
+                .kind = AnchorKind::StringXref,
+                // The update step names itself through the HUD format literal it formats: one copy in the image, one
+                // referencing instruction, and the enclosing function of that instruction is the entry. No byte
+                // pattern is involved, so the witness survives the code motion a byte row is sensitive to.
+                .xref_text = FRAME_UPDATE_HUD_FORMAT,
+                .xref_return = DMK::scan::XrefReturn::EnclosingFunction,
+                .validator = function_entry_site,
+                .validator_context = &s_host_image,
+                .require_validator = true,
+            },
             // RTTI witnesses: class vtables resolved by mangled name through the RTTI records in .rdata. Each one
             // holds a mid-hook target in a known slot, and corroborate_vtable_slots() reads that slot after the sweep.
             // A vtable is data, so in_host_image is the whole contract.
@@ -652,6 +664,75 @@ namespace Transmog
                 );
             }
         }
+
+        /**
+         * @brief Holds the FrameUpdate ladder against its string-xref witness.
+         * @details Runs after the parallel sweep, on the init thread, before the quality summary. The anchor gates a
+         *          hook that runs engine calls, so it is the one anchor where a wrong value costs more than a missing
+         *          one. Agreement is logged at info. A disagreement fails the anchor closed: the frame hook stays off
+         *          and the apply runs inline, as it does without the hook. A ladder miss adopts the witness, which
+         *          function_entry_site already validated, and warns that the byte rows need re-deriving.
+         */
+        void corroborate_frame_update()
+        {
+            auto &logger = DMK::log();
+            const auto code_index = static_cast<std::size_t>(AnchorId::FrameUpdate);
+            const auto xref_index = static_cast<std::size_t>(AnchorId::FrameUpdateXref);
+            if (code_index >= s_report_count || xref_index >= s_report_count)
+            {
+                return;
+            }
+            DMK::anchor::ResolvedAnchor &code = s_report[code_index];
+            const DMK::anchor::ResolvedAnchor &xref = s_report[xref_index];
+
+            if (xref.status != DMK::anchor::AnchorStatus::Resolved)
+            {
+                logger.warning(
+                    "Anchor {}: no string-xref witness ({} unresolved), the byte ladder stands alone",
+                    code.label,
+                    xref.label
+                );
+                return;
+            }
+            const auto witness = static_cast<std::uintptr_t>(xref.value);
+
+            if (code.status == DMK::anchor::AnchorStatus::Resolved)
+            {
+                const auto ladder = static_cast<std::uintptr_t>(code.value);
+                if (ladder == witness)
+                {
+                    logger.info(
+                        "Anchor {} corroborated: byte ladder and string-xref witness agree at {:#x}",
+                        code.label,
+                        ladder
+                    );
+                    return;
+                }
+                code.status = DMK::anchor::AnchorStatus::Failed;
+                code.value = 0;
+                logger.warning(
+                    "Anchor {} DISAGREES with its string-xref witness: ladder {:#x}, witness {:#x}. Failing it closed, "
+                    "the frame hook stays off. Re-derive both on this build",
+                    code.label,
+                    ladder,
+                    witness
+                );
+                return;
+            }
+
+            code.status = DMK::anchor::AnchorStatus::Resolved;
+            code.value = static_cast<std::int64_t>(witness);
+            code.domain = DMK::anchor::ResultDomain::CodeSite;
+            code.witness = DMK::anchor::ResolvedWitness{};
+            code.witness.image = xref.witness.image;
+            code.witness.source = xref.witness.source;
+            code.witness.completeness = xref.witness.completeness;
+            logger.warning(
+                "Anchor {} self-healed from its string-xref witness -> {:#x}. Re-derive the byte ladder for this build",
+                code.label,
+                witness
+            );
+        }
     } // namespace
 
     void resolve_all_anchors()
@@ -713,6 +794,9 @@ namespace Transmog
         // Runs after the sweep so it can compare against (or stand in for) the ladder result, and before the summary
         // so an adopted value counts as resolved.
         corroborate_vtable_slots();
+        // The frame hook's entry gets the same treatment from its string-xref witness, and fails closed on a
+        // disagreement, because a hook that runs engine calls must not arm on a coincidental match.
+        corroborate_frame_update();
 
         const DMK::anchor::AnchorQuality quality = DMK::anchor::assess_quality(anchor_report());
         logger.info(

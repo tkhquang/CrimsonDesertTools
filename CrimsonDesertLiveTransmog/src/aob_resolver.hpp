@@ -1176,10 +1176,10 @@ namespace Transmog
      * @brief FrameUpdate - the per-frame update step of the game's main loop.
      *
      * The main-loop body calls it once per frame on the main thread, ahead of that frame's scene-graph work (the
-     * appearance assembly and its claim-vector walks run deeper in the same step). game_thread hooks its ENTRY with a
-     * mid-hook and drains a one-slot mailbox there, which is how the apply worker gets its engine calls (SlotPopulator,
-     * SafeTearDown, the prefab-swap unlink) executed on the thread the engine mutates its scene graph from. See
-     * game_thread.hpp for why the thread matters.
+     * appearance assembly and its claim-vector walks run deeper in the same step). Two loop bodies carry the call, so
+     * the hook fires in both loop modes. game_thread hooks its ENTRY with a mid-hook and drains a one-slot mailbox
+     * there, which is how the apply worker gets its engine calls (SlotPopulator, SafeTearDown, the prefab-swap unlink)
+     * executed on the thread the engine mutates its scene graph from. See game_thread.hpp for why the thread matters.
      *
      * Shape: a `mov rax,rsp` frame-pointer prologue, spills of rbx and rcx into the caller's home slots, a
      * seven-register push run, `lea rbp,[rax-disp32]`, a disp32 stack frame, five AVX callee-save spills (xmm6-xmm10),
@@ -1187,17 +1187,23 @@ namespace Transmog
      * `[rcx+0x60] -> +0x1080` and calls into it, passes 4 to a second callee, and bumps a frame counter
      * (`inc dword [rax]`) reached through a `[rsi+disp32]` field.
      *
-     * @warning Every row carries the AVX register-capture triple (`vmovaps xmm9,xmm3 / xmm10,xmm2 / xmm6,xmm1`) or the
-     *          `[rcx+0x60] -> +0x1080` walk. Those are this function's identity; the capture triple alone is unique
-     *          module-wide. A row built from the prologue alone (mov rax,rsp; spills; pushes; lea rbp; sub rsp) matches
-     *          dozens of large frame functions.
+     * Register selectors the allocator can renumber are per-nibble wildcards: the VEX byte's R and vvvv bits (`?8`
+     * keeps L and pp) and the REX byte of every GPR move (`4?` keeps the prefix class). The ModRM bytes stay, because
+     * their rm fields name ABI-fixed sources (rcx for `this`, xmm1-xmm3 for the arguments).
+     *
+     * @warning Every row carries the AVX register-capture triple (`vmovaps xmm9,xmm3 / xmm10,xmm2 / xmm6,xmm1`), the
+     *          `[rcx+0x60] -> +0x1080` walk, or the call site's argument loads. Those are this function's identity.
+     *          The capture triple alone is unique module-wide, and a row built from the prologue alone (mov rax,rsp;
+     *          spills; pushes; lea rbp; sub rsp) matches dozens of large frame functions.
      * @warning This anchor gates a hook that RUNS ENGINE CALLS: a wrong match would execute the apply inside an
-     *          unrelated function on an unknown thread. function_entry_site guards the walk-back, and game_thread logs
-     *          the thread its first job ran on so the log shows which thread carries it.
+     *          unrelated function on an unknown thread. function_entry_site guards every row, the FrameUpdateXref
+     *          witness (see FRAME_UPDATE_HUD_FORMAT) corroborates the value, and game_thread logs the thread its
+     *          first job ran on.
      */
     inline const Candidate FRAME_UPDATE_CANDIDATES[] = {
-        // P1 - full prologue through the argument captures. Wildcards the frame displacements (lea rbp, sub rsp) and
-        // each AVX spill's stack offset. Zero walk-back: the match IS the entry.
+        // P1 - full prologue through the argument captures. Wildcards the frame displacements (lea rbp, sub rsp), each
+        // AVX spill's register bits and stack offset, and the REX bytes of the two GPR moves. Zero walk-back: the
+        // match IS the entry.
 
         // 48 8B C4                  mov rax, rsp
         // 48 89 58 18               mov [rax+0x18], rbx
@@ -1211,22 +1217,22 @@ namespace Transmog
         // 41 57                     push r15
         // 48 8D A8 ?? ?? FF FF      lea rbp, [rax-disp32]
         // 48 81 EC ?? ?? 00 00      sub rsp, imm32
-        // C5 F8 29 70 ??            vmovaps [rax-d8], xmm6
-        // C5 F8 29 78 ??            vmovaps [rax-d8], xmm7
-        // C5 78 29 40 ??            vmovaps [rax-d8], xmm8
-        // C5 78 29 48 ??            vmovaps [rax-d8], xmm9
-        // C5 78 29 90 ?? ?? FF FF   vmovaps [rax-disp32], xmm10
-        // C5 78 28 CB               vmovaps xmm9, xmm3
-        // C5 78 28 D2               vmovaps xmm10, xmm2
-        // C5 F8 28 F1               vmovaps xmm6, xmm1
-        // 48 8B F1                  mov rsi, rcx
-        // 45 33 F6                  xor r14d, r14d
+        // C5 ?8 29 ?? ??            vmovaps [rax-d8], xmm6
+        // C5 ?8 29 ?? ??            vmovaps [rax-d8], xmm7
+        // C5 ?8 29 ?? ??            vmovaps [rax-d8], xmm8
+        // C5 ?8 29 ?? ??            vmovaps [rax-d8], xmm9
+        // C5 ?8 29 ?? ?? ?? ?? ??   vmovaps [rax-disp32], xmm10
+        // C5 ?8 28 CB               vmovaps xmm9, xmm3
+        // C5 ?8 28 D2               vmovaps xmm10, xmm2
+        // C5 ?8 28 F1               vmovaps xmm6, xmm1
+        // 4? 8B F1                  mov rsi, rcx
+        // 4? 33 F6                  xor r14d, r14d
         Candidate::direct(
             "FrameUpdate_P1_FullPrologue",
             Pattern::literal(
                 "48 8B C4 48 89 58 18 48 89 48 08 55 56 57 41 54 41 55 41 56 41 57 48 8D A8 ?? ?? FF FF "
-                "48 81 EC ?? ?? 00 00 C5 F8 29 70 ?? C5 F8 29 78 ?? C5 78 29 40 ?? C5 78 29 48 ?? "
-                "C5 78 29 90 ?? ?? FF FF C5 78 28 CB C5 78 28 D2 C5 F8 28 F1 48 8B F1 45 33 F6"
+                "48 81 EC ?? ?? 00 00 C5 ?8 29 ?? ?? C5 ?8 29 ?? ?? C5 ?8 29 ?? ?? C5 ?8 29 ?? ?? "
+                "C5 ?8 29 ?? ?? ?? ?? ?? C5 ?8 28 CB C5 ?8 28 D2 C5 ?8 28 F1 4? 8B F1 4? 33 F6"
             )
         ),
 
@@ -1242,42 +1248,74 @@ namespace Transmog
         // 55 56 57                  push rbp / push rsi / push rdi
         // 41 54 41 55 41 56 41 57   push r12 / push r13 / push r14 / push r15
         // [24-64]                   lea rbp,[rax-disp] ; sub rsp,imm ; vmovaps spills of xmm6..xmm10
-        // C5 78 28 CB               vmovaps xmm9, xmm3
-        // C5 78 28 D2               vmovaps xmm10, xmm2
-        // C5 F8 28 F1               vmovaps xmm6, xmm1
-        // 48 8B F1                  mov rsi, rcx
-        // 45 33 F6                  xor r14d, r14d
+        // C5 ?8 28 CB               vmovaps xmm9, xmm3
+        // C5 ?8 28 D2               vmovaps xmm10, xmm2
+        // C5 ?8 28 F1               vmovaps xmm6, xmm1
+        // 4? 8B F1                  mov rsi, rcx
+        // 4? 33 F6                  xor r14d, r14d
         Candidate::direct(
             "FrameUpdate_P2_GapTolerantPrologue",
             Pattern::literal(
                 "48 8B C4 48 89 58 18 48 89 48 08 55 56 57 41 54 41 55 41 56 41 57 [24-64] "
-                "C5 78 28 CB C5 78 28 D2 C5 F8 28 F1 48 8B F1 45 33 F6"
+                "C5 ?8 28 CB C5 ?8 28 D2 C5 ?8 28 F1 4? 8B F1 4? 33 F6"
             )
         ),
 
-        // P3 - first body block, past every prologue byte. The `[rcx+0x60] -> +0x1080` subsystem walk, the `mov edx,4`
-        // second call and the frame-counter `inc dword [rax]` are the function-defining behavior. Walk-back -0x52 to
-        // the entry across the fixed-length prologue above. Survives a prologue reshuffle at equal length; a prologue
-        // that changes LENGTH retires the row through function_entry_site instead of hooking mid-instruction.
+        // P3 - the main-loop call site, resolved through the call's rel32 with the `|` marker on the E8 (displacement
+        // at +1, five-byte instruction). It carries no prologue byte at all, so a rewritten prologue cannot retire
+        // it. The three `vmovss` loads pull the frame timings the step receives in xmm1-xmm3 from `[rcx+0x64..0x6C]`,
+        // and `[rsi+0x18]` is the step's `this`. A second loop body carries the same call with rdx and rbp as bases,
+        // so the rsi/rcx selectors stay pinned: they are what keeps the row at one match.
 
-        // 48 8B 49 60               mov rcx, [rcx+0x60]
-        // 48 8B 89 ?? ?? 00 00      mov rcx, [rcx+disp32]
+        // C5 FA 10 59 6C            vmovss xmm3, [rcx+0x6C]
+        // C5 FA 10 51 68            vmovss xmm2, [rcx+0x68]
+        // C5 FA 10 49 64            vmovss xmm1, [rcx+0x64]
+        // 48 8B 4E 18               mov rcx, [rsi+0x18]
+        // | E8 ?? ?? ?? ??          call <FrameUpdate>   <- result: the call target
+        // 48 8B 4E 38               mov rcx, [rsi+0x38]
+        // 33 D2                     xor edx, edx
+        Candidate::rip_relative(
+            "FrameUpdate_P3_MainLoopCallSite",
+            Pattern::literal(
+                "C5 FA 10 59 6C C5 FA 10 51 68 C5 FA 10 49 64 48 8B 4E 18 | E8 ?? ?? ?? ?? 48 8B 4E 38 33 D2"
+            ),
+            1,
+            5
+        ),
+
+        // P4 - first body block, past every prologue byte. The `[rcx+0x60] -> +0x1080` subsystem walk, the `mov edx,4`
+        // second call and the frame-counter `inc dword [rax]` are the function-defining behavior. Walk-back -0x52 to
+        // the entry across the fixed-length prologue above. It is the last rung on purpose: a prologue that changes
+        // LENGTH retires it through function_entry_site instead of hooking mid-instruction.
+
+        // 4? 8B 49 60               mov rcx, [rcx+0x60]
+        // 4? 8B 89 ?? ?? 00 00      mov rcx, [rcx+disp32]
         // E8 ?? ?? ?? ??            call <subsystem step>
         // BA 04 00 00 00            mov edx, 4
-        // 48 8B 4E ??               mov rcx, [rsi+d8]
+        // 4? 8B 4E ??               mov rcx, [rsi+d8]
         // E8 ?? ?? ?? ??            call <second step>
-        // 48 8B 86 ?? ?? 00 00      mov rax, [rsi+disp32]
+        // 4? 8B 86 ?? ?? 00 00      mov rax, [rsi+disp32]
         // FF 00                     inc dword [rax]
-        // 48 8B 5E 60               mov rbx, [rsi+0x60]
+        // 4? 8B 5E 60               mov rbx, [rsi+0x60]
         Candidate::direct(
-            "FrameUpdate_P3_UpdateStepBody",
+            "FrameUpdate_P4_UpdateStepBody",
             Pattern::literal(
-                "48 8B 49 60 48 8B 89 ?? ?? 00 00 E8 ?? ?? ?? ?? BA 04 00 00 00 48 8B 4E ?? E8 ?? ?? ?? ?? "
-                "48 8B 86 ?? ?? 00 00 FF 00 48 8B 5E 60"
+                "4? 8B 49 60 4? 8B 89 ?? ?? 00 00 E8 ?? ?? ?? ?? BA 04 00 00 00 4? 8B 4E ?? E8 ?? ?? ?? ?? "
+                "4? 8B 86 ?? ?? 00 00 FF 00 4? 8B 5E 60"
             ),
             -0x52
         ),
     };
+
+    /**
+     * @brief The frame-time HUD format string the update step formats its timings with.
+     * @details The image holds exactly one copy of the literal and exactly one instruction references it, and that
+     *          instruction sits inside the update step, so a StringXref anchor with XrefReturn::EnclosingFunction
+     *          resolves the step's entry from the literal alone, with no byte pattern involved. It is the independent
+     *          witness resolve_all_anchors() holds the FrameUpdate ladder against: a hook that runs engine calls must
+     *          not arm on a coincidental byte match.
+     */
+    inline constexpr std::string_view FRAME_UPDATE_HUD_FORMAT = "%5.2f<br/>%5.2f ms<br/>%5.2f ms<br/>%5.2f / %5.2f GB";
 
     /**
      * @brief StructCopy - 0x40-byte struct-copy hotpath.
@@ -2617,6 +2655,8 @@ namespace Transmog
         HelmAudioRegistrar,
         /// Per-frame update step of the main loop, the game-thread mailbox hook site (code).
         FrameUpdate,
+        /// Enclosing function of the frame-time HUD format literal, the string-xref witness for FrameUpdate (code).
+        FrameUpdateXref,
         /// Vtable of HOST_SCOPE_VFUNC1_BIND_TYPE, the RTTI witness for HostScopeVfunc1 (data, .rdata).
         HostScopeVfunc1Vtable,
         /// Vtable of HOST_SCOPE_VFUNC2_BIND_TYPE, the RTTI witness for HostScopeVfunc2 (data, .rdata).
