@@ -636,11 +636,43 @@ namespace EquipHide
         {
             const auto postfix_eval_addr = anchor_address(AnchorId::PostfixEval);
 
-            // The row's own walk-back already reaches the byte after the rule-eval call, so the resolved value IS the
-            // return address an NPC stack frame carries. Do NOT add a fixup here. The offset belongs in the
+            // The row's own result marker already sits on the byte after the rule-eval call, so the resolved value IS
+            // the return address an NPC stack frame carries. Do NOT add a fixup here. The offset belongs in the
             // candidate row, and a second application yields an address no call ever pushes, which makes
             // is_npc_call_stack() reject every call while the install still logs "bald fix active".
-            addrs.npc_pfe_return_addr = anchor_address(AnchorId::NpcPfeReturnAddr);
+            //
+            // Two independent routes reach the landmark: the image-wide byte row, and the caller named by its own
+            // profiling label through the NpcPfeCaller string xref, with the landmark cut out of that one function.
+            // Both routes resolving the same byte is the corroboration. A disagreement means one route matched a
+            // look-alike, and the label-derived value wins because the string names the function outright. A miss on
+            // the image-wide row alone is self-healed from the label.
+            const auto landmark_by_bytes = anchor_address(AnchorId::NpcPfeReturnAddr);
+            const auto landmark_by_label = derive_npc_pfe_return_addr();
+            if (landmark_by_bytes && landmark_by_label && landmark_by_bytes != landmark_by_label)
+            {
+                logger.warning(
+                    "NpcPfeReturnAddr disagreement: byte row {:#x}, label-derived {:#x}. Using the label-derived "
+                    "landmark. Re-derive the byte row for this build",
+                    landmark_by_bytes,
+                    landmark_by_label
+                );
+            }
+            else if (landmark_by_bytes && landmark_by_label)
+            {
+                logger.info(
+                    "NpcPfeReturnAddr corroborated by the byte row and the caller label at {:#x}",
+                    landmark_by_bytes
+                );
+            }
+            else if (!landmark_by_bytes && landmark_by_label)
+            {
+                logger.warning(
+                    "NpcPfeReturnAddr byte row missed. Self-healed from the createPrefabFromPartPrefab label at {:#x}. "
+                    "Re-derive the byte row for this build",
+                    landmark_by_label
+                );
+            }
+            addrs.npc_pfe_return_addr = landmark_by_label ? landmark_by_label : landmark_by_bytes;
 
             if (postfix_eval_addr && addrs.npc_pfe_return_addr)
             {

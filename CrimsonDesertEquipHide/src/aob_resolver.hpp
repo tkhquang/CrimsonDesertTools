@@ -10,7 +10,8 @@
  * resolve_all_anchors() resolves the whole table in one parallel pass at startup. anchor_address() then hands each
  * resolved address, or 0 on a ladder miss, to the call sites.
  *
- * A mid-body hook site is a Direct row whose walk-back lands on the exact instruction the hook must mid-hook.
+ * A mid-body hook site is a Direct row whose `|` result marker sits on the exact instruction the hook must mid-hook,
+ * so the hook offset is part of the matched bytes instead of a count kept by hand next to them.
  *
  * Naming convention (unified across both mods):
  *   <RoleName>_P<N>_<AnchorDescriptor>
@@ -23,6 +24,7 @@
 
 #include <cstdint>
 #include <span>
+#include <string_view>
 
 namespace EquipHide
 {
@@ -41,10 +43,12 @@ namespace EquipHide
 
         // Branch-encoding caveat (aob-signatures.md section 9, the short Jcc rel8 rule): P2 keeps the EB opcode of the
         // trailing 2-byte jmp-over-fallback that follows the vtable store, and wildcards only its rel8 operand. A row
-        // that wildcards the EB opcode too loses uniqueness, and the scan reports several matches. If a future
-        // compiler flips this jmp to the 6-byte E9 rel32 form, P2 stops matching: P1 and P3 pick up the slack. P1 is
-        // truncated, so it does not cross the jmp and stays encoding-independent. P3 wildcards the preceding `74 ??`
-        // jz pair as `?? ??`, so it declares only a 2-byte slot, not the rel8 opcode literal.
+        // that wildcards the EB opcode too loses uniqueness, and so does one that widens the slot into a `[2-5]`
+        // bounded gap: a second constructor shares the whole lead-in through the store, so the literal jmp width is
+        // part of P2's selectivity. If a future compiler flips this jmp to the 5-byte E9 rel32 form, P2 stops
+        // matching: the RTTI tier, P1 and P3 pick up the slack. P1 is truncated, so it does not cross the jmp and
+        // stays encoding-independent. P3 carries its preceding jz in a `[2-6]` bounded gap, so it admits the rel8 and
+        // the rel32 form alike.
 
         // Primary - resolve the vtable by its RTTI mangled name. The AllocCtor stores ClientChildOnlyInGameActor's
         // primary vtable into the new object, so the RTTI backend yields the exact pointer the byte tiers below
@@ -87,14 +91,15 @@ namespace EquipHide
             7
         ),
 
-        // P3 - the row wildcards the rel8 jz at offset +6 to `?? ??` (both bytes). It does not hardcode the opcode
-        // literal, and it still only matches the 2-byte form (it fails on `0F 84 rel32`). The trailing `?? ?? ?? ??`
-        // is the lea's own disp32: the RipRelative tier decode-verifies the instruction at the marker, so the
-        // matched suffix has to span the displacement it authorizes.
+        // P3 - the jz ahead of the ctor call sits in a `[2-6]` bounded gap, so the row matches the 2-byte `74 rel8`
+        // and the 6-byte `0F 84 rel32` form alike. The resolver adds the actual gap width at match time, so the `|`
+        // marker still lands on the lea. The trailing `?? ?? ?? ??` is the lea's own disp32: the RipRelative tier
+        // decode-verifies the instruction at the marker, so the matched suffix has to span the displacement it
+        // authorizes.
         //
         // 45 31 ED               xor r13d, r13d
         // 48 85 F6               test rsi, rsi
-        // ?? ??                  je <rel8>
+        // [2-6]                  je <rel8 or rel32>
         // 48 8B 55 ??            mov rdx, [rbp+d8]
         // 48 89 F1               mov rcx, rsi
         // E8 ?? ?? ?? ??         call <rel32>
@@ -102,7 +107,7 @@ namespace EquipHide
         // 48 8D 05 ?? ?? ?? ??   lea rax, [rip+d32]   <- result offset
         Candidate::rip_relative(
             "ChildActorVtbl_P3_WiderCtorStore",
-            Pattern::literal("45 31 ED 48 85 F6 ?? ?? 48 8B 55 ?? 48 89 F1 E8 ?? ?? ?? ?? 90 | 48 8D 05 ?? ?? ?? ??"),
+            Pattern::literal("45 31 ED 48 85 F6 [2-6] 48 8B 55 ?? 48 89 F1 E8 ?? ?? ?? ?? 90 | 48 8D 05 ?? ?? ?? ??"),
             3,
             7
         ),
@@ -223,26 +228,29 @@ namespace EquipHide
         // P1 - the whole entry block: the single rbx spill, the visibility read, the context move, the sentinel
         // compare, its branch, and the exclusion-array header. No frame arithmetic sits inside the window because this
         // function allocates no frame, so nothing here moves when the compiler resizes a caller. The row wildcards
-        // the branch displacement and the visibility field offset. The exclusion offsets are engine layout and stay
-        // literal. The hook lands on the movzx at match + 5.
+        // the visibility field offset and carries the sentinel branch in a `[2-6]` bounded gap, so the 2-byte
+        // `74 rel8` and the 6-byte `0F 84 rel32` encodings both match. The exclusion offsets are engine layout and
+        // stay literal. The `|` marker puts the result on the movzx, so the hook offset is part of the matched bytes
+        // instead of a walk counted next to them.
         //
         // 48 89 5C 24 08         mov [rsp+0x8], rbx
-        // 45 0F B6 58 ??         movzx r11d, byte [r8+d8]
+        // 45 0F B6 58 ??         movzx r11d, byte [r8+d8]   <- result marker
         // 48 8B D9               mov rbx, rcx
         // 41 80 FB 03            cmp r11b, 0x3
-        // 0F 84 ?? ?? ?? ??      je <rel32>
+        // [2-6]                  je <rel8 or rel32>
         // 48 8B 41 78            mov rax, [rcx+0x78]
         // 44 8B 91 80 00 00 00   mov r10d, [rcx+0x80]
         Candidate::direct(
             "EquipVisCheck_P1_EntrySpillToExclusionHeader",
             Pattern::literal(
-                "48 89 5C 24 08 45 0F B6 58 ?? 48 8B D9 41 80 FB 03 0F 84 ?? ?? ?? ?? 48 8B 41 78 44 8B 91 80 00 00 00"
-            ),
-            5
+                "48 89 5C 24 08 | 45 0F B6 58 ?? 48 8B D9 41 80 FB 03 [2-6] 48 8B 41 78 44 8B 91 80 00 00 00"
+            )
         ),
 
         // P2 - the same window without the prologue spill, so a change to the register the entry saves (or a move to
-        // a push) cannot take this row down with P1. The match lands directly on the movzx, walk-back 0.
+        // a push) cannot take this row down with P1. The match lands directly on the movzx, walk-back 0. It pins the
+        // 6-byte `0F 84 rel32` branch on purpose: P1 and P3 admit either width through their gaps, and one row with
+        // the literal width keeps the three rows from sharing a single failure mode.
         //
         // 45 0F B6 58 ??         movzx r11d, byte [r8+d8]
         // 48 8B D9               mov rbx, rcx
@@ -258,24 +266,33 @@ namespace EquipHide
             )
         ),
 
-        // P3 - the exclusion walk alone: array base at a1+0x78, count at a1+0x80, the 0x10-byte stride shift, the
-        // empty-list test, and the first key compare through the hash pointer. It shares no pattern byte with P1 or
-        // P2, so a rewrite of the entry block leaves it standing. It is not independent of that block, though. The
-        // -0x12 walk-back spans the sentinel compare and its rel32 branch, so a wider or narrower branch resolves the
-        // row SHORT. Re-measure whenever the entry block changes. Order it last.
+        // P3 - the visibility read through the exclusion walk: array base at a1+0x78, count at a1+0x80, the
+        // 0x10-byte stride shift, the end-pointer form, the empty-list test, and the first key compare through the
+        // hash pointer. Both branches sit in `[2-6]` bounded gaps, so neither a widened sentinel branch nor a widened
+        // empty-list branch takes the row down, and the match lands on the movzx itself: no negative walk-back spans a
+        // variable-width instruction. The head is kept on purpose. The mid-hook reads R8 as the PartInOut pointer
+        // and RCX as the context at this instruction, so a row that matched the walk without the head could resolve
+        // a re-registered body whose register contract no longer holds. A rewrite of the head is a re-derivation of
+        // the hook, and it must fail loudly here. Order it last.
         //
+        // 45 0F B6 58 ??         movzx r11d, byte [r8+d8]
+        // 48 8B D9               mov rbx, rcx
+        // 41 80 FB 03            cmp r11b, 0x3
+        // [2-6]                  je <rel8 or rel32>
         // 48 8B 41 78            mov rax, [rcx+0x78]
         // 44 8B 91 80 00 00 00   mov r10d, [rcx+0x80]
         // 49 C1 E2 04            shl r10, 0x4
         // 4C 03 D0               add r10, rax
         // 49 3B C2               cmp rax, r10
-        // 74 ??                  je <rel8>
+        // [2-6]                  je <rel8 or rel32>
         // 8B 0A                  mov ecx, [rdx]
         // 39 08                  cmp [rax], ecx
         Candidate::direct(
-            "EquipVisCheck_P3_ExclusionWalk",
-            Pattern::literal("48 8B 41 78 44 8B 91 80 00 00 00 49 C1 E2 04 4C 03 D0 49 3B C2 74 ?? 8B 0A 39 08"),
-            -0x12
+            "EquipVisCheck_P3_VisReadThroughExclusionWalk",
+            Pattern::literal(
+                "45 0F B6 58 ?? 48 8B D9 41 80 FB 03 [2-6] 48 8B 41 78 44 8B 91 80 00 00 00 49 C1 E2 04 4C 03 D0 "
+                "49 3B C2 [2-6] 8B 0A 39 08"
+            )
         ),
     };
 
@@ -366,20 +383,20 @@ namespace EquipHide
      *          compiler schedules local cleanup between it and the epilogue, so a "call followed by the frame reload"
      *          row picks up a destructor's return address instead. That resolves cleanly and silently makes the bald
      *          fix reject every NPC. Identify it by its ARGUMENT SETUP instead.
-     * @note A 1-row ladder resolving the return address.
+     * @note A 1-row image-wide ladder resolving the return address. A second route, independent of it, is the
+     *       NpcPfeCaller string-xref anchor plus @ref NPC_PFE_LANDMARK_LOCAL_CANDIDATES; equip_hide.cpp resolves both
+     *       and logs whether they agree.
      */
     inline const Candidate NPC_PFE_RETURN_ADDR_CANDIDATES[] = {
 
-        // P1 - the rule-eval call's argument setup, then the call itself. The landmark is the byte after the call, at
-        // match+0x1E. The setup loads the world singleton from a module global, walks it to a large sub-object
+        // P1 - the rule-eval call's argument setup, then the call itself. The `|` marker sits on the byte after the
+        // call, which IS the return address, so the landmark offset is part of the matched bytes and cannot go stale
+        // on its own. The setup loads the world singleton from a module global, walks it to a large sub-object
         // displacement (in the +0x40000 family that LiveTransmog's LoaderRegistry ladder also walks), and passes an
         // outbound `lea r8,[rbp-X]` result slot. The row wildcards the global's RIP displacement, the sub-object
         // displacement and the outbound frame slot. It keeps the trailing `mov eax,0x1FD` literal because that
-        // profiling-scope id, which the engine emits right after the call, is what makes the window unique.
-        //
-        // Longer term this target wants a StringXref tier on the function's own profiling label,
-        // "createPrefabFromPartPrefab", with XrefReturn::EnclosingFunction. That literal is what actually names this
-        // function, and it survives the code motion that keeps invalidating byte rows here.
+        // profiling-scope id, which the engine emits right after the call, is what makes the window unique
+        // image-wide.
         //
         // 48 83 C2 40            add rdx, 0x40
         // 48 8B 05 ?? ?? ?? ??   mov rax, [rip+d32]
@@ -387,15 +404,54 @@ namespace EquipHide
         // 4C 8D 45 ??            lea r8, [rbp-d8]
         // 48 8B 89 ?? ?? ?? ??   mov rcx, [rcx+d32]
         // E8 ?? ?? ?? ??         call <rel32>
-        // B8 FD 01 00 00         mov eax, 0x1FD
+        // B8 FD 01 00 00         mov eax, 0x1FD   <- result marker, the return address
         Candidate::direct(
             "NpcPfeReturnAddr_P1_RuleEvalCallLandmark",
             Pattern::literal(
-                "48 83 C2 40 48 8B 05 ?? ?? ?? ?? 48 8B 08 4C 8D 45 ?? 48 8B 89 ?? ?? ?? ?? E8 ?? ?? ?? ?? "
+                "48 83 C2 40 48 8B 05 ?? ?? ?? ?? 48 8B 08 4C 8D 45 ?? 48 8B 89 ?? ?? ?? ?? E8 ?? ?? ?? ?? | "
                 "B8 FD 01 00 00"
-            ),
-            0x1E
+            )
         ),
+    };
+
+    /**
+     * @brief The profiling label the prefab-instantiation routine registers for itself.
+     * @details The literal names the function that carries the NpcPfeReturnAddr landmark. The image holds exactly one
+     *          copy of it and exactly one instruction references that copy, so a StringXref anchor with
+     *          XrefReturn::EnclosingFunction resolves the function entry from the label alone, with no byte pattern
+     *          involved. That identity survives the code motion inside the function that a byte row is sensitive to.
+     */
+    inline constexpr std::string_view NPC_PFE_CALLER_LABEL = "createPrefabFromPartPrefab";
+
+    /**
+     * @brief Function-scoped rows that cut the rule-eval return address out of the caller named by
+     *        @ref NPC_PFE_CALLER_LABEL.
+     * @details Neither row is unique image-wide, so neither may join NPC_PFE_RETURN_ADDR_CANDIDATES. They resolve only
+     *          inside the bounds of the enclosing function (derive_npc_pfe_return_addr scopes the scan to the
+     *          function's exception-table extent), where each matches once. Inside that scope the profiling id is not
+     *          needed for uniqueness, so L1 identifies the call by its argument setup alone and L2 by the id alone: a
+     *          renumbered profiling enum takes down L2 and P1 together, a re-registered argument setup takes down L1
+     *          and P1 together, and no single change takes down all three.
+     * @note Every row places the `|` marker on the byte after the call, the return address itself.
+     */
+    inline const Candidate NPC_PFE_LANDMARK_LOCAL_CANDIDATES[] = {
+
+        // L1 - the argument setup through the call: context load, outbound result slot, sub-object walk, call.
+        //
+        // 48 8B 08               mov rcx, [rax]
+        // 4C 8D 45 ??            lea r8, [rbp-d8]
+        // 48 8B 89 ?? ?? ?? ??   mov rcx, [rcx+d32]
+        // E8 ?? ?? ?? ??         call <rel32>
+        Candidate::direct(
+            "NpcPfeLandmark_L1_ArgSetupThroughCall",
+            Pattern::literal("48 8B 08 4C 8D 45 ?? 48 8B 89 ?? ?? ?? ?? E8 ?? ?? ?? ?? |")
+        ),
+
+        // L2 - the call followed by the profiling-scope id load.
+        //
+        // E8 ?? ?? ?? ??         call <rel32>
+        // B8 FD 01 00 00         mov eax, 0x1FD
+        Candidate::direct("NpcPfeLandmark_L2_CallThenScopeId", Pattern::literal("E8 ?? ?? ?? ?? | B8 FD 01 00 00")),
     };
 
     /**
@@ -422,6 +478,8 @@ namespace EquipHide
         PostfixEval,
         /// Return-address landmark inside createPrefabFromPartPrefab (code).
         NpcPfeReturnAddr,
+        /// Entry of createPrefabFromPartPrefab, named by its own profiling label through a string xref (code).
+        NpcPfeCaller,
         /// VisualEquipChange function entry (code).
         VisualEquipChange,
         /// BatchEquip function entry, which this mod calls VisualEquipSwap (code).
@@ -445,6 +503,15 @@ namespace EquipHide
      * @note Callback-safe after resolve_all_anchors() returns: a plain read of write-once storage.
      */
     [[nodiscard]] std::uintptr_t anchor_address(AnchorId id) noexcept;
+
+    /**
+     * @brief The NpcPfeReturnAddr landmark derived from the NpcPfeCaller anchor, or 0.
+     * @details Takes the function entry the string-xref anchor resolved, bounds it through the image's exception table,
+     *          and resolves @ref NPC_PFE_LANDMARK_LOCAL_CANDIDATES inside that one function only. Independent of the
+     *          image-wide byte row: the two agree on a healthy build, and the caller logs a disagreement.
+     * @note Setup/control-plane only: one bounded byte scan. Call it after resolve_all_anchors().
+     */
+    [[nodiscard]] std::uintptr_t derive_npc_pfe_return_addr() noexcept;
 
     /**
      * @brief The per-anchor drift report, for the startup quality summary and the diagnostics snapshot.

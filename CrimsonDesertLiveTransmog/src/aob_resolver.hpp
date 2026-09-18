@@ -4,9 +4,11 @@
 // LiveTransmog-local AOB candidate ladders plus the declarative anchor registry for the mod.
 //
 // The roles both mods share live in cdcore/anchors.hpp. Only the LiveTransmog-only roles are declared here. Every
-// table, shared or local, enters the registry below as the `site` of an AnchorKind::RipGlobal entry, and
-// resolve_all_anchors() resolves the whole table in one parallel pass at startup. anchor_address() then hands each
-// resolved address, or 0 on a ladder miss, to the call sites.
+// table, shared or local, enters the registry below as the `site` of an AnchorKind::RipGlobal entry, and the three
+// RTTI witnesses (a class vtable whose slot holds a hooked function) enter it as the `mangled` name of an
+// AnchorKind::VtableIdentity entry. resolve_all_anchors() resolves the whole table in one parallel pass at startup,
+// then corroborates each witnessed ladder against its vtable slot. anchor_address() then hands each resolved
+// address, or 0 on a miss, to the call sites.
 //
 // Naming convention (unified across both mods):
 //   <RoleName>_P<N>_<AnchorDescriptor>
@@ -536,20 +538,22 @@ namespace Transmog
         // P1 - caller that loads a `+0x828` field and null-checks it before the registry load. That field read is
         // the caller-specific part and carries the whole uniqueness budget. The bucket-probe tail after the load
         // (`cmp dword [reg+0x6C],0` / `mov r8d,[reg+0x68]` / `mov ecx,[rcx+0x18]`) confirms it is a registry access
-        // and not an unrelated global.
+        // and not an unrelated global. Both short branches sit in `[2-6]` bounded gaps, so a rel8-to-rel32 widening
+        // of either keeps the row alive; the resolver adds the first gap's width before it applies the `|` marker,
+        // so the marker still lands on the load.
 
         // 48 8B BA 28 08 00 00   mov rdi, [rdx+0x828]
         // 48 85 FF               test rdi, rdi
-        // 74 ??                  je <rel8>
+        // [2-6]                  je <rel8 or rel32>
         // 4C 8B 15 ?? ?? ?? ??   mov r10, [rip+d32]   <- result offset
         // 41 83 7A 6C 00         cmp dword [r10+0x6C], 0x0
-        // 74 ??                  je <rel8>
+        // [2-6]                  je <rel8 or rel32>
         // 45 8B 42 68            mov r8d, [r10+0x68]
         // 8B 49 18               mov ecx, [rcx+0x18]
         Candidate::rip_relative(
             "StringInfoRegistry_P1_Field828GuardedLoad",
             Pattern::literal(
-                "48 8B BA 28 08 00 00 48 85 FF 74 ?? | 4C 8B 15 ?? ?? ?? ?? 41 83 7A 6C 00 74 ?? 45 8B 42 68 8B 49 18"
+                "48 8B BA 28 08 00 00 48 85 FF [2-6] | 4C 8B 15 ?? ?? ?? ?? 41 83 7A 6C 00 [2-6] 45 8B 42 68 8B 49 18"
             ),
             3,
             7
@@ -579,23 +583,23 @@ namespace Transmog
 
         // P3 - a third call site, in a caller neither P1 nor P2 touches, so a rewrite of one caller cannot take the
         // whole cascade down. Shape: read a count through rdi, branch out when it is zero, then load the registry and
-        // run the same bucket probe. The row wildcards the branch distance and stops before the probe's own
-        // conditional jumps.
+        // run the same bucket probe. Both branches sit in `[2-6]` bounded gaps: the count branch is the 6-byte rel32
+        // form today and the probe branch the 2-byte rel8 form, and either may flip on a recompile without taking
+        // the row down. The row stops before the probe's remaining conditional jumps.
 
         // 8B 7F 0C               mov edi, [rdi+0xC]
         // 45 85 FF               test r15d, r15d
-        // 0F 84 ?? ?? ?? ??      je <rel32>
+        // [2-6]                  je <rel32 or rel8>
         // 4C 8B 1D ?? ?? ?? ??   mov r11, [rip+d32]   <- result offset
         // 45 8B 63 6C            mov r12d, [r11+0x6C]
         // 45 85 E4               test r12d, r12d
-        // 74 ??                  je <rel8>
+        // [2-6]                  je <rel8 or rel32>
         // 45 8B 4B 68            mov r9d, [r11+0x68]
         // 45 85 C9               test r9d, r9d
         Candidate::rip_relative(
             "StringInfoRegistry_P3_CountGuardedLoad",
             Pattern::literal(
-                "8B 7F 0C 45 85 FF 0F 84 ?? ?? ?? ?? | 4C 8B 1D ?? ?? ?? ?? 45 8B 63 6C 45 85 E4 74 ?? 45 8B 4B 68 "
-                "45 85 C9"
+                "8B 7F 0C 45 85 FF [2-6] | 4C 8B 1D ?? ?? ?? ?? 45 8B 63 6C 45 85 E4 [2-6] 45 8B 4B 68 45 85 C9"
             ),
             3,
             7
@@ -1461,8 +1465,8 @@ namespace Transmog
         // P1 - true prologue through the capacity check and the grow call. Shape: spill rbx, push rdi, take the 0x20
         // frame, capture both arguments, then read the live count from `[rcx+0x08]` and the capacity from
         // `[rbx+0x0C]` and skip the grow while the capacity still has room. The grow size is the engine's 1.5x rule,
-        // `(3 * capacity + 1) >> 1`, clamped below via `cmovb` and above via `cmova`. The row wildcards the `77 ??`
-        // rel8, because the compiler owns the jump distance. One match module-wide.
+        // `(3 * capacity + 1) >> 1`, clamped below via `cmovb` and above via `cmova`. The `ja` sits in a `[2-6]`
+        // bounded gap, because the compiler owns both the jump distance and the jump width. One match module-wide.
         //
         // Anchoring at the entry is deliberate: it gives the cascade one row that does not depend on the grow-size
         // arithmetic at all, which is the part a compiler is most free to re-associate.
@@ -1475,7 +1479,7 @@ namespace Transmog
         // 8B 49 08               mov ecx, [rcx+0x8]
         // 8B 43 0C               mov eax, [rbx+0xC]
         // 3B C1                  cmp eax, ecx
-        // 77 ??                  ja <rel8>
+        // [2-6]                  ja <rel8 or rel32>
         // 8D 14 45 01 00 00 00   lea edx, [rax*2+0x1]
         // 03 D0                  add edx, eax
         // B8 01 00 00 00         mov eax, 0x1
@@ -1494,7 +1498,7 @@ namespace Transmog
         Candidate::direct(
             "DyeCopy_P1_PrologueToGrowCheck",
             Pattern::literal(
-                "48 89 5C 24 08 57 48 83 EC 20 48 8B D9 48 8B FA 8B 49 08 8B 43 0C 3B C1 77 ?? 8D 14 45 01 00 00 00 "
+                "48 89 5C 24 08 57 48 83 EC 20 48 8B D9 48 8B FA 8B 49 08 8B 43 0C 3B C1 [2-6] 8D 14 45 01 00 00 00 "
                 "03 D0 B8 01 00 00 00 D1 EA 3B D0 0F 42 D0 3B CA 0F 47 D1 48 8B CB E8 ?? ?? ?? ?? 8B 53 08 8B 07 "
                 "48 C1 E2 04 48 03 13 89 02"
             )
@@ -1659,14 +1663,16 @@ namespace Transmog
      * @warning That leaves the preceding function as the only discriminator, so the row below crosses inter-function
      *          padding, normally forbidden, and the reason this cascade is one row rather than three. The padding
      *          bytes stay LITERAL for exactly that reason. If the linker rebalances them the row fails to match and
-     *          the feature disables itself, which is the correct outcome. It must never silently resolve to a
-     *          neighboring function. The durable replacement is an RttiVtable tier plus a slot index, which needs a
-     *          resolver change, not another byte row.
+     *          the RTTI witness takes over: HOST_SCOPE_VFUNC1_BIND_TYPE names a class whose vtable holds this thunk
+     *          at HOST_SCOPE_VFUNC1_SLOT, the registry resolves that vtable by mangled name, and
+     *          resolve_all_anchors() corroborates the row against the slot and adopts the slot when the row misses.
+     *          The row must never silently resolve to a neighboring function.
      */
     inline const Candidate HOST_SCOPE_VFUNC1_CANDIDATES[] = {
         // P1 - preceding-function tail (a two-arm indirect-dispatch epilogue ending in `jmp rax`), then six bytes of
-        // `CC` alignment, then the thunk prologue through its `xor r14d,r14d ; mov rdi,r9` head. Walk forward +0x1A
-        // (20 bytes of tail + 6 of padding) to the thunk entry.
+        // `CC` alignment, then the thunk prologue through its `xor r14d,r14d ; mov rdi,r9` head. The `|` marker sits
+        // on the thunk entry, after the 20 bytes of tail and the 6 of padding, so the entry offset is part of the
+        // matched bytes instead of a walk counted next to them.
 
         // 48 8B 41 78      mov rax, [rcx+0x78]
         // 49 8B C8         mov rcx, r8
@@ -1680,7 +1686,7 @@ namespace Transmog
         // CC               int 3
         // CC               int 3
         // CC               int 3
-        // 48 89 5C 24 08   mov [rsp+0x8], rbx
+        // 48 89 5C 24 08   mov [rsp+0x8], rbx   <- result marker, the thunk entry
         // 48 89 6C 24 10   mov [rsp+0x10], rbp
         // 56               push rsi
         // 57               push rdi
@@ -1691,12 +1697,25 @@ namespace Transmog
         Candidate::direct(
             "HostScopeVfunc1_P1_PrevTailPadStart",
             Pattern::literal(
-                "48 8B 41 78 49 8B C8 48 FF E0 48 63 49 68 49 03 C8 48 FF E0 CC CC CC CC CC CC 48 89 5C 24 08 "
+                "48 8B 41 78 49 8B C8 48 FF E0 48 63 49 68 49 03 C8 48 FF E0 CC CC CC CC CC CC | 48 89 5C 24 08 "
                 "48 89 6C 24 10 56 57 41 56 48 83 EC 30 45 33 F6 49 8B F9"
-            ),
-            0x1a
+            )
         ),
     };
+
+    /**
+     * @brief RTTI witness for HostScopeVfunc1: a class whose vtable holds the thunk, and the slot that holds it.
+     * @details The thunk is the identical-COMDAT-folded body every `VectorReflectPropertyBind<T, ReflectObject*, 1>`
+     *          instantiation shares, so any of those classes names it. The witness class is a gameplay component the
+     *          engine cannot drop without a redesign. A slot index moves only when a virtual is added or removed
+     *          ahead of it in that template's interface, a rarer event than a prologue reshape, so the slot
+     *          corroborates the byte row and stands in for it when the row misses. The hook at this entry reads only
+     *          RCX, which is `this` for every virtual of the class, so a drifted slot index degrades the host-scope
+     *          election instead of crashing.
+     */
+    inline constexpr std::string_view HOST_SCOPE_VFUNC1_BIND_TYPE =
+        ".?AV?$VectorReflectPropertyBind@VDamageComponent@pa@@PEAVReflectObject@2@$00@pa@@";
+    inline constexpr std::size_t HOST_SCOPE_VFUNC1_SLOT = 66;
 
     /**
      * @brief host_scope OwnerVfunc2 - sibling per-host owner-container vtable slot. Same role as Vfunc1 (capture rcx
@@ -1780,6 +1799,15 @@ namespace Transmog
     };
 
     /**
+     * @brief RTTI witness for HostScopeVfunc2, see @ref HOST_SCOPE_VFUNC1_BIND_TYPE for the reasoning.
+     * @details The `$01` instantiation family holds this sibling vfunc; the scene-object bind is its most durable
+     *          member.
+     */
+    inline constexpr std::string_view HOST_SCOPE_VFUNC2_BIND_TYPE =
+        ".?AV?$VectorReflectPropertyBind@VSceneObject@pa@@PEAVReflectObject@2@$01@pa@@";
+    inline constexpr std::size_t HOST_SCOPE_VFUNC2_SLOT = 35;
+
+    /**
      * @brief PropertyByteSetter - 4-byte property descriptor's BYTE-variant write path. Mid-hooked by
      *        color_override::setter_substitute so the engine's per-property color writes can be redirected
      *        to user-chosen RGB values.
@@ -1799,53 +1827,54 @@ namespace Transmog
         // against `[rcx+0xC8]`), so both gates have to be inside every window.
         //
         // The entry block is volatile across builds. A patch can invert the first test polarity (`74` je against `75`
-        // jne) or insert another gate, which breaks any row that pins the old shape. P1 and P2 are therefore a
-        // specific-then-general pair over the same window, and P3 drops the first gate entirely so a rewrite of the
-        // callback-present test cannot take all three down.
+        // jne), widen a branch, or insert another gate, which breaks any row that pins the old shape. P1 and P2 are
+        // therefore a specific-then-general pair over the same window, and P3 loosens the first gate to its load
+        // alone so a rewrite of the callback-present test cannot take all three down.
 
-        // Why every row below spans a wildcarded rel8 branch, against the usual rule.
+        // Why every row below spans a branch, against the usual rule, and why each branch is a bounded gap.
         //
         // This function and its near-clone differ in exactly TWO bytes across their entire bodies: the callback field
         // (`[rcx+0x78]` against `[rcx+0x98]`) at offset 0, and the second gate (`[rcx+0xC8]` against `[rcx+0xD8]`) at
         // offset 9. A short conditional jump sits between them, so no branch-free window can contain both, and
-        // without both the row matches the clone too. There is no branch-free discriminator to prefer here.
+        // without both the row matches the clone too. There is no branch-free discriminator to prefer here. Every
+        // branch therefore sits in a `[2-6]` bounded gap: the 2-byte rel8 form and the 6-byte `0F 8x rel32` form
+        // both match, and a polarity flip (je against jne) matches too, because the gap carries no opcode. The
+        // discriminating loads on both sides of each gap keep the selectivity.
         //
         // The family is larger than the one near-clone: five groups of two clones share this body. Only this group
         // compares the property bytes ONE AT A TIME (`movzx eax,byte [r8+n]` / `cmp [r9+n],al` for n = 0..3). The
         // other four use wider loads. That byte-by-byte chain is therefore mandatory in every row - the entry gates
         // alone match four functions.
         //
-        // Entry layout, with the deltas that produce the walk-backs:
-        //     +0x00  48 8B 41 78 48 85 C0 75 ??        callback present?
-        //     +0x09  48 39 81 C8 00 00 00 74 ??        <- P3 anchors here, so -9
-        //     +0x12  45 33 C9 4C 8D 52 F8 48 85 D2 48 63 51 70 4D 0F 44 D1 83 FA FF 74 ??
-        //     +0x29  41 0F B6 00 4D 8D 0C 12 41 38 01  first byte compare
+        // Every row starts at the entry, so no walk-back spans a variable-width branch. This function has no unwind
+        // data (a leaf that touches no stack), so the exception-table check the other entry anchors get cannot catch
+        // a stale walk-back here, which is one more reason the rows carry none.
 
         // P1 - entry gates through the SECOND byte compare. Most specific row.
 
         // 48 8B 41 78            mov rax, [rcx+0x78]
         // 48 85 C0               test rax, rax
-        // 75 ??                  jne <rel8>
+        // [2-6]                  jne <rel8 or rel32>
         // 48 39 81 C8 00 00 00   cmp [rcx+0xC8], rax
-        // 74 ??                  je <rel8>
+        // [2-6]                  je <rel8 or rel32>
         // 45 33 C9               xor r9d, r9d
         // 4C 8D 52 F8            lea r10, [rdx-0x8]
         // 48 85 D2               test rdx, rdx
         // 48 63 51 70            movsxd rdx, dword [rcx+0x70]
         // 4D 0F 44 D1            cmove r10, r9
         // 83 FA FF               cmp edx, -0x1
-        // 74 ??                  je <rel8>
+        // [2-6]                  je <rel8 or rel32>
         // 41 0F B6 00            movzx eax, byte [r8]
         // 4D 8D 0C 12            lea r9, [r10+rdx]
         // 41 38 01               cmp [r9], al
-        // 75 ??                  jne <rel8>
+        // [2-6]                  jne <rel8 or rel32>
         // 41 0F B6 40 01         movzx eax, byte [r8+0x1]
         // 41 38 41 01            cmp [r9+0x1], al
         Candidate::direct(
             "SetterByte_P1_FullPrologue",
             Pattern::literal(
-                "48 8B 41 78 48 85 C0 75 ?? 48 39 81 C8 00 00 00 74 ?? 45 33 C9 4C 8D 52 F8 48 85 D2 48 63 51 70 "
-                "4D 0F 44 D1 83 FA FF 74 ?? 41 0F B6 00 4D 8D 0C 12 41 38 01 75 ?? 41 0F B6 40 01 41 38 41 01"
+                "48 8B 41 78 48 85 C0 [2-6] 48 39 81 C8 00 00 00 [2-6] 45 33 C9 4C 8D 52 F8 48 85 D2 48 63 51 70 "
+                "4D 0F 44 D1 83 FA FF [2-6] 41 0F B6 00 4D 8D 0C 12 41 38 01 [2-6] 41 0F B6 40 01 41 38 41 01"
             )
         ),
 
@@ -1853,51 +1882,66 @@ namespace Transmog
 
         // 48 8B 41 78            mov rax, [rcx+0x78]
         // 48 85 C0               test rax, rax
-        // 75 ??                  jne <rel8>
+        // [2-6]                  jne <rel8 or rel32>
         // 48 39 81 C8 00 00 00   cmp [rcx+0xC8], rax
-        // 74 ??                  je <rel8>
+        // [2-6]                  je <rel8 or rel32>
         // 45 33 C9               xor r9d, r9d
         // 4C 8D 52 F8            lea r10, [rdx-0x8]
         // 48 85 D2               test rdx, rdx
         // 48 63 51 70            movsxd rdx, dword [rcx+0x70]
         // 4D 0F 44 D1            cmove r10, r9
         // 83 FA FF               cmp edx, -0x1
-        // 74 ??                  je <rel8>
+        // [2-6]                  je <rel8 or rel32>
         // 41 0F B6 00            movzx eax, byte [r8]
         // 4D 8D 0C 12            lea r9, [r10+rdx]
         // 41 38 01               cmp [r9], al
         Candidate::direct(
-            "SetterByte_P2_WildcardedJumpDist",
+            "SetterByte_P2_GatesToFirstByteCompare",
             Pattern::literal(
-                "48 8B 41 78 48 85 C0 75 ?? 48 39 81 C8 00 00 00 74 ?? 45 33 C9 4C 8D 52 F8 48 85 D2 48 63 51 70 "
-                "4D 0F 44 D1 83 FA FF 74 ?? 41 0F B6 00 4D 8D 0C 12 41 38 01"
+                "48 8B 41 78 48 85 C0 [2-6] 48 39 81 C8 00 00 00 [2-6] 45 33 C9 4C 8D 52 F8 48 85 D2 48 63 51 70 "
+                "4D 0F 44 D1 83 FA FF [2-6] 41 0F B6 00 4D 8D 0C 12 41 38 01"
             )
         ),
 
-        // P3 - drops the first gate and opens on the second, which is the gate that carries the clone
-        // discriminator (0xC8 against the clone's 0xD8). Survives a rewrite of the callback-present test.
+        // P3 - keeps only the callback LOAD of the first gate and puts the rest of that gate (the test and its branch,
+        // 5 to 9 bytes today) in a `[4-10]` bounded gap, then opens on the second gate, which carries the clone
+        // discriminator (0xC8 against the clone's 0xD8). Survives a rewrite of the callback-present test that keeps
+        // the load first, and still starts at the entry.
 
+        // 48 8B 41 78            mov rax, [rcx+0x78]
+        // [4-10]                 test rax, rax ; jne <rel8 or rel32>
         // 48 39 81 C8 00 00 00   cmp [rcx+0xC8], rax
-        // 74 ??                  je <rel8>
+        // [2-6]                  je <rel8 or rel32>
         // 45 33 C9               xor r9d, r9d
         // 4C 8D 52 F8            lea r10, [rdx-0x8]
         // 48 85 D2               test rdx, rdx
         // 48 63 51 70            movsxd rdx, dword [rcx+0x70]
         // 4D 0F 44 D1            cmove r10, r9
         // 83 FA FF               cmp edx, -0x1
-        // 74 ??                  je <rel8>
+        // [2-6]                  je <rel8 or rel32>
         // 41 0F B6 00            movzx eax, byte [r8]
         // 4D 8D 0C 12            lea r9, [r10+rdx]
         // 41 38 01               cmp [r9], al
         Candidate::direct(
-            "SetterByte_P3_SecondGateToByteCompare",
+            "SetterByte_P3_LooseFirstGateToByteCompare",
             Pattern::literal(
-                "48 39 81 C8 00 00 00 74 ?? 45 33 C9 4C 8D 52 F8 48 85 D2 48 63 51 70 4D 0F 44 D1 83 FA FF 74 ?? "
-                "41 0F B6 00 4D 8D 0C 12 41 38 01"
-            ),
-            -9
+                "48 8B 41 78 [4-10] 48 39 81 C8 00 00 00 [2-6] 45 33 C9 4C 8D 52 F8 48 85 D2 48 63 51 70 "
+                "4D 0F 44 D1 83 FA FF [2-6] 41 0F B6 00 4D 8D 0C 12 41 38 01"
+            )
         ),
     };
+
+    /**
+     * @brief RTTI witness for SetterByte: the color-property bind class whose vtable holds the setter, and its slot.
+     * @details The setter is the per-channel write path every `SimpleReflectPropertyBind<T, Color, ...>` instantiation
+     *          shares. Unlike the host-scope vfuncs, the mid-hook here rewrites R8, so the slot alone never arms a
+     *          hook: resolve_all_anchors() adopts it only when a SETTER_BYTE_CANDIDATES row confirms the byte-compare
+     *          chain inside the function the slot names. On a healthy build the slot and the ladder agree and the
+     *          agreement is logged; a disagreement is logged as a warning and the ladder value is kept.
+     */
+    inline constexpr std::string_view SETTER_BYTE_BIND_TYPE =
+        ".?AV?$SimpleReflectPropertyBind@VCustomAttributeColor@pa@@VColor@2@AEBV32@AEBV32@@pa@@";
+    inline constexpr std::size_t SETTER_BYTE_SLOT = 89;
 
     /**
      * @brief ColorTokenInterner - shader-property name interner. Maps an ASCII property name (e.g. "_tintColorR") to
@@ -1963,11 +2007,16 @@ namespace Transmog
             -0x24
         ),
 
-        // P3 - deep-body cap-init magic-write anchor. Walks back -0x126 from the matched site to reach the function
+        // P3 - deep-body cap-init magic-write anchor. Walks back -0x123 from the matched site to reach the function
         // start. After the once-only `lock cmpxchg` init guard succeeds, the function writes the four-constant
         // fingerprint below. That fingerprint survives wholesale prologue rewrites (e.g., a future patch swapping the
         // fastcall ABI for a different register save list) because the constants are dictated by the interner's
         // data-structure contract, not by compiler layout.
+        //
+        // The distance is the one thing this row cannot verify for itself: it spans the whole prologue and the
+        // init-guard path, and both move whenever the compiler re-lays the function. Re-measure it against P1 on
+        // every patch day. The registry validator rejects a value the exception table does not record as a function
+        // begin, so a stale distance fails this row closed instead of hooking mid-instruction.
         //
         // 48 8B F3               mov rsi, rbx
         // C7 46 50 8E 00 00 00   mov [rsi+0x50], 0x8E     ; bucket prime
@@ -1977,7 +2026,7 @@ namespace Transmog
         Candidate::direct(
             "ColorTokenInterner_P3_CapInitMagicWrite",
             Pattern::literal("48 8B F3 C7 46 50 8E 00 00 00 C7 46 54 FF FF 02 00 BA F8 FF 2F 00 41 B8 10 00 00 00"),
-            -0x126
+            -0x123
         ),
     };
 
@@ -2239,24 +2288,24 @@ namespace Transmog
 
         // P2 - writer site extended through the TLS-guard tail. Same store as P1 (`mov [rip+disp32], r15`) followed by
         // the [rdi+0xF8] field load and the (wildcarded) scratch-id tag, then continues past the short-jz into the TIB
-        // load and the per-thread flag-byte compare. The row wildcards the rel8 jz byte for encoding-flip safety. The
-        // trailing TLS+compare shape is unique
-        // text and pins the writer. The row wildcards the scratch-id imm32, because it shifts across patches. The
-        // RipRelative offsets are unchanged from P1 (disp_offset = 3, instr_end_offset = 7) because the store is
-        // still the first instruction in the window.
+        // load and the per-thread flag-byte compare. The jz sits in a `[2-6]` bounded gap, so the rel8 and the
+        // rel32 encodings both match. The trailing TLS+compare shape is unique text and pins the writer. The row
+        // wildcards the scratch-id imm32, because it shifts across patches. The RipRelative offsets are unchanged
+        // from P1 (disp_offset = 3, instr_end_offset = 7) because the store is still the first instruction in the
+        // window.
 
         // 4C 89 3D ?? ?? ?? ??         mov [rip+d32], r15
         // 48 8B 8F F8 00 00 00         mov rcx, [rdi+0xF8]
         // 41 BC ?? ?? 00 00            mov r12d, imm32
         // 48 85 C9                     test rcx, rcx
-        // 74 ??                        je <rel8>
+        // [2-6]                        je <rel8 or rel32>
         // 65 48 8B 04 25 58 00 00 00   mov rax, gs:[0x58]    ; TIB
         // 48 8B 10                     mov rdx, [rax]        ; TLS block
         // 45 38 3C 14                  cmp [r12+rdx], r15b   ; flag test
         Candidate::rip_relative(
             "PlayerStatic_P2_WriterSiteTlsTail",
             Pattern::literal(
-                "4C 89 3D ?? ?? ?? ?? 48 8B 8F F8 00 00 00 41 BC ?? ?? 00 00 48 85 C9 74 ?? 65 48 8B 04 25 58 00 00 00 "
+                "4C 89 3D ?? ?? ?? ?? 48 8B 8F F8 00 00 00 41 BC ?? ?? 00 00 48 85 C9 [2-6] 65 48 8B 04 25 58 00 00 00 "
                 "48 8B 10 45 38 3C 14"
             ),
             3,
@@ -2458,6 +2507,12 @@ namespace Transmog
         PlayerStatic,
         /// Passive-skill registrar entry, the helm-audio hook site (code).
         HelmAudioRegistrar,
+        /// Vtable of HOST_SCOPE_VFUNC1_BIND_TYPE, the RTTI witness for HostScopeVfunc1 (data, .rdata).
+        HostScopeVfunc1Vtable,
+        /// Vtable of HOST_SCOPE_VFUNC2_BIND_TYPE, the RTTI witness for HostScopeVfunc2 (data, .rdata).
+        HostScopeVfunc2Vtable,
+        /// Vtable of SETTER_BYTE_BIND_TYPE, the RTTI witness for SetterByte (data, .rdata).
+        SetterByteVtable,
         Count
     };
 

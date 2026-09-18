@@ -81,6 +81,8 @@ namespace Transmog::prefab_wrapper_swap
     constexpr std::size_t LOADER_NAME_CAP = 96;
     constexpr std::uint32_t MIN_PLAUSIBLE_COUNT = 100;
     constexpr std::uint32_t MAX_PLAUSIBLE_COUNT = 200000;
+    /// MSVC RTTI name of the registry object the StringInfoRegistry slot publishes.
+    constexpr std::string_view STRING_INFO_MANAGER_RTTI_NAME = ".?AVStringInfoManager@pa@@";
 
     // Runtime-resolved data globals
     //
@@ -733,6 +735,38 @@ namespace Transmog::prefab_wrapper_swap
             DMK::memory::read<std::uint64_t>(DMK::Address{reinterpret_cast<std::uintptr_t>(reg_addr)}).value_or(0);
         if (!DMK::memory::is_plausible_ptr(DMK::Address{registry_ptr}))
             return 0;
+
+        // One-time identity check on the registry object. The slot ladder proves where the engine STORES the
+        // pa::StringInfoManager, not what the slot holds: a slot that moved by one pointer on a patch still yields a
+        // plausible heap pointer, and the walk below then reads a neighboring object's count and array fields, which
+        // the plausibility bands can pass. The object's own RTTI names its class, so a wrong slot reports itself once
+        // here instead of as an empty or garbage catalog.
+        static std::atomic<bool> s_registry_type_checked{false};
+        if (!s_registry_type_checked.load(std::memory_order_acquire))
+        {
+            const auto vtable = DMK::memory::read<std::uintptr_t>(DMK::Address{registry_ptr});
+            if (vtable && DMK::memory::is_plausible_ptr(DMK::Address{*vtable}))
+            {
+                s_registry_type_checked.store(true, std::memory_order_release);
+                if (DMK::rtti::vtable_is_type(DMK::Address{*vtable}, STRING_INFO_MANAGER_RTTI_NAME))
+                {
+                    logger.debug(
+                        "[prefab-swap] StringInfoRegistry pointee verified as {}",
+                        STRING_INFO_MANAGER_RTTI_NAME
+                    );
+                }
+                else
+                {
+                    logger.warning(
+                        "[prefab-swap] StringInfoRegistry pointee {:#x} is not {} (vtable {:#x}). The slot ladder "
+                        "resolved a neighboring global, and the catalog walk is not trustworthy on this build",
+                        registry_ptr,
+                        STRING_INFO_MANAGER_RTTI_NAME,
+                        *vtable
+                    );
+                }
+            }
+        }
         const auto count =
             DMK::memory::read<std::uint32_t>(DMK::Address{registry_ptr + STRING_INFO_COUNT_OFF}).value_or(0);
         const auto array_ptr =

@@ -121,6 +121,38 @@ namespace CDCore
             return off_mgr_actor_array() + MGR_ARRAY_CAP_REL;
         }
 
+        /// pa::ClientActorManager, the object the ClientActorManagerGlobal slot publishes.
+        constexpr std::string_view ACTOR_MANAGER_MANGLED = ".?AVClientActorManager@pa@@";
+        std::atomic<bool> s_manager_type_checked{false};
+
+        // One-time identity check on the published manager. The slot ladder proves where the engine STORES the
+        // manager, not what the slot holds: a slot that moved by one pointer on a patch still yields a plausible heap
+        // pointer, and the walk then reads a neighboring object's fields as manager fields without ever faulting. The
+        // manager's own RTTI names its class, so a wrong slot reports itself once here instead of surfacing later as
+        // "companions lose transmog". Latches only once a vtable pointer is readable, because the manager may not
+        // exist yet during early startup, and the walk retries on its own.
+        void check_manager_type(std::uintptr_t mgr) noexcept
+        {
+            if (s_manager_type_checked.load(std::memory_order_acquire))
+                return;
+            const auto vtable = DMK::memory::read<std::uintptr_t>(DMK::Address{mgr});
+            if (!vtable || !DMK::memory::is_plausible_ptr(DMK::Address{*vtable}))
+                return;
+            s_manager_type_checked.store(true, std::memory_order_release);
+            if (DMK::rtti::vtable_is_type(DMK::Address{*vtable}, ACTOR_MANAGER_MANGLED))
+            {
+                DMK::log().debug("ClientActorManagerGlobal pointee verified as {}", ACTOR_MANAGER_MANGLED);
+                return;
+            }
+            DMK::log().warning(
+                "ClientActorManagerGlobal pointee {:#x} is not {} (vtable {:#x}). The slot ladder resolved a "
+                "neighboring global, and the player chain is not trustworthy on this build",
+                mgr,
+                ACTOR_MANAGER_MANGLED,
+                *vtable
+            );
+        }
+
         // Re-entrant offset self-heal. Latches only on success (or the no-drift short-circuit inside heal_landmark).
         // Until the player chain is wired the heal legitimately finds nothing: a user can sit at the main menu, where
         // no pa::ClientUserActor exists yet, for any length of time. So it NEVER gives up and NEVER latches on failure
@@ -476,6 +508,7 @@ namespace CDCore
                 const auto mgr = *reinterpret_cast<const volatile std::uintptr_t *>(player_base);
                 if (!DMK::memory::is_plausible_ptr(DMK::Address{mgr}))
                     return out;
+                check_manager_type(mgr);
                 heal_chain_offsets(mgr);
                 const auto user_actor = *reinterpret_cast<const volatile std::uintptr_t *>(mgr + off_user_actor());
                 if (!DMK::memory::is_plausible_ptr(DMK::Address{user_actor}))

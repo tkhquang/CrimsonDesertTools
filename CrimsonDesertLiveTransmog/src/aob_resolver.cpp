@@ -13,14 +13,18 @@
 #include <DetourModKit/anchor.hpp>
 #include <DetourModKit/format.hpp>
 #include <DetourModKit/logger.hpp>
+#include <DetourModKit/memory.hpp>
 #include <DetourModKit/region.hpp>
 #include <DetourModKit/scan.hpp>
 #include <DetourModKit/sighealth.hpp>
+
+#include <Windows.h>
 
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <string_view>
 
 namespace Transmog
 {
@@ -74,10 +78,39 @@ namespace Transmog
             return DMK::scan::is_likely_function_prologue(DMK::Address{static_cast<std::uintptr_t>(value)});
         }
 
+        /**
+         * @brief Post-resolve validator for a function ENTRY: @ref code_site, plus the image's own exception table has
+         *        to agree that the value begins a function.
+         * @details Most entry ladders here reach the entry through a negative walk-back measured against one build's
+         *          prologue length. The byte probe in code_site rejects only padding and a bare return, so a walk-back
+         *          that lands a few bytes short or long, mid-instruction on a plausible opcode, still passes it. The
+         *          x64 exception directory records the exact begin address of every function that touches the stack,
+         *          and RtlLookupFunctionEntry answers for any address inside one. A value with unwind data whose
+         *          recorded begin is not the value itself is therefore a stale walk-back, and it fails closed here. A
+         *          value with no unwind data at all (a leaf that touches no stack, SetterByte is one) keeps the byte
+         *          probe as its only evidence, so a leaf target is never rejected for lacking a table entry.
+         */
+        [[nodiscard]] bool function_entry_site(std::int64_t value, const void *context) noexcept
+        {
+            if (!code_site(value, context))
+            {
+                return false;
+            }
+            DWORD64 image_base = 0;
+            const RUNTIME_FUNCTION *entry = RtlLookupFunctionEntry(static_cast<DWORD64>(value), &image_base, nullptr);
+            if (entry == nullptr)
+            {
+                return true;
+            }
+            return image_base + entry->BeginAddress == static_cast<DWORD64>(value);
+        }
+
         // The registry, indexed by AnchorId. The enumerator order IS this order. Every candidate row is a byte
         // pattern authored against an instruction, so Pages::Executable narrows each sweep to code pages and a
         // signature cannot alias an identical run in .rdata or .data. That holds even for the rows whose RESULT is a
-        // data slot: the match site is the referencing instruction, and only the decoded disp32 leaves code.
+        // data slot: the match site is the referencing instruction, and only the decoded disp32 leaves code. Every
+        // code target here is a function entry, so each takes function_entry_site. The three VtableIdentity rows at
+        // the end are the RTTI witnesses resolve_all_anchors() corroborates the mid-hook ladders against.
         // Every row sets require_validator: an anchor that reaches a backend without a post-resolve predicate then
         // fails CLOSED instead of publishing an unchecked address. It is a no-op for the rows below, which all carry
         // one. It is there so a row ADDED later cannot quietly skip verification.
@@ -86,7 +119,7 @@ namespace Transmog
                 .label = "SlotPopulator",
                 .kind = AnchorKind::RipGlobal,
                 .site = SLOT_POPULATOR_CANDIDATES,
-                .validator = code_site,
+                .validator = function_entry_site,
                 .validator_context = &s_host_image,
                 .require_validator = true,
                 .pages = Pages::Executable,
@@ -95,7 +128,7 @@ namespace Transmog
                 .label = "MapLookup",
                 .kind = AnchorKind::RipGlobal,
                 .site = CDCore::anchors::MAP_LOOKUP_CANDIDATES,
-                .validator = code_site,
+                .validator = function_entry_site,
                 .validator_context = &s_host_image,
                 .require_validator = true,
                 .pages = Pages::Executable,
@@ -104,7 +137,7 @@ namespace Transmog
                 .label = "SubTranslator",
                 .kind = AnchorKind::RipGlobal,
                 .site = SUB_TRANSLATOR_CANDIDATES,
-                .validator = code_site,
+                .validator = function_entry_site,
                 .validator_context = &s_host_image,
                 .require_validator = true,
                 .pages = Pages::Executable,
@@ -113,7 +146,7 @@ namespace Transmog
                 .label = "SafeTearDown",
                 .kind = AnchorKind::RipGlobal,
                 .site = SAFE_TEAR_DOWN_CANDIDATES,
-                .validator = code_site,
+                .validator = function_entry_site,
                 .validator_context = &s_host_image,
                 .require_validator = true,
                 .pages = Pages::Executable,
@@ -122,7 +155,7 @@ namespace Transmog
                 .label = "InitSwapEntry",
                 .kind = AnchorKind::RipGlobal,
                 .site = INIT_SWAP_ENTRY_CANDIDATES,
-                .validator = code_site,
+                .validator = function_entry_site,
                 .validator_context = &s_host_image,
                 .require_validator = true,
                 .pages = Pages::Executable,
@@ -131,7 +164,7 @@ namespace Transmog
                 .label = "PartSlotRefresh",
                 .kind = AnchorKind::RipGlobal,
                 .site = PART_SLOT_REFRESH_CANDIDATES,
-                .validator = code_site,
+                .validator = function_entry_site,
                 .validator_context = &s_host_image,
                 .require_validator = true,
                 .pages = Pages::Executable,
@@ -140,7 +173,7 @@ namespace Transmog
                 .label = "SlotTagToHandle",
                 .kind = AnchorKind::RipGlobal,
                 .site = SLOT_TAG_TO_HANDLE_CANDIDATES,
-                .validator = code_site,
+                .validator = function_entry_site,
                 .validator_context = &s_host_image,
                 .require_validator = true,
                 .pages = Pages::Executable,
@@ -149,7 +182,7 @@ namespace Transmog
                 .label = "PartAddShow",
                 .kind = AnchorKind::RipGlobal,
                 .site = CDCore::anchors::PART_ADD_SHOW_CANDIDATES,
-                .validator = code_site,
+                .validator = function_entry_site,
                 .validator_context = &s_host_image,
                 .require_validator = true,
                 .pages = Pages::Executable,
@@ -196,7 +229,7 @@ namespace Transmog
                 .label = "StructCopy",
                 .kind = AnchorKind::RipGlobal,
                 .site = STRUCT_COPY_CANDIDATES,
-                .validator = code_site,
+                .validator = function_entry_site,
                 .validator_context = &s_host_image,
                 .require_validator = true,
                 .pages = Pages::Executable,
@@ -205,7 +238,7 @@ namespace Transmog
                 .label = "NaturalPipeline",
                 .kind = AnchorKind::RipGlobal,
                 .site = NATURAL_PIPELINE_CANDIDATES,
-                .validator = code_site,
+                .validator = function_entry_site,
                 .validator_context = &s_host_image,
                 .require_validator = true,
                 .pages = Pages::Executable,
@@ -214,7 +247,7 @@ namespace Transmog
                 .label = "UnlinkByWrapper",
                 .kind = AnchorKind::RipGlobal,
                 .site = UNLINK_BY_WRAPPER_CANDIDATES,
-                .validator = code_site,
+                .validator = function_entry_site,
                 .validator_context = &s_host_image,
                 .require_validator = true,
                 .pages = Pages::Executable,
@@ -223,7 +256,7 @@ namespace Transmog
                 .label = "PartListMerge",
                 .kind = AnchorKind::RipGlobal,
                 .site = PART_LIST_MERGE_CANDIDATES,
-                .validator = code_site,
+                .validator = function_entry_site,
                 .validator_context = &s_host_image,
                 .require_validator = true,
                 .pages = Pages::Executable,
@@ -232,7 +265,7 @@ namespace Transmog
                 .label = "PartDescriptorBuild",
                 .kind = AnchorKind::RipGlobal,
                 .site = PART_DESCRIPTOR_BUILD_CANDIDATES,
-                .validator = code_site,
+                .validator = function_entry_site,
                 .validator_context = &s_host_image,
                 .require_validator = true,
                 .pages = Pages::Executable,
@@ -241,7 +274,7 @@ namespace Transmog
                 .label = "DyeCopy",
                 .kind = AnchorKind::RipGlobal,
                 .site = DYE_COPY_CANDIDATES,
-                .validator = code_site,
+                .validator = function_entry_site,
                 .validator_context = &s_host_image,
                 .require_validator = true,
                 .pages = Pages::Executable,
@@ -250,7 +283,7 @@ namespace Transmog
                 .label = "DyeCopier",
                 .kind = AnchorKind::RipGlobal,
                 .site = DYE_COPIER_CANDIDATES,
-                .validator = code_site,
+                .validator = function_entry_site,
                 .validator_context = &s_host_image,
                 .require_validator = true,
                 .pages = Pages::Executable,
@@ -259,7 +292,7 @@ namespace Transmog
                 .label = "ColorPublisher",
                 .kind = AnchorKind::RipGlobal,
                 .site = COLOR_PUBLISHER_CANDIDATES,
-                .validator = code_site,
+                .validator = function_entry_site,
                 .validator_context = &s_host_image,
                 .require_validator = true,
                 .pages = Pages::Executable,
@@ -268,7 +301,7 @@ namespace Transmog
                 .label = "HostScopeVfunc1",
                 .kind = AnchorKind::RipGlobal,
                 .site = HOST_SCOPE_VFUNC1_CANDIDATES,
-                .validator = code_site,
+                .validator = function_entry_site,
                 .validator_context = &s_host_image,
                 .require_validator = true,
                 .pages = Pages::Executable,
@@ -277,7 +310,7 @@ namespace Transmog
                 .label = "HostScopeVfunc2",
                 .kind = AnchorKind::RipGlobal,
                 .site = HOST_SCOPE_VFUNC2_CANDIDATES,
-                .validator = code_site,
+                .validator = function_entry_site,
                 .validator_context = &s_host_image,
                 .require_validator = true,
                 .pages = Pages::Executable,
@@ -286,7 +319,7 @@ namespace Transmog
                 .label = "SetterByte",
                 .kind = AnchorKind::RipGlobal,
                 .site = SETTER_BYTE_CANDIDATES,
-                .validator = code_site,
+                .validator = function_entry_site,
                 .validator_context = &s_host_image,
                 .require_validator = true,
                 .pages = Pages::Executable,
@@ -295,7 +328,7 @@ namespace Transmog
                 .label = "ColorTokenInterner",
                 .kind = AnchorKind::RipGlobal,
                 .site = COLOR_TOKEN_INTERNER_CANDIDATES,
-                .validator = code_site,
+                .validator = function_entry_site,
                 .validator_context = &s_host_image,
                 .require_validator = true,
                 .pages = Pages::Executable,
@@ -323,10 +356,37 @@ namespace Transmog
                 .label = "HelmAudioRegistrar",
                 .kind = AnchorKind::RipGlobal,
                 .site = HELM_AUDIO_REGISTRAR_CANDIDATES,
-                .validator = code_site,
+                .validator = function_entry_site,
                 .validator_context = &s_host_image,
                 .require_validator = true,
                 .pages = Pages::Executable,
+            },
+            // RTTI witnesses: class vtables resolved by mangled name through the RTTI records in .rdata. Each one
+            // holds a mid-hook target in a known slot, and corroborate_vtable_slots() reads that slot after the sweep.
+            // A vtable is data, so in_host_image is the whole contract.
+            {
+                .label = "HostScopeVfunc1Vtable",
+                .kind = AnchorKind::VtableIdentity,
+                .mangled = HOST_SCOPE_VFUNC1_BIND_TYPE,
+                .validator = in_host_image,
+                .validator_context = &s_host_image,
+                .require_validator = true,
+            },
+            {
+                .label = "HostScopeVfunc2Vtable",
+                .kind = AnchorKind::VtableIdentity,
+                .mangled = HOST_SCOPE_VFUNC2_BIND_TYPE,
+                .validator = in_host_image,
+                .validator_context = &s_host_image,
+                .require_validator = true,
+            },
+            {
+                .label = "SetterByteVtable",
+                .kind = AnchorKind::VtableIdentity,
+                .mangled = SETTER_BYTE_BIND_TYPE,
+                .validator = in_host_image,
+                .validator_context = &s_host_image,
+                .require_validator = true,
             },
         };
         static_assert(std::size(ANCHORS) == ANCHOR_COUNT, "ANCHORS must hold one entry per AnchorId.");
@@ -401,6 +461,188 @@ namespace Transmog
                 logger.info("Signature health: {} fragile candidate(s), 0 unusable", fragile);
             }
         }
+
+        /**
+         * @brief One mid-hook entry paired with the class vtable slot that holds the same function.
+         * @details The RTTI witness for a byte ladder. The registry resolves the class vtable by mangled name (a
+         *          VtableIdentity anchor), and the slot content is the function the ladder should have found. The two
+         *          are independent evidence: the vtable comes from the RTTI records in .rdata, the ladder from the
+         *          instruction bytes in the code section.
+         */
+        struct VtableSlotWitness
+        {
+            /// The byte-ladder anchor the slot corroborates.
+            AnchorId code;
+            /// The VtableIdentity anchor whose resolved vtable holds the function.
+            AnchorId vtable;
+            /// Zero-based slot index in that vtable.
+            std::size_t slot;
+            /**
+             * @brief Rows that have to resolve to the slot's function, inside that function, before the slot may
+             *        stand in for a missed ladder. Empty when the slot may stand in on its own.
+             * @details A mid-hook that only reads `this` at entry is safe on any virtual of the same class, so the
+             *          slot alone is enough evidence for it. A mid-hook that rewrites an argument register is not: a
+             *          drifted slot index would hand it an unrelated function, so a body row has to confirm the
+             *          function before the hook is allowed to arm.
+             */
+            std::span<const DMK::scan::Candidate> contract;
+        };
+
+        const VtableSlotWitness VTABLE_SLOT_WITNESSES[] = {
+            {AnchorId::HostScopeVfunc1, AnchorId::HostScopeVfunc1Vtable, HOST_SCOPE_VFUNC1_SLOT, {}},
+            {AnchorId::HostScopeVfunc2, AnchorId::HostScopeVfunc2Vtable, HOST_SCOPE_VFUNC2_SLOT, {}},
+            {AnchorId::SetterByte, AnchorId::SetterByteVtable, SETTER_BYTE_SLOT, SETTER_BYTE_CANDIDATES},
+        };
+
+        /// The content of the witnessed vtable slot, or 0 when the vtable anchor is unresolved or the slot unreadable.
+        [[nodiscard]] std::uintptr_t vtable_slot_target(const VtableSlotWitness &witness) noexcept
+        {
+            const auto vtable_index = static_cast<std::size_t>(witness.vtable);
+            if (vtable_index >= s_report_count || s_report[vtable_index].status != DMK::anchor::AnchorStatus::Resolved)
+            {
+                return 0;
+            }
+            const auto vtable = static_cast<std::uintptr_t>(s_report[vtable_index].value);
+            const auto slot_address =
+                DMK::Address{vtable}.offset(static_cast<std::ptrdiff_t>(witness.slot * sizeof(std::uintptr_t)));
+            const auto target = DMK::memory::read<std::uintptr_t>(slot_address);
+            return target ? *target : 0;
+        }
+
+        /**
+         * @brief True when the contract rows resolve to @p target inside the function that begins at @p target.
+         * @details The extent comes from the exception table when the function has unwind data. A leaf without it
+         *          (SetterByte is one) gets a fixed window, which is enough for rows that anchor at the entry.
+         *          require_unique stays on: inside one function each contract row matches once.
+         */
+        [[nodiscard]] bool slot_target_confirmed(std::uintptr_t target, std::span<const DMK::scan::Candidate> contract)
+        {
+            if (contract.empty())
+            {
+                return true;
+            }
+            std::size_t extent = 0x100;
+            DWORD64 image_base = 0;
+            const RUNTIME_FUNCTION *entry = RtlLookupFunctionEntry(static_cast<DWORD64>(target), &image_base, nullptr);
+            if (entry != nullptr && image_base + entry->BeginAddress == target &&
+                entry->EndAddress > entry->BeginAddress)
+            {
+                extent = entry->EndAddress - entry->BeginAddress;
+            }
+            const auto hit = DMK::scan::resolve(
+                DMK::scan::ScanRequest{
+                    .ladder = contract,
+                    .label = "VtableSlotContract",
+                    .scope = DMK::Region{DMK::Address{target}, extent},
+                    .pages = Pages::Executable,
+                }
+            );
+            return hit && hit->address.raw() == target;
+        }
+
+        /**
+         * @brief Corroborates each witnessed byte ladder against its class vtable slot, and adopts the slot when the
+         *        ladder missed.
+         * @details Runs after the parallel sweep, on the init thread, before the quality summary. Agreement is logged
+         *          once at info. A disagreement keeps the ladder value and warns: one of the two is wrong and only a
+         *          human with the new build can say which. A missed ladder whose slot names a plausible code entry
+         *          adopts the slot, subject to the witness contract, and warns, so the feature runs and the log still
+         *          says the byte row needs re-deriving. The adopted entry carries the vtable anchor's image identity
+         *          and a TypeIdentity source, so the report says where the value came from.
+         */
+        void corroborate_vtable_slots()
+        {
+            auto &logger = DMK::log();
+            for (const VtableSlotWitness &witness : VTABLE_SLOT_WITNESSES)
+            {
+                const auto code_index = static_cast<std::size_t>(witness.code);
+                const auto vtable_index = static_cast<std::size_t>(witness.vtable);
+                if (code_index >= s_report_count || vtable_index >= s_report_count)
+                {
+                    continue;
+                }
+                DMK::anchor::ResolvedAnchor &code = s_report[code_index];
+                const std::string_view vtable_label = ANCHORS[vtable_index].label;
+
+                const std::uintptr_t slot_target = vtable_slot_target(witness);
+                if (slot_target == 0)
+                {
+                    logger.warning(
+                        "Anchor {}: no RTTI witness ({} unresolved), the byte ladder stands alone",
+                        code.label,
+                        vtable_label
+                    );
+                    continue;
+                }
+                if (!code_site(static_cast<std::int64_t>(slot_target), &s_host_image))
+                {
+                    logger.warning(
+                        "Anchor {}: {} slot {} holds {:#x}, which is not a code entry. Slot index drift?",
+                        code.label,
+                        vtable_label,
+                        witness.slot,
+                        slot_target
+                    );
+                    continue;
+                }
+
+                if (code.status == DMK::anchor::AnchorStatus::Resolved)
+                {
+                    const auto ladder = static_cast<std::uintptr_t>(code.value);
+                    if (ladder == slot_target)
+                    {
+                        logger.info(
+                            "Anchor {} corroborated: byte ladder and {} slot {} agree at {:#x}",
+                            code.label,
+                            vtable_label,
+                            witness.slot,
+                            ladder
+                        );
+                    }
+                    else
+                    {
+                        logger.warning(
+                            "Anchor {} DISAGREES with its RTTI witness: ladder {:#x}, {} slot {} {:#x}. Keeping the "
+                            "ladder. Re-derive both on this build",
+                            code.label,
+                            ladder,
+                            vtable_label,
+                            witness.slot,
+                            slot_target
+                        );
+                    }
+                    continue;
+                }
+
+                if (!slot_target_confirmed(slot_target, witness.contract))
+                {
+                    logger.warning(
+                        "Anchor {} unresolved. {} slot {} names {:#x} but no contract row confirms that body, so it "
+                        "is not adopted",
+                        code.label,
+                        vtable_label,
+                        witness.slot,
+                        slot_target
+                    );
+                    continue;
+                }
+                code.status = DMK::anchor::AnchorStatus::Resolved;
+                code.value = static_cast<std::int64_t>(slot_target);
+                code.domain = DMK::anchor::ResultDomain::CodeSite;
+                code.witness = DMK::anchor::ResolvedWitness{};
+                code.witness.image = s_report[vtable_index].witness.image;
+                code.witness.source = DMK::anchor::PhysicalSource::TypeIdentity;
+                code.witness.completeness = s_report[vtable_index].witness.completeness;
+                logger.warning(
+                    "Anchor {} self-healed from its RTTI witness: {} slot {} -> {:#x}. Re-derive the byte ladder for "
+                    "this build",
+                    code.label,
+                    vtable_label,
+                    witness.slot,
+                    slot_target
+                );
+            }
+        }
     } // namespace
 
     void resolve_all_anchors()
@@ -457,6 +699,11 @@ namespace Transmog
                 );
             }
         }
+
+        // Second, independent evidence for the three mid-hook entries: the class vtable slot that holds each one.
+        // Runs after the sweep so it can compare against (or stand in for) the ladder result, and before the summary
+        // so an adopted value counts as resolved.
+        corroborate_vtable_slots();
 
         const DMK::anchor::AnchorQuality quality = DMK::anchor::assess_quality(anchor_report());
         logger.info(

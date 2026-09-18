@@ -17,6 +17,8 @@
 #include <DetourModKit/scan.hpp>
 #include <DetourModKit/sighealth.hpp>
 
+#include <Windows.h>
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -73,10 +75,38 @@ namespace EquipHide
             return DMK::scan::is_likely_function_prologue(DMK::Address{static_cast<std::uintptr_t>(value)});
         }
 
+        /**
+         * @brief Post-resolve validator for a function ENTRY: @ref code_site, plus the image's own exception table has
+         *        to agree that the value begins a function.
+         * @details Most entry ladders here reach the entry through a negative walk-back measured against one build's
+         *          prologue length. The byte probe in code_site rejects only padding and a bare return, so a walk-back
+         *          that lands a few bytes short or long, mid-instruction on a plausible opcode, still passes it. The
+         *          x64 exception directory records the exact begin address of every function that touches the stack,
+         *          and RtlLookupFunctionEntry answers for any address inside one. A value with unwind data whose
+         *          recorded begin is not the value itself is therefore a stale walk-back, and it fails closed here. A
+         *          value with no unwind data at all (a leaf that touches no stack) keeps the byte probe as its only
+         *          evidence, so a leaf target is never rejected for lacking a table entry.
+         */
+        [[nodiscard]] bool function_entry_site(std::int64_t value, const void *context) noexcept
+        {
+            if (!code_site(value, context))
+            {
+                return false;
+            }
+            DWORD64 image_base = 0;
+            const RUNTIME_FUNCTION *entry = RtlLookupFunctionEntry(static_cast<DWORD64>(value), &image_base, nullptr);
+            if (entry == nullptr)
+            {
+                return true;
+            }
+            return image_base + entry->BeginAddress == static_cast<DWORD64>(value);
+        }
+
         // The registry, indexed by AnchorId. The enumerator order IS this order. Every target is code: a function
         // entry, a mid-body instruction, or the instruction whose disp32 names a data slot. Pages::Executable narrows
         // each byte sweep to code pages so a signature that must land on an instruction cannot alias an identical run
-        // in .rdata or .data.
+        // in .rdata or .data. A function entry takes function_entry_site, which adds the exception-table check; the
+        // mid-body EquipVisCheck instruction takes code_site alone, because no table records a mid-body address.
         // Every row sets require_validator: an anchor that reaches a backend without a post-resolve predicate then
         // fails CLOSED and never publishes an unchecked address. It is a no-op for the rows below, which all carry
         // one. It is there so a row ADDED later cannot quietly skip verification.
@@ -103,7 +133,7 @@ namespace EquipHide
                 .label = "MapLookup",
                 .kind = AnchorKind::RipGlobal,
                 .site = CDCore::anchors::MAP_LOOKUP_CANDIDATES,
-                .validator = code_site,
+                .validator = function_entry_site,
                 .validator_context = &s_host_image,
                 .require_validator = true,
                 .pages = Pages::Executable,
@@ -112,7 +142,7 @@ namespace EquipHide
                 .label = "MapInsert",
                 .kind = AnchorKind::RipGlobal,
                 .site = MAP_INSERT_CANDIDATES,
-                .validator = code_site,
+                .validator = function_entry_site,
                 .validator_context = &s_host_image,
                 .require_validator = true,
                 .pages = Pages::Executable,
@@ -130,7 +160,7 @@ namespace EquipHide
                 .label = "PartAddShow",
                 .kind = AnchorKind::RipGlobal,
                 .site = CDCore::anchors::PART_ADD_SHOW_CANDIDATES,
-                .validator = code_site,
+                .validator = function_entry_site,
                 .validator_context = &s_host_image,
                 .require_validator = true,
                 .pages = Pages::Executable,
@@ -139,7 +169,7 @@ namespace EquipHide
                 .label = "PostfixEval",
                 .kind = AnchorKind::RipGlobal,
                 .site = POSTFIX_EVAL_CANDIDATES,
-                .validator = code_site,
+                .validator = function_entry_site,
                 .validator_context = &s_host_image,
                 .require_validator = true,
                 .pages = Pages::Executable,
@@ -156,10 +186,22 @@ namespace EquipHide
                 .pages = Pages::Executable,
             },
             {
+                .label = "NpcPfeCaller",
+                .kind = AnchorKind::StringXref,
+                // The function that carries the landmark, named by its own profiling label: one copy of the literal in
+                // the image, one instruction that references it, and the enclosing function of that instruction is
+                // the entry. No byte pattern is involved, so the row survives the code motion inside the function.
+                .xref_text = NPC_PFE_CALLER_LABEL,
+                .xref_return = DMK::scan::XrefReturn::EnclosingFunction,
+                .validator = function_entry_site,
+                .validator_context = &s_host_image,
+                .require_validator = true,
+            },
+            {
                 .label = "VisualEquipChange",
                 .kind = AnchorKind::RipGlobal,
                 .site = CDCore::anchors::VISUAL_EQUIP_CHANGE_CANDIDATES,
-                .validator = code_site,
+                .validator = function_entry_site,
                 .validator_context = &s_host_image,
                 .require_validator = true,
                 .pages = Pages::Executable,
@@ -169,7 +211,7 @@ namespace EquipHide
                 .kind = AnchorKind::RipGlobal,
                 // BatchEquip is the same engine function this mod calls VisualEquipSwap.
                 .site = CDCore::anchors::BATCH_EQUIP_CANDIDATES,
-                .validator = code_site,
+                .validator = function_entry_site,
                 .validator_context = &s_host_image,
                 .require_validator = true,
                 .pages = Pages::Executable,
@@ -343,6 +385,70 @@ namespace EquipHide
     std::span<const DMK::anchor::ResolvedAnchor> anchor_report() noexcept
     {
         return std::span<const DMK::anchor::ResolvedAnchor>(s_report.data(), s_report_count);
+    }
+
+    std::uintptr_t derive_npc_pfe_return_addr() noexcept
+    {
+        // The declaration is noexcept and the body is not: scan::resolve and the logger verbs may throw. Contain it
+        // here rather than terminate the process; a miss is a 0 the caller already handles.
+        try
+        {
+            auto &logger = DMK::log();
+            const std::uintptr_t caller = anchor_address(AnchorId::NpcPfeCaller);
+            if (caller == 0)
+            {
+                return 0;
+            }
+
+            // The function's extent comes from the image's exception table, the same authority the string-xref anchor
+            // used to name the entry. A fixed window would run into the next function and hand the local rows a
+            // second, unrelated call to match. Without unwind data the function is a leaf and cannot contain a call
+            // at all, so there is nothing to derive.
+            DWORD64 image_base = 0;
+            const RUNTIME_FUNCTION *entry = RtlLookupFunctionEntry(static_cast<DWORD64>(caller), &image_base, nullptr);
+            if (entry == nullptr || image_base + entry->BeginAddress != caller ||
+                entry->EndAddress <= entry->BeginAddress)
+            {
+                logger.warning("NpcPfeCaller {:#x} has no exception-table extent. Landmark not derived", caller);
+                return 0;
+            }
+            const DMK::Region body{
+                DMK::Address{caller},
+                static_cast<std::size_t>(entry->EndAddress - entry->BeginAddress)
+            };
+
+            // require_unique stays on: inside one function each local row matches once, and a second match means the
+            // function was restructured in a way that needs a human to look at it.
+            const auto hit = DMK::scan::resolve(
+                DMK::scan::ScanRequest{
+                    .ladder = NPC_PFE_LANDMARK_LOCAL_CANDIDATES,
+                    .label = "NpcPfeLandmarkLocal",
+                    .scope = body,
+                    .pages = Pages::Executable,
+                }
+            );
+            if (!hit)
+            {
+                logger.warning(
+                    "NpcPfeCaller {:#x} ({} bytes) holds no unique rule-eval call landmark: {}",
+                    caller,
+                    body.size,
+                    hit.error().message()
+                );
+                return 0;
+            }
+            const std::uintptr_t landmark = hit->address.raw();
+            if (!body.contains(DMK::Address{landmark}))
+            {
+                return 0;
+            }
+            logger.debug("NpcPfeReturnAddr derived from the caller label: {:#x} via {}", landmark, hit->winning_name);
+            return landmark;
+        }
+        catch (...)
+        {
+            return 0;
+        }
     }
 
 } // namespace EquipHide

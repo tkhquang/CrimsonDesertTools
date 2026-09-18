@@ -67,17 +67,19 @@ namespace CDCore::anchors
         // Shape: load the global, walk `+0xD8` to the container, take `[+0x20]`, and branch on whether its count at
         // `+0x28` is zero - empty yields a null, otherwise the element at `[+0x20][+0x10]` - then virtual-call
         // `[rax+0x40]` on the result. The load plus the container walk alone is a common idiom with dozens of matches,
-        // so the window has to run through the empty-check branch and the vcall to be unique. Both rel8 targets are
-        // wildcarded. A compiler that widens either short jump to `0F 8x rel32` breaks this row - that is what P2 is
-        // for, since it crosses no branch of its own.
+        // so the window has to run through the empty-check branch and the vcall to be unique. Both branches sit in
+        // bounded gaps instead of literal opcodes: `[2-6]` admits the 2-byte `ja rel8` and the 6-byte `0F 87 rel32`
+        // form, `[2-5]` the 2-byte `jmp rel8` and the 5-byte `E9 rel32` form, so a compiler that widens either jump
+        // leaves this row standing. The fixed runs on both sides of each gap carry the selectivity; the gaps carry
+        // none.
         //
         // 48 8B 05 ?? ?? ?? ??   mov rax, [rip+d32]
         // 48 8B 88 D8 00 00 00   mov rcx, [rax+0xD8]
         // 48 8B 41 20            mov rax, [rcx+0x20]
         // 83 78 28 00            cmp dword [rax+0x28], 0x0
-        // 77 ??                  ja <rel8>
+        // [2-6]                  ja <rel8 or rel32>
         // 33 C9                  xor ecx, ecx
-        // EB ??                  jmp <rel8>
+        // [2-5]                  jmp <rel8 or rel32>
         // 48 8B 40 20            mov rax, [rax+0x20]
         // 48 8B 48 10            mov rcx, [rax+0x10]
         // 48 8B 01               mov rax, [rcx]
@@ -85,7 +87,7 @@ namespace CDCore::anchors
         Candidate::rip_relative(
             "WorldSystem_P1_InlinedGetterThroughVCall",
             Pattern::literal(
-                "48 8B 05 ?? ?? ?? ?? 48 8B 88 D8 00 00 00 48 8B 41 20 83 78 28 00 77 ?? 33 C9 EB ?? 48 8B 40 20 "
+                "48 8B 05 ?? ?? ?? ?? 48 8B 88 D8 00 00 00 48 8B 41 20 83 78 28 00 [2-6] 33 C9 [2-5] 48 8B 40 20 "
                 "48 8B 48 10 48 8B 01 FF 50 40"
             ),
             3,
@@ -94,31 +96,31 @@ namespace CDCore::anchors
 
         // P2 - alternative sibling site:
         //   cmp byte [rax+disp32], 0
-        //   <2-byte branch: jne rel8 or the first 2 bytes of jne rel32>
+        //   <jne, rel8 or rel32>
         //   mov rax, [rip+disp32]    <- the resolved instruction, marked with `|`
         //   mov rcx, [rax+0xD8]      <- game-ABI disambiguator
         //
-        // The 2-byte branch slot is wildcarded rather than hard-coded as `75 ??`. Per aob-signatures.md section 9 the
-        // compiler can flip a short Jcc to the 6-byte `0F 85 rel32` form, and that flip changes the opcode byte. Two
-        // wildcard bytes tolerate the 2-byte shape for any opcode, but the pattern still fails on a 6-byte flip. In
-        // that case P3 takes over, since it crosses no branch at all. The trailing `48 8B 88 D8 00 00 00` pins the
-        // specific WorldSystem follow-on (`mov rcx, [rax+0xD8]`). 0xD8 is a game-struct ABI offset that is stable
-        // within a build.
+        // The branch is a `[2-6]` bounded gap, not a wildcarded 2-byte slot. Per aob-signatures.md section 9 the
+        // compiler can flip a short Jcc to the 6-byte `0F 85 rel32` form; the gap admits both widths, and the
+        // resolver adds the actual gap width at match time so the `|` marker still lands on the load. The trailing
+        // `48 8B 88 D8 00 00 00` pins the specific WorldSystem follow-on (`mov rcx, [rax+0xD8]`). 0xD8 is a
+        // game-struct ABI offset that is stable within a build.
         //
         // 80 B8 ?? ?? ?? ?? 00   cmp byte [rax+d32], 0x0
-        // ?? ??                  jne <rel8>
+        // [2-6]                  jne <rel8 or rel32>
         // 48 8B 05 ?? ?? ?? ??   mov rax, [rip+d32]   <- result offset
         // 48 8B 88 D8 00 00 00   mov rcx, [rax+0xD8]
         Candidate::rip_relative(
             "WorldSystem_P2_StructField",
-            Pattern::literal("80 B8 ?? ?? ?? ?? 00 ?? ?? | 48 8B 05 ?? ?? ?? ?? 48 8B 88 D8 00 00 00"),
+            Pattern::literal("80 B8 ?? ?? ?? ?? 00 [2-6] | 48 8B 05 ?? ?? ?? ?? 48 8B 88 D8 00 00 00"),
             3,
             7
         ),
 
         // P3 - a consumer site that walks the global to `+0x58` and passes the result straight into a call. It shares
-        // no bytes with P1 or P2, and it crosses neither a branch nor a call, so it survives both the branch-widening
-        // that sinks P1 and the entry-block rewrite that sinks P2. Only the outbound frame slot is wildcarded.
+        // no bytes with P1 or P2, and it crosses neither a branch nor a call, so it survives an entry-block rewrite
+        // that sinks P2 and any branch reshaping the gaps in P1 and P2 do not cover. Only the outbound frame slot is
+        // wildcarded.
         //
         // The window has to reach `mov rcx,rbx` to be usable. Stopping at the `lea` leaves a shape that also matches a
         // neighboring global's walk, and that near-miss resolves to a DIFFERENT global rather than a failure, which
@@ -570,11 +572,13 @@ namespace CDCore::anchors
         //
         // Both halves of the window earn their length. The post-call tail is needed because the leading lea/lea/call
         // shape alone matches many unrelated sites, and the leading loop tail is needed because the
-        // lea/lea/call/nop/vpxor block itself occurs TWICE in this function.
+        // lea/lea/call/nop/vpxor block itself occurs TWICE in this function. The loop-tail `jne` sits in a `[2-6]`
+        // bounded gap, so a rel8-to-rel32 widening keeps the row alive; the resolver adds the gap width before it
+        // applies the `|` marker, so the marker still lands on the lea.
         //
         // 48 83 C6 10            add rsi, 0x10
         // 49 83 EE 01            sub r14, 0x1
-        // 75 ??                  jne <rel8>
+        // [2-6]                  jne <rel8 or rel32>
         // 48 8D 15 ?? ?? ?? ??   lea rdx, [rip+d32]   <- result offset
         // 48 8D 4D ??            lea rcx, [rbp-d8]
         // E8 ?? ?? ?? ??         call <rel32>
@@ -584,7 +588,7 @@ namespace CDCore::anchors
         Candidate::rip_relative(
             "ClientActorManagerGlobal_P2_LeaCallBodyDisp8",
             Pattern::literal(
-                "48 83 C6 10 49 83 EE 01 75 ?? | 48 8D 15 ?? ?? ?? ?? 48 8D 4D ?? E8 ?? ?? ?? ?? 90 C6 44 24 ?? 00 "
+                "48 83 C6 10 49 83 EE 01 [2-6] | 48 8D 15 ?? ?? ?? ?? 48 8D 4D ?? E8 ?? ?? ?? ?? 90 C6 44 24 ?? 00 "
                 "C5 F9 EF C0"
             ),
             3,

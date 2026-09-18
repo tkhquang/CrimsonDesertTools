@@ -45,85 +45,81 @@ namespace EquipHide
         //
         // A short branch sits between the outer loop head and the imul, and the same three-instruction shape appears at
         // an unrelated container-iteration site. No branch-free window tells the two sites apart, so each candidate
-        // below includes one short jump with a wildcarded target. If a future build changes that jump encoding, the
-        // candidate stops matching. The mod accepts that outcome: the decode keeps the nominal instead of resolving to
-        // the wrong site.
+        // below spans that jump, as a `[2-6]` bounded gap that admits the 2-byte rel8 and the 6-byte rel32 encoding.
+        // A build that rewrites the jump into something else entirely still stops the candidate from matching, and
+        // the mod accepts that outcome: the decode keeps the nominal instead of resolving to the wrong site.
         //
-        // Every walk-back below is the byte offset of the IMUL ITSELF within the matched window, which is what
-        // read_code_constant decodes the operand from. It has to be re-measured whenever the instructions ahead of the
-        // imul change length - folding two loads into one is enough to shift it. A stale value decodes a neighboring
-        // instruction's bytes as the stride, and the range check is the only thing standing between that and a silently
-        // wrong entry width.
+        // Every candidate below puts the `|` result marker on the IMUL ITSELF, which is the instruction
+        // read_code_constant decodes the operand from. The marker rides the matched bytes, so a fold or reflow ahead
+        // of the imul either still matches with the marker on the imul or fails to match at all. No counted walk-back
+        // is left to go stale and decode a neighboring instruction's bytes as the stride.
         const DMK::scan::Candidate EQUIP_SWAP_STRIDE_SITE[] = {
             // P1 - outer loop head through the imul. Widest context, anchored before the null check.
             //
             // C7 85 ?? ?? ?? ?? ?? ?? ?? ??   mov [rbp+d32], imm32
             // 49 8B 19                        mov rbx, [r9]
             // 48 85 DB                        test rbx, rbx
-            // 74 ??                           je <rel8>
+            // [2-6]                           je <rel8 or rel32>
             // 8B 43 08                        mov eax, [rbx+0x8]
-            // 48 69 F8                        imul rdi, rax, imm32 (truncated)
+            // 48 69 F8                        imul rdi, rax, imm32 (truncated)   <- result marker
             DMK::scan::Candidate::direct(
                 "BatchEquipStride_P1_LoopHeadToImul",
-                DMK::scan::Pattern::literal("C7 85 ?? ?? ?? ?? ?? ?? ?? ?? 49 8B 19 48 85 DB 74 ?? 8B 43 08 48 69 F8"),
-                0x15
+                DMK::scan::Pattern::literal("C7 85 ?? ?? ?? ?? ?? ?? ?? ?? 49 8B 19 48 85 DB [2-6] 8B 43 08 | 48 69 F8")
             ),
 
             // P2 - null check through the imul. Drops the preceding frame initialization.
             //
             // 49 8B 19   mov rbx, [r9]
             // 48 85 DB   test rbx, rbx
-            // 74 ??      je <rel8>
+            // [2-6]      je <rel8 or rel32>
             // 8B 43 08   mov eax, [rbx+0x8]
-            // 48 69 F8   imul rdi, rax, imm32 (truncated)
+            // 48 69 F8   imul rdi, rax, imm32 (truncated)   <- result marker
             DMK::scan::Candidate::direct(
                 "BatchEquipStride_P2_NullCheckToImul",
-                DMK::scan::Pattern::literal("49 8B 19 48 85 DB 74 ?? 8B 43 08 48 69 F8"),
-                11
+                DMK::scan::Pattern::literal("49 8B 19 48 85 DB [2-6] 8B 43 08 | 48 69 F8")
             ),
 
             // P3 - imul forward into the branch that follows it. Independent of everything before the imul, so it
-            // survives a rewrite of the loop head that defeats P1 and P2.
+            // survives a rewrite of the loop head that defeats P1 and P2. The join jmp sits in a `[2-5]` gap, the
+            // 2-byte rel8 and the 5-byte rel32 form.
             //
             // 8B 43 08               mov eax, [rbx+0x8]
-            // 48 69 F8 ?? ?? ?? ??   imul rdi, rax, imm32
+            // 48 69 F8 ?? ?? ?? ??   imul rdi, rax, imm32   <- result marker
             // 48 03 3B               add rdi, [rbx]
             // 48 8B 1B               mov rbx, [rbx]
-            // EB ??                  jmp <rel8>
+            // [2-5]                  jmp <rel8 or rel32>
             // 49 8B 49 08            mov rcx, [r9+0x8]
             DMK::scan::Candidate::direct(
                 "BatchEquipStride_P3_ImulToJoin",
-                DMK::scan::Pattern::literal("8B 43 08 48 69 F8 ?? ?? ?? ?? 48 03 3B 48 8B 1B EB ?? 49 8B 49 08"),
-                3
+                DMK::scan::Pattern::literal("8B 43 08 | 48 69 F8 ?? ?? ?? ?? 48 03 3B 48 8B 1B [2-5] 49 8B 49 08")
             ),
         };
 
         // Slot: the disp32 of `movzx eax, word ptr [rbx+<slot>]`, where rbx is the current outer entry. The instruction
         // that follows compares that word against the inner table's own slot field, which uses a different offset.
-        // Anchor on the movzx, not on the compare.
+        // Anchor on the movzx, not on the compare: P1 carries the `|` marker on it, P2 and P3 start on it.
         const DMK::scan::Candidate EQUIP_SWAP_SLOT_SITE[] = {
             // P1 - inner-loop setup through the movzx. Widest context and unique across the whole process.
             //
             // 48 69 C8 ?? ?? ?? ??   imul rcx, rax, imm32
             // 48 03 CA               add rcx, rdx
             // 48 3B D1               cmp rdx, rcx
-            // 74 ??                  je <rel8>
-            // 0F B7 83               movzx eax, word [rbx+d32] (truncated)
+            // [2-6]                  je <rel8 or rel32>
+            // 0F B7 83               movzx eax, word [rbx+d32] (truncated)   <- result marker
             DMK::scan::Candidate::direct(
                 "BatchEquipSlot_P1_InnerSetupToMovzx",
-                DMK::scan::Pattern::literal("48 69 C8 ?? ?? ?? ?? 48 03 CA 48 3B D1 74 ?? 0F B7 83"),
-                0x0F
+                DMK::scan::Pattern::literal("48 69 C8 ?? ?? ?? ?? 48 03 CA 48 3B D1 [2-6] | 0F B7 83")
             ),
 
             // P2 - movzx and compare, extended into the entry advance that follows.
             //
             // 0F B7 83 ?? ?? ?? ??   movzx eax, word [rbx+d32]
             // 66 39 82 ?? ?? ?? ??   cmp [rdx+d32], ax
-            // 74 ??                  je <rel8>
+            // [2-6]                  je <rel8 or rel32>
             // 48 81 C2               add rdx, imm32 (truncated)
             DMK::scan::Candidate::direct(
                 "BatchEquipSlot_P2_MovzxCompareAdvance",
-                DMK::scan::Pattern::literal("0F B7 83 ?? ?? ?? ?? 66 39 82 ?? ?? ?? ?? 74 ?? 48 81 C2")
+                DMK::scan::Pattern::literal("0F B7 83 ?? ?? ?? ?? 66 39 82 ?? ?? ?? ?? [2-6] 48 81 C2")
             ),
 
             // P3 - movzx and compare only. The pattern wildcards both displacements, so a shifted slot field still
