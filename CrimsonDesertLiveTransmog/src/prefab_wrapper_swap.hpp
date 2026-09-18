@@ -364,7 +364,9 @@ namespace Transmog::prefab_wrapper_swap
      *          keeps its mesh attached forever once cleared. Resolution of the item's prefabs here, plus their
      *          addition to the installed set, makes the existing park-then-subtract machinery cover direct fakes for
      *          free: the next apply parks them, the rebuilt set no longer lists them, so they fall out as orphans and
-     *          get detached.
+     *          get detached. One exception: a parked wrapper that a released (unticked) slot wears as its REAL item is
+     *          kept, because the carrier of a direct fake can be the real item itself, and detaching it would take the
+     *          restored real item down with it.
      */
     void register_direct_fake(std::uint16_t item_id) noexcept;
 } // namespace Transmog::prefab_wrapper_swap

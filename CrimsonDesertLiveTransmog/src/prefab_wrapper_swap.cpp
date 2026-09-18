@@ -4047,11 +4047,22 @@ namespace Transmog::prefab_wrapper_swap
      * It runs after the install, so a slot whose target is unchanged keeps its wrapper in the new target set and
      * drops out. Only genuinely-orphaned wrappers - changed slots, cleared slots - detach. That is also what makes
      * the apply feel immediate: the new visual is already on screen before any removal.
+     *
+     * A parked wrapper is live in one more way: a slot LT has RELEASED (unticked) wears it as its real item. A direct
+     * fake is the carrier equipped as itself, so when that carrier is also the real item, the fake's wrappers and the
+     * real item's wrappers are the same wrappers. The apply that releases the slot parks them as the fake and then
+     * re-attaches them as the real item, so the walk below keeps them instead of detaching the real item it restored.
      */
     static void sweep_pending_stale() noexcept
     {
         std::unordered_set<std::uintptr_t> victims_per_char[3];
         bool any = false;
+
+        // Wrappers a RELEASED slot wears as its real item, for the active character's bucket only. Filled by the slot
+        // walk below and consulted when the parked set is walked. Three means "no bucket".
+        std::unordered_set<std::uintptr_t> worn_real_wrappers;
+        std::unordered_set<std::string> worn_real_names;
+        std::size_t worn_ci = 3;
 
         // "Active + none" (hide a slot). Nothing LT installed is involved: the mesh to remove is the REAL item's, so
         // the pending-stale set can never contain it. Resolve the real item's prefabs and add them as victims, so the
@@ -4068,26 +4079,45 @@ namespace Transmog::prefab_wrapper_swap
                 for (std::size_t i = 0; i < static_cast<std::size_t>(Transmog::TransmogSlot::Count); ++i)
                 {
                     const auto &m = Transmog::slot_mappings()[i];
-                    if (!m.active || m.target_item_id != 0)
-                        continue; // only "ticked, but no target" means hide
+                    // "Ticked, but no target" hides the slot. "Unticked" releases it: the real item is worn again.
+                    const bool hidden = m.active && m.target_item_id == 0;
+                    const bool released = !m.active;
+                    if (!hidden && !released)
+                        continue; // a dressed slot: its real item is torn down and its fake sits in a live set
                     const auto game_tag = Transmog::game_slot_from_transmog(static_cast<Transmog::TransmogSlot>(i));
                     const auto real_id = Transmog::real_part_tear_down::get_real_item_id(
                         reinterpret_cast<void *>(a1),
                         static_cast<std::uint16_t>(game_tag)
                     );
                     if (real_id == 0)
-                        continue; // nothing worn there - already hidden
+                        continue; // nothing worn there - already hidden, or nothing to keep
 
                     std::unordered_set<std::uintptr_t> wrappers;
                     collect_wrappers_for_item(real_id, wrappers);
-                    if (!wrappers.empty())
+                    if (wrappers.empty())
+                        continue;
+                    if (hidden)
                     {
                         victims_per_char[ci].insert(wrappers.begin(), wrappers.end());
                         any = true;
+                        continue;
+                    }
+                    // Released: these wrappers are on the body as the REAL item, whatever the parked set says. A
+                    // direct fake whose carrier IS the real item parks exactly these wrappers, and the untick-restore
+                    // that follows re-attaches them as the real item. Both identities the detach matches on are kept,
+                    // the canonical pointer and the prefab name, so an attached instance the catalog cannot name by
+                    // pointer still counts as worn.
+                    worn_ci = ci;
+                    for (const auto w : wrappers)
+                    {
+                        worn_real_wrappers.insert(w);
+                        if (auto nm = wrapper_inline_name(w); !nm.empty())
+                            worn_real_names.insert(std::move(nm));
                     }
                 }
             }
         }
+        std::size_t kept_as_real = 0;
         {
             std::scoped_lock lk(s_map_mtx);
             for (std::size_t ci = 0; ci < 3; ++ci)
@@ -4100,11 +4130,27 @@ namespace Transmog::prefab_wrapper_swap
                         continue;
                     if (s_direct_fakes_per_char[ci].find(w) != s_direct_fakes_per_char[ci].end())
                         continue;
+                    // Worn as the real item of a released slot -> live, not stale. Without this the sweep detaches the
+                    // real item the apply just restored, whenever the carrier of a direct fake is that real item.
+                    if (ci == worn_ci &&
+                        (worn_real_wrappers.contains(w) ||
+                         (!worn_real_names.empty() && worn_real_names.contains(wrapper_inline_name(w)))))
+                    {
+                        ++kept_as_real;
+                        continue;
+                    }
                     victims_per_char[ci].insert(w);
                     any = true;
                 }
                 s_pending_stale_per_char[ci].clear();
             }
+        }
+        if (kept_as_real > 0)
+        {
+            DMK::log().debug(
+                "[prefab-swap] post-apply sweep: kept {} parked wrapper(s) worn as real items on released slot(s)",
+                kept_as_real
+            );
         }
         if (!any)
             return;
