@@ -43,12 +43,14 @@ namespace Transmog
             return;
         }
 
-        DMK::Logger::get_instance().warning("[preset] dye group '{}' not found in current game's "
-                                            "color table; dye mod dropped",
-                                            ch.group_name);
+        DMK::log().warning(
+            "[preset] dye group '{}' not found in current game's "
+            "color table; dye mod dropped",
+            ch.group_name
+        );
     }
 
-    // --- JSON serialization ---
+    // JSON serialization
 
     static json slot_to_json(const PresetSlot &s)
     {
@@ -72,7 +74,11 @@ namespace Transmog
                 // group_name (the data file's _stringKey) is the sole stable identifier we persist. group_hash is
                 // resolved from it at load and never written back.
                 json m{
-                    {"idx", idx}, {"group_name", ch.group_name}, {"r", ch.r}, {"g", ch.g}, {"b", ch.b},
+                    {"idx", idx},
+                    {"group_name", ch.group_name},
+                    {"r", ch.r},
+                    {"g", ch.g},
+                    {"b", ch.b},
                 };
                 if (ch.material_id != 0xFFFF)
                     m["material"] = ch.material_id;
@@ -136,15 +142,17 @@ namespace Transmog
         }
         else
         {
-            DMK::Logger::get_instance().warning("[preset] item name '{}' not in current catalog -- "
-                                                "slot disabled; re-pick in the overlay",
-                                                s.itemName);
+            DMK::log().warning(
+                "[preset] item name '{}' not in current catalog -- "
+                "slot disabled; re-pick in the overlay",
+                s.itemName
+            );
             s.active = false;
         }
         return s;
     }
 
-    // ---- ColorOverride swatch persistence helpers ------------------
+    // ColorOverride swatch persistence helpers
     //
     // Identity: `(submesh_name, token_name)` -- stable across sessions AND patches. Independent of `dye_mods`
     // (DyeRecordInject's ARMOR_MOD path).
@@ -366,10 +374,13 @@ namespace Transmog
                 }
                 if (!matched)
                 {
-                    DMK::Logger::get_instance().warning("[preset] '{}' has unknown slot key '{}' -- "
-                                                        "ignored (slot may have been renamed or "
-                                                        "removed)",
-                                                        p.name, it.key());
+                    DMK::log().warning(
+                        "[preset] '{}' has unknown slot key '{}' -- "
+                        "ignored (slot may have been renamed or "
+                        "removed)",
+                        p.name,
+                        it.key()
+                    );
                 }
             }
             preset_swatches_from_json(p, j);
@@ -380,9 +391,11 @@ namespace Transmog
         // form on next save.
         if (slotsJ.is_array())
         {
-            DMK::Logger::get_instance().info("[preset] '{}' loaded from legacy array format -- "
-                                             "next save will rewrite as keyed object",
-                                             p.name);
+            DMK::log().info(
+                "[preset] '{}' loaded from legacy array format -- "
+                "next save will rewrite as keyed object",
+                p.name
+            );
             for (std::size_t i = 0; i < k_slotCount && i < slotsJ.size(); ++i)
                 p.slots[i] = slot_from_json(slotsJ[i]);
         }
@@ -495,7 +508,7 @@ namespace Transmog
         return cp;
     }
 
-    // ---- Per-preset ColorOverride snapshot/restore helpers ---------
+    // Per-preset ColorOverride snapshot/restore helpers
     //
     // Used by every preset-switch / character-switch / load path to sync `Preset::swatch_overrides` +
     // `Preset::swatch_slot_enabled` with the live SwatchTable state. The pattern is:
@@ -586,12 +599,15 @@ namespace Transmog
         {
             if (p.swatch_palette[s].empty() && p.swatch_overrides[s].empty())
                 continue;
-            ColorOverride::SwatchTable::populate_from_persisted(static_cast<int>(s), p.swatch_palette[s],
-                                                                p.swatch_overrides[s]);
+            ColorOverride::SwatchTable::populate_from_persisted(
+                static_cast<int>(s),
+                p.swatch_palette[s],
+                p.swatch_overrides[s]
+            );
         }
     }
 
-    // --- PresetManager ---
+    // PresetManager
 
     PresetManager &PresetManager::instance()
     {
@@ -601,7 +617,7 @@ namespace Transmog
 
     bool PresetManager::load(const std::string &path)
     {
-        auto &logger = DMK::Logger::get_instance();
+        auto &logger = DMK::log();
         m_filePath = path;
 
         std::ifstream file(path);
@@ -641,8 +657,10 @@ namespace Transmog
 
             if (!ItemNameTable::instance().ready())
             {
-                logger.info("[preset] item catalog not ready at load time -- name "
-                            "resolution deferred until background scan completes");
+                logger.info(
+                    "[preset] item catalog not ready at load time -- name "
+                    "resolution deferred until background scan completes"
+                );
             }
         }
         catch (const json::exception &e)
@@ -687,7 +705,7 @@ namespace Transmog
 
     bool PresetManager::save(const std::string &path) const
     {
-        auto &logger = DMK::Logger::get_instance();
+        auto &logger = DMK::log();
 
         json root;
         // Schema v3: slots carry only itemName (stable identifier). itemId is resolved at runtime from the item
@@ -741,7 +759,7 @@ namespace Transmog
         return true;
     }
 
-    // --- Character management ---
+    // Character management
 
     std::vector<std::string> PresetManager::character_names() const
     {
@@ -790,9 +808,13 @@ namespace Transmog
 
     void PresetManager::set_active_character(const std::string &name)
     {
-        DMK::Logger::get_instance().info("[preset] set_active_character('{}') prev='{}' "
-                                         "(changed={})",
-                                         name, m_controlledCharacter, m_controlledCharacter != name);
+        DMK::log().info(
+            "[preset] set_active_character('{}') prev='{}' "
+            "(changed={})",
+            name,
+            m_controlledCharacter,
+            m_controlledCharacter != name
+        );
         m_controlledCharacter = name;
         ensure_character(name);
         if (!m_editingPinned)
@@ -875,7 +897,7 @@ namespace Transmog
         save();
     }
 
-    // --- Preset management ---
+    // Preset management
 
     int PresetManager::active_preset_index() const
     {
@@ -938,7 +960,7 @@ namespace Transmog
         std::string name = "Preset " + std::to_string(idx);
         cp.presets.push_back(capture_from_state(name));
         cp.activePreset = idx;
-        DMK::Logger::get_instance().info("Preset auto-created for dye/edit: '{}' (index {})", name, idx);
+        DMK::log().info("Preset auto-created for dye/edit: '{}' (index {})", name, idx);
         save();
         return active_preset_mut();
     }
@@ -988,7 +1010,7 @@ namespace Transmog
 
         apply_to_state();
 
-        DMK::Logger::get_instance().info("Preset appended: '{}' (index {}, armor slots ticked + none)", name, idx);
+        DMK::log().info("Preset appended: '{}' (index {}, armor slots ticked + none)", name, idx);
         save();
     }
 
@@ -1018,7 +1040,7 @@ namespace Transmog
 
         apply_to_state();
 
-        DMK::Logger::get_instance().info("Preset duplicated (clean clone): '{}' (index {})", name, idx);
+        DMK::log().info("Preset duplicated (clean clone): '{}' (index {})", name, idx);
         save();
     }
 
@@ -1055,7 +1077,7 @@ namespace Transmog
 
         apply_to_state();
 
-        DMK::Logger::get_instance().info("Preset saved as new (pending state): '{}' (index {})", name, idx);
+        DMK::log().info("Preset saved as new (pending state): '{}' (index {})", name, idx);
         save();
     }
 
@@ -1070,7 +1092,7 @@ namespace Transmog
             cp.presets.push_back(capture_from_state(name));
             cp.activePreset = idx;
 
-            DMK::Logger::get_instance().info("Preset replaced: '{}' (index {})", name, idx);
+            DMK::log().info("Preset replaced: '{}' (index {})", name, idx);
             save();
             return;
         }
@@ -1094,7 +1116,7 @@ namespace Transmog
         // the dirty flag is set.
         snapshot_live_swatches_into(*p, /*force=*/true);
 
-        DMK::Logger::get_instance().info("Preset replaced: '{}'", p->name);
+        DMK::log().info("Preset replaced: '{}'", p->name);
         save();
     }
 
@@ -1107,7 +1129,7 @@ namespace Transmog
         auto &cp = it->second;
         auto idx = std::clamp(cp.activePreset, 0, static_cast<int>(cp.presets.size()) - 1);
 
-        DMK::Logger::get_instance().info("Preset removed: '{}'", cp.presets[static_cast<std::size_t>(idx)].name);
+        DMK::log().info("Preset removed: '{}'", cp.presets[static_cast<std::size_t>(idx)].name);
 
         cp.presets.erase(cp.presets.begin() + idx);
 
@@ -1143,7 +1165,8 @@ namespace Transmog
         // snapshot would inadvertently auto-save unsaved swatch edits.
         auto &cp = it->second;
         snapshot_live_swatches_into(cp.presets[static_cast<std::size_t>(
-            std::clamp(cp.activePreset, 0, static_cast<int>(cp.presets.size()) - 1))]);
+            std::clamp(cp.activePreset, 0, static_cast<int>(cp.presets.size()) - 1)
+        )]);
 
         // Discard unsaved dye-mod edits before cycling.
         revert_active_dye_to_snapshot();
@@ -1153,9 +1176,12 @@ namespace Transmog
         capture_dye_snapshot();
         restore_swatches_from(cp.presets[static_cast<std::size_t>(cp.activePreset)]);
 
-        DMK::Logger::get_instance().info("Preset cycled to: '{}' ({}/{})",
-                                         cp.presets[static_cast<std::size_t>(cp.activePreset)].name,
-                                         cp.activePreset + 1, cp.presets.size());
+        DMK::log().info(
+            "Preset cycled to: '{}' ({}/{})",
+            cp.presets[static_cast<std::size_t>(cp.activePreset)].name,
+            cp.activePreset + 1,
+            cp.presets.size()
+        );
 
         // See set_active_preset for the rationale -- preset switch must force re-apply so dye state is rebuilt.
         for (std::size_t i = 0; i < k_slotCount; ++i)
@@ -1190,9 +1216,12 @@ namespace Transmog
         capture_dye_snapshot();
         restore_swatches_from(cp.presets[static_cast<std::size_t>(cp.activePreset)]);
 
-        DMK::Logger::get_instance().info("Preset cycled to: '{}' ({}/{})",
-                                         cp.presets[static_cast<std::size_t>(cp.activePreset)].name,
-                                         cp.activePreset + 1, cp.presets.size());
+        DMK::log().info(
+            "Preset cycled to: '{}' ({}/{})",
+            cp.presets[static_cast<std::size_t>(cp.activePreset)].name,
+            cp.activePreset + 1,
+            cp.presets.size()
+        );
 
         for (std::size_t i = 0; i < k_slotCount; ++i)
             if (slot_enabled(i))
@@ -1232,7 +1261,7 @@ namespace Transmog
             p->slots[i].dye = m_dyeSnapshot[i];
         }
         dye_dirty().store(false, std::memory_order_release);
-        DMK::Logger::get_instance().info("[preset] reverted unsaved dye edits on '{}'", p->name);
+        DMK::log().info("[preset] reverted unsaved dye edits on '{}'", p->name);
     }
 
     void PresetManager::set_active_preset(int index)
@@ -1244,9 +1273,13 @@ namespace Transmog
         if (it == m_characters.end() || it->second.presets.empty())
             return;
 
-        DMK::Logger::get_instance().info("[preset] set_active_preset(index={}) char='{}' "
-                                         "(prev_active={})",
-                                         index, editing, it->second.activePreset);
+        DMK::log().info(
+            "[preset] set_active_preset(index={}) char='{}' "
+            "(prev_active={})",
+            index,
+            editing,
+            it->second.activePreset
+        );
 
         auto &cp = it->second;
         // Snapshot OUTGOING ColorOverride swatches BEFORE the dye-mod revert. Order matters: the snapshot helper checks
@@ -1255,7 +1288,8 @@ namespace Transmog
         // snapshot would proceed and capture the user's unsaved swatch RGB into the outgoing preset -- making swatch
         // edits effectively auto-save on every preset switch.
         snapshot_live_swatches_into(cp.presets[static_cast<std::size_t>(
-            std::clamp(cp.activePreset, 0, static_cast<int>(cp.presets.size()) - 1))]);
+            std::clamp(cp.activePreset, 0, static_cast<int>(cp.presets.size()) - 1)
+        )]);
 
         // Now drop any unsaved dye-mod edits on the OUTGOING preset -- the new preset's dye state will be captured
         // fresh below.
@@ -1314,7 +1348,7 @@ namespace Transmog
         }
     }
 
-    // --- State bridge ---
+    // State bridge
 
     void PresetManager::apply_to_state() const
     {
@@ -1500,12 +1534,14 @@ namespace Transmog
 
     std::size_t PresetManager::reresolve_all_names()
     {
-        auto &logger = DMK::Logger::get_instance();
+        auto &logger = DMK::log();
         const auto &table = ItemNameTable::instance();
         if (!table.ready())
         {
-            logger.warning("[preset] reresolve_all_names called before catalog ready -- "
-                           "no-op");
+            logger.warning(
+                "[preset] reresolve_all_names called before catalog ready -- "
+                "no-op"
+            );
             return 0;
         }
 
@@ -1529,9 +1565,13 @@ namespace Transmog
                     }
                     else
                     {
-                        logger.warning("[preset] '{}' not in catalog -- disabling "
-                                       "(char='{}' preset='{}')",
-                                       slot.itemName, charName, preset.name);
+                        logger.warning(
+                            "[preset] '{}' not in catalog -- disabling "
+                            "(char='{}' preset='{}')",
+                            slot.itemName,
+                            charName,
+                            preset.name
+                        );
                         slot.itemId = 0;
                         slot.active = false;
                         ++disabled;
@@ -1544,7 +1584,7 @@ namespace Transmog
         return resolved;
     }
 
-    // --- Private ---
+    // Private
 
     CharacterPresets &PresetManager::ensure_character(const std::string &name)
     {

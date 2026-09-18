@@ -1,12 +1,13 @@
 #ifndef CDCORE_CONTROLLED_CHAR_HPP
 #define CDCORE_CONTROLLED_CHAR_HPP
 
+#include <DetourModKit/rtti.hpp>
+
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <string_view>
 
-// ---------------------------------------------------------------------------
 // Controlled-character resolver -- static-chain + body-mesh asset-path architecture.
 //
 // Identity is derived from a deterministic static-chain walk plus a body-mesh asset-path read on the CCOIA
@@ -53,14 +54,13 @@
 //   resolver walks the chain on every call (SEH-guarded). No hooks,
 //   no learning caches, no broadcast subscriptions. The player-base
 //   slot is AOB-resolved lazily on first use via
-//   CDCore::Anchors::k_clientActorManagerGlobalCandidates (3-tier
-//   cascade across distinct instructions in the publishing function).
+//   CDCore::Anchors::client_actor_manager_global() (a 2-row ladder
+//   across the only two instructions that reference the slot).
 //
 // Thread safety:
 //   - All functions are non-blocking and SEH-guarded; safe from any thread including the rendering thread.
 //   - The only mutable internal state is the world-generation counter plus the Kliff-CCOIA tracker that drives it, both
 //     atomics.
-// ---------------------------------------------------------------------------
 
 namespace CDCore
 {
@@ -97,8 +97,8 @@ namespace CDCore
     /**
      * @brief INI-tunable search radius (bytes, per side) for the rtti_dissect self-heal that recovers the
      *        manager->userActor offset after a patch shifts the struct layout.
-     * @details Returns the atomic a consumer binds with DMK::Config::register_atomic("Advanced", "SelfHealWindow",
-     *          ...). The heal reads it once per attempt (not a hot path) and clamps it to DMK::Rtti::MAX_HEAL_WINDOW; a
+     * @details Returns the atomic a consumer binds with DMK::config::bind("Advanced", "SelfHealWindow", ...). The
+     *          heal reads it once per attempt (not a hot path) and clamps it to DMK::rtti::MAX_HEAL_WINDOW; a
      *          non-positive value falls back to the built-in default. A wider window reaches a larger insertion before
      *          the userActor slot; this is a single independent landmark, but the manager references
      *          pa::ClientUserActor exactly once (the next pointer to it is megabytes away), so the 0x200 default is
@@ -343,12 +343,16 @@ namespace CDCore
      *                      (CCOIA + 0x68 typically).
      * @param rttiName      MSVC-mangled type-descriptor name, e.g.
      *                      ".?AVClientCharacterControlActorComponent@pa@@".
-     * @param vtableCache   Caller-owned cache slot. Must be initialised
-     *                      to 0 and dedicated to one @p rttiName.
+     * @param vtableCache   Caller-owned cache, dedicated to one @p rttiName. The generation-checked cache drops its
+     *                      snapshot when the image generation changes, so a dev-build module reload cannot serve a
+     *                      stale vtable from the previous generation.
      * @returns Slot pointer (the component instance) or 0.
      */
-    [[nodiscard]] std::uintptr_t find_component_in_table(std::uintptr_t p1, std::string_view rttiName,
-                                                         std::atomic<std::uintptr_t> &vtableCache) noexcept;
+    [[nodiscard]] std::uintptr_t find_component_in_table(
+        std::uintptr_t p1,
+        std::string_view rttiName,
+        DetourModKit::rtti::PointerTableCache &vtableCache
+    ) noexcept;
 
     /**
      * @brief Locate a component on the actor whose ClientEquipSlotActorComponent is @p equipSlot.
@@ -360,8 +364,11 @@ namespace CDCore
      * @param rttiName  MSVC-mangled type-descriptor name.
      * @param vtableCache Caller-owned cache slot per rttiName.
      */
-    [[nodiscard]] std::uintptr_t find_component_for_equipslot(std::uintptr_t equipSlot, std::string_view rttiName,
-                                                              std::atomic<std::uintptr_t> &vtableCache) noexcept;
+    [[nodiscard]] std::uintptr_t find_component_for_equipslot(
+        std::uintptr_t equipSlot,
+        std::string_view rttiName,
+        DetourModKit::rtti::PointerTableCache &vtableCache
+    ) noexcept;
 
 } // namespace CDCore
 

@@ -12,7 +12,7 @@ namespace Transmog
 {
     std::string runtime_dir_utf8()
     {
-        std::wstring dirW = DMK::Filesystem::get_runtime_directory();
+        std::wstring dirW = DMK::filesystem::get_runtime_directory();
         if (dirW.empty())
             return {};
         const int n =
@@ -228,7 +228,7 @@ namespace Transmog
         s_lastAppliedCarrierIds.fill(0);
     }
 
-    // --- Protagonist body-ownership table ---
+    // Protagonist body-ownership table
     //
     // One producer (the load-detect worker) and many readers (engine threads inside the socket-build detour). The
     // producer owns the expensive part, the actor-array walk, so a reader never pays for it.

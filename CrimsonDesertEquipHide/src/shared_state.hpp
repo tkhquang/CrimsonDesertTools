@@ -1,12 +1,13 @@
 #pragma once
 
 #include "categories.hpp"
-
 #include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <mutex>
 #include <unordered_map>
+
+#include <DetourModKit/memory.hpp>
 
 namespace EquipHide
 {
@@ -94,37 +95,40 @@ namespace EquipHide
     /** @brief Flag set when vis-byte writes need to be flushed. */
     std::atomic<bool> &needs_direct_write();
 
-    // --- Feature flags ---
+    // Feature flags
     std::atomic<bool> &flag_bald_fix();
     std::atomic<bool> &flag_gliding_fix();
     std::atomic<bool> &flag_fallback_mode();
     std::atomic<bool> &flag_independent_toggle();
     std::atomic<bool> &flag_cascade_fix();
 
-    // --- Background thread control ---
+    // Background thread control
     std::atomic<bool> &shutdown_requested();
     std::atomic<bool> &deferred_scan_pending();
     std::atomic<bool> &lazy_probe_pending();
     std::atomic<int64_t> &lazy_probe_signal();
 
-    // --- Hot-path utilities ---
+    // Hot-path utilities
 
     inline int64_t steady_ms() noexcept
     {
         return std::chrono::duration_cast<std::chrono::milliseconds>(
-                   std::chrono::steady_clock::now().time_since_epoch())
+                   std::chrono::steady_clock::now().time_since_epoch()
+        )
             .count();
     }
 
     /**
      * @brief Unsafe pointer read -- use ONLY inside SEH-protected hot paths.
-     * @details Forwards to DMKMemory::read_ptr_unchecked, which applies the same low-address result guard plus a
-     *          source-address guard and an aliasing-safe memcpy read. No OS-level fault protection: the caller must
-     *          keep this inside an SEH frame for stale pointers.
+     * @details Forwards to DetourModKit::memory::unchecked::read, the validation-free fast path. A Debug build
+     *          asserts the source is readable; a Release build performs a bare copy. No OS-level fault protection: the
+     *          caller must keep this inside an SEH frame for stale pointers, and must screen the loaded value itself.
      */
     inline uintptr_t read_ptr_unsafe(uintptr_t base, ptrdiff_t off) noexcept
     {
-        return DMKMemory::read_ptr_unchecked(base, off);
+        return DMK::memory::unchecked::read<std::uintptr_t>(
+            DMK::Address{base}.offset(static_cast<std::ptrdiff_t>(off))
+        );
     }
 
     /** @brief Returns true if the part at the given hash pointer is hidden by any category. */

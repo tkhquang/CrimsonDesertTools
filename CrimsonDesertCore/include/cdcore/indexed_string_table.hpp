@@ -6,7 +6,6 @@
 #include <string>
 #include <unordered_map>
 
-// ---------------------------------------------------------------------------
 // IndexedStringA table scanner.
 //
 // Table layout (resolved from mapLookupFunc prologue `mov rax, [rip+disp]`):
@@ -18,7 +17,6 @@
 // The scanner locates the `48 8B 05 <disp32>` instruction inside the first 0x40 bytes of mapLookupFunc (patch-proof
 // against compiler shuffles), walks the chain, then enumerates the configured hash range end-to-end in a single pass
 // and returns every entry whose string starts with cfg.prefix.
-// ---------------------------------------------------------------------------
 
 namespace CDCore
 {

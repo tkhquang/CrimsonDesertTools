@@ -3,7 +3,9 @@
 #include "categories.hpp"
 #include "shared_state.hpp"
 
-#include <DetourModKit.hpp>
+#include <DetourModKit/logger.hpp>
+#include <DetourModKit/memory.hpp>
+#include <DetourModKit/scan.hpp>
 
 #include <Windows.h>
 
@@ -59,30 +61,33 @@ namespace EquipHide
             constexpr std::size_t k_nominal = 0x20;
             try
             {
-                DMK::Scanner::CodeConstant cc{};
-                cc.site = k_hookSiteCandidates;
-                cc.kind = DMK::Scanner::OperandKind::MemoryDisplacement;
+                DMK::scan::CodeConstant cc{};
+                cc.site = k_equipVisCheckCandidates;
+                cc.kind = DMK::scan::OperandKind::MemoryDisplacement;
                 cc.operand_index = 1; // movzx eax, byte [r12+disp]: the memory operand
                 cc.nominal = static_cast<std::int64_t>(k_nominal);
                 cc.has_nominal = true;
-                const auto decoded = DMK::Scanner::read_code_constant(cc);
+                const auto decoded = DMK::scan::read_code_constant(cc);
                 if (decoded.has_value() && *decoded >= 0x10 && *decoded <= 0x40)
                 {
                     const auto off = static_cast<std::size_t>(*decoded);
                     // A live value != nominal means the PartInOut layout drifted on a patch; the decode self-healed it,
                     // but surface it as a WARNING so the offset change is easy to spot in the log.
                     if (off != k_nominal)
-                        DMK::Logger::get_instance().warning(
+                        DMK::log().warning(
                             "PartInOut vis-byte offset DRIFTED: live={:#x} nominal={:#x} -- self-healed "
                             "(engine layout changed)",
-                            off, k_nominal);
+                            off,
+                            k_nominal
+                        );
                     else
-                        DMK::Logger::get_instance().info(
-                            "PartInOut vis-byte offset decoded live: {:#x} (matches nominal)", off);
+                        DMK::log().info("PartInOut vis-byte offset decoded live: {:#x} (matches nominal)", off);
                     return off;
                 }
-                DMK::Logger::get_instance().warning(
-                    "PartInOut vis-byte offset live-decode out of range/unavailable; using nominal {:#x}", k_nominal);
+                DMK::log().warning(
+                    "PartInOut vis-byte offset live-decode out of range/unavailable; using nominal {:#x}",
+                    k_nominal
+                );
             }
             catch (...)
             {
@@ -102,21 +107,22 @@ namespace EquipHide
         // bucket array [+0x10], entry-pointer array [+0x18]. Reject anything that is not a well-formed tiny
         // per-character hashtable so a stale/reallocated descriptor never reaches lookup()/insert(). Mirrors
         // armor_injection.cpp.
-        const auto count = DMKMemory::seh_read<std::uint32_t>(mapBase);
-        const auto entryCount = DMKMemory::seh_read<std::uint32_t>(mapBase + 4);
-        const auto cap = DMKMemory::seh_read<std::uint32_t>(mapBase + 8);
-        const auto buckets = DMKMemory::seh_read<std::uintptr_t>(mapBase + 0x10);
-        const auto entryPtrs = DMKMemory::seh_read<std::uintptr_t>(mapBase + 0x18);
+        const auto count = DMK::memory::read<std::uint32_t>(DMK::Address{mapBase});
+        const auto entryCount = DMK::memory::read<std::uint32_t>(DMK::Address{mapBase + 4});
+        const auto cap = DMK::memory::read<std::uint32_t>(DMK::Address{mapBase + 8});
+        const auto buckets = DMK::memory::read<std::uintptr_t>(DMK::Address{mapBase + 0x10});
+        const auto entryPtrs = DMK::memory::read<std::uintptr_t>(DMK::Address{mapBase + 0x18});
         if (!count || !entryCount || !cap || !buckets || !entryPtrs)
             return false;
         if (*count == 0 || *count > 0x400)
             return false;
         if (*cap == 0 || *cap > 0x10000 || *entryCount > *cap)
             return false;
-        if (!DMKMemory::plausible_userspace_ptr(*buckets) || !DMKMemory::plausible_userspace_ptr(*entryPtrs))
+        if (!DMK::memory::is_plausible_ptr(DMK::Address{*buckets}) ||
+            !DMK::memory::is_plausible_ptr(DMK::Address{*entryPtrs}))
             return false;
-        return DMKMemory::seh_read<std::uint32_t>(*buckets).has_value() &&
-               DMKMemory::seh_read<std::uintptr_t>(*entryPtrs).has_value();
+        return DMK::memory::read<std::uint32_t>(DMK::Address{*buckets}).has_value() &&
+               DMK::memory::read<std::uintptr_t>(DMK::Address{*entryPtrs}).has_value();
     }
 
     /* Implementation body extracted out of the SEH-wrapped public entry point so MSVC's C2712 ("Cannot use __try in
@@ -127,7 +133,7 @@ namespace EquipHide
     static void apply_direct_vis_write_impl() noexcept
     {
         auto &addrs = resolved_addrs();
-        auto &logger = DMK::Logger::get_instance();
+        auto &logger = DMK::log();
         auto lookup = reinterpret_cast<MapLookupFn>(addrs.mapLookup);
         auto &ps = player_state();
         auto &origVis = original_vis_map();
@@ -148,26 +154,41 @@ namespace EquipHide
 
             // Resolve the part-info descriptor and its part-visibility map. Offsets and the re-verification recipe
             // live on the k_visCtrl* constants in visibility_write.hpp; armor_injection.cpp walks the same three.
-            // seh_read_chain dereferences the terminal link, so `*desc` (the optional unwrap) IS the descriptor
-            // pointer.
-            auto desc = DMKMemory::seh_read_chain<std::uintptr_t>(vc, {k_visCtrlToCccOffset, k_cccToDescriptorOffset});
+            // The walk stops at the descriptor SLOT, so the trailing read is what yields the descriptor pointer
+            // itself.
+            const auto desc = DMK::memory::walk(
+                                  DMK::Address{vc},
+                                  std::array<std::ptrdiff_t, 2>{k_visCtrlToCccOffset, k_cccToDescriptorOffset}
+            )
+                                  .and_then([](DMK::Address leaf) { return DMK::memory::read<std::uintptr_t>(leaf); });
             if (!desc)
             {
-                logger.trace("DirectWrite [{}]: vc=0x{:X} descriptor=NULL (+{:#x} -> +{:#x})", i, vc,
-                             k_visCtrlToCccOffset, k_cccToDescriptorOffset);
+                logger.trace(
+                    "DirectWrite [{}]: vc=0x{:X} descriptor=NULL (+{:#x} -> +{:#x})",
+                    i,
+                    vc,
+                    k_visCtrlToCccOffset,
+                    k_cccToDescriptorOffset
+                );
                 continue;
             }
             auto mapBase = *desc + k_descriptorToPartVisMapOffset;
 
-            // A drifted chain offset can yield a non-faulting garbage mapBase (the SEH chain read only traps an
+            // A drifted chain offset can yield a non-faulting garbage mapBase (the guarded walk only traps an
             // actual fault, not a wrong-but-mapped pointer). Reject an implausible base so a future layout shift
             // skips just this vis-controller instead of letting the per-part lookup walk a wrong map -- or fault and
             // abort the whole pass for every character.
-            if (!DMKMemory::plausible_userspace_ptr(mapBase))
+            if (!DMK::memory::is_plausible_ptr(DMK::Address{mapBase}))
             {
-                logger.trace("DirectWrite [{}]: vc=0x{:X} implausible mapBase=0x{:X} (+{:#x} -> +{:#x} -> +{:#x})", i,
-                             vc, mapBase, k_visCtrlToCccOffset, k_cccToDescriptorOffset,
-                             k_descriptorToPartVisMapOffset);
+                logger.trace(
+                    "DirectWrite [{}]: vc=0x{:X} implausible mapBase=0x{:X} (+{:#x} -> +{:#x} -> +{:#x})",
+                    i,
+                    vc,
+                    mapBase,
+                    k_visCtrlToCccOffset,
+                    k_cccToDescriptorOffset,
+                    k_descriptorToPartVisMapOffset
+                );
                 continue;
             }
 
@@ -175,9 +196,13 @@ namespace EquipHide
             // gate yet point at a non-map; walking it in lookup() below faults. Skip it.
             if (!part_vis_map_looks_valid(mapBase))
             {
-                logger.trace("DirectWrite [{}]: vc=0x{:X} mapBase=0x{:X} not a valid part-vis map "
-                             "(stale/reallocated descriptor) -- skipping",
-                             i, vc, mapBase);
+                logger.trace(
+                    "DirectWrite [{}]: vc=0x{:X} mapBase=0x{:X} not a valid part-vis map "
+                    "(stale/reallocated descriptor) -- skipping",
+                    i,
+                    vc,
+                    mapBase
+                );
                 continue;
             }
 
@@ -258,8 +283,13 @@ namespace EquipHide
                 if (!v_hidden.empty())
                     logger.trace("  [{}] hidden char_idx={} ({}): {}", i, charIdx, v_hidden.size(), join_hex(v_hidden));
                 if (!v_forceShown.empty())
-                    logger.trace("  [{}] force-shown char_idx={} ({}): {}", i, charIdx, v_forceShown.size(),
-                                 join_hex(v_forceShown));
+                    logger.trace(
+                        "  [{}] force-shown char_idx={} ({}): {}",
+                        i,
+                        charIdx,
+                        v_forceShown.size(),
+                        join_hex(v_forceShown)
+                    );
                 if (!v_restored.empty())
                 {
                     std::string s;
@@ -341,9 +371,11 @@ namespace EquipHide
             ++orphanRestored;
         }
         if (orphanRestored > 0)
-            logger.debug("DirectWrite: {} orphan vis bytes restored "
-                         "(category change for active vis ctrls)",
-                         orphanRestored);
+            logger.debug(
+                "DirectWrite: {} orphan vis bytes restored "
+                "(category change for active vis ctrls)",
+                orphanRestored
+            );
         restoredCount += orphanRestored;
 
         logger.info("DirectWrite: {} protagonists, {} hidden, {} restored", n, hiddenCount, restoredCount);
@@ -368,7 +400,7 @@ namespace EquipHide
                toggle that triggered this call would be silently dropped and the user-visible vis byte would not flip.
              */
             needs_direct_write().store(true, std::memory_order_release);
-            DMK::Logger::get_instance().trace("DirectWrite: try_lock failed, deferred to mid-hook");
+            DMK::log().trace("DirectWrite: try_lock failed, deferred to mid-hook");
             return;
         }
 
@@ -384,7 +416,7 @@ namespace EquipHide
             {
                 static std::atomic<bool> s_crashLogged{false};
                 if (!s_crashLogged.exchange(true, std::memory_order_relaxed))
-                    DMK::Logger::get_instance().warning("DirectWrite: SEH caught crash");
+                    DMK::log().warning("DirectWrite: SEH caught crash");
             }
         }
         __finally
@@ -408,7 +440,7 @@ namespace EquipHide
         }
         origVis.clear();
 
-        DMK::Logger::get_instance().debug("Cleanup: {} vis bytes restored", restoredCount);
+        DMK::log().debug("Cleanup: {} vis bytes restored", restoredCount);
     }
 
     void cleanup_vis_bytes() noexcept

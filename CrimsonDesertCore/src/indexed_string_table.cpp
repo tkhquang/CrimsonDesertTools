@@ -1,6 +1,8 @@
 #include <cdcore/indexed_string_table.hpp>
 
-#include <DetourModKit.hpp>
+#include <DetourModKit/logger.hpp>
+#include <DetourModKit/memory.hpp>
+#include <DetourModKit/scan.hpp>
 
 #include <excpt.h>
 
@@ -17,6 +19,9 @@ namespace CDCore
     /** @brief Byte stride between consecutive table entries. */
     static constexpr std::uintptr_t k_entryStride = 16;
 
+    /** @brief Prologue window searched for the `mov rax, [rip+disp32]` that names the IndexedStringA global. */
+    static constexpr std::size_t k_ripAnchorSearchBytes = 0x40;
+
     /**
      * @brief Copy entry[hash]'s string into @p buf, but only when it starts with @p prefix.
      *
@@ -28,8 +33,14 @@ namespace CDCore
      * @return Copied length, or 0 for an empty slot, a prefix mismatch, or a faulting read. Callers cannot
      *         distinguish the three and do not need to.
      */
-    static std::size_t read_table_entry(std::uintptr_t tableArray, std::uint32_t hash, const char *prefix,
-                                        std::size_t prefixLen, char *buf, std::size_t bufSize) noexcept
+    static std::size_t read_table_entry(
+        std::uintptr_t tableArray,
+        std::uint32_t hash,
+        const char *prefix,
+        std::size_t prefixLen,
+        char *buf,
+        std::size_t bufSize
+    ) noexcept
     {
         __try
         {
@@ -64,42 +75,41 @@ namespace CDCore
         }
     }
 
-    std::unordered_map<std::string, std::uint32_t> scan_indexed_string_table(std::uintptr_t mapLookupFunc,
-                                                                             const IndexedStringScanConfig &cfg)
+    std::unordered_map<std::string, std::uint32_t>
+    scan_indexed_string_table(std::uintptr_t mapLookupFunc, const IndexedStringScanConfig &cfg)
     {
-        auto &logger = DMK::Logger::get_instance();
+        auto &logger = DMK::log();
         std::unordered_map<std::string, std::uint32_t> nameToHash;
 
         if (!mapLookupFunc)
             return nameToHash;
 
-        // Locate `48 8B 05 <disp32>` inside the first 0x40 bytes of mapLookupFunc. Bounded scan -- global uniqueness
-        // irrelevant.
-        const auto funcStart = reinterpret_cast<const std::byte *>(mapLookupFunc);
-        auto ripAob = DMK::Scanner::parse_aob("48 8B 05 ?? ?? ?? ??");
-        if (!ripAob)
+        // Locate `mov rax, [rip+disp32]` inside the first 0x40 bytes of mapLookupFunc and resolve its target. The
+        // resolver skips a decoy occurrence whose displacement lands on an implausible or unreadable address and
+        // reports the last concrete decode failure, so a compiler shuffle that moves the real instruction later in the
+        // prologue still resolves. Global uniqueness is irrelevant here: the search window is one known function.
+        const auto resolved = DMK::scan::find_and_resolve_rip_relative(
+            DMK::Region{DMK::Address{mapLookupFunc}, k_ripAnchorSearchBytes},
+            DMK::scan::PREFIX_MOV_RAX_RIP,
+            7
+        );
+        if (!resolved)
         {
-            logger.warning("{}: parse_aob failed for mapLookup rip-anchor", cfg.logLabel);
+            logger.warning(
+                "{}: `48 8B 05` rip-instruction did not resolve in the first 0x{:X} bytes of "
+                "mapLookupFunc (0x{:X}): {}",
+                cfg.logLabel,
+                k_ripAnchorSearchBytes,
+                mapLookupFunc,
+                resolved.error().message()
+            );
             return nameToHash;
         }
-        const auto *ripMatch = DMK::Scanner::find_pattern(funcStart, 0x40, *ripAob);
-        if (!ripMatch)
-        {
-            logger.warning("{}: `48 8B 05` rip-instruction not found in first 0x40 "
-                           "bytes of mapLookupFunc (0x{:X})",
-                           cfg.logLabel, mapLookupFunc);
-            return nameToHash;
-        }
-        const auto ripInstr = reinterpret_cast<std::uintptr_t>(ripMatch);
-
-        std::int32_t disp = 0;
-        std::memcpy(&disp, reinterpret_cast<const void *>(ripInstr + 3), sizeof(std::int32_t));
-        const auto instrEnd = ripInstr + 7;
-        const auto globalPtrAddr = static_cast<std::uintptr_t>(static_cast<std::int64_t>(instrEnd) + disp);
+        const auto globalPtrAddr = resolved->raw();
 
         // globalPtrAddr is a RIP-resolved module slot; guard the read so a build whose layout shifted it outside
         // committed memory yields 0 (handled as "not yet initialized") rather than faulting.
-        const auto globalPtr = DMKMemory::seh_read<std::uintptr_t>(globalPtrAddr).value_or(0);
+        const auto globalPtr = DMK::memory::read<std::uintptr_t>(DMK::Address{globalPtrAddr}).value_or(0);
         if (globalPtr < k_minStringPtr)
         {
             logger.trace("{}: global pointer not yet initialized (0x{:X})", cfg.logLabel, globalPtr);
@@ -108,17 +118,28 @@ namespace CDCore
 
         // globalPtr is a live game heap pointer that can tear or relocate across a world reload; a faulting read yields
         // 0 and routes to the "offset moved" warning below instead of crashing the caller.
-        const auto tableArray = DMKMemory::seh_read<std::uintptr_t>(globalPtr + cfg.tableArrayOffset).value_or(0);
+        const auto tableArray =
+            DMK::memory::read<std::uintptr_t>(DMK::Address{globalPtr + cfg.tableArrayOffset}).value_or(0);
         if (tableArray < k_minStringPtr)
         {
-            logger.warning("{}: tableArray is null/invalid (0x{:X}) -- offset 0x{:X} "
-                           "inside globalPtr may have moved",
-                           cfg.logLabel, tableArray, static_cast<std::int64_t>(cfg.tableArrayOffset));
+            logger.warning(
+                "{}: tableArray is null/invalid (0x{:X}) -- offset 0x{:X} "
+                "inside globalPtr may have moved",
+                cfg.logLabel,
+                tableArray,
+                static_cast<std::int64_t>(cfg.tableArrayOffset)
+            );
             return nameToHash;
         }
 
-        logger.trace("{}: globalPtr=0x{:X} tableArray=0x{:X} range=0x{:X}-0x{:X}", cfg.logLabel, globalPtr, tableArray,
-                     cfg.tableScanMin, cfg.tableScanMax);
+        logger.trace(
+            "{}: globalPtr=0x{:X} tableArray=0x{:X} range=0x{:X}-0x{:X}",
+            cfg.logLabel,
+            globalPtr,
+            tableArray,
+            cfg.tableScanMin,
+            cfg.tableScanMax
+        );
 
         const char *prefix = cfg.prefix ? cfg.prefix : "";
         const std::size_t prefixLen = std::strlen(prefix);
@@ -142,19 +163,31 @@ namespace CDCore
 
         if (entries == 0)
         {
-            logger.warning("{}: 0 entries matching prefix '{}' found in range "
-                           "0x{:X}..0x{:X} -- table not yet populated or prefix "
-                           "missing from this build; deferring feature",
-                           cfg.logLabel, prefix, cfg.tableScanMin, cfg.tableScanMax);
+            logger.warning(
+                "{}: 0 entries matching prefix '{}' found in range "
+                "0x{:X}..0x{:X} -- table not yet populated or prefix "
+                "missing from this build; deferring feature",
+                cfg.logLabel,
+                prefix,
+                cfg.tableScanMin,
+                cfg.tableScanMax
+            );
         }
         else
         {
             // Per-scan summary stays at TRACE so the deferred-scan poll path (called every 2s until table stability)
             // does not flood the INFO stream. Call sites that want a one-shot INFO line emit their own at init-time
             // decision points.
-            logger.trace("{}: {} entries for prefix '{}' in range 0x{:X}..0x{:X} "
-                         "in {}ms",
-                         cfg.logLabel, entries, prefix, cfg.tableScanMin, cfg.tableScanMax, ms);
+            logger.trace(
+                "{}: {} entries for prefix '{}' in range 0x{:X}..0x{:X} "
+                "in {}ms",
+                cfg.logLabel,
+                entries,
+                prefix,
+                cfg.tableScanMin,
+                cfg.tableScanMax,
+                ms
+            );
         }
 
         return nameToHash;

@@ -213,9 +213,11 @@ namespace Transmog
                 rl_dl->AddTriangleFilled(p_tip, p_in, p_out, col);
             }
             if (reloadHovered)
-                ui_tooltip("Re-tick this slot once so color\n"
-                           "overrides commit. Use if a colour\n"
-                           "edit didn't take.");
+                ui_tooltip(
+                    "Re-tick this slot once so color\n"
+                    "overrides commit. Use if a colour\n"
+                    "edit didn't take."
+                );
             if (reloadClicked && !Transmog::ColorOverride::Reinit::any_slot_reinit_active())
             {
                 Transmog::flag_enabled().store(true, std::memory_order_relaxed);
@@ -260,9 +262,15 @@ namespace Transmog
             const char *label; // UI-only display text
         };
         static constexpr GroupRow kGroupRows[] = {
-            {"Her_Color_Group_I", "Red"},  {"Tom_Color_Group_I", "Orange"}, {"Por_Color_Group_I", "Yellow"},
-            {"Bar_Color_Group_I", "Lime"}, {"Cal_Color_Group_I", "Green"},  {"Kwe_Color_Group_I", "Teal"},
-            {"Del_Color_Group_I", "Cyan"}, {"Dem_Color_Group_III", "Blue"}, {"Dem_Color_Group_II", "Magenta"},
+            {"Her_Color_Group_I", "Red"},
+            {"Tom_Color_Group_I", "Orange"},
+            {"Por_Color_Group_I", "Yellow"},
+            {"Bar_Color_Group_I", "Lime"},
+            {"Cal_Color_Group_I", "Green"},
+            {"Kwe_Color_Group_I", "Teal"},
+            {"Del_Color_Group_I", "Cyan"},
+            {"Dem_Color_Group_III", "Blue"},
+            {"Dem_Color_Group_II", "Magenta"},
             {"Dem_Color_Group_I", "Rose"},
         };
         constexpr std::uint32_t kSampleShadeIdx = 18;
@@ -376,8 +384,15 @@ namespace Transmog
                         if (ImGui::IsItemHovered())
                         {
                             char tip[64];
-                            std::snprintf(tip, sizeof(tip), "shade %u  RGB=(%u,%u,%u)", s, (bgra >> 16) & 0xFF,
-                                          (bgra >> 8) & 0xFF, bgra & 0xFF);
+                            std::snprintf(
+                                tip,
+                                sizeof(tip),
+                                "shade %u  RGB=(%u,%u,%u)",
+                                s,
+                                (bgra >> 16) & 0xFF,
+                                (bgra >> 8) & 0xFF,
+                                bgra & 0xFF
+                            );
                             ui_tooltip(tip);
                         }
                     }
@@ -408,8 +423,15 @@ namespace Transmog
                         if (ImGui::IsItemHovered())
                         {
                             char tip[64];
-                            std::snprintf(tip, sizeof(tip), "shade %u  RGB=(%u,%u,%u)", s, (bgra >> 16) & 0xFF,
-                                          (bgra >> 8) & 0xFF, bgra & 0xFF);
+                            std::snprintf(
+                                tip,
+                                sizeof(tip),
+                                "shade %u  RGB=(%u,%u,%u)",
+                                s,
+                                (bgra >> 16) & 0xFF,
+                                (bgra >> 8) & 0xFF,
+                                bgra & 0xFF
+                            );
                             ui_tooltip(tip);
                         }
                         ++col;
@@ -440,7 +462,7 @@ namespace Transmog
                 reapply_now();
             }
 
-            // --- Material picker (template u16 at +4..+5) ---
+            // Material picker (template u16 at +4..+5)
             //
             // The dye record's u16 at +4..+5 is a TEMPLATE INDEX (1..10) into partprefabdyetexturepalleteinfo. Each
             // template specifies texture variants per cat_code slot (cat1=cloth, cat2=secondary fabric, cat3=metal).
@@ -478,11 +500,24 @@ namespace Transmog
                         {
                             const auto &slot = t->slots[s];
                             if (slot.alias)
-                                n += std::snprintf(tip + n, sizeof(tip) - n, "  cat%u %s/%s -> %u\n", slot.cat_code,
-                                                   slot.label, slot.alias, slot.variant);
+                                n += std::snprintf(
+                                    tip + n,
+                                    sizeof(tip) - n,
+                                    "  cat%u %s/%s -> %u\n",
+                                    slot.cat_code,
+                                    slot.label,
+                                    slot.alias,
+                                    slot.variant
+                                );
                             else
-                                n += std::snprintf(tip + n, sizeof(tip) - n, "  cat%u %s -> %u\n", slot.cat_code,
-                                                   slot.label, slot.variant);
+                                n += std::snprintf(
+                                    tip + n,
+                                    sizeof(tip) - n,
+                                    "  cat%u %s -> %u\n",
+                                    slot.cat_code,
+                                    slot.label,
+                                    slot.variant
+                                );
                         }
                         ui_tooltip(tip);
                     }
@@ -509,8 +544,10 @@ namespace Transmog
                 if (selected)
                     ImGui::PopStyleColor();
                 if (ImGui::IsItemHovered())
-                    ui_tooltip("0xFFFF -- engine picks the "
-                               "natural variant for this channel.");
+                    ui_tooltip(
+                        "0xFFFF -- engine picks the "
+                        "natural variant for this channel."
+                    );
             }
             // Render the label on the left so the trailing ImGui auto-label does not clip on the popup's right edge in
             // the standalone overlay.
@@ -518,8 +555,13 @@ namespace Transmog
             ui_text("Raw u16:");
             ImGui::SameLine();
             ImGui::SetNextItemWidth(140.0f);
-            if (ImGui::InputInt("##matRaw", &rawMat, 1, 16,
-                                ImGuiInputTextFlags_CharsHexadecimal | ImGuiInputTextFlags_EnterReturnsTrue))
+            if (ImGui::InputInt(
+                    "##matRaw",
+                    &rawMat,
+                    1,
+                    16,
+                    ImGuiInputTextFlags_CharsHexadecimal | ImGuiInputTextFlags_EnterReturnsTrue
+                ))
             {
                 if (rawMat < 0)
                     rawMat = 0;
@@ -560,7 +602,7 @@ namespace Transmog
                 s_dyePopupJumpToDye[slot] = false;
                 if (ImGui::BeginTabItem("Dye", nullptr, dyeTabFlags))
                 {
-                    // --- Top action bar ---
+                    // Top action bar
                     if (ImGui::Button("Mirror Mod 0 to all", ImVec2(0, 0)))
                     {
                         if (slotDye)
@@ -590,15 +632,17 @@ namespace Transmog
                             reapply_now();
                     }
                     if (ImGui::IsItemHovered())
-                        ui_tooltip("Re-read this slot's dye from the engine's\n"
-                                   "current auth table and overwrite the\n"
-                                   "preset's saved channels. Use after you\n"
-                                   "apply dye at an in-game dye station and\n"
-                                   "want those bytes saved into this preset\n"
-                                   "without re-running Capture Outfit.\n"
-                                   "\n"
-                                   "No-op if the slot has no live auth-table\n"
-                                   "entry (nothing equipped) or no dye records.");
+                        ui_tooltip(
+                            "Re-read this slot's dye from the engine's\n"
+                            "current auth table and overwrite the\n"
+                            "preset's saved channels. Use after you\n"
+                            "apply dye at an in-game dye station and\n"
+                            "want those bytes saved into this preset\n"
+                            "without re-running Capture Outfit.\n"
+                            "\n"
+                            "No-op if the slot has no live auth-table\n"
+                            "entry (nothing equipped) or no dye records."
+                        );
                     ImGui::SameLine();
                     if (ImGui::Button("Close", ImVec2(0, 0)))
                         ImGui::CloseCurrentPopup();
@@ -616,22 +660,26 @@ namespace Transmog
                             reapply_now();
                         }
                         if (ImGui::IsItemHovered())
-                            ui_tooltip("Sparse (default, matches the merchant dye UI):\n"
-                                       "emit only the channels you set; engine paints\n"
-                                       "the rest with its own defaults.\n"
-                                       "\n"
-                                       "Turn off for cross-class fake transmog where\n"
-                                       "every channel needs your colour to suppress\n"
-                                       "the carrier's default palette.");
+                            ui_tooltip(
+                                "Sparse (default, matches the merchant dye UI):\n"
+                                "emit only the channels you set; engine paints\n"
+                                "the rest with its own defaults.\n"
+                                "\n"
+                                "Turn off for cross-class fake transmog where\n"
+                                "every channel needs your colour to suppress\n"
+                                "the carrier's default palette."
+                            );
                     }
 
-                    ui_text_disabled("Tip: items typically use mods (dye slots) 1-12; "
-                                     "rest no-ops.\n"
-                                     "This mod cannot tell which item is dyeable or "
-                                     "has many slots.");
+                    ui_text_disabled(
+                        "Tip: items typically use mods (dye slots) 1-12; "
+                        "rest no-ops.\n"
+                        "This mod cannot tell which item is dyeable or "
+                        "has many slots."
+                    );
                     ImGui::Separator();
 
-                    // --- 16 mod rows, each inline-expandable ---
+                    // 16 mod rows, each inline-expandable
                     if (slotDye)
                     {
                         for (std::size_t k = 0; k < slotDye->size(); ++k)
@@ -697,7 +745,7 @@ namespace Transmog
                     ImGui::EndTabItem();
                 } // end Dye tab
 
-                // --- Color Override tab ---
+                // Color Override tab
                 // Post-binding matInst colour injection. Different pipeline from dye records but presented in the same
                 // popup as a unified per-slot picker. On first activation per popup session, auto-fires a single-pass
                 // reinit so the swatch grid is populated without the user clicking Re-init -- one pass is enough; the

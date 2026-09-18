@@ -8,7 +8,7 @@
 
 namespace Transmog
 {
-    // --- Resolved AOB addresses ---
+    // Resolved AOB addresses
 
     struct ResolvedAddresses
     {
@@ -22,7 +22,7 @@ namespace Transmog
 
     ResolvedAddresses &resolved_addrs();
 
-    // --- Transmog slot definitions ---
+    // Transmog slot definitions
 
     // Order is preset-format-stable: existing slots 0..4 (Helm..Boots) MUST keep their indices so legacy presets load
     // unchanged. New accessory/utility slots append after Boots. Engine slot tags for each entry are listed below;
@@ -189,7 +189,7 @@ namespace Transmog
      */
     void reset_all_applied_state() noexcept;
 
-    // --- Feature flags ---
+    // Feature flags
 
     std::atomic<bool> &flag_player_only();
     std::atomic<bool> &flag_enabled();
@@ -227,7 +227,7 @@ namespace Transmog
      */
     std::atomic<bool> &flag_apply_to_editing();
 
-    // --- Trampoline typedefs ---
+    // Trampoline typedefs
 
     // sub_14076C960: Populates slot visual data + calls VisualEquipChange. This is the KEY function for transmog -- it
     // loads meshes and transitions.
@@ -242,7 +242,9 @@ namespace Transmog
 
     // Resolves a slot TAG to the slot HANDLE PartSlotRefresh needs for its second argument. Writes 0xFFFF when the
     // tag names no live part record.
-    using SlotTagToHandleFn = std::uint16_t *(__fastcall *)(__int64 a1, std::uint16_t *out, std::uint16_t slotTag,
+    using SlotTagToHandleFn = std::uint16_t *(__fastcall *)(__int64 a1,
+                                                            std::uint16_t *out,
+                                                            std::uint16_t slotTag,
                                                             char flag);
     SlotTagToHandleFn &slot_tag_to_handle_fn();
 
@@ -257,12 +259,14 @@ namespace Transmog
     using InitSwapEntryFn = __int64(__fastcall *)(__int64 dest);
     InitSwapEntryFn &init_swap_entry_fn();
 
-    // --- Cross-TU shared state ---
+    // Cross-TU shared state
     // Atomics and arrays accessed by multiple translation units (hooks, workers, apply logic). Accessor pattern mirrors
     // the flag/fn-ptr accessors above to keep linkage internal to shared_state.cpp.
 
-    /// Recursion guard: set while LT is driving an apply, so its own engine calls are not treated as the
-    /// player's. Read by SocketMeshOverride and the prefab-swap hooks.
+    /**
+     * @brief Recursion guard: set while LT is driving an apply, so its own engine calls are not treated as the
+     * player's. Read by SocketMeshOverride and the prefab-swap hooks.
+     */
     std::atomic<bool> &in_transmog();
 
     /// Last known player a1 (resolved lazily, and stored by the load-detect thread each poll).
@@ -333,12 +337,13 @@ namespace Transmog
      */
     std::atomic<std::size_t> &pending_slot_index();
 
-    // --- Hot-path utilities ---
+    // Hot-path utilities
 
     inline int64_t steady_ms() noexcept
     {
         return std::chrono::duration_cast<std::chrono::milliseconds>(
-                   std::chrono::steady_clock::now().time_since_epoch())
+                   std::chrono::steady_clock::now().time_since_epoch()
+        )
             .count();
     }
 

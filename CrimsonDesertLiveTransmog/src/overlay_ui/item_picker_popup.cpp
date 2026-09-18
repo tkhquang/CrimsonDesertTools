@@ -43,9 +43,15 @@ namespace Transmog
     // Draw a search-filterable picker popup for one slot. Returns true if the user committed a selection this frame
     // (caller is responsible for persisting it). When autoApply is true, hovering an item starts a debounce timer; once
     // it expires the slot-scoped apply fires via manual_apply_slot so only the hovered slot re-equips.
-    [[nodiscard]] bool draw_item_picker_popup(const char *popupId, SlotUIState &ui, Transmog::TransmogSlot slotCategory,
-                                              uint16_t &targetItemId, bool autoApply, std::size_t slotIdx,
-                                              int *outPrefabIdx)
+    [[nodiscard]] bool draw_item_picker_popup(
+        const char *popupId,
+        SlotUIState &ui,
+        Transmog::TransmogSlot slotCategory,
+        uint16_t &targetItemId,
+        bool autoApply,
+        std::size_t slotIdx,
+        int *outPrefabIdx
+    )
     {
         bool committed = false;
         if (!ImGui::BeginPopup(popupId))
@@ -68,7 +74,7 @@ namespace Transmog
         ui_text_disabled("Item picker");
         ImGui::Separator();
 
-        // --- Filter toggles ---
+        // Filter toggles
         //
         // Exact: only show items whose auto-detected category matches
         //        this slot (helm-suffixed items for the helm slot, etc.)
@@ -94,9 +100,11 @@ namespace Transmog
                 ImGui::SameLine();
                 ImGui::Checkbox("Hide cross-body", &ui.hideBodyMismatch);
                 if (ImGui::IsItemHovered())
-                    ui_tooltip("Hide items whose body type (male/female) "
-                               "doesn't match the active character. Cross-body "
-                               "items may render with broken meshes.");
+                    ui_tooltip(
+                        "Hide items whose body type (male/female) "
+                        "doesn't match the active character. Cross-body "
+                        "items may render with broken meshes."
+                    );
             }
         }
         else
@@ -105,14 +113,18 @@ namespace Transmog
             ImGui::SameLine();
             ImGui::Checkbox("Exact##prefab_exact", &ui.prefabExactFilter);
             if (ImGui::IsItemHovered())
-                ui_tooltip("Limit the list to prefabs whose body-mesh family "
-                           "matches this slot. Untick to browse the full cross-"
-                           "slot catalog.");
+                ui_tooltip(
+                    "Limit the list to prefabs whose body-mesh family "
+                    "matches this slot. Untick to browse the full cross-"
+                    "slot catalog."
+                );
             ImGui::SameLine();
             ImGui::Checkbox("Keep open##prefab_keep_open", &ui.prefabKeepOpenOnPick);
             if (ImGui::IsItemHovered())
-                ui_tooltip("Keep the picker open after each pick so you can "
-                           "quickly compare prefabs. Untick to close on click.");
+                ui_tooltip(
+                    "Keep the picker open after each pick so you can "
+                    "quickly compare prefabs. Untick to close on click."
+                );
             // In-picker Apply button so users with Instant Apply off can commit a pick without leaving the popup. ImGui
             // closes a popup on outside clicks AND consumes the click, so the main Apply All below the picker can't be
             // reached without re-opening. This button fires the same manual_apply() the footer's Apply All uses;
@@ -124,8 +136,10 @@ namespace Transmog
                 Transmog::manual_apply();
             }
             if (ImGui::IsItemHovered())
-                ui_tooltip("Apply all pending changes without closing the "
-                           "picker. Same as the main Apply All button.");
+                ui_tooltip(
+                    "Apply all pending changes without closing the "
+                    "picker. Same as the main Apply All button."
+                );
         }
 
         ImGui::SetNextItemWidth(320.0f);
@@ -182,10 +196,12 @@ namespace Transmog
                 ImGui::SameLine();
                 ImGui::Checkbox("Prefabs##picker_prefab_mode", &ui.prefabMode);
                 if (ImGui::IsItemHovered())
-                    ui_tooltip("Browse all body-mesh prefabs across every "
-                               "slot. The search bar filters across the "
-                               "merged prefab list. Picking applies to the "
-                               "prefab's native slot.");
+                    ui_tooltip(
+                        "Browse all body-mesh prefabs across every "
+                        "slot. The search bar filters across the "
+                        "merged prefab list. Picking applies to the "
+                        "prefab's native slot."
+                    );
             }
             else if (ui.prefabMode)
             {
@@ -508,17 +524,21 @@ namespace Transmog
             if (shown == 0)
             {
                 if (ui.exactFilter && filteredByCategory > 0)
-                    ui_text_disabled("no matches in this category -- "
-                                     "uncheck Exact to widen");
+                    ui_text_disabled(
+                        "no matches in this category -- "
+                        "uncheck Exact to widen"
+                    );
                 else if ((ui.hideIncompatible || ui.hideVariants || ui.hideBodyMismatch) && filteredByUnsafe > 0)
-                    ui_text_disabled("no matches -- uncheck filters "
-                                     "to show more items");
+                    ui_text_disabled(
+                        "no matches -- uncheck filters "
+                        "to show more items"
+                    );
                 else
                     ui_text_disabled("no matches");
             }
         } // if (!ui.prefabMode)
 
-        // --- Body-Mesh Prefab section ---
+        // Body-Mesh Prefab section
         //
         // Mirrors the carrier picker but for raw body-mesh prefabs. Picking an entry here is equivalent to setting a
         // body-mesh override on the slot: the engine still equips the player's actual carrier item, but the body-mesh
@@ -533,7 +553,7 @@ namespace Transmog
             ImGui::Separator();
             if (ui.prefabMode)
             {
-                // --- Cross-slot prefab browser ---
+                // Cross-slot prefab browser
                 //
                 // Walks every TransmogSlot's catalog, applies the search filter, and labels each entry with its native
                 // slot. Clicking applies the prefab to its NATIVE slot (not the popup slot) -- the popup is just an
@@ -596,8 +616,13 @@ namespace Transmog
                     if (totalShown == catalogedTotal)
                         std::snprintf(hdr, sizeof(hdr), "All Prefabs across all slots (%zu)", catalogedTotal);
                     else
-                        std::snprintf(hdr, sizeof(hdr), "All Prefabs across all slots (%zu / %zu)", totalShown,
-                                      catalogedTotal);
+                        std::snprintf(
+                            hdr,
+                            sizeof(hdr),
+                            "All Prefabs across all slots (%zu / %zu)",
+                            totalShown,
+                            catalogedTotal
+                        );
                     ui_text_disabled(hdr);
                 }
 
@@ -671,16 +696,23 @@ namespace Transmog
                     if (!pe.is_loaded)
                         return false;
                     const auto adoptedIdx = PWS::adopt_into_slot_and_select(
-                        slotCategory, static_cast<Transmog::TransmogSlot>(0), static_cast<int>(pi));
+                        slotCategory,
+                        static_cast<Transmog::TransmogSlot>(0),
+                        static_cast<int>(pi)
+                    );
                     if (adoptedIdx < 0)
                         return false;
                     if (outPrefabIdx)
                         *outPrefabIdx = adoptedIdx;
                     committed = true;
-                    DMK::Logger::get_instance().info("[picker] prefabs-mode pick: popupSlot={} "
-                                                     "label={} adoptedIdx={} name='{}'",
-                                                     Transmog::slot_name(slotCategory), label_for_prefab(pe.name),
-                                                     adoptedIdx, pe.name.c_str());
+                    DMK::log().info(
+                        "[picker] prefabs-mode pick: popupSlot={} "
+                        "label={} adoptedIdx={} name='{}'",
+                        Transmog::slot_name(slotCategory),
+                        label_for_prefab(pe.name),
+                        adoptedIdx,
+                        pe.name.c_str()
+                    );
                     if (!previewOnly && !ui.prefabKeepOpenOnPick)
                         ImGui::CloseCurrentPopup();
                     return true;
@@ -697,13 +729,25 @@ namespace Transmog
                         char pickerId[224];
                         if (pe.is_loaded)
                         {
-                            std::snprintf(pickerId, sizeof(pickerId), "[%s] %s##all_prefab_%zu", natName,
-                                          pe.name.c_str(), pi);
+                            std::snprintf(
+                                pickerId,
+                                sizeof(pickerId),
+                                "[%s] %s##all_prefab_%zu",
+                                natName,
+                                pe.name.c_str(),
+                                pi
+                            );
                         }
                         else
                         {
-                            std::snprintf(pickerId, sizeof(pickerId), "[%s] %s  (unloaded)##all_prefab_%zu", natName,
-                                          pe.name.c_str(), pi);
+                            std::snprintf(
+                                pickerId,
+                                sizeof(pickerId),
+                                "[%s] %s  (unloaded)##all_prefab_%zu",
+                                natName,
+                                pe.name.c_str(),
+                                pi
+                            );
                         }
                         // Highlight the prefab currently selected on the popup slot OR the row the Up/Down nav buttons
                         // last moved to. Matches the items list's combined "current selection + nav cursor" highlight
@@ -770,8 +814,10 @@ namespace Transmog
                 shown = total;
                 if (catalogedTotal == 0)
                 {
-                    ui_text_disabled("no prefabs cataloged yet -- catalog may still "
-                                     "be populating, try Refresh");
+                    ui_text_disabled(
+                        "no prefabs cataloged yet -- catalog may still "
+                        "be populating, try Refresh"
+                    );
                 }
                 else if (totalShown == 0)
                 {
@@ -809,7 +855,7 @@ namespace Transmog
         ImGui::PopStyleVar(); // ItemSpacing
         ImGui::EndChild();
 
-        // --- Hover-apply debounce ---
+        // Hover-apply debounce
         // Fire manual_apply_slot() only after the cursor has rested on the same item for k_hoverDebounceMs. Uses the
         // slot-scoped apply path so only this slot re-equips -- other slots are untouched and don't flicker.
         if (autoApply && ui.hoverPendingId != ui.hoverAppliedId && ui.hoverStartMs != 0 &&

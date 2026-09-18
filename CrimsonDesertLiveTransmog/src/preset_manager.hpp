@@ -103,7 +103,7 @@ namespace Transmog
         std::string name;
         std::array<PresetSlot, k_slotCount> slots{};
 
-        // ---- ColorOverride (setter-substitute) persistence -----------
+        // ColorOverride (setter-substitute) persistence
         //
         // INDEPENDENT of `slots[].dye` -- that path drives the engine's ARMOR_MOD record copier (`DyeRecordInject`)
         // keyed by dye-group + channel + RGB. The fields below persist the ColorOverride / SwatchTable path --
@@ -156,13 +156,13 @@ namespace Transmog
     public:
         static PresetManager &instance();
 
-        // --- File I/O ---
+        // File I/O
 
         bool load(const std::string &path);
         bool save() const;
         bool save(const std::string &path) const;
 
-        // --- Character management ---
+        // Character management
         //
         // The manager tracks two distinct character identities:
         //
@@ -238,7 +238,7 @@ namespace Transmog
         std::string body_kind_of(const std::string &charName) const;
         void set_body_kind_of(const std::string &charName, const std::string &bodyKind);
 
-        // --- Preset management (operates on active character) ---
+        // Preset management (operates on active character)
 
         int active_preset_index() const;
         int preset_count() const;
@@ -291,7 +291,7 @@ namespace Transmog
         /// Set active preset by index and apply to slot_mappings.
         void set_active_preset(int index);
 
-        // --- State bridge ---
+        // State bridge
 
         /// Apply the active preset's slot data to the global slot_mappings.
         void apply_to_state() const;

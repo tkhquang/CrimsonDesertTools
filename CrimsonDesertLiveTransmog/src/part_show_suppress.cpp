@@ -75,7 +75,7 @@ namespace Transmog::PartShowSuppress
 
     std::size_t init_slot_hashes(const std::unordered_map<std::string, uint32_t> &nameToHash) noexcept
     {
-        auto &logger = DMK::Logger::get_instance();
+        auto &logger = DMK::log();
         std::size_t resolved = 0;
 
         // Walk slot_metadata; only rows where partShowHashKey is set (the 5 armor slots) participate in
@@ -93,9 +93,12 @@ namespace Transmog::PartShowSuppress
             auto it = nameToHash.find(partShowKey);
             if (it == nameToHash.end())
             {
-                logger.warning("[dispatch] slot hash missing: '{}' not found in "
-                               "IndexedStringA -- suppression for slot {} disabled",
-                               partShowKey, i);
+                logger.warning(
+                    "[dispatch] slot hash missing: '{}' not found in "
+                    "IndexedStringA -- suppression for slot {} disabled",
+                    partShowKey,
+                    i
+                );
                 continue;
             }
 
@@ -132,8 +135,17 @@ namespace Transmog::PartShowSuppress
         }
     }
 
-    __int64 __fastcall on_part_add_show(__int64 a1, uint8_t a2, uint64_t partHashPtr, float blend, __int64 a5,
-                                        __int64 a6, __int64 a7, __int64 a8, __int64 a9)
+    __int64 __fastcall on_part_add_show(
+        __int64 a1,
+        uint8_t a2,
+        uint64_t partHashPtr,
+        float blend,
+        __int64 a5,
+        __int64 a6,
+        __int64 a7,
+        __int64 a8,
+        __int64 a9
+    )
     {
         // Snapshot the trampoline pointer at entry. SafetyHook drains in-flight callers under its own shared lock, but
         // the brief teardown window between hook removal and the loader unmapping the Logic DLL can still see this body
@@ -151,16 +163,22 @@ namespace Transmog::PartShowSuppress
 
         if (partHash != 0 && s_hashSeen[idx].exchange(1, std::memory_order_relaxed) == 0)
         {
-            DMK::Logger::get_instance().trace("[dispatch] PartAddShow unique hash=0x{:08X} low16=0x{:04X} "
-                                              "a2={:#04x} enabled={} suppress={}",
-                                              partHash, idx, static_cast<unsigned>(a2), enabled, suppress);
+            DMK::log().trace(
+                "[dispatch] PartAddShow unique hash=0x{:08X} low16=0x{:04X} "
+                "a2={:#04x} enabled={} suppress={}",
+                partHash,
+                idx,
+                static_cast<unsigned>(a2),
+                enabled,
+                suppress
+            );
         }
 
         if (suppress)
         {
             // Per-suppress diagnostic kept at trace level -- this fires on the hot PartAddShow dispatch path, so INFO
             // would flood the log.
-            DMK::Logger::get_instance().trace("[dispatch] PartAddShow suppressed hash=0x{:04X}", idx);
+            DMK::log().trace("[dispatch] PartAddShow suppressed hash=0x{:04X}", idx);
             return 0;
         }
 

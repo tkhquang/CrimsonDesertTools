@@ -1,30 +1,22 @@
 #ifndef TRANSMOG_INPUT_HANDLER_HPP
 #define TRANSMOG_INPUT_HANDLER_HPP
 
-#include <DetourModKit.hpp>
+#include <DetourModKit/input.hpp>
 
 namespace Transmog
 {
     /**
-     * @brief Register all hotkey bindings and INI keys with DetourModKit.
+     * @brief Binds every hotkey INI key and registers its press binding.
+     * @details Each binding goes through DMK::config::press_combo, which fuses the INI key binding, the default-combo
+     *          parse, and the input press registration into one call. The returned guards are added to @p scope, so
+     *          the Session releases them in reverse insertion order before it tears the input engine down.
      *
-     * Each binding is wired via DMK::Config::register_press_combo, which fuses the INI registration, default-combo
-     * parsing, and the InputManager press registration into a single call. The returned InputBindingGuards are stashed
-     * in a process-lifetime static vector so the cancellation flag survives until InputManager teardown.
-     *
-     * Must be invoked before DMK::Config::load() (so the registered setters fire on the first load pass) and before
-     * InputManager::start() (so the bindings are picked up by the poller).
+     *          Must be invoked before the INI load (so the bound setters fire on the first load pass) and before
+     *          input::Input::start() (so the poller picks the bindings up).
+     * @param scope The Session's input scope, which owns every returned guard.
+     * @note Setup/control-plane only: registration allocates and reshapes the binding set.
      */
-    void register_hotkeys();
-
-    /**
-     * @brief Drops the guard vector populated by register_hotkeys().
-     *
-     * Releases the per-binding cancellation flags so a subsequent register_hotkeys() pass starts from an empty stash.
-     * The InputManager poller and its registered bindings are torn down by DMK_Shutdown() immediately before this
-     * helper runs, so this call only resets the local guard vector.
-     */
-    void clear_hotkey_guards() noexcept;
+    void register_hotkeys(DetourModKit::input::Scope &scope);
 
 } // namespace Transmog
 

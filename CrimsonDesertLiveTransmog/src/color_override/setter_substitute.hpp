@@ -1,5 +1,7 @@
 #pragma once
 
+#include <DetourModKit/hook.hpp>
+
 // Mid-hook on the engine's per-property 4-byte property setter.
 //
 // The dye-record-inject path (writes ARMOR_MOD records to dst+120 via the DyeCopier hook) propagates colors only for
@@ -13,7 +15,7 @@
 // LT-apply window, host scope, and a per-row `override_active` flag in the swatch table, so unrelated property writes
 // pass through unchanged.
 //
-// The setter target is AOB-resolved via `k_setterByteCandidates` in `aob_resolver.hpp`; the cascade's three patterns
+// The setter target is AOB-resolved via `setter_byte()` in `aob_resolver.hpp`; the cascade's three patterns
 // cover patch-day prologue reflows.
 
 #include <cstdint>
@@ -24,7 +26,7 @@ namespace Transmog::ColorOverride::SetterSubstitute
      * Install the setter mid-hook. Returns true on success; failure (AOB cascade exhausted or hook install rejected)
      * leaves the substitute inert.
      */
-    bool init() noexcept;
+    bool init(DetourModKit::hook::HookStack &hooks) noexcept;
 
     /**
      * Mark the LT-apply window. Set true immediately before invoking the engine's slot-populator from

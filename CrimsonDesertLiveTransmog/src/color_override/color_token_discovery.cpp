@@ -3,7 +3,8 @@
 #include "../aob_resolver.hpp"
 
 #include <DetourModKit.hpp>
-#include <DetourModKit/scanner.hpp>
+#include <DetourModKit/region.hpp>
+#include <DetourModKit/scan.hpp>
 
 #include <Windows.h>
 
@@ -13,9 +14,8 @@
 #include <cstring>
 #include <mutex>
 #include <optional>
+#include <stop_token>
 #include <vector>
-
-namespace DMK = DetourModKit;
 
 namespace Transmog::ColorOverride::TokenSlotDiscovery
 {
@@ -56,7 +56,23 @@ namespace Transmog::ColorOverride::TokenSlotDiscovery
             int channel;
         };
         std::vector<DiscoveredSlot> g_slots;
+
+        // Guards every read and write of g_slots. The writer runs on the re-scan worker while the engine's property
+        // setter reads through classify_layer / name_for_token on the game thread, so a push_back that reallocates
+        // would otherwise invalidate an iterator another thread is walking. Held only around the dedup-and-append,
+        // never across a sweep, so a reader waits microseconds rather than the length of a scan.
+        std::mutex g_slotsMtx;
         std::atomic<bool> g_complete{false};
+
+        // Re-scan worker state. The sweep is half a second of work, so it runs OFF the caller's thread: its only
+        // caller is a mid-hook detour on the engine's per-channel property setter, and doing it inline stalled the
+        // game thread for as long as the sweep took.
+        std::mutex g_rescanThreadMtx;
+        std::optional<DMK::StoppableWorker> g_rescanWorker;
+        std::atomic<bool> g_rescanBusy{false};
+        std::atomic<bool> g_stopping{false};
+        std::atomic<bool> g_settled{false};
+        std::atomic<std::size_t> g_lastCount{0};
         std::once_flag g_runOnce;
 
         bool name_matches(std::uintptr_t addr, const char *name) noexcept
@@ -139,15 +155,13 @@ namespace Transmog::ColorOverride::TokenSlotDiscovery
             const auto t0 = clock::now();
 
             // Get module base + image size from DMK's cached host-module range (single atomic load on the warm path).
-            const auto range = DMKMemory::host_module_range();
-            if (!range.valid())
+            const auto range = DMK::Region::host();
+            if (range.size == 0)
             {
-                DMK::Logger::get_instance().warning("[token-discovery] host_module_range unavailable");
+                DMK::log().warning("[token-discovery] host image range unavailable");
                 g_complete.store(true, std::memory_order_release);
                 return;
             }
-            const auto *base = reinterpret_cast<const std::byte *>(range.base);
-            const auto size = static_cast<std::size_t>(range.end - range.base);
 
             // Walk every property-registration call site emitted by the two TLS-guarded registrars (sub_14274A3C0 and
             // sub_142749F10). The pattern matches the 17-byte run:
@@ -179,23 +193,10 @@ namespace Transmog::ColorOverride::TokenSlotDiscovery
             // walk patterns up front. We try each in turn over the module range; the inner accept logic dedups by
             // slot_addr so a site matched by multiple patterns is recorded only once. Walking the union gives
             // resilience: if a future patch reshapes one pattern's tail, the others still cover the call site.
-            const auto &aobs = Transmog::k_colorTokenRegistrarCallAobs;
-            std::array<std::optional<DMK::Scanner::CompiledPattern>, Transmog::k_colorTokenRegistrarCallAobCount>
-                compiledPatterns{};
-            std::size_t compiledCount = 0;
-            for (std::size_t pi = 0; pi < aobs.size(); ++pi)
-            {
-                compiledPatterns[pi] = DMK::Scanner::parse_aob(aobs[pi]);
-                if (compiledPatterns[pi])
-                    ++compiledCount;
-            }
-            if (compiledCount == 0)
-            {
-                DMK::Logger::get_instance().warning("[token-discovery] all AOB candidates failed to "
-                                                    "compile");
-                g_complete.store(true, std::memory_order_release);
-                return;
-            }
+            // The candidates are compiled at BUILD time (Pattern::literal is consteval), so there is no parse step
+            // that can fail at runtime and no compiled-count guard to write.
+            const auto &patterns = Transmog::k_colorTokenRegistrarCallAobs;
+            constexpr std::size_t compiledCount = Transmog::k_colorTokenRegistrarCallAobCount;
 
             // SEH-guarded zero-write decode. The instruction immediately preceding the matched `mov r9d, 0x2FFFF`
             // anchor is one of:
@@ -241,7 +242,11 @@ namespace Transmog::ColorOverride::TokenSlotDiscovery
             // bytes give it slack and the real registrar sites sit late in the text section. The walk therefore has
             // to step past tens of thousands of them. The per-pattern cap is set generously; the shared wall-clock
             // budget across all patterns is the real safety net.
-            constexpr std::size_t k_maxItersPerPattern = 50000;
+            // Sized well clear of the observed hit count (~45k on the live build, nearly all of them P1's false
+            // positives) so ordinary drift between game builds cannot reach it. This is a runaway stop, not a tuning
+            // knob: the wall-clock budget below is what actually bounds the sweep, and a cap sitting just above the
+            // real count silently truncates the moment the game grows a few thousand more matching sites.
+            constexpr std::size_t k_maxItersPerPattern = 250000;
             constexpr auto k_timeBudget = std::chrono::milliseconds(3000);
             // The anchor is the start of the `mov r9d, 0x2FFFF` sentinel. Advance the cursor by the shared head
             // length each iteration even when the matched pattern is longer (the P2/P3 tails are not needed for
@@ -259,42 +264,58 @@ namespace Transmog::ColorOverride::TokenSlotDiscovery
             std::size_t totalIter = 0;
             std::size_t accepted = 0;
             bool budgetExceeded = false;
-            for (std::size_t pi = 0; pi < compiledPatterns.size() && !budgetExceeded; ++pi)
+            for (std::size_t pi = 0; pi < patterns.size() && !budgetExceeded; ++pi)
             {
-                if (!compiledPatterns[pi])
-                    continue;
-                const auto &compiled = *compiledPatterns[pi];
+                const auto &compiled = patterns[pi];
 
-                const std::byte *cursor = base;
-                std::size_t bytes_left = size;
+                // unchecked::find_pattern, not scan(): this sweep takes thousands of hits per pattern, and scan()
+                // walks the OS page map on every call, which is a startup-time cost its own note warns against
+                // paying in a loop. The raw twin does no page filtering, so the caller owns readability -- and the
+                // scope here IS one mapped PE image, every byte of it committed. Page gating also buys nothing at
+                // this site: the query bytes live in this DLL's own .rdata, outside the scanned image, so a match
+                // can never be the query finding itself.
+                const auto *cursor = range.base.ptr<const std::byte>();
+                const auto *const scanEnd = range.end().ptr<const std::byte>();
                 std::size_t patternHits = 0;
                 std::size_t iter = 0;
                 for (; iter < k_maxItersPerPattern; ++iter)
                 {
-                    if (clock::now() - t0 > k_timeBudget)
+                    if (g_stopping.load(std::memory_order_acquire))
                     {
-                        DMK::Logger::get_instance().warning("[token-discovery] time budget exceeded "
-                                                            "at pattern={} iter={} hits={} (bailing)",
-                                                            pi, iter, patternHits);
+                        // Teardown asked for the module back. Abandoning mid-sweep is safe: every accepted slot is
+                        // already in g_slots and the dedup makes a later scan idempotent.
                         budgetExceeded = true;
                         break;
                     }
-                    if (bytes_left < k_patternHeadLen)
+                    if (clock::now() - t0 > k_timeBudget)
+                    {
+                        DMK::log().warning(
+                            "[token-discovery] time budget exceeded "
+                            "at pattern={} iter={} hits={} (bailing)",
+                            pi,
+                            iter,
+                            patternHits
+                        );
+                        budgetExceeded = true;
                         break;
-                    const auto *m = DMK::Scanner::find_pattern(cursor, bytes_left, compiled);
-                    if (m == nullptr)
+                    }
+                    const auto bytesLeft = static_cast<std::size_t>(scanEnd - cursor);
+                    if (bytesLeft < k_patternHeadLen)
+                        break;
+                    const auto *const hit =
+                        DMK::scan::unchecked::find_pattern(DMK::Region{DMK::Address{cursor}, bytesLeft}, compiled);
+                    if (hit == nullptr)
                         break;
                     ++patternHits;
 
-                    const auto matchAddr = reinterpret_cast<std::uintptr_t>(m);
+                    const auto matchAddr = reinterpret_cast<std::uintptr_t>(hit);
 
                     // Decode the `lea rdx, [rip+disp32]` target that closes the matched head; the disp32 sits 3
                     // bytes into the lea.
-                    const auto strAddr = decode_lea_rip(m + k_nameLeaOffset, 0x48, 0x8D, 0x15);
+                    const auto strAddr = decode_lea_rip(hit + k_nameLeaOffset, 0x48, 0x8D, 0x15);
                     if (strAddr == 0)
                     {
-                        cursor = m + 1;
-                        bytes_left = (base + size) - cursor;
+                        cursor = hit + 1;
                         continue;
                     }
 
@@ -307,10 +328,15 @@ namespace Transmog::ColorOverride::TokenSlotDiscovery
                         {
                             char preview[33] = {0};
                             peek_name_preview(strAddr, preview, sizeof(preview));
-                            DMK::Logger::get_instance().trace("[token-discovery] trace: P{} "
-                                                              "site=0x{:X} strAddr=0x{:X} "
-                                                              "preview='{}'",
-                                                              pi + 1, matchAddr, strAddr, preview);
+                            DMK::log().trace(
+                                "[token-discovery] trace: P{} "
+                                "site=0x{:X} strAddr=0x{:X} "
+                                "preview='{}'",
+                                pi + 1,
+                                matchAddr,
+                                strAddr,
+                                preview
+                            );
                         }
                     }
 
@@ -327,43 +353,78 @@ namespace Transmog::ColorOverride::TokenSlotDiscovery
                     }
                     if (matched_kp != nullptr)
                     {
-                        const auto slotAddr = decode_zero_write_slot(m);
+                        const auto slotAddr = decode_zero_write_slot(hit);
                         if (slotAddr != 0)
                         {
                             bool dup = false;
-                            for (const auto &s : g_slots)
                             {
-                                if (s.slot_addr == slotAddr)
+                                // The scan for a duplicate and the append have to be one critical section: released
+                                // between them, a second scan could append the same slot twice.
+                                std::lock_guard<std::mutex> lk(g_slotsMtx);
+                                for (const auto &s : g_slots)
                                 {
-                                    dup = true;
-                                    break;
+                                    if (s.slot_addr == slotAddr)
+                                    {
+                                        dup = true;
+                                        break;
+                                    }
+                                }
+                                if (!dup)
+                                {
+                                    g_slots.push_back(
+                                        {slotAddr, matched_kp->name, matched_kp->layer, matched_kp->channel}
+                                    );
                                 }
                             }
                             if (!dup)
                             {
-                                g_slots.push_back({slotAddr, matched_kp->name, matched_kp->layer, matched_kp->channel});
                                 ++accepted;
-                                DMK::Logger::get_instance().trace("[token-discovery] slot=0x{:X} "
-                                                                  "'{}' layer={} channel={} "
-                                                                  "site=0x{:X} via P{}",
-                                                                  slotAddr, matched_kp->name, matched_kp->layer,
-                                                                  matched_kp->channel, matchAddr, pi + 1);
+                                DMK::log().trace(
+                                    "[token-discovery] slot=0x{:X} "
+                                    "'{}' layer={} channel={} "
+                                    "site=0x{:X} via P{}",
+                                    slotAddr,
+                                    matched_kp->name,
+                                    matched_kp->layer,
+                                    matched_kp->channel,
+                                    matchAddr,
+                                    pi + 1
+                                );
                             }
                         }
                     }
 
-                    cursor = m + k_patternHeadLen;
-                    bytes_left = (base + size) - cursor;
+                    cursor = hit + k_patternHeadLen;
                 }
+                // The cap exit is the one loop exit that used to say nothing. Silence here is the worst case of
+                // the three: a truncated P1 (the superset pattern) drops the slot count below the retry baseline, so
+                // retry_if_underpopulated never settles and re-scans on the hot path for the rest of the session,
+                // with no line in the log pointing at the cause.
+                if (iter >= k_maxItersPerPattern)
+                {
+                    DMK::log().warning(
+                        "[token-discovery] pattern={} hit the {} iteration cap with {} hit(s) -- its sweep was "
+                        "TRUNCATED and later slots were not seen; raise k_maxItersPerPattern",
+                        pi,
+                        k_maxItersPerPattern,
+                        patternHits
+                    );
+                }
+
                 totalHits += patternHits;
                 totalIter += iter;
             }
 
             const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(clock::now() - t0).count();
-            DMK::Logger::get_instance().info("[token-discovery] scan complete: patterns={} "
-                                             "iter={} hits={} slots={} elapsed_ms={}",
-                                             compiledCount, totalIter, totalHits, accepted,
-                                             static_cast<long long>(elapsed));
+            DMK::log().info(
+                "[token-discovery] scan complete: patterns={} "
+                "iter={} hits={} slots={} elapsed_ms={}",
+                compiledCount,
+                totalIter,
+                totalHits,
+                accepted,
+                static_cast<long long>(elapsed)
+            );
             g_complete.store(true, std::memory_order_release);
         }
     } // namespace
@@ -388,13 +449,50 @@ namespace Transmog::ColorOverride::TokenSlotDiscovery
     //
     // Throttled to ~1.5 s between attempts so we don't hammer the 600-800 ms scan in a hot loop. do_run() dedups
     // against g_slots, so an interrupted re-scan is safe.
+    namespace
+    {
+        /// One re-scan, on the worker thread. Clearing @ref g_rescanBusy is deliberately its last act.
+        void rescan_worker(std::stop_token stop, std::size_t expectedMin) noexcept
+        {
+            if (stop.stop_requested())
+            {
+                g_rescanBusy.store(false, std::memory_order_release);
+                return;
+            }
+            const auto before = slot_count();
+            // do_run sets g_complete=true at the end; allow re-run by resetting the flag locally (g_runOnce stays
+            // satisfied for the original call path so external `run()` callers still skip).
+            g_complete.store(false, std::memory_order_release);
+            do_run();
+            const auto after = slot_count();
+            const auto prev = g_lastCount.exchange(after, std::memory_order_acq_rel);
+            if (after != before)
+            {
+                DMK::log().info(
+                    "[token-discovery] re-scan: slots {} -> {} (prev_total={} expectedMin={})",
+                    before,
+                    after,
+                    prev,
+                    expectedMin
+                );
+            }
+            // Settle = two consecutive scans returned the same count AND we've met the expected baseline. Without the
+            // baseline gate, an early scan that finds 0 slots could "settle" immediately on the next 0-slot scan and
+            // freeze the retry permanently. A sweep abandoned by teardown must not settle on its short count.
+            if (after == prev && after >= expectedMin && !g_stopping.load(std::memory_order_acquire))
+            {
+                g_settled.store(true, std::memory_order_release);
+                DMK::log().info("[token-discovery] settled at {} slots; no further re-scans this session", after);
+            }
+            g_rescanBusy.store(false, std::memory_order_release);
+        }
+    } // namespace
+
     void retry_if_underpopulated(std::size_t expectedMin) noexcept
     {
-        static std::atomic<bool> s_settled{false};
         static std::atomic<long long> s_lastMs{0};
-        static std::atomic<bool> s_busy{false};
-        static std::atomic<std::size_t> s_lastCount{0};
-        if (s_settled.load(std::memory_order_acquire))
+
+        if (g_settled.load(std::memory_order_acquire) || g_stopping.load(std::memory_order_acquire))
             return;
         using clock = std::chrono::steady_clock;
         const auto nowMs =
@@ -402,35 +500,47 @@ namespace Transmog::ColorOverride::TokenSlotDiscovery
         auto last = s_lastMs.load(std::memory_order_acquire);
         if (last != 0 && (nowMs - last) < 1500)
             return;
-        // Single-flight guard: only one thread enters do_run at a time. Other concurrent callers see s_busy and bail.
+        // Single-flight guard: only one worker runs at a time. Other concurrent callers see the flag and bail.
         bool expected = false;
-        if (!s_busy.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
+        if (!g_rescanBusy.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
             return;
         s_lastMs.store(nowMs, std::memory_order_release);
-        const auto before = g_slots.size();
-        // do_run sets g_complete=true at the end; allow re-run by resetting the flag locally (g_runOnce stays satisfied
-        // for the original call path so external `run()` callers still skip).
-        g_complete.store(false, std::memory_order_release);
-        do_run();
-        const auto after = g_slots.size();
-        const auto prev = s_lastCount.exchange(after, std::memory_order_acq_rel);
-        if (after != before)
+
+        // Dispatch rather than run. The caller is a detour on the engine's property setter, so the game thread must
+        // leave here in microseconds; the sweep itself is half a second of work. Nothing downstream needs the result
+        // this frame -- an unclassified token still substitutes, it is only bucketed under "misc" in the UI until a
+        // later scan names it.
+        try
         {
-            DMK::Logger::get_instance().info("[token-discovery] re-scan: slots {} -> {} "
-                                             "(prev_total={} expectedMin={})",
-                                             before, after, prev, expectedMin);
+            std::lock_guard<std::mutex> lk(g_rescanThreadMtx);
+            if (g_stopping.load(std::memory_order_acquire))
+            {
+                g_rescanBusy.store(false, std::memory_order_release);
+                return;
+            }
+            // The previous worker cleared g_rescanBusy as its last act, so it has finished; destroying it here
+            // only collects the exited thread and cannot wait on a sweep.
+            g_rescanWorker.reset();
+            g_rescanWorker.emplace(
+                "LtTokenRescan",
+                [expectedMin](std::stop_token stop) { rescan_worker(stop, expectedMin); }
+            );
         }
-        // Settle = two consecutive scans returned the same count AND we've met the expected baseline. Without the
-        // baseline gate, an early scan that finds 0 slots could "settle" immediately on the next 0-slot scan and freeze
-        // the retry permanently.
-        if (after == prev && after >= expectedMin)
+        catch (const std::exception &)
         {
-            s_settled.store(true, std::memory_order_release);
-            DMK::Logger::get_instance().info("[token-discovery] settled at {} slots; "
-                                             "no further re-scans this session",
-                                             after);
+            // Thread creation failed (resource exhaustion). Release the guard so a later call can retry; the feature
+            // degrades to whatever slots are already known.
+            g_rescanBusy.store(false, std::memory_order_release);
+            DMK::log().warning("[token-discovery] could not start the re-scan worker; keeping the current slots");
         }
-        s_busy.store(false, std::memory_order_release);
+    }
+
+    void stop_and_join_rescan() noexcept
+    {
+        g_stopping.store(true, std::memory_order_release);
+        std::lock_guard<std::mutex> lk(g_rescanThreadMtx);
+        // ~StoppableWorker requests stop and joins, so the reset IS the join.
+        g_rescanWorker.reset();
     }
 
     int classify_layer(std::uint32_t tok) noexcept
@@ -438,9 +548,10 @@ namespace Transmog::ColorOverride::TokenSlotDiscovery
         if (!is_complete() || tok == 0)
             return -1;
         const auto t = tok & 0xFFFFu;
+        std::lock_guard<std::mutex> lk(g_slotsMtx);
         for (const auto &s : g_slots)
         {
-            const auto live = DMKMemory::seh_read<std::uint32_t>(s.slot_addr).value_or(0) & 0xFFFFu;
+            const auto live = DMK::memory::read<std::uint32_t>(DMK::Address{s.slot_addr}).value_or(0) & 0xFFFFu;
             if (live != 0u && live == t)
                 return s.layer;
         }
@@ -452,9 +563,10 @@ namespace Transmog::ColorOverride::TokenSlotDiscovery
         if (!is_complete() || tok == 0)
             return -1;
         const auto t = tok & 0xFFFFu;
+        std::lock_guard<std::mutex> lk(g_slotsMtx);
         for (const auto &s : g_slots)
         {
-            const auto live = DMKMemory::seh_read<std::uint32_t>(s.slot_addr).value_or(0) & 0xFFFFu;
+            const auto live = DMK::memory::read<std::uint32_t>(DMK::Address{s.slot_addr}).value_or(0) & 0xFFFFu;
             if (live != 0u && live == t)
                 return s.channel;
         }
@@ -465,11 +577,12 @@ namespace Transmog::ColorOverride::TokenSlotDiscovery
     {
         if (name == nullptr || !is_complete())
             return 0;
+        std::lock_guard<std::mutex> lk(g_slotsMtx);
         for (const auto &s : g_slots)
         {
             if (std::strcmp(s.name, name) == 0)
             {
-                const auto v = DMKMemory::seh_read<std::uint32_t>(s.slot_addr).value_or(0);
+                const auto v = DMK::memory::read<std::uint32_t>(DMK::Address{s.slot_addr}).value_or(0);
                 if (v != 0u && v != 0xFFFFFFFFu)
                     return v;
             }
@@ -482,9 +595,10 @@ namespace Transmog::ColorOverride::TokenSlotDiscovery
         if (!is_complete() || tok == 0)
             return nullptr;
         const auto t = tok & 0xFFFFu;
+        std::lock_guard<std::mutex> lk(g_slotsMtx);
         for (const auto &s : g_slots)
         {
-            const auto live = DMKMemory::seh_read<std::uint32_t>(s.slot_addr).value_or(0) & 0xFFFFu;
+            const auto live = DMK::memory::read<std::uint32_t>(DMK::Address{s.slot_addr}).value_or(0) & 0xFFFFu;
             if (live != 0u && live == t)
                 return s.name;
         }
@@ -493,6 +607,7 @@ namespace Transmog::ColorOverride::TokenSlotDiscovery
 
     std::size_t slot_count() noexcept
     {
+        std::lock_guard<std::mutex> lk(g_slotsMtx);
         return g_slots.size();
     }
 } // namespace Transmog::ColorOverride::TokenSlotDiscovery

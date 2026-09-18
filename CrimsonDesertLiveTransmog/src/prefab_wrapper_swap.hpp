@@ -2,6 +2,8 @@
 
 #include "shared_state.hpp"
 
+#include <DetourModKit/hook.hpp>
+
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -9,7 +11,7 @@
 #include <string_view>
 #include <vector>
 
-// --- PWS state-lifetime model ---
+// PWS state-lifetime model
 // PWS keeps three pieces of state, each with a different scope:
 //
 //   - s_selSrcIdxPerChar[N] / s_selTgtIdxPerChar[N] -- session-scoped, ONE row per protagonist. UI writes here through
@@ -33,7 +35,6 @@
 // Driving character: PresetManager::apply_to_state() primes s_activeCharIdx with the editing-character idx. The next
 // apply build reads that idx to pick the right per-char bucket. See the "current_apply_owner" helper for the canonical
 // pin/flag derivation every site uses.
-// ---------------------------------------------------------------------
 
 // Pointer-swap body-mesh override.
 //
@@ -62,7 +63,7 @@
 namespace Transmog::PrefabWrapperSwap
 {
     void register_config();
-    bool init();
+    bool init(DetourModKit::hook::HookStack &hooks);
     void shutdown();
 
     /**
@@ -163,7 +164,7 @@ namespace Transmog::PrefabWrapperSwap
      */
     void notify_apply_finished(const std::uint16_t (&itemIds)[5]);
 
-    // --- Per-slot dropdown catalog ---
+    // Per-slot dropdown catalog
     //
     // The catalog is built by walking StringInfo with a broad body-mesh prefix ("cd_phm_00_") and classifying each
     // matched entry into one of the 5 transmog slots by sub-prefix. Once populated, `slot_catalog(slot)` returns the
@@ -188,7 +189,7 @@ namespace Transmog::PrefabWrapperSwap
         bool is_loaded{false};
     };
 
-    // --- AppearanceTableLoader integration ---
+    // AppearanceTableLoader integration
     //
     // The PartPrefab table is a 252,480-entry container the engine builds at boot from .pappt parser output. Its loader
     // instance lives at `[[ResMgr+0x40]+0x88]` -- captured by hooking the first call to `sub_1408AF8F0` (game-init).
@@ -239,8 +240,13 @@ namespace Transmog::PrefabWrapperSwap
      *          bound character inside this function re-samples a global another thread can change mid-loop, so a
      *          per-slot restore loop could start writing one character's bucket and finish writing another's.
      */
-    void set_selection(Transmog::TransmogSlot slot, int srcIdx, int tgtIdx, std::string_view site = "?",
-                       std::uint32_t charIdxFor = 0) noexcept;
+    void set_selection(
+        Transmog::TransmogSlot slot,
+        int srcIdx,
+        int tgtIdx,
+        std::string_view site = "?",
+        std::uint32_t charIdxFor = 0
+    ) noexcept;
 
     /**
      * Bind the writes done by `set_selection` (and the "active editing view" exposed via selection_*_index) to a
@@ -272,8 +278,8 @@ namespace Transmog::PrefabWrapperSwap
      *
      * Returns the new tgt index on success, -1 on bad slot/index.
      */
-    int adopt_into_slot_and_select(Transmog::TransmogSlot intoSlot, Transmog::TransmogSlot fromSlot,
-                                   int fromIdx) noexcept;
+    int
+    adopt_into_slot_and_select(Transmog::TransmogSlot intoSlot, Transmog::TransmogSlot fromSlot, int fromIdx) noexcept;
 
     /**
      * Rebuilds `s_swapMapPerChar[active-1]` from the bound character's per-slot selections. Reads pre-cached wrapper

@@ -57,13 +57,14 @@ namespace EquipHide
 
     [[nodiscard]] constexpr std::string_view category_section(Category cat) noexcept
     {
-        constexpr std::string_view names[] = {
-            "OneHandWeapons", "TwoHandWeapons", "Shields",     "Bows",        "SpecialWeapons", "Tools",
-            "Lanterns",       "Helm",           "Chest",       "Legs",        "Underwear",      "Gloves",
-            "Boots",          "Cloak",          "Shoulder",    "Mask",        "Glasses",        "Earrings",
-            "Rings",          "Necklace",       "Bags",        "UserPreset1", "UserPreset2",    "UserPreset3",
-            "UserPreset4",    "UserPreset5",    "UserPreset6", "UserPreset7", "UserPreset8",    "UserPreset9",
-            "UserPreset10"};
+        constexpr std::string_view names[] = {"OneHandWeapons", "TwoHandWeapons", "Shields",     "Bows",
+                                              "SpecialWeapons", "Tools",          "Lanterns",    "Helm",
+                                              "Chest",          "Legs",           "Underwear",   "Gloves",
+                                              "Boots",          "Cloak",          "Shoulder",    "Mask",
+                                              "Glasses",        "Earrings",       "Rings",       "Necklace",
+                                              "Bags",           "UserPreset1",    "UserPreset2", "UserPreset3",
+                                              "UserPreset4",    "UserPreset5",    "UserPreset6", "UserPreset7",
+                                              "UserPreset8",    "UserPreset9",    "UserPreset10"};
         static_assert(std::size(names) == CATEGORY_COUNT, "names[] must match Category enum");
         const auto idx = static_cast<std::size_t>(cat);
         if (idx >= CATEGORY_COUNT)
@@ -77,14 +78,14 @@ namespace EquipHide
         return cat >= Category::UserPreset1 && cat <= Category::UserPreset10;
     }
 
-    // --- Per-category runtime state ---
+    // Per-category runtime state
     struct CategoryState
     {
         std::atomic<bool> enabled{true};
         std::atomic<bool> hidden{false};
-        DMK::Config::KeyComboList toggleHotkeyCombos;
-        DMK::Config::KeyComboList showHotkeyCombos;
-        DMK::Config::KeyComboList hideHotkeyCombos;
+        DMK::input::KeyComboList toggleHotkeyCombos;
+        DMK::input::KeyComboList showHotkeyCombos;
+        DMK::input::KeyComboList hideHotkeyCombos;
     };
 
     std::array<CategoryState, CATEGORY_COUNT> &category_states();
@@ -92,7 +93,7 @@ namespace EquipHide
     /** @brief Returns the comma-separated default Parts string for a category. */
     std::string default_parts_string(Category cat);
 
-    // --- Runtime hash resolution ---
+    // Runtime hash resolution
 
     /**
      * @brief Supply runtime-resolved name-to-hash mappings from the IndexedStringA table.
@@ -110,7 +111,7 @@ namespace EquipHide
      */
     std::vector<std::string> get_unresolved_parts(const std::unordered_map<std::string, uint32_t> &resolved);
 
-    // --- Part classification ---
+    // Part classification
 
     /**
      * @brief Parse a "Parts" string and register all contained IDs for the given category.
@@ -122,7 +123,7 @@ namespace EquipHide
     /** @brief Finalize the lookup map and compute hash range bounds. Call after all register_parts(). */
     void build_part_lookup();
 
-    // --- Per-character Parts overrides ---
+    // Per-character Parts overrides
 
     /** @brief Number of supported protagonist identities for per-char overrides. */
     inline constexpr std::size_t k_charIdxCount = 3;

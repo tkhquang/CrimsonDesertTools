@@ -20,7 +20,7 @@ namespace Transmog::ColorOverride::TokenTable
      */
     void bootstrap_snapshot();
 
-    // ---- Layer/channel classification ---------------------------------
+    // Layer/channel classification
     //
     // Layer kind: 0=tint, 1=color-mask, 2=detail-layer, 3=hair, 4=scratch (wear/damage overlay tint), -1=unknown /
     // non-dye-color.
@@ -67,7 +67,7 @@ namespace Transmog::ColorOverride::TokenTable
      */
     std::uint16_t token_id_for_name(const char *name) noexcept;
 
-    // ---- _permutations token (runtime-resolved via name-interner) -----
+    // _permutations token (runtime-resolved via name-interner)
 
     /**
      * Token id for "_permutations" -- used by the publisher hook to detect when the engine's interner re-hands out a

@@ -22,11 +22,13 @@
 #include <chrono>
 #include <condition_variable>
 #include <mutex>
+#include <optional>
+#include <stop_token>
 #include <thread>
 
 namespace Transmog
 {
-    // --- Deferred item-name catalog scan ---
+    // Deferred item-name catalog scan
     //
     // The game populates the iteminfo global (`qword_145CEF370`) some time after our DLL init runs -- exactly when
     // depends on world load order, so we can't reliably build the catalog in init(). Mirror EquipHide's pattern: a
@@ -36,15 +38,15 @@ namespace Transmog
     // Once the build lands, the thread calls PresetManager to re-resolve every stored itemName against the freshly
     // populated catalog and re-applies the active preset so the visual snaps into place.
     static std::mutex s_nametableThreadMtx;
-    static std::thread s_nametableScanThread;
+    static std::optional<DMK::StoppableWorker> s_nametableScanWorker;
     static std::atomic<bool> s_nametableScanLaunched{false};
 
     static constexpr int k_nametableInitialDelayMs = 8000;
     static constexpr int k_nametableRetryMs = 2000;
 
-    static void deferred_nametable_scan_fn() noexcept
+    static void deferred_nametable_scan_fn(std::stop_token stop) noexcept
     {
-        auto &logger = DMK::Logger::get_instance();
+        auto &logger = DMK::log();
         const auto subTranslator = resolved_addrs().subTranslator;
         if (!subTranslator)
             return;
@@ -54,7 +56,7 @@ namespace Transmog
         // Initial grace period -- lets the game finish loading its iteminfo container before we start polling.
         for (int slept = 0; slept < k_nametableInitialDelayMs; slept += 250)
         {
-            if (shutdown_requested().load(std::memory_order_relaxed))
+            if (stop.stop_requested() || shutdown_requested().load(std::memory_order_relaxed))
                 return;
             std::this_thread::sleep_for(std::chrono::milliseconds(250));
         }
@@ -62,16 +64,19 @@ namespace Transmog
         int attempt = 0;
         for (;;)
         {
-            if (shutdown_requested().load(std::memory_order_relaxed))
+            if (stop.stop_requested() || shutdown_requested().load(std::memory_order_relaxed))
                 return;
 
             const auto result = ItemNameTable::instance().build(subTranslator);
             if (result == BR::Ok)
             {
                 const auto size = ItemNameTable::instance().size();
-                logger.info("[nametable] deferred scan succeeded on attempt {} "
-                            "({} entries)",
-                            attempt + 1, size);
+                logger.info(
+                    "[nametable] deferred scan succeeded on attempt {} "
+                    "({} entries)",
+                    attempt + 1,
+                    size
+                );
                 // Load display names before dump so the sorted cache built by the dump already contains them.
                 {
                     const auto dir = runtime_dir_utf8();
@@ -82,9 +87,9 @@ namespace Transmog
                     ItemNameTable::instance().dump_catalog_tsv();
                 if (flag_dump_item_prefabs().load(std::memory_order_relaxed))
                 {
-                    // Targeted phantom-recovery sweep can take ~minutes. Detach so reresolve_all_names + manual_apply
-                    // happen immediately and the live transmog state refreshes without waiting on the TSV write.
-                    std::thread{[] { dump_itemmesh_tsv(); }}.detach();
+                    // Targeted phantom-recovery sweep can take ~minutes, so it runs on its own worker and
+                    // reresolve_all_names + manual_apply happen immediately without waiting on the TSV write.
+                    launch_itemmesh_dump();
                 }
 
                 // Re-resolve all loaded preset slots against the now-populated catalog and re-apply the active preset
@@ -100,8 +105,10 @@ namespace Transmog
             }
             if (result == BR::Fatal)
             {
-                logger.error("[nametable] deferred scan hit fatal chain error -- "
-                             "item catalog unavailable, mod disabled");
+                logger.error(
+                    "[nametable] deferred scan hit fatal chain error -- "
+                    "item catalog unavailable, mod disabled"
+                );
                 flag_enabled().store(false, std::memory_order_release);
                 return;
             }
@@ -113,7 +120,7 @@ namespace Transmog
 
             for (int slept = 0; slept < k_nametableRetryMs; slept += 250)
             {
-                if (shutdown_requested().load(std::memory_order_relaxed))
+                if (stop.stop_requested() || shutdown_requested().load(std::memory_order_relaxed))
                     return;
                 std::this_thread::sleep_for(std::chrono::milliseconds(250));
             }
@@ -126,24 +133,24 @@ namespace Transmog
             return;
 
         std::lock_guard<std::mutex> lk(s_nametableThreadMtx);
-        s_nametableScanThread = std::thread(deferred_nametable_scan_fn);
+        s_nametableScanWorker.emplace("LtNametableScan", &deferred_nametable_scan_fn);
     }
 
     void join_deferred_nametable_scan()
     {
         std::lock_guard<std::mutex> lk(s_nametableThreadMtx);
-        if (s_nametableScanThread.joinable())
-            s_nametableScanThread.join();
+        // ~StoppableWorker requests stop and joins, so the reset IS the join.
+        s_nametableScanWorker.reset();
     }
 
-    // --- Deferred PartShowSuppress slot-hash scan ---
+    // Deferred PartShowSuppress slot-hash scan
     //
     // Mirrors deferred_nametable_scan_fn but for the IndexedStringA entries PartShowSuppress keys on. A synchronous
     // scan at LT init would observe a small / empty table on cold-launch (LT loaded before main-menu wiring finishes),
     // leaving PartShowSuppress inert for the entire session. The deferred worker gates on
     // Transmog::is_world_ready() and waits until every expected partShowHashKey resolves, then commits once.
     static std::mutex s_slotHashThreadMtx;
-    static std::thread s_slotHashScanThread;
+    static std::optional<DMK::StoppableWorker> s_slotHashScanWorker;
     static std::atomic<bool> s_slotHashScanLaunched{false};
 
     // Timings match k_nametableInitialDelayMs / k_nametableRetryMs so both deferred workers behave the same way during
@@ -163,9 +170,9 @@ namespace Transmog
         return expected;
     }
 
-    static void deferred_slot_hash_scan_fn() noexcept
+    static void deferred_slot_hash_scan_fn(std::stop_token stop) noexcept
     {
-        auto &logger = DMK::Logger::get_instance();
+        auto &logger = DMK::log();
         const auto mapLookupAddr = resolved_addrs().mapLookup;
         if (!mapLookupAddr)
             return; // MapLookup unresolved -- already warned at init.
@@ -178,7 +185,7 @@ namespace Transmog
         // polls while the engine is still in pre-main-menu state.
         for (int slept = 0; slept < k_slotHashInitialDelayMs; slept += 250)
         {
-            if (shutdown_requested().load(std::memory_order_relaxed))
+            if (stop.stop_requested() || shutdown_requested().load(std::memory_order_relaxed))
                 return;
             std::this_thread::sleep_for(std::chrono::milliseconds(250));
         }
@@ -189,7 +196,7 @@ namespace Transmog
         {
             for (int slept = 0; slept < k_slotHashRetryMs; slept += 250)
             {
-                if (shutdown_requested().load(std::memory_order_relaxed))
+                if (stop.stop_requested() || shutdown_requested().load(std::memory_order_relaxed))
                     return;
                 std::this_thread::sleep_for(std::chrono::milliseconds(250));
             }
@@ -199,9 +206,11 @@ namespace Transmog
             if (!Transmog::is_world_ready())
             {
                 if (attempt % 50 == 0)
-                    logger.debug("[dispatch] slot-hash deferred scan: waiting "
-                                 "for world after {} attempts",
-                                 attempt);
+                    logger.debug(
+                        "[dispatch] slot-hash deferred scan: waiting "
+                        "for world after {} attempts",
+                        attempt
+                    );
                 continue;
             }
 
@@ -209,10 +218,12 @@ namespace Transmog
             if (nameToHash.empty())
             {
                 if (attempt % 50 == 0)
-                    logger.debug("[dispatch] slot-hash deferred scan: "
-                                 "IndexedStringA empty after world-ready "
-                                 "({} attempts)",
-                                 attempt);
+                    logger.debug(
+                        "[dispatch] slot-hash deferred scan: "
+                        "IndexedStringA empty after world-ready "
+                        "({} attempts)",
+                        attempt
+                    );
                 continue;
             }
 
@@ -231,26 +242,38 @@ namespace Transmog
             if (resolvable == expectedCount)
             {
                 const auto resolved = PartShowSuppress::init_slot_hashes(nameToHash);
-                logger.info("[dispatch] slot hashes resolved via deferred "
-                            "scan: {}/{} slots ({} attempts)",
-                            resolved, expectedCount, attempt);
+                logger.info(
+                    "[dispatch] slot hashes resolved via deferred "
+                    "scan: {}/{} slots ({} attempts)",
+                    resolved,
+                    expectedCount,
+                    attempt
+                );
                 return;
             }
 
             if (resolvable > prevResolvable)
             {
-                logger.debug("[dispatch] slot-hash deferred scan: {}/{} "
-                             "resolvable (attempt {})",
-                             resolvable, expectedCount, attempt);
+                logger.debug(
+                    "[dispatch] slot-hash deferred scan: {}/{} "
+                    "resolvable (attempt {})",
+                    resolvable,
+                    expectedCount,
+                    attempt
+                );
                 prevResolvable = resolvable;
                 continue;
             }
 
             // Plateaued -- sleep and retry indefinitely until every expected key registers or shutdown is requested.
             if (attempt % 50 == 0)
-                logger.debug("[dispatch] slot-hash deferred scan: still "
-                             "waiting after {} attempts ({}/{} resolvable)",
-                             attempt, resolvable, expectedCount);
+                logger.debug(
+                    "[dispatch] slot-hash deferred scan: still "
+                    "waiting after {} attempts ({}/{} resolvable)",
+                    attempt,
+                    resolvable,
+                    expectedCount
+                );
         }
     }
 
@@ -260,17 +283,17 @@ namespace Transmog
             return;
 
         std::lock_guard<std::mutex> lk(s_slotHashThreadMtx);
-        s_slotHashScanThread = std::thread(deferred_slot_hash_scan_fn);
+        s_slotHashScanWorker.emplace("LtSlotHashScan", &deferred_slot_hash_scan_fn);
     }
 
     void join_deferred_slot_hash_scan()
     {
         std::lock_guard<std::mutex> lk(s_slotHashThreadMtx);
-        if (s_slotHashScanThread.joinable())
-            s_slotHashScanThread.join();
+        // ~StoppableWorker requests stop and joins, so the reset IS the join.
+        s_slotHashScanWorker.reset();
     }
 
-    // --- Player component resolution ---
+    // Player component resolution
     //
     // WorldSystem -> ClientActorManager -> ClientUserActor chain
     // offsets. The same pa::ClientActorManager singleton is reached via the WorldSystem holder here and via the
@@ -358,7 +381,7 @@ namespace Transmog
         }
     }
 
-    // --- Debounced apply scheduling ---
+    // Debounced apply scheduling
     // Rapid inventory swaps fire VEC/BatchEquip hooks multiple times in quick succession. Without coalescing, each
     // trigger spawns its own apply and the visible effect is the player cycling head-to-toe while the auth table is
     // still mid-mutation (SEH faults in tear_down). The debounce collapses bursts into a single apply k_applyDebounceMs
@@ -403,7 +426,7 @@ namespace Transmog
 
     static std::mutex s_applyCvMtx;
     static std::condition_variable s_applyCv;
-    static std::thread s_applyWorker;
+    static std::optional<DMK::StoppableWorker> s_applyWorker;
     static std::atomic<bool> s_applyWorkerStarted{false};
 
     // Apply ALWAYS targets the currently-controlled character. This helper re-reads the live character via the Core
@@ -461,7 +484,7 @@ namespace Transmog
     [[nodiscard]] static std::uintptr_t applied_ccoia_for_char(std::uint32_t idx) noexcept;
     static void set_applied_ccoia_for_char(std::uint32_t idx, std::uintptr_t ccoia) noexcept;
 
-    // --- Multi-character auto-apply (world-generation triggered) ---
+    // Multi-character auto-apply (world-generation triggered)
     //
     // Apply one character's preset against an explicit equip-slot a1, bypassing the controlled-char-only path that
     // run_debounced_apply normally takes. Mutates the same global axes (active_character, slot_mappings,
@@ -471,16 +494,19 @@ namespace Transmog
     // if the body was not yet ready and the caller should re-arm the multi-apply pending flag to retry later.
     [[nodiscard]] static bool apply_for_one_char(const std::string &name, std::uintptr_t ccoia) noexcept
     {
-        auto &logger = DMK::Logger::get_instance();
+        auto &logger = DMK::log();
         if (name.empty() || ccoia == 0)
             return true; // nothing to do; caller should not retry
 
         const auto equipSlot = CDCore::equip_slot_for_ccoia(ccoia);
         if (equipSlot == 0)
         {
-            logger.debug("[multi-apply] {} (ccoia=0x{:X}): equip-slot walk "
-                         "failed -- skipping",
-                         name, static_cast<std::uint64_t>(ccoia));
+            logger.debug(
+                "[multi-apply] {} (ccoia=0x{:X}): equip-slot walk "
+                "failed -- skipping",
+                name,
+                static_cast<std::uint64_t>(ccoia)
+            );
             return true; // CCOIA likely invalid; do not retry
         }
 
@@ -492,9 +518,12 @@ namespace Transmog
         // this same predicate, so reusing it here keeps the policy consistent.
         if (!RealPartTearDown::is_actor_apply_ready(reinterpret_cast<void *>(equipSlot)))
         {
-            logger.debug("[multi-apply] {} a1=0x{:X}: body not yet ready "
-                         "(container chain incomplete) -- will retry",
-                         name, static_cast<std::uint64_t>(equipSlot));
+            logger.debug(
+                "[multi-apply] {} a1=0x{:X}: body not yet ready "
+                "(container chain incomplete) -- will retry",
+                name,
+                static_cast<std::uint64_t>(equipSlot)
+            );
             return false; // caller should re-arm
         }
 
@@ -526,10 +555,14 @@ namespace Transmog
         if (bodyReallocated)
         {
             if (prevCcoia != 0)
-                logger.info("[multi-apply] {} body reallocated (ccoia 0x{:X} -> "
-                            "0x{:X}); wiping stale apply-cache and re-applying "
-                            "from clean slate",
-                            name, static_cast<std::uint64_t>(prevCcoia), static_cast<std::uint64_t>(ccoia));
+                logger.info(
+                    "[multi-apply] {} body reallocated (ccoia 0x{:X} -> "
+                    "0x{:X}); wiping stale apply-cache and re-applying "
+                    "from clean slate",
+                    name,
+                    static_cast<std::uint64_t>(prevCcoia),
+                    static_cast<std::uint64_t>(ccoia)
+                );
             reset_applied_state_for_char(idx);
         }
         else
@@ -551,9 +584,12 @@ namespace Transmog
             // SEH during apply_all_transmog -- the carrier byte patches may have landed but the mesh-rebuild path hit a
             // torn deref on a freshly-summoned body. Report as deferred so the bounded retry catches the next attempt
             // once the body has fully settled.
-            logger.debug("[multi-apply] {} a1=0x{:X}: exception during "
-                         "apply_all_transmog -- deferring retry",
-                         name, static_cast<std::uint64_t>(equipSlot));
+            logger.debug(
+                "[multi-apply] {} a1=0x{:X}: exception during "
+                "apply_all_transmog -- deferring retry",
+                name,
+                static_cast<std::uint64_t>(equipSlot)
+            );
             return false;
         }
         capture_applied_state_for_char(idx);
@@ -638,7 +674,7 @@ namespace Transmog
 
     static void do_multi_char_apply() noexcept
     {
-        auto &logger = DMK::Logger::get_instance();
+        auto &logger = DMK::log();
 
         // Gate on item-catalog readiness. Cold-load completes the CCOIA chain (~500 ms after world_generation bumps)
         // well before the iteminfo background scan finishes the catalog (~3 s on cold-load). Running apply_all_transmog
@@ -647,8 +683,10 @@ namespace Transmog
         // here without consuming the retry budget so a slow catalog build does not exhaust the attempt cap.
         if (!ItemNameTable::instance().ready())
         {
-            logger.info("[multi-apply] catalog not ready -- re-arming "
-                        "(retry budget preserved)");
+            logger.info(
+                "[multi-apply] catalog not ready -- re-arming "
+                "(retry budget preserved)"
+            );
             s_multiCharApplyPending.store(true, std::memory_order_release);
             schedule_transmog_ms(k_multiCharRetryMs);
             return;
@@ -661,14 +699,20 @@ namespace Transmog
         {
             std::array<CDCore::ActorListDebugEntry, 24> rawEntries{}; // filled for the count only
             summary = CDCore::debug_enumerate_actor_list(rawEntries.data(), rawEntries.size());
-            logger.trace("[multi-apply-diag] chain mgr=0x{:X} ua=0x{:X} "
-                         "sub=0x{:X} kliff=0x{:X} ctrl=0x{:X} vec=0x{:X} "
-                         "child=0x{:X} list=0x{:X} rawEntries={}",
-                         static_cast<std::uint64_t>(summary.mgr), static_cast<std::uint64_t>(summary.userActor),
-                         static_cast<std::uint64_t>(summary.subMgr), static_cast<std::uint64_t>(summary.kliffCcoia),
-                         static_cast<std::uint64_t>(summary.controlled), static_cast<std::uint64_t>(summary.vecData),
-                         static_cast<std::uint64_t>(summary.childContainer),
-                         static_cast<std::uint64_t>(summary.actorList), summary.rawEntries);
+            logger.trace(
+                "[multi-apply-diag] chain mgr=0x{:X} ua=0x{:X} "
+                "sub=0x{:X} kliff=0x{:X} ctrl=0x{:X} vec=0x{:X} "
+                "child=0x{:X} list=0x{:X} rawEntries={}",
+                static_cast<std::uint64_t>(summary.mgr),
+                static_cast<std::uint64_t>(summary.userActor),
+                static_cast<std::uint64_t>(summary.subMgr),
+                static_cast<std::uint64_t>(summary.kliffCcoia),
+                static_cast<std::uint64_t>(summary.controlled),
+                static_cast<std::uint64_t>(summary.vecData),
+                static_cast<std::uint64_t>(summary.childContainer),
+                static_cast<std::uint64_t>(summary.actorList),
+                summary.rawEntries
+            );
             // Deliberately no per-entry dump: it reprints every actor on every apply, and the summary line above
             // already carries what the retry oracle reads. Add one back only while chasing the actor list itself.
         }
@@ -693,19 +737,28 @@ namespace Transmog
             const auto attempt = s_multiCharRetryCount.fetch_add(1, std::memory_order_acq_rel) + 1;
             if (attempt <= k_multiCharMaxRetries)
             {
-                logger.info("[multi-apply] partial chain "
-                            "(snapshot={}, actorList=0x{:X}); retrying in "
-                            "{} ms (attempt {}/{})",
-                            n, static_cast<std::uint64_t>(summary.actorList), k_multiCharRetryMs, attempt,
-                            k_multiCharMaxRetries);
+                logger.info(
+                    "[multi-apply] partial chain "
+                    "(snapshot={}, actorList=0x{:X}); retrying in "
+                    "{} ms (attempt {}/{})",
+                    n,
+                    static_cast<std::uint64_t>(summary.actorList),
+                    k_multiCharRetryMs,
+                    attempt,
+                    k_multiCharMaxRetries
+                );
                 s_multiCharApplyPending.store(true, std::memory_order_release);
                 schedule_transmog_ms(k_multiCharRetryMs);
                 return;
             }
-            logger.warning("[multi-apply] gave up after {} attempts -- "
-                           "chain never finished wiring (snapshot={}, "
-                           "actorList=0x{:X}); applying what we have",
-                           k_multiCharMaxRetries, n, static_cast<std::uint64_t>(summary.actorList));
+            logger.warning(
+                "[multi-apply] gave up after {} attempts -- "
+                "chain never finished wiring (snapshot={}, "
+                "actorList=0x{:X}); applying what we have",
+                k_multiCharMaxRetries,
+                n,
+                static_cast<std::uint64_t>(summary.actorList)
+            );
             s_multiCharRetryCount.store(0, std::memory_order_release);
             // Fall through and apply whatever we have (Kliff only, typically) so we at least don't drop the controlled
             // char's transmog.
@@ -728,9 +781,13 @@ namespace Transmog
         // Diagnostic: dump filtered snapshot.
         for (std::size_t i = 0; i < n; ++i)
         {
-            logger.trace("[multi-apply-diag] snapshot[{}] ccoia=0x{:X} "
-                         "charIdx={}",
-                         i, static_cast<std::uint64_t>(entries[i].body), entries[i].charIdx);
+            logger.trace(
+                "[multi-apply-diag] snapshot[{}] ccoia=0x{:X} "
+                "charIdx={}",
+                i,
+                static_cast<std::uint64_t>(entries[i].body),
+                entries[i].charIdx
+            );
         }
 
         const auto controlledCcoia = CDCore::current_controlled_ccoia();
@@ -799,10 +856,15 @@ namespace Transmog
             }
         }
 
-        logger.info("[multi-apply] world-entry auto-apply complete: "
-                    "applied {} of {} player CCOIAs "
-                    "(deferred={} skipped={})",
-                    applied, n, deferred, skipped);
+        logger.info(
+            "[multi-apply] world-entry auto-apply complete: "
+            "applied {} of {} player CCOIAs "
+            "(deferred={} skipped={})",
+            applied,
+            n,
+            deferred,
+            skipped
+        );
 
         // If any char's body wasn't ready, re-arm with a bounded retry. Freshly-summoned companions take ~1-3 seconds
         // to wire up their mesh container; re-firing the apply on a 1 s cadence catches them once is_actor_apply_ready
@@ -812,18 +874,26 @@ namespace Transmog
             const auto attempt = s_multiCharRetryCount.fetch_add(1, std::memory_order_acq_rel) + 1;
             if (attempt <= k_multiCharMaxRetries)
             {
-                logger.info("[multi-apply] {} char(s) not yet ready; "
-                            "re-arming in {} ms (attempt {}/{})",
-                            deferred, k_multiCharRetryMs, attempt, k_multiCharMaxRetries);
+                logger.info(
+                    "[multi-apply] {} char(s) not yet ready; "
+                    "re-arming in {} ms (attempt {}/{})",
+                    deferred,
+                    k_multiCharRetryMs,
+                    attempt,
+                    k_multiCharMaxRetries
+                );
                 s_multiCharApplyPending.store(true, std::memory_order_release);
                 schedule_transmog_ms(k_multiCharRetryMs);
             }
             else
             {
-                logger.warning("[multi-apply] {} char(s) never became ready "
-                               "after {} attempts -- giving up until next "
-                               "world-gen / roster-grew event",
-                               deferred, k_multiCharMaxRetries);
+                logger.warning(
+                    "[multi-apply] {} char(s) never became ready "
+                    "after {} attempts -- giving up until next "
+                    "world-gen / roster-grew event",
+                    deferred,
+                    k_multiCharMaxRetries
+                );
                 s_multiCharRetryCount.store(0, std::memory_order_release);
             }
         }
@@ -838,7 +908,7 @@ namespace Transmog
     // condition-variable unique_lock (MSVC C2712 forbids __try with objects requiring unwinding).
     static void run_debounced_apply() noexcept
     {
-        auto &logger = DMK::Logger::get_instance();
+        auto &logger = DMK::log();
 
         // Multi-character world-entry auto-apply takes priority over any pending single-char clear/apply. It iterates
         // every live protagonist CCOIA from CDCore::snapshot_body_cache(), applying each character's preset against its
@@ -879,19 +949,24 @@ namespace Transmog
                 // Editing character is no longer live (follower dismissed between schedule and run, or never was
                 // loaded). The user opted out of cross-body apply via the flag, so skip silently rather than render
                 // their preset on the controlled body.
-                logger.info("[targeted-apply] editing char idx={} not in live "
-                            "snapshot -- skipping apply",
-                            targetedIdx);
+                logger.info(
+                    "[targeted-apply] editing char idx={} not in live "
+                    "snapshot -- skipping apply",
+                    targetedIdx
+                );
                 s_lastApplyOk.store(true, std::memory_order_release);
                 return;
             }
             const auto targetA1 = CDCore::equip_slot_for_ccoia(targetCcoia);
             if (targetA1 == 0)
             {
-                logger.info("[targeted-apply] editing char idx={} ccoia=0x{:X} "
-                            "has no equip-slot yet (body still wiring) -- "
-                            "re-arming",
-                            targetedIdx, static_cast<std::uint64_t>(targetCcoia));
+                logger.info(
+                    "[targeted-apply] editing char idx={} ccoia=0x{:X} "
+                    "has no equip-slot yet (body still wiring) -- "
+                    "re-arming",
+                    targetedIdx,
+                    static_cast<std::uint64_t>(targetCcoia)
+                );
                 s_targetedApplyCharIdx.store(targetedIdx, std::memory_order_release);
                 schedule_transmog_ms(200);
                 return;
@@ -930,9 +1005,13 @@ namespace Transmog
             if (faulted)
             {
                 s_lastApplyOk.store(false, std::memory_order_release);
-                logger.debug("[targeted-apply] exception during {} on idx={} "
-                             "a1=0x{:X}",
-                             do_clear ? "clear" : "apply", targetedIdx, static_cast<std::uint64_t>(targetA1));
+                logger.debug(
+                    "[targeted-apply] exception during {} on idx={} "
+                    "a1=0x{:X}",
+                    do_clear ? "clear" : "apply",
+                    targetedIdx,
+                    static_cast<std::uint64_t>(targetA1)
+                );
             }
             else
             {
@@ -940,11 +1019,15 @@ namespace Transmog
                 // up-to-date installed state.
                 capture_applied_state_for_char(targetedIdx);
                 s_lastApplyOk.store(true, std::memory_order_release);
-                logger.debug("[targeted-apply] {} idx={} slotIdx={} a1=0x{:X}",
-                             do_clear                ? "cleared"
-                             : slotIdx < k_slotCount ? "applied-slot"
-                                                     : "applied",
-                             targetedIdx, slotIdx, static_cast<std::uint64_t>(targetA1));
+                logger.debug(
+                    "[targeted-apply] {} idx={} slotIdx={} a1=0x{:X}",
+                    do_clear                ? "cleared"
+                    : slotIdx < k_slotCount ? "applied-slot"
+                                            : "applied",
+                    targetedIdx,
+                    slotIdx,
+                    static_cast<std::uint64_t>(targetA1)
+                );
             }
             return;
         }
@@ -1014,9 +1097,11 @@ namespace Transmog
         if (controlledCcoia != 0 && controlledCcoia != prevControlledCcoia)
         {
             if (prevControlledCcoia != 0)
-                logger.info("[apply] controlled body reallocated (ccoia 0x{:X} -> 0x{:X}); wiping stale apply-cache",
-                            static_cast<std::uint64_t>(prevControlledCcoia),
-                            static_cast<std::uint64_t>(controlledCcoia));
+                logger.info(
+                    "[apply] controlled body reallocated (ccoia 0x{:X} -> 0x{:X}); wiping stale apply-cache",
+                    static_cast<std::uint64_t>(prevControlledCcoia),
+                    static_cast<std::uint64_t>(controlledCcoia)
+                );
             reset_applied_state_for_char(controlledIdx);
         }
         else
@@ -1065,17 +1150,19 @@ namespace Transmog
 
     // Persistent debounce worker. Sleeps on a condition variable until schedule_transmog bumps the deadline, then waits
     // out any remaining debounce window before invoking run_debounced_apply.
-    static void apply_worker_fn() noexcept
+    static void apply_worker_fn(std::stop_token stop) noexcept
     {
         std::unique_lock<std::mutex> lk(s_applyCvMtx);
         for (;;)
         {
-            s_applyCv.wait(lk,
-                           []
-                           {
-                               return shutdown_requested().load(std::memory_order_acquire) ||
-                                      s_applyPending.load(std::memory_order_acquire);
-                           });
+            s_applyCv.wait(
+                lk,
+                []
+                {
+                    return shutdown_requested().load(std::memory_order_acquire) ||
+                           s_applyPending.load(std::memory_order_acquire);
+                }
+            );
             if (shutdown_requested().load(std::memory_order_acquire))
                 return;
 
@@ -1092,12 +1179,15 @@ namespace Transmog
                     break;
 
                 const auto waitFor = std::chrono::milliseconds(deadline - now);
-                s_applyCv.wait_for(lk, waitFor,
-                                   [&deadline]
-                                   {
-                                       return shutdown_requested().load(std::memory_order_acquire) ||
-                                              s_applyDeadlineTick.load(std::memory_order_acquire) != deadline;
-                                   });
+                s_applyCv.wait_for(
+                    lk,
+                    waitFor,
+                    [&deadline]
+                    {
+                        return shutdown_requested().load(std::memory_order_acquire) ||
+                               s_applyDeadlineTick.load(std::memory_order_acquire) != deadline;
+                    }
+                );
                 if (shutdown_requested().load(std::memory_order_acquire))
                     return;
             }
@@ -1155,7 +1245,7 @@ namespace Transmog
         bool expected = false;
         if (!s_applyWorkerStarted.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
             return;
-        s_applyWorker = std::thread(apply_worker_fn);
+        s_applyWorker.emplace("LtApplyWorker", &apply_worker_fn);
     }
 
     void stop_apply_worker()
@@ -1166,21 +1256,24 @@ namespace Transmog
             std::lock_guard<std::mutex> lk(s_applyCvMtx);
             s_applyPending.store(true, std::memory_order_release);
         }
+        // request_stop() before the notify so the body observes the stop signal on the wake it is about to get:
+        // the apply worker parks on a condition variable, which a stop request alone does not disturb.
+        if (s_applyWorker.has_value())
+            s_applyWorker->request_stop();
         s_applyCv.notify_all();
-        if (s_applyWorker.joinable())
-            s_applyWorker.join();
+        s_applyWorker.reset();
         s_applyWorkerStarted.store(false, std::memory_order_release);
     }
 
-    // --- Load-detection thread ---
+    // Load-detection thread
 
-    static HANDLE s_loadDetectThread = nullptr;
+    static std::optional<DMK::StoppableWorker> s_loadDetectWorker;
 
-    static void sleep_interruptible(int ms)
+    static void sleep_interruptible(std::stop_token stop, int ms)
     {
         for (int i = 0; i < ms / 100; ++i)
         {
-            if (shutdown_requested().load(std::memory_order_relaxed))
+            if (stop.stop_requested() || shutdown_requested().load(std::memory_order_relaxed))
                 return;
             Sleep(100);
         }
@@ -1268,9 +1361,9 @@ namespace Transmog
         return found;
     }
 
-    static DWORD WINAPI load_detect_thread_fn(LPVOID)
+    static void load_detect_thread_fn(std::stop_token stop) noexcept
     {
-        auto &logger = DMK::Logger::get_instance();
+        auto &logger = DMK::log();
         __int64 prevComp = 0;
         std::uintptr_t prevUser = 0;
         std::string prevCharName;
@@ -1300,11 +1393,11 @@ namespace Transmog
 
         while (!shutdown_requested().load(std::memory_order_relaxed))
         {
-            sleep_interruptible(1000);
-            if (shutdown_requested().load(std::memory_order_relaxed))
-                return 0;
+            sleep_interruptible(stop, 1000);
+            if (stop.stop_requested() || shutdown_requested().load(std::memory_order_relaxed))
+                return;
 
-            // --- Multi-character auto-apply triggers ---
+            // Multi-character auto-apply triggers
             //
             // Two independent signals re-arm the multi-apply path:
             //
@@ -1342,9 +1435,12 @@ namespace Transmog
                 const auto curWorldGen = CDCore::world_generation();
                 if (curWorldGen != prevWorldGen)
                 {
-                    logger.info("World generation {} -> {}; arming multi-char "
-                                "auto-apply (500 ms debounce)",
-                                prevWorldGen, curWorldGen);
+                    logger.info(
+                        "World generation {} -> {}; arming multi-char "
+                        "auto-apply (500 ms debounce)",
+                        prevWorldGen,
+                        curWorldGen
+                    );
                     s_multiCharApplyPending.store(true, std::memory_order_release);
                     // Tight first-shot: apply_for_one_char treats a mesh-walk fault as a deferred retry (re-arms
                     // s_multiCharApplyPending and returns false) so the bounded retry below picks it up if the body
@@ -1357,9 +1453,12 @@ namespace Transmog
                 {
                     if (s_prevSnapshotCount != kSnapshotCountUninit && n > s_prevSnapshotCount)
                     {
-                        logger.info("Player roster grew {} -> {}; arming "
-                                    "multi-char auto-apply (500 ms debounce)",
-                                    s_prevSnapshotCount, n);
+                        logger.info(
+                            "Player roster grew {} -> {}; arming "
+                            "multi-char auto-apply (500 ms debounce)",
+                            s_prevSnapshotCount,
+                            n
+                        );
                         s_multiCharApplyPending.store(true, std::memory_order_release);
                         // Match the world-gen debounce; the deferred-retry path covers the "newly-summoned but
                         // not-yet-wired" window.
@@ -1369,7 +1468,7 @@ namespace Transmog
                 }
             }
 
-            // --- Save-load invalidation ---
+            // Save-load invalidation
             //
             // The Core controlled-character resolver caches the most recent known identity key. On a save load the
             // previous world's actor pool is freed and reallocated; without invalidation the resolver could keep
@@ -1388,10 +1487,13 @@ namespace Transmog
                 {
                     if (prevUser != 0)
                     {
-                        logger.info("Load detect: UserActor swapped "
-                                    "({:#x} -> {:#x}); invalidating controlled-"
-                                    "char cache for save-load transition",
-                                    static_cast<uint64_t>(prevUser), static_cast<uint64_t>(curUser));
+                        logger.info(
+                            "Load detect: UserActor swapped "
+                            "({:#x} -> {:#x}); invalidating controlled-"
+                            "char cache for save-load transition",
+                            static_cast<uint64_t>(prevUser),
+                            static_cast<uint64_t>(curUser)
+                        );
                         CDCore::invalidate_controlled_character();
                         prevCharName.clear();
                         pendingCharName.clear();
@@ -1411,7 +1513,7 @@ namespace Transmog
                 }
             }
 
-            // --- Save-load detected (controlled-actor signal) ---
+            // Save-load detected (controlled-actor signal)
             //
             // Mirrors EquipHide/player_detection.cpp. Polls user+0xD8 (the CLIENT controlled body pointer) and
             // disambiguates three transitions:
@@ -1447,18 +1549,22 @@ namespace Transmog
 
                     if (controlledActor == 0 && prevControlledActor != 0)
                     {
-                        logger.info("Save-load detected: controlled actor "
-                                    "(0x{:X} -> 0x0); deferring full cache wipe "
-                                    "until new world is live",
-                                    static_cast<uint64_t>(prevControlledActor));
+                        logger.info(
+                            "Save-load detected: controlled actor "
+                            "(0x{:X} -> 0x0); deferring full cache wipe "
+                            "until new world is live",
+                            static_cast<uint64_t>(prevControlledActor)
+                        );
                         pendingReloadInvalidation = true;
                     }
                     else if (controlledActor != 0 && prevControlledActor == 0 && pendingReloadInvalidation)
                     {
-                        logger.info("Save-load complete: new controlled actor "
-                                    "0x{:X} -- clearing LT preset_manager "
-                                    "active character + swap-scope state",
-                                    static_cast<uint64_t>(controlledActor));
+                        logger.info(
+                            "Save-load complete: new controlled actor "
+                            "0x{:X} -- clearing LT preset_manager "
+                            "active character + swap-scope state",
+                            static_cast<uint64_t>(controlledActor)
+                        );
                         wipe_lt_state();
                         pendingReloadInvalidation = false;
                     }
@@ -1470,13 +1576,17 @@ namespace Transmog
 
                         if (atomicSaveLoad)
                         {
-                            logger.info("Save-load detected (atomic swap): "
-                                        "controlled actor (0x{:X} -> 0x{:X}); "
-                                        "world_generation {} -> {}; clearing "
-                                        "LT preset_manager active character + "
-                                        "swap-scope state",
-                                        static_cast<uint64_t>(prevControlledActor),
-                                        static_cast<uint64_t>(controlledActor), prevWorldGen, curWorldGen);
+                            logger.info(
+                                "Save-load detected (atomic swap): "
+                                "controlled actor (0x{:X} -> 0x{:X}); "
+                                "world_generation {} -> {}; clearing "
+                                "LT preset_manager active character + "
+                                "swap-scope state",
+                                static_cast<uint64_t>(prevControlledActor),
+                                static_cast<uint64_t>(controlledActor),
+                                prevWorldGen,
+                                curWorldGen
+                            );
                             wipe_lt_state();
                             pendingReloadInvalidation = false;
                         }
@@ -1488,7 +1598,7 @@ namespace Transmog
                 prevWorldGen = curWorldGen;
             }
 
-            // --- Character-swap auto-detect ---
+            // Character-swap auto-detect
             //
             // Reads the controlled-character name every tick; when it changes AND remains stable for
             // k_charSwapSettleMs, switches the UI preset list to the new character and schedules an apply. The apply
@@ -1579,10 +1689,13 @@ namespace Transmog
                 // Advance prevComp BEFORE the controlled-char gate so the worker does not re-observe the same change
                 // every tick while the world is still loading. prevComp tracks the most recent observed value, not the
                 // most recent successfully-applied one.
-                logger.info("Load detect: player component changed "
-                            "({:#x} -> {:#x}); controlled = {}",
-                            static_cast<uint64_t>(prevComp), static_cast<uint64_t>(comp),
-                            liveChar.empty() ? std::string_view{"<unresolved>"} : std::string_view{liveChar});
+                logger.info(
+                    "Load detect: player component changed "
+                    "({:#x} -> {:#x}); controlled = {}",
+                    static_cast<uint64_t>(prevComp),
+                    static_cast<uint64_t>(comp),
+                    liveChar.empty() ? std::string_view{"<unresolved>"} : std::string_view{liveChar}
+                );
                 prevComp = comp;
 
                 // Engine has rotated player_component to the new body, so the race window that s_charSwapPending guards
@@ -1595,8 +1708,10 @@ namespace Transmog
 
                 if (liveChar.empty())
                 {
-                    logger.trace("Load detect: holding auto-apply -- controlled "
-                                 "char unresolved (waiting for world)");
+                    logger.trace(
+                        "Load detect: holding auto-apply -- controlled "
+                        "char unresolved (waiting for world)"
+                    );
                     continue;
                 }
 
@@ -1645,8 +1760,8 @@ namespace Transmog
                 for (int attempt = 0; attempt < k_maxAutoApplyAttempts; ++attempt)
                 {
                     const int delayMs = (attempt < 2) ? 2000 : (attempt < 3) ? 3000 : (attempt < 4) ? 4000 : 5000;
-                    sleep_interruptible(delayMs);
-                    if (shutdown_requested().load(std::memory_order_relaxed))
+                    sleep_interruptible(stop, delayMs);
+                    if (stop.stop_requested() || shutdown_requested().load(std::memory_order_relaxed))
                         break;
 
                     // The outer tick cannot run while this loop owns the thread, and this loop can hold it for a
@@ -1665,9 +1780,12 @@ namespace Transmog
                         const auto curComp = resolve_player_component();
                         if (curComp > 0x10000 && curComp != comp)
                         {
-                            logger.info("Load detect: wrapper changed mid-retry "
-                                        "({:#x} -> {:#x}), aborting current budget",
-                                        static_cast<uint64_t>(comp), static_cast<uint64_t>(curComp));
+                            logger.info(
+                                "Load detect: wrapper changed mid-retry "
+                                "({:#x} -> {:#x}), aborting current budget",
+                                static_cast<uint64_t>(comp),
+                                static_cast<uint64_t>(curComp)
+                            );
                             wrapperChanged = true;
                             break;
                         }
@@ -1683,18 +1801,22 @@ namespace Transmog
                     if (!ItemNameTable::instance().ready())
                     {
                         if (catalogWaitStreak == 0)
-                            logger.debug("Load detect: catalog not ready -- "
-                                         "holding auto-apply (attempt {})",
-                                         attempt + 1);
+                            logger.debug(
+                                "Load detect: catalog not ready -- "
+                                "holding auto-apply (attempt {})",
+                                attempt + 1
+                            );
                         ++catalogWaitStreak;
                         --attempt; // do not consume an attempt slot
                         continue;
                     }
                     if (catalogWaitStreak > 0)
                     {
-                        logger.debug("Load detect: catalog became ready after "
-                                     "{} deferred ticks",
-                                     catalogWaitStreak);
+                        logger.debug(
+                            "Load detect: catalog became ready after "
+                            "{} deferred ticks",
+                            catalogWaitStreak
+                        );
                         catalogWaitStreak = 0;
                     }
 
@@ -1704,18 +1826,22 @@ namespace Transmog
                         // streak resets when a probe finally passes or when the wrapper changes (next outer-loop
                         // iteration).
                         if (notReadyStreak == 0)
-                            logger.debug("Load detect: actor not ready -- deferring "
-                                         "apply (attempt {})",
-                                         attempt + 1);
+                            logger.debug(
+                                "Load detect: actor not ready -- deferring "
+                                "apply (attempt {})",
+                                attempt + 1
+                            );
                         ++notReadyStreak;
                         continue;
                     }
 
                     if (notReadyStreak > 0)
                     {
-                        logger.debug("Load detect: actor became ready after {} "
-                                     "deferred attempts",
-                                     notReadyStreak);
+                        logger.debug(
+                            "Load detect: actor became ready after {} "
+                            "deferred attempts",
+                            notReadyStreak
+                        );
                         notReadyStreak = 0;
                     }
 
@@ -1723,7 +1849,7 @@ namespace Transmog
                     logger.debug("Load detect: scheduled apply (attempt {})", attempt + 1);
 
                     // Give the worker time to finish, then check result.
-                    sleep_interruptible(500);
+                    sleep_interruptible(stop, 500);
                     if (s_lastApplyOk.load(std::memory_order_acquire))
                     {
                         logger.info("Load detect: auto-apply succeeded on attempt {}", attempt + 1);
@@ -1741,24 +1867,22 @@ namespace Transmog
             }
         }
 
-        return 0;
+        return;
     }
 
     void start_load_detect_thread()
     {
-        s_loadDetectThread = CreateThread(nullptr, 0, load_detect_thread_fn, nullptr, 0, nullptr);
+        s_loadDetectWorker.emplace("LtLoadDetect", &load_detect_thread_fn);
     }
 
     void stop_load_detect_thread()
     {
-        if (s_loadDetectThread)
-        {
-            // Polls via sleep_interruptible(1000), auto-apply retries up to 20x with backoff. All sleeps check
-            // shutdown_requested every 100ms, so drain completes well under 1s.
-            WaitForSingleObject(s_loadDetectThread, 15000);
-            CloseHandle(s_loadDetectThread);
-            s_loadDetectThread = nullptr;
-        }
+        // Polls via sleep_interruptible(1000), auto-apply retries up to 20x with backoff. Every sleep checks the
+        // stop token and shutdown_requested every 100ms, so the drain completes well under a second.
+        // ~StoppableWorker requests stop and joins, so the reset IS the join. Unlike the WaitForSingleObject
+        // timeout this replaced, there is no path where the wait gives up and leaves the thread running inside a
+        // module that is about to unmap.
+        s_loadDetectWorker.reset();
     }
 
 } // namespace Transmog

@@ -5,160 +5,186 @@
 #include "transmog.hpp"
 #include "transmog_map.hpp"
 
-#include <DetourModKit.hpp>
+#include <DetourModKit/config.hpp>
+#include <DetourModKit/input.hpp>
+#include <DetourModKit/logger.hpp>
 
 #include <functional>
-#include <string>
+#include <optional>
 #include <string_view>
 #include <utility>
-#include <vector>
 
 namespace Transmog
 {
-    namespace
+    void register_hotkeys(DMK::input::Scope &scope)
     {
-        // Process-lifetime stash for the per-binding cancellation guards returned by register_press_combo. Each guard
-        // owns a shared_ptr<atomic<bool>> that gates the user callback; dropping the guard cancels the binding. We only
-        // need the guards for shutdown ordering (they release in destructor order), so a plain vector with reserve is
-        // fine.
-        std::vector<DMK::Config::InputBindingGuard> &binding_guards()
-        {
-            static std::vector<DMK::Config::InputBindingGuard> s_guards;
-            return s_guards;
-        }
+        auto &logger = DMK::log();
+        const auto before = scope.size();
 
-        DMK::Config::InputBindingGuard add_binding(std::string_view section, std::string_view ini_key,
-                                                   std::string_view log_name, std::string_view input_name,
-                                                   std::function<void()> on_press, std::string_view default_value)
-        {
-            // Empty / "NONE" INI values are recognised as opt-out sentinels by DMK::Config::parse_key_combo_list and
-            // produce an unbound binding silently. The binding name remains addressable for a later non-empty
-            // update_binding_combos when the user assigns a real combo on a live INI reload, with no consumer-side
-            // wrapper required.
-            return DMK::Config::register_press_combo(section, ini_key, log_name, input_name, std::move(on_press),
-                                                     default_value);
-        }
-    } // namespace
+        // Section-scoped binders, so each INI section name is written once here instead of heading every call.
+        const DMK::config::SectionBinder general = DMK::config::section("General");
+        const DMK::config::SectionBinder presets = DMK::config::section("Presets");
 
-    void register_hotkeys()
-    {
-        auto &logger = DMK::Logger::get_instance();
-        auto &guards = binding_guards();
-        constexpr std::size_t k_expected = 10;
-        guards.reserve(k_expected);
+        // Every binding passes false as press_combo's trailing `consume`, which registers a "<ini_key>.Consume"
+        // bool defaulting OFF. Registering it costs nothing at runtime -- the input engine only installs its XInput
+        // interception once some binding is actually set true -- and withholding it would hide the option entirely,
+        // because an INI key that was never registered is ignored without a warning. Whether a binding can USE
+        // suppression is not fixed here either: the combo is user-editable, so any binding can become a gamepad
+        // binding. Suppression is honored for digital gamepad buttons and the mouse wheel only, masks just the
+        // TRIGGER (never the modifier), and never affects a keyboard combo.
+        //
+        // An empty default and the literal "NONE" are opt-out sentinels: press_combo registers an unbound but
+        // addressable binding silently, so a later non-empty INI value attaches a real combo on a live reload
+        // without re-registering.
 
-        guards.push_back(add_binding(
-            "General", "ToggleHotkey", "Toggle Hotkey", "ToggleTransmog",
+        scope.add(general.press_combo(
+            "ToggleHotkey",
+            "Toggle Hotkey",
+            "ToggleTransmog",
             []()
             {
-                // flag_enabled() is the single source of truth used by every hook and the overlay checkbox. The toggle
-                // flips it so all state stays consistent.
+                // flag_enabled() is the single source of truth used by every hook and the overlay checkbox. The
+                // toggle flips it so all state stays consistent.
                 auto &ff = flag_enabled();
                 const bool nowEnabled = !ff.load(std::memory_order_relaxed);
                 ff.store(nowEnabled, std::memory_order_relaxed);
                 if (nowEnabled)
                 {
-                    DMK::Logger::get_instance().info("Transmog ON (hotkey) -- applying");
+                    DMK::log().info("Transmog ON (hotkey) -- applying");
                     Transmog::manual_apply();
                 }
                 else
                 {
-                    DMK::Logger::get_instance().info("Transmog OFF (hotkey) -- restoring original");
+                    DMK::log().info("Transmog OFF (hotkey) -- restoring original");
                     Transmog::manual_clear();
                 }
             },
-            ""));
+            "",
+            false
+        ));
 
-        guards.push_back(add_binding(
-            "General", "ApplyHotkey", "Apply Transmog Hotkey", "ApplyTransmog",
+        scope.add(general.press_combo(
+            "ApplyHotkey",
+            "Apply Transmog Hotkey",
+            "ApplyTransmog",
             []()
             {
-                DMK::Logger::get_instance().info("Apply hotkey pressed");
+                DMK::log().info("Apply hotkey pressed");
                 Transmog::manual_apply();
             },
-            ""));
+            "",
+            false
+        ));
 
-        guards.push_back(add_binding(
-            "General", "ClearHotkey", "Clear Transmog Hotkey", "ClearTransmog",
+        scope.add(general.press_combo(
+            "ClearHotkey",
+            "Clear Transmog Hotkey",
+            "ClearTransmog",
             []()
             {
                 // Clear also flips flag_enabled to false so a subsequent
                 // Toggle sees cleared == disabled (avoids 2-press bug).
-                DMK::Logger::get_instance().info("Clear hotkey pressed -- disabling transmog");
+                DMK::log().info("Clear hotkey pressed -- disabling transmog");
                 flag_enabled().store(false, std::memory_order_relaxed);
                 Transmog::manual_clear();
             },
-            ""));
+            "",
+            false
+        ));
 
-        guards.push_back(add_binding(
-            "General", "CaptureHotkey", "Capture Outfit Hotkey", "CaptureOutfit",
+        scope.add(general.press_combo(
+            "CaptureHotkey",
+            "Capture Outfit Hotkey",
+            "CaptureOutfit",
             []()
             {
-                DMK::Logger::get_instance().info("Capture hotkey pressed");
+                DMK::log().info("Capture hotkey pressed");
                 Transmog::capture_outfit();
             },
-            ""));
+            "",
+            false
+        ));
 
-        guards.push_back(add_binding(
-            "Presets", "AppendHotkey", "Append Preset Hotkey", "PresetAppend",
+        scope.add(presets.press_combo(
+            "AppendHotkey",
+            "Append Preset Hotkey",
+            "PresetAppend",
             []()
             {
-                DMK::Logger::get_instance().info("Preset append hotkey pressed");
+                DMK::log().info("Preset append hotkey pressed");
                 PresetManager::instance().append_from_state();
                 Transmog::manual_apply();
             },
-            ""));
+            "",
+            false
+        ));
 
-        guards.push_back(add_binding(
-            "Presets", "ReplaceHotkey", "Replace Preset Hotkey", "PresetReplace",
+        scope.add(presets.press_combo(
+            "ReplaceHotkey",
+            "Replace Preset Hotkey",
+            "PresetReplace",
             []()
             {
-                DMK::Logger::get_instance().info("Preset replace hotkey pressed");
+                DMK::log().info("Preset replace hotkey pressed");
                 PresetManager::instance().replace_current_from_state();
             },
-            ""));
+            "",
+            false
+        ));
 
-        guards.push_back(add_binding(
-            "Presets", "RemoveHotkey", "Remove Preset Hotkey", "PresetRemove",
+        scope.add(presets.press_combo(
+            "RemoveHotkey",
+            "Remove Preset Hotkey",
+            "PresetRemove",
             []()
             {
-                DMK::Logger::get_instance().info("Preset remove hotkey pressed");
+                DMK::log().info("Preset remove hotkey pressed");
                 PresetManager::instance().remove_current();
             },
-            ""));
+            "",
+            false
+        ));
 
-        guards.push_back(add_binding(
-            "Presets", "NextHotkey", "Next Preset Hotkey", "PresetNext",
+        scope.add(presets.press_combo(
+            "NextHotkey",
+            "Next Preset Hotkey",
+            "PresetNext",
             []()
             {
                 auto &pm = PresetManager::instance();
                 pm.next_preset();
-                DMK::Logger::get_instance().info("Preset next hotkey pressed");
+                DMK::log().info("Preset next hotkey pressed");
                 Transmog::manual_apply();
             },
-            ""));
+            "",
+            false
+        ));
 
-        guards.push_back(add_binding(
-            "Presets", "PrevHotkey", "Previous Preset Hotkey", "PresetPrev",
+        scope.add(presets.press_combo(
+            "PrevHotkey",
+            "Previous Preset Hotkey",
+            "PresetPrev",
             []()
             {
                 auto &pm = PresetManager::instance();
                 pm.prev_preset();
-                DMK::Logger::get_instance().info("Preset prev hotkey pressed");
+                DMK::log().info("Preset prev hotkey pressed");
                 Transmog::manual_apply();
             },
-            ""));
+            "",
+            false
+        ));
 
-        guards.push_back(add_binding(
-            "General", "OverlayToggleHotkey", "Overlay Toggle Hotkey", "OverlayToggle",
-            []() { toggle_overlay_visible(); }, "Home"));
+        scope.add(general.press_combo(
+            "OverlayToggleHotkey",
+            "Overlay Toggle Hotkey",
+            "OverlayToggle",
+            []() { toggle_overlay_visible(); },
+            "Home",
+            false
+        ));
 
-        logger.info("Hotkeys registered: {} binding(s)", guards.size());
-    }
-
-    void clear_hotkey_guards() noexcept
-    {
-        binding_guards().clear();
+        logger.info("Hotkeys registered: {} binding(s)", scope.size() - before);
     }
 
 } // namespace Transmog

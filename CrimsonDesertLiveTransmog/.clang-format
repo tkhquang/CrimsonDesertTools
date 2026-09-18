@@ -42,6 +42,16 @@ AllowShortBlocksOnASingleLine: Never
 AllowShortIfStatementsOnASingleLine: false
 AllowShortLoopsOnASingleLine: false
 AllowShortCaseLabelsOnASingleLine: false
+# Wrapped argument and parameter lists take one item per line, with the right paren on its own line. A list that
+# fits inside ColumnLimit stays on one line. BinPackParameters: OnePerLine keeps that conditional; AlwaysOnePerLine
+# would expand a short signature. AGENTS.md states the convention for a human reader.
+AlignAfterOpenBracket: BlockIndent
+BinPackArguments: false
+AllowAllArgumentsOnNextLine: false
+BinPackParameters: OnePerLine
+AllowAllParametersOfDeclarationOnNextLine: false
+# Pinned at the default so a definition wraps the same way as its declaration.
+BreakFunctionDefinitionParameters: false
 # Single-statement control bodies stay optionally braced: InsertBraces is deliberately left unset, so a brace-less
 # guard clause (if (cond) return;) is preserved and never force-braced, while any multi-line or non-obvious body is
 # braced by hand. Enabling InsertBraces would mechanically rewrite every brace-less guard in the tree and is rejected

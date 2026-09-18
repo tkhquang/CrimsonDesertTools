@@ -1,59 +1,97 @@
+/**
+ * @file dllmain.cpp
+ * @brief DLL entry point wiring the mod lifecycle to the DetourModKit Session.
+ *
+ * bootstrap_attach() performs the process and single-instance gates without allocating, then runs on_ready(session)
+ * on its own worker thread off the loader lock; ~Session (also on that worker) clears the binding scope and tears the
+ * DMK subsystems down in order.
+ *
+ * DetourModKit does not own the mod's own state. Hooks are caller-owned handles, so EquipHide::shutdown() is the only
+ * path that restores the patched prologues, and this file calls it.
+ */
+
 #ifndef EQUIPHIDE_DEV_BUILD
 
 #include "constants.hpp"
 #include "equip_hide.hpp"
 #include "version.hpp"
 
-#include <DetourModKit.hpp>
-#include <DetourModKit/bootstrap.hpp>
+#include <DetourModKit/async_logger_config.hpp>
+#include <DetourModKit/error.hpp>
 #include <DetourModKit/filesystem.hpp>
+#include <DetourModKit/logger.hpp>
+#include <DetourModKit/session.hpp>
 
 #include <Windows.h>
 
 namespace
 {
-    bool init_mod()
+    DMK::Result<void> on_ready(DMK::Session &session)
     {
-        auto &logger = DetourModKit::Logger::get_instance();
+        auto &logger = session.log();
         EquipHide::Version::log_version_info();
+        logger.info("DLL loaded, runtime dir: {}", DMK::filesystem::get_runtime_directory_utf8());
 
-        const auto runtimeDir = DetourModKit::Filesystem::get_runtime_directory_utf8();
-        logger.info("DLL loaded, runtime dir: {}", runtimeDir);
-
-        if (!EquipHide::init())
+        auto ready = EquipHide::init(session);
+        if (!ready)
         {
-            logger.error("Equip hide initialization FAILED. Mod will not function.");
-            return false;
+            logger.error("Equip hide initialization FAILED ({}).", ready.error().message());
+            return ready;
         }
 
         logger.info("Equip hide initialization complete.");
-        return true;
-    }
-
-    void shutdown_mod()
-    {
-        EquipHide::shutdown();
+        return {};
     }
 } // namespace
 
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved)
 {
+    // bootstrap_attach captures the calling module itself, because DetourModKit links statically into this DLL and
+    // its code address resolves to this HMODULE.
+    (void)hModule;
+
     switch (ul_reason_for_call)
     {
     case DLL_PROCESS_ATTACH:
     {
-        DetourModKit::AsyncLoggerConfig asyncCfg;
-        asyncCfg.overflow_policy = DetourModKit::OverflowPolicy::SyncFallback;
+        DMK::AsyncLoggerConfig asyncCfg;
+        // Fall back to synchronous logging if the async queue overflows, so no diagnostic line is lost during a burst
+        // (startup or teardown).
+        asyncCfg.overflow_policy = DMK::OverflowPolicy::SyncFallback;
 
-        const DetourModKit::Bootstrap::ModInfo info{
-            "EquipHide", EquipHide::LOG_FILE, EquipHide::GAME_PROCESS_NAME, "CrimsonDesertEquipHide_", asyncCfg,
+        const DMK::ModInfo info{
+            .name = EquipHide::MOD_NAME,
+            .log_file = EquipHide::LOG_FILE,
+            .game_process_name = EquipHide::GAME_PROCESS_NAME,
+            .instance_mutex_prefix = EquipHide::INSTANCE_MUTEX_PREFIX,
+            .log = asyncCfg,
+            // Single DLL, one Session per run, so the default Truncate gives one log per game launch. The dev loader
+            // needs Append instead, because it keeps every generation's teardown records in one file.
+            .log_open_mode = DMK::LogOpenMode::Truncate,
+            // Keep the [file:line] stamp only where it earns its place: Trace records are the ones read while actively
+            // debugging, and every higher level renders clean.
+            .log_source_stamp_mode = DMK::LogSourceStampMode::at_or_below(DMK::LogLevel::Trace),
         };
 
-        return DetourModKit::Bootstrap::on_dll_attach(hModule, info, &init_mod, &shutdown_mod);
+        // A gate refusal (wrong process, a duplicate load already holding the mutex) is a reason for this DLL to go
+        // away, not for the host to fail, so report it as a failed attach and let the loader unmap us.
+        return DMK::bootstrap_attach(info, &on_ready).has_value() ? TRUE : FALSE;
     }
 
     case DLL_PROCESS_DETACH:
-        DetourModKit::Bootstrap::on_dll_detach(lpReserved != nullptr);
+        // lpReserved == NULL is an explicit FreeLibrary. Run the mod teardown so the patched prologues are restored;
+        // this is best-effort, because a ~Hook under the loader lock pins the backend rather than leaving a
+        // half-restored target. lpReserved != NULL is process exit: the OS has already killed every other thread, so
+        // touching patched pages there would be a UAF and the abandon path inside bootstrap_detach is the correct
+        // no-op.
+        if (lpReserved == nullptr)
+        {
+            // The verdict is discarded on purpose. DllMain cannot refuse a FreeLibrary already in progress, and this
+            // ASI is loaded once for the process, so there is no later load that a pinned backend could hand a stale
+            // image to. shutdown() logs the failure itself.
+            (void)EquipHide::shutdown();
+        }
+        DMK::bootstrap_detach(lpReserved);
         break;
 
     default:

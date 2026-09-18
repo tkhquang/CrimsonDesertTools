@@ -45,19 +45,46 @@ namespace Transmog
             static_cast<const imgui_function_table_19250 *>(lt_get_imgui_function_table());
     }
 
-    bool init_overlay(HMODULE hModule)
+    /**
+     * @brief Returns the handle of the module this function is compiled into, without adding a reference.
+     * @details GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT is load-bearing, not an optimization: a counted
+     *          reference on the dev build's logic DLL would keep the generation mapped forever, and the loader's
+     *          unload verdict would refuse every hot reload after the first.
+     */
+    static HMODULE self_module() noexcept
     {
-        auto &logger = DMK::Logger::get_instance();
+        HMODULE self = nullptr;
+        if (GetModuleHandleExW(
+                GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                reinterpret_cast<LPCWSTR>(&self_module),
+                &self
+            ) == 0)
+        {
+            return nullptr;
+        }
+        return self;
+    }
+
+    bool init_overlay()
+    {
+        auto &logger = DMK::log();
         bool hasOverlay = false;
 
         // Try ReShade first unless the user opted into strict standalone. Mixed mode (ReShade addon AND standalone
         // window) would clobber imgui_function_table_instance() since it is a single pointer.
-        if (!s_forceStandalone)
+        //
+        // A null module is never handed to register_addon. ReShade caches the first handle it receives in a
+        // function-local static, so one null call would poison addon registration for the rest of this module's
+        // life, and the failure reads as "ReShade not present" rather than as the bug it is.
+        const HMODULE self = self_module();
+        if (!s_forceStandalone && self != nullptr)
         {
-            if (init_reshade_overlay(hModule))
+            if (init_reshade_overlay(self))
             {
-                logger.info("[overlay] ReShade detected -- registered addon "
-                            "tab (open ReShade with Home key)");
+                logger.info(
+                    "[overlay] ReShade detected -- registered addon "
+                    "tab (open ReShade with Home key)"
+                );
                 hasOverlay = true;
             }
         }
@@ -67,15 +94,19 @@ namespace Transmog
             activate_standalone_imgui_table();
             if (init_dx_overlay())
             {
-                logger.info("[overlay] Standalone overlay active "
-                            "(press Home to toggle)");
+                logger.info(
+                    "[overlay] Standalone overlay active "
+                    "(press Home to toggle)"
+                );
                 hasOverlay = true;
             }
         }
 
         if (!hasOverlay)
-            logger.warning("[overlay] No overlay available -- "
-                           "mod still works via hotkeys");
+            logger.warning(
+                "[overlay] No overlay available -- "
+                "mod still works via hotkeys"
+            );
         return hasOverlay;
     }
 

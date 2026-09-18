@@ -26,10 +26,19 @@ namespace Transmog::SocketMeshOverride
 {
     namespace
     {
-        /// PartDescriptorBuild: `f(a1, &partId, slotTag, a4, a5, record, outList)`, resolved by AOB (see
-        /// k_partDescriptorBuildCandidates).
-        using BuildFn = std::int64_t(__fastcall *)(std::int64_t, std::int16_t *, std::uint16_t, std::uint32_t *, char,
-                                                   std::int64_t, std::uint64_t *);
+        /**
+         * @brief PartDescriptorBuild: `f(a1, &partId, slotTag, a4, a5, record, outList)`, resolved by AOB (see
+         * part_descriptor_build()).
+         */
+        using BuildFn = std::int64_t(__fastcall *)(
+            std::int64_t,
+            std::int16_t *,
+            std::uint16_t,
+            std::uint32_t *,
+            char,
+            std::int64_t,
+            std::uint64_t *
+        );
 
         BuildFn g_orig = nullptr;
         std::atomic<bool> g_installed{false};
@@ -41,23 +50,29 @@ namespace Transmog::SocketMeshOverride
         /// Refcount field on a StringInfo wrapper.
         constexpr std::size_t k_wrapperRefcountOffset = 0x10;
 
-        /// Dye entry array on the part record the descriptor's dye is built from. Geometry and the record writer
-        /// both come from DyeRecordInject -- this module is a second PRODUCER of those records, not a second
-        /// definition of them.
+        /**
+         * @brief Dye entry array on the part record the descriptor's dye is built from. Geometry and the record writer
+         * both come from DyeRecordInject -- this module is a second PRODUCER of those records, not a second definition
+         * of them.
+         */
         constexpr std::size_t k_recordDyeDataOffset =
             DyeRecordInject::k_dyeVectorOffset + DyeRecordInject::k_vecDataOffset;
         constexpr std::size_t k_recordDyeCountOffset =
             DyeRecordInject::k_dyeVectorOffset + DyeRecordInject::k_vecCountOffset;
-        /// Buffer capacity in records. Sparse mode starts from the engine's own entries, which can outnumber the
-        /// channel count, so this sits above it.
+        /**
+         * @brief Buffer capacity in records. Sparse mode starts from the engine's own entries, which can outnumber the
+         * channel count, so this sits above it.
+         */
         constexpr std::size_t k_maxDyeRecords = 32;
         /// One dye record, aliased locally so the arithmetic below reads in units rather than raw 16s.
         constexpr std::size_t k_dyeRecordSize = DyeRecordInject::k_dyeRecordSize;
         /// Floor for anything treated as a live heap pointer. Below this is a packed scalar or a null.
         constexpr std::uint64_t k_minPlausiblePtr = 0x10000;
-        /// Same floor for the values the engine passes through signed `__int64` parameters. Comparing those against
-        /// the unsigned form converts the operand, so a negative (garbage) value would compare ABOVE the floor and
-        /// pass the guard meant to reject it.
+        /**
+         * @brief Same floor for the values the engine passes through signed `__int64` parameters. Comparing those
+         * against the unsigned form converts the operand, so a negative (garbage) value would compare ABOVE the floor
+         * and pass the guard meant to reject it.
+         */
         constexpr std::int64_t k_minPlausiblePtrSigned = static_cast<std::int64_t>(k_minPlausiblePtr);
 
         /**
@@ -87,8 +102,10 @@ namespace Transmog::SocketMeshOverride
                 // The injector achieves that by upserting into the records the engine already produced. This path
                 // replaces the array instead, so it has to start from a copy of the engine's own entries -- emitting
                 // just the active channels would drop every channel the preset does not touch.
-                const auto srcData = DMKMemory::seh_read<std::uint64_t>(record + k_recordDyeDataOffset).value_or(0);
-                const auto srcCount = DMKMemory::seh_read<std::uint32_t>(record + k_recordDyeCountOffset).value_or(0);
+                const auto srcData =
+                    DMK::memory::read<std::uint64_t>(DMK::Address{record + k_recordDyeDataOffset}).value_or(0);
+                const auto srcCount =
+                    DMK::memory::read<std::uint32_t>(DMK::Address{record + k_recordDyeCountOffset}).value_or(0);
                 std::uint32_t n = 0;
                 if (srcData >= k_minPlausiblePtr)
                 {
@@ -97,8 +114,11 @@ namespace Transmog::SocketMeshOverride
                     for (std::uint32_t i = 0; i < copy; ++i)
                     {
                         const auto offset = static_cast<std::size_t>(i) * k_dyeRecordSize;
-                        const auto bytes = DMKMemory::seh_read_bytes(static_cast<std::uintptr_t>(srcData) + offset,
-                                                                     out + offset, k_dyeRecordSize);
+                        const auto bytes = DMK::memory::read_into(
+                                               DMK::Address{static_cast<std::uintptr_t>(srcData) + offset},
+                                               std::span{reinterpret_cast<std::byte *>(out + offset), k_dyeRecordSize}
+                        )
+                                               .has_value();
                         if (!bytes)
                             break;
                         ++n;
@@ -127,8 +147,16 @@ namespace Transmog::SocketMeshOverride
                         std::memset(rec, 0, k_dyeRecordSize);
                         ++n;
                     }
-                    DyeRecordInject::build_dye_record(rec, k, ch.group_hash, ch.r, ch.g, ch.b, ch.material_id,
-                                                     ch.repair_byte);
+                    DyeRecordInject::build_dye_record(
+                        rec,
+                        k,
+                        ch.group_hash,
+                        ch.r,
+                        ch.g,
+                        ch.b,
+                        ch.material_id,
+                        ch.repair_byte
+                    );
                 }
                 return n;
             }
@@ -152,8 +180,16 @@ namespace Transmog::SocketMeshOverride
                 const auto &ch = (dye[k].group_hash != 0) ? dye[k] : *fallback;
                 std::uint8_t *rec = out + static_cast<std::size_t>(n) * k_dyeRecordSize;
                 std::memset(rec, 0, k_dyeRecordSize);
-                DyeRecordInject::build_dye_record(rec, k, ch.group_hash, ch.r, ch.g, ch.b, ch.material_id,
-                                                 ch.repair_byte);
+                DyeRecordInject::build_dye_record(
+                    rec,
+                    k,
+                    ch.group_hash,
+                    ch.r,
+                    ch.g,
+                    ch.b,
+                    ch.material_id,
+                    ch.repair_byte
+                );
                 ++n;
             }
             return n;
@@ -164,11 +200,13 @@ namespace Transmog::SocketMeshOverride
         {
             if (a7 == nullptr)
                 return 0;
-            const auto primary = DMKMemory::seh_read<std::uint64_t>(reinterpret_cast<std::uintptr_t>(a7)).value_or(0);
+            const auto primary =
+                DMK::memory::read<std::uint64_t>(DMK::Address{reinterpret_cast<std::uintptr_t>(a7)}).value_or(0);
             if (primary >= k_minPlausiblePtr)
                 return static_cast<std::uintptr_t>(primary);
             return static_cast<std::uintptr_t>(
-                DMKMemory::seh_read<std::uint64_t>(reinterpret_cast<std::uintptr_t>(a7) + 8).value_or(0));
+                DMK::memory::read<std::uint64_t>(DMK::Address{reinterpret_cast<std::uintptr_t>(a7) + 8}).value_or(0)
+            );
         }
 
         /**
@@ -183,7 +221,7 @@ namespace Transmog::SocketMeshOverride
         {
             if (wrapper < k_minPlausiblePtr)
                 return;
-            const auto cur = DMKMemory::seh_read<std::int32_t>(wrapper + k_wrapperRefcountOffset);
+            const auto cur = DMK::memory::read<std::int32_t>(DMK::Address{wrapper + k_wrapperRefcountOffset});
             if (!cur.has_value() || *cur < 0)
                 return;
             __try
@@ -195,8 +233,15 @@ namespace Transmog::SocketMeshOverride
             }
         }
 
-        std::int64_t __fastcall on_build(std::int64_t a1, std::int16_t *partId, std::uint16_t slotTag,
-                                         std::uint32_t *a4, char a5, std::int64_t record, std::uint64_t *outList)
+        std::int64_t __fastcall on_build(
+            std::int64_t a1,
+            std::int16_t *partId,
+            std::uint16_t slotTag,
+            std::uint32_t *a4,
+            char a5,
+            std::int64_t record,
+            std::uint64_t *outList
+        )
         {
             const auto trampoline = g_orig;
             if (!trampoline)
@@ -256,12 +301,16 @@ namespace Transmog::SocketMeshOverride
                     static std::atomic<std::uint64_t> s_lastMismatchKey{0};
                     if (s_lastMismatchKey.exchange(key, std::memory_order_relaxed) != key)
                     {
-                        DMK::Logger::get_instance().warning(
+                        DMK::log().warning(
                             "[socket-override] HOST MISMATCH: body 0x{:X} belongs to charIdx {}, but the target "
                             "table holds charIdx {}'s targets -- refusing to dress it. Slot={} tag={:#06x}. "
                             "Expect the character's own apply to redress it once the table rebinds.",
-                            static_cast<std::uint64_t>(a1), hostIdx, tableIdx, slot_name(*slotOpt),
-                            static_cast<unsigned>(slotTag));
+                            static_cast<std::uint64_t>(a1),
+                            hostIdx,
+                            tableIdx,
+                            slot_name(*slotOpt),
+                            static_cast<unsigned>(slotTag)
+                        );
                     }
                 }
                 return trampoline(a1, partId, slotTag, a4, a5, record, outList);
@@ -286,16 +335,23 @@ namespace Transmog::SocketMeshOverride
                 const auto n = build_slot_dye_records(slotIdx, static_cast<std::uintptr_t>(record), s_dyeRecords);
                 if (n != 0)
                 {
-                    const auto curData = DMKMemory::seh_read<std::uint64_t>(
-                        static_cast<std::uintptr_t>(record) + k_recordDyeDataOffset);
-                    const auto curCount = DMKMemory::seh_read<std::uint32_t>(
-                        static_cast<std::uintptr_t>(record) + k_recordDyeCountOffset);
+                    const auto curData = DMK::memory::read<std::uint64_t>(
+                        DMK::Address{static_cast<std::uintptr_t>(record) + k_recordDyeDataOffset}
+                    );
+                    const auto curCount = DMK::memory::read<std::uint32_t>(
+                        DMK::Address{static_cast<std::uintptr_t>(record) + k_recordDyeCountOffset}
+                    );
                     if (curData.has_value() && curCount.has_value() &&
-                        DMKMemory::seh_write<std::uint64_t>(static_cast<std::uintptr_t>(record) +
-                                                                k_recordDyeDataOffset,
-                                                            reinterpret_cast<std::uint64_t>(s_dyeRecords)) &&
-                        DMKMemory::seh_write<std::uint32_t>(
-                            static_cast<std::uintptr_t>(record) + k_recordDyeCountOffset, n))
+                        DMK::memory::write_in_place<std::uint64_t>(
+                            DMK::Address{static_cast<std::uintptr_t>(record) + k_recordDyeDataOffset},
+                            reinterpret_cast<std::uint64_t>(s_dyeRecords)
+                        )
+                            .has_value() &&
+                        DMK::memory::write_in_place<std::uint32_t>(
+                            DMK::Address{static_cast<std::uintptr_t>(record) + k_recordDyeCountOffset},
+                            n
+                        )
+                            .has_value())
                     {
                         savedDyeData = *curData;
                         savedDyeCount = *curCount;
@@ -307,23 +363,29 @@ namespace Transmog::SocketMeshOverride
             // Snapshot the out-list length so only descriptors THIS call appends get rewritten.
             const auto containerBefore = out_container(outList);
             const auto countBefore =
-                containerBefore ? DMKMemory::seh_read<std::uint32_t>(containerBefore + 8).value_or(0) : 0;
+                containerBefore ? DMK::memory::read<std::uint32_t>(DMK::Address{containerBefore + 8}).value_or(0) : 0;
 
             const auto ret = trampoline(a1, partId, slotTag, a4, a5, record, outList);
 
             if (dyeSwapped)
             {
-                (void)DMKMemory::seh_write<std::uint64_t>(
-                    static_cast<std::uintptr_t>(record) + k_recordDyeDataOffset, savedDyeData);
-                (void)DMKMemory::seh_write<std::uint32_t>(
-                    static_cast<std::uintptr_t>(record) + k_recordDyeCountOffset, savedDyeCount);
+                (void)DMK::memory::write_in_place<std::uint64_t>(
+                    DMK::Address{static_cast<std::uintptr_t>(record) + k_recordDyeDataOffset},
+                    savedDyeData
+                )
+                    .has_value();
+                (void)DMK::memory::write_in_place<std::uint32_t>(
+                    DMK::Address{static_cast<std::uintptr_t>(record) + k_recordDyeCountOffset},
+                    savedDyeCount
+                )
+                    .has_value();
             }
 
             const auto container = out_container(outList);
             if (container == 0)
                 return ret;
-            const auto data = DMKMemory::seh_read<std::uint64_t>(container).value_or(0);
-            const auto countAfter = DMKMemory::seh_read<std::uint32_t>(container + 8).value_or(0);
+            const auto data = DMK::memory::read<std::uint64_t>(DMK::Address{container}).value_or(0);
+            const auto countAfter = DMK::memory::read<std::uint32_t>(DMK::Address{container + 8}).value_or(0);
             if (data < k_minPlausiblePtr || countAfter <= countBefore)
                 return ret;
 
@@ -334,13 +396,17 @@ namespace Transmog::SocketMeshOverride
             for (std::uint32_t i = countBefore; i < countAfter; ++i)
             {
                 const auto entry = static_cast<std::uintptr_t>(data) + i * k_descriptorStride;
-                const auto cur = DMKMemory::seh_read<std::uint64_t>(entry + k_descriptorWrapperOffset).value_or(0);
+                const auto cur =
+                    DMK::memory::read<std::uint64_t>(DMK::Address{entry + k_descriptorWrapperOffset}).value_or(0);
                 if (cur < k_minPlausiblePtr || cur == target)
                     continue;
                 // Reference AFTER the write lands. Taking it first leaks one count per failed write, and a wrapper
                 // over-referenced this way is never released for the rest of the process.
-                if (DMKMemory::seh_write<std::uint64_t>(entry + k_descriptorWrapperOffset,
-                                                        static_cast<std::uint64_t>(target)))
+                if (DMK::memory::write_in_place<std::uint64_t>(
+                        DMK::Address{entry + k_descriptorWrapperOffset},
+                        static_cast<std::uint64_t>(target)
+                    )
+                        .has_value())
                 {
                     addref_wrapper(target);
                     ++rewritten;
@@ -350,42 +416,55 @@ namespace Transmog::SocketMeshOverride
             if (rewritten != 0)
             {
                 const auto n = g_overridden.fetch_add(rewritten, std::memory_order_relaxed) + rewritten;
-                DMK::Logger::get_instance().debug(
+                DMK::log().debug(
                     "[socket-override] slot={} tag={:#06x} rewrote {} descriptor(s) -> {:#x} (total {})",
-                    slot_name(static_cast<TransmogSlot>(slotIdx)), slotTag, rewritten, target, n);
+                    slot_name(static_cast<TransmogSlot>(slotIdx)),
+                    slotTag,
+                    rewritten,
+                    target,
+                    n
+                );
             }
             return ret;
         }
     } // namespace
 
-    bool install() noexcept
+    bool install(DMK::hook::HookStack &hooks) noexcept
     {
         bool expected = false;
         if (!g_installed.compare_exchange_strong(expected, true))
             return g_orig != nullptr;
 
-        auto &log = DMK::Logger::get_instance();
+        auto &log = DMK::log();
 
-        const auto addr = resolve_address(k_partDescriptorBuildCandidates, std::size(k_partDescriptorBuildCandidates),
-                                          "PartDescriptorBuild");
+        const auto addr = anchor_address(AnchorId::PartDescriptorBuild);
         if (addr == 0)
         {
             log.warning("[socket-override] PartDescriptorBuild AOB failed -- real items will flash before tear-down");
             return false;
         }
 
-        auto &hookMgr = DMK::HookManager::get_instance();
-        BuildFn tramp = nullptr;
-        auto res = hookMgr.create_inline_hook("PartDescriptorBuild", addr, reinterpret_cast<void *>(&on_build),
-                                              reinterpret_cast<void **>(&tramp));
-        if (!res.has_value())
+        auto hook = DMK::hook::inline_at(
+            DMK::hook::InlineRequest{.name = "PartDescriptorBuild", .target = DMK::Address{addr}},
+            &on_build
+        );
+        if (!hook)
         {
-            log.warning("[socket-override] hook install failed at {:#x}: {}", addr,
-                        DMK::Hook::error_to_string(res.error()));
+            log.warning("[socket-override] hook creation failed at {:#x}: {}", addr, hook.error().message());
             return false;
         }
 
-        g_orig = tramp;
+        // Publish the trampoline BEFORE enable() arms the patch, so no game thread can enter the detour while its
+        // original pointer is still null.
+        g_orig = hook->original<BuildFn>();
+        if (auto armed = hook->enable(); !armed)
+        {
+            log.warning("[socket-override] hook could not be armed at {:#x}: {}", addr, armed.error().message());
+            g_orig = nullptr;
+            return false;
+        }
+        hooks.push(std::move(*hook));
+
         log.info("[socket-override] hooked PartDescriptorBuild at {:#x}", addr);
         return true;
     }

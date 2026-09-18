@@ -87,7 +87,8 @@ namespace EquipHide
         // body -> +0x68 (inner) -> +0x40 (sub) -> *(sub+0xE8) (vc). The chain
         // walk dereferences each link and reads the terminal vc value under a single fault guard; a broken link falls
         // through to the per-body LRU.
-        const auto vcOpt = DMK::Memory::seh_read_chain<uintptr_t>(body, {0x68, 0x40, 0xE8});
+        const auto vcOpt = DMK::memory::walk(DMK::Address{body}, std::array<std::ptrdiff_t, 3>{0x68, 0x40, 0xE8})
+                               .and_then([](DMK::Address leaf) { return DMK::memory::read<std::uintptr_t>(leaf); });
         if (!vcOpt)
         {
             for (const auto &e : s_body2vcLru)
@@ -95,7 +96,7 @@ namespace EquipHide
                 if (e.body == body && e.vc != 0)
                     return e.vc;
             }
-            DMK::Logger::get_instance().trace("body_to_vis_ctrl: body=0x{:X} chain broken, no cache", body);
+            DMK::log().trace("body_to_vis_ctrl: body=0x{:X} chain broken, no cache", body);
             return 0;
         }
         const auto vc = *vcOpt;
@@ -109,7 +110,7 @@ namespace EquipHide
         s_body2vcLru[s_body2vcNext] = {body, vc};
         s_body2vcNext = (s_body2vcNext + 1) % k_maxProtagonists;
 
-        DMK::Logger::get_instance().trace("body_to_vis_ctrl: body=0x{:X} vc=0x{:X}", body, vc);
+        DMK::log().trace("body_to_vis_ctrl: body=0x{:X} vc=0x{:X}", body, vc);
         return vc;
     }
 
@@ -165,10 +166,13 @@ namespace EquipHide
             {
                 if (s_prevUser != 0)
                 {
-                    DMK::Logger::get_instance().info("Load detect: UserActor swapped "
-                                                     "(0x{:X} -> 0x{:X}); invalidating controlled-"
-                                                     "char cache for save-load transition",
-                                                     s_prevUser, user);
+                    DMK::log().info(
+                        "Load detect: UserActor swapped "
+                        "(0x{:X} -> 0x{:X}); invalidating controlled-"
+                        "char cache for save-load transition",
+                        s_prevUser,
+                        user
+                    );
                     CDCore::invalidate_controlled_character();
                 }
                 s_prevUser = user;
@@ -232,17 +236,21 @@ namespace EquipHide
             {
                 if (controlledActor == 0 && s_prevControlledActor != 0)
                 {
-                    DMK::Logger::get_instance().info("Save-load detected: controlled actor "
-                                                     "(0x{:X} -> 0x0); deferring full cache wipe "
-                                                     "until new world is live",
-                                                     s_prevControlledActor);
+                    DMK::log().info(
+                        "Save-load detected: controlled actor "
+                        "(0x{:X} -> 0x0); deferring full cache wipe "
+                        "until new world is live",
+                        s_prevControlledActor
+                    );
                     s_pendingReloadInvalidation = true;
                 }
                 else if (controlledActor != 0 && s_prevControlledActor == 0 && s_pendingReloadInvalidation)
                 {
-                    DMK::Logger::get_instance().info("Save-load complete: new controlled actor 0x{:X}; "
-                                                     "wiping body cache + body_to_vis_ctrl LRU",
-                                                     controlledActor);
+                    DMK::log().info(
+                        "Save-load complete: new controlled actor 0x{:X}; "
+                        "wiping body cache + body_to_vis_ctrl LRU",
+                        controlledActor
+                    );
                     apply_full_reload_wipe();
                     s_pendingReloadInvalidation = false;
                 }
@@ -266,12 +274,16 @@ namespace EquipHide
 
                     if (atomicSaveLoad)
                     {
-                        DMK::Logger::get_instance().info("Save-load detected (atomic swap): "
-                                                         "controlled actor (0x{:X} -> 0x{:X}); "
-                                                         "world_generation {} -> {}; wiping body "
-                                                         "cache + body_to_vis_ctrl LRU",
-                                                         s_prevControlledActor, controlledActor, s_prevWorldGen,
-                                                         curWorldGen);
+                        DMK::log().info(
+                            "Save-load detected (atomic swap): "
+                            "controlled actor (0x{:X} -> 0x{:X}); "
+                            "world_generation {} -> {}; wiping body "
+                            "cache + body_to_vis_ctrl LRU",
+                            s_prevControlledActor,
+                            controlledActor,
+                            s_prevWorldGen,
+                            curWorldGen
+                        );
                         apply_full_reload_wipe();
                         /* No X->0 was observed, so the deferred flag was never latched -- defensively clear so a later
                            spurious X->0->Y cannot double-fire against this transition. */
@@ -279,9 +291,12 @@ namespace EquipHide
                     }
                     else
                     {
-                        DMK::Logger::get_instance().info("Char swap detected: controlled actor "
-                                                         "(0x{:X} -> 0x{:X}); body cache preserved",
-                                                         s_prevControlledActor, controlledActor);
+                        DMK::log().info(
+                            "Char swap detected: controlled actor "
+                            "(0x{:X} -> 0x{:X}); body cache preserved",
+                            s_prevControlledActor,
+                            controlledActor
+                        );
                     }
                 }
                 s_prevControlledActor = controlledActor;
@@ -367,8 +382,10 @@ namespace EquipHide
                 ps.visCharIdx[i].store(-1, std::memory_order_relaxed);
             }
 
-            ps.primaryVisCtrl.store(count > 0 ? ps.visCtrls[0].load(std::memory_order_relaxed) : 0,
-                                    std::memory_order_relaxed);
+            ps.primaryVisCtrl.store(
+                count > 0 ? ps.visCtrls[0].load(std::memory_order_relaxed) : 0,
+                std::memory_order_relaxed
+            );
 
             for (int i = 0; i < k_maxProtagonists; ++i)
                 ps.armorInjected[i].store(false, std::memory_order_relaxed);
@@ -378,14 +395,13 @@ namespace EquipHide
             {
                 static std::atomic<bool> s_logged{false};
                 if (!s_logged.exchange(true, std::memory_order_relaxed))
-                    DMK::Logger::get_instance().debug("Resolve: ws=0x{:X} am=0x{:X} user=0x{:X} count={}", ws, am, user,
-                                                      count);
+                    DMK::log().debug("Resolve: ws=0x{:X} am=0x{:X} user=0x{:X} count={}", ws, am, user, count);
             }
             if (count > 0)
             {
                 static std::atomic<bool> s_resolvedLogged{false};
                 if (!s_resolvedLogged.exchange(true, std::memory_order_relaxed))
-                    DMK::Logger::get_instance().info("Player set resolved: {} protagonist(s) tracked", count);
+                    DMK::log().info("Player set resolved: {} protagonist(s) tracked", count);
             }
             if (count > 0)
             {
@@ -420,8 +436,7 @@ namespace EquipHide
                             for (int j = 0; j < k_maxProtagonists; ++j)
                                 ps.armorInjected[j].store(false, std::memory_order_relaxed);
                             needs_direct_write().store(true, std::memory_order_relaxed);
-                            DMK::Logger::get_instance().debug(
-                                "Player set changed -- scheduling injection + direct write");
+                            DMK::log().debug("Player set changed -- scheduling injection + direct write");
                         }
                     }
                     __finally
@@ -435,7 +450,7 @@ namespace EquipHide
         {
             static std::atomic<bool> s_crashLogged{false};
             if (!s_crashLogged.exchange(true, std::memory_order_relaxed))
-                DMK::Logger::get_instance().warning("Resolve: SEH caught crash");
+                DMK::log().warning("Resolve: SEH caught crash");
         }
     }
 
@@ -456,7 +471,7 @@ namespace EquipHide
 
     bool check_player_filter(uintptr_t a1) noexcept
     {
-        if (!DMK::Memory::plausible_userspace_ptr(a1))
+        if (!DMK::memory::is_plausible_ptr(DMK::Address{a1}))
             return false;
 
         auto &ps = player_state();
@@ -466,23 +481,25 @@ namespace EquipHide
             /* Actor type byte: *(*(actor+0x88)+1). Value 1 = local player, 3-6 = party members. Same mechanism the
                headgear visibility system uses. */
             // Resolve a1 -> +0x88 -> +0x08 -> +0x88 and read the type byte at
-            // +1, all under fault guards. seh_read_chain dereferences the terminal +0x88 link, so typePtr carries
-            // *(actor+0x88); the byte lives at typePtr+1. This fallback runs when the global chain-walk AOB failed at
-            // init, so the downstream links are not proven live. v1.13.00 shifted the vis-ctrl -> CCC link +0x30
-            // (0x58 -> 0x88, RTTI-confirmed pa::ClientCharacterControlActorComponent); +0x08 (CCC -> actor) and +0x88
-            // (actor -> type-byte holder) are unchanged.
-            const auto typePtr = DMKMemory::seh_read_chain<std::uintptr_t>(a1, {0x88, 0x08, 0x88});
+            // +1, all under fault guards. The walk stops at the terminal +0x88 SLOT and the trailing read
+            // dereferences it, so typePtr carries *(actor+0x88); the byte lives at typePtr+1. This fallback runs when
+            // the global chain-walk AOB failed at init, so the downstream links are not proven live. v1.13.00 shifted
+            // the vis-ctrl -> CCC link +0x30 (0x58 -> 0x88, RTTI-confirmed pa::ClientCharacterControlActorComponent);
+            // +0x08 (CCC -> actor) and +0x88 (actor -> type-byte holder) are unchanged.
+            const auto typePtr =
+                DMK::memory::walk(DMK::Address{a1}, std::array<std::ptrdiff_t, 3>{0x88, 0x08, 0x88})
+                    .and_then([](DMK::Address leaf) { return DMK::memory::read<std::uintptr_t>(leaf); });
             if (typePtr)
             {
-                const auto typeByteOpt = DMKMemory::seh_read<std::uint8_t>(*typePtr + 1);
+                const auto typeByteOpt = DMK::memory::read<std::uint8_t>(DMK::Address{*typePtr + 1});
                 if (typeByteOpt)
                 {
                     const std::uint8_t typeByte = *typeByteOpt;
                     {
                         static std::atomic<int> s_fbLog{0};
                         if (s_fbLog.fetch_add(1, std::memory_order_relaxed) < 5)
-                            DMK::Logger::get_instance().trace("Fallback chain: a1=0x{:X} typePtr=0x{:X} type={}", a1,
-                                                              *typePtr, typeByte);
+                            DMK::log()
+                                .trace("Fallback chain: a1=0x{:X} typePtr=0x{:X} type={}", a1, *typePtr, typeByte);
                     }
                     bool isProtagonist = (typeByte == 1) || (typeByte >= 3 && typeByte <= 6);
                     if (isProtagonist)
@@ -508,12 +525,18 @@ namespace EquipHide
                                    Consumers fall back to the active character's hide mask, mirroring single-character
                                    semantics for unidentified slots. */
                                 ps.visCharIdx[n].store(-1, std::memory_order_relaxed);
-                                ps.primaryVisCtrl.store(ps.visCtrls[0].load(std::memory_order_relaxed),
-                                                        std::memory_order_relaxed);
+                                ps.primaryVisCtrl.store(
+                                    ps.visCtrls[0].load(std::memory_order_relaxed),
+                                    std::memory_order_relaxed
+                                );
                                 needs_direct_write().store(true, std::memory_order_relaxed);
-                                DMK::Logger::get_instance().debug("Fallback: cached protagonist vis ctrl at slot {} "
-                                                                  "(0x{:X}, type={})",
-                                                                  n, a1, typeByte);
+                                DMK::log().debug(
+                                    "Fallback: cached protagonist vis ctrl at slot {} "
+                                    "(0x{:X}, type={})",
+                                    n,
+                                    a1,
+                                    typeByte
+                                );
                             }
                         }
                     }
@@ -546,8 +569,8 @@ namespace EquipHide
             const auto now = steady_ms();
             auto last = s_lastInlineResolveMs.load(std::memory_order_relaxed);
             if ((now - last) >= k_inlineResolveMinIntervalMs &&
-                s_lastInlineResolveMs.compare_exchange_strong(last, now, std::memory_order_relaxed,
-                                                              std::memory_order_relaxed))
+                s_lastInlineResolveMs
+                    .compare_exchange_strong(last, now, std::memory_order_relaxed, std::memory_order_relaxed))
             {
                 resolve_player_vis_ctrls();
             }

@@ -96,16 +96,29 @@ namespace Transmog::ColorOverride::SwatchTable
      * Lookup-or-insert keyed by full identity tuple. Returns row index in [0..k_dyeSwatchesPerSlot) on success, -1 if
      * the slot is full or frozen or any required field is 0. `expect_open` gates inserts (false means lookup-only).
      */
-    int lookup_or_insert(int slot, std::uint32_t content_hash, std::uint64_t stable_id, std::uint16_t template_id,
-                         std::uint16_t token_id, bool expect_open) noexcept;
+    int lookup_or_insert(
+        int slot,
+        std::uint32_t content_hash,
+        std::uint64_t stable_id,
+        std::uint16_t template_id,
+        std::uint16_t token_id,
+        bool expect_open
+    ) noexcept;
 
     /**
      * Overload that also seeds the per-row submesh name (captured from `SkinnedMeshMaterialWrapper +0x28` at
      * publisher-hook time). Name is only WRITTEN on insert; on lookup-hit the existing row's name is preserved. Pass
      * nullptr or empty to behave identically to the non-name overload.
      */
-    int lookup_or_insert(int slot, std::uint32_t content_hash, std::uint64_t stable_id, std::uint16_t template_id,
-                         std::uint16_t token_id, bool expect_open, const char *submesh_name) noexcept;
+    int lookup_or_insert(
+        int slot,
+        std::uint32_t content_hash,
+        std::uint64_t stable_id,
+        std::uint16_t template_id,
+        std::uint16_t token_id,
+        bool expect_open,
+        const char *submesh_name
+    ) noexcept;
 
     /// Count of rows currently used in the slot's table.
     std::size_t count(int slot) noexcept;
@@ -119,10 +132,16 @@ namespace Transmog::ColorOverride::SwatchTable
      * No-op if the row's override is currently active OR a default was already captured. `r,g,b,a` are the canonical
      * color channels (caller converts from shader-side byte order).
      */
-    void capture_default_if_unset(int slot, std::size_t idx, std::uint8_t r, std::uint8_t g, std::uint8_t b,
-                                  std::uint8_t a) noexcept;
+    void capture_default_if_unset(
+        int slot,
+        std::size_t idx,
+        std::uint8_t r,
+        std::uint8_t g,
+        std::uint8_t b,
+        std::uint8_t a
+    ) noexcept;
 
-    /// UI-side helpers --------------------------------------------------
+    /// UI-side helpers
 
     /**
      * Set a per-row override RGB. Setter reads `r/g/b` when `override_active` is true.
@@ -173,15 +192,23 @@ namespace Transmog::ColorOverride::SwatchTable
      * Safe to call concurrently from multiple setter threads -- all writes are atomic, and last-writer-wins is fine
      * because every caller writes the same matInst's identity.
      */
-    bool promote_placeholder_identity(const char *submesh_name, std::uint16_t token_id, std::uint32_t content_hash,
-                                      std::uint64_t stable_id, std::uint16_t template_id, std::uint8_t def_r,
-                                      std::uint8_t def_g, std::uint8_t def_b, std::uint8_t def_a) noexcept;
+    bool promote_placeholder_identity(
+        const char *submesh_name,
+        std::uint16_t token_id,
+        std::uint32_t content_hash,
+        std::uint64_t stable_id,
+        std::uint16_t template_id,
+        std::uint8_t def_r,
+        std::uint8_t def_g,
+        std::uint8_t def_b,
+        std::uint8_t def_a
+    ) noexcept;
 
     void mark_all_inactive(int slot) noexcept;
     void clear_slot(int slot) noexcept;
     void clear_all() noexcept;
 
-    // ---- Per-slot DyeSlot view ---------------------------------------
+    // Per-slot DyeSlot view
     //
     // UI-facing view over the per-slot swatch storage. `slot_enabled` is the per-slot override master switch. The
     // picker reads the per-row SwatchOverride storage directly via `dye_state()[slot].swatches[idx]`.
@@ -204,7 +231,7 @@ namespace Transmog::ColorOverride::SwatchTable
      */
     void clear_dye_state_for_slot(int slot) noexcept;
 
-    // ---- Reinit-aware accessors -------------------------------------
+    // Reinit-aware accessors
 
     /**
      * Wipe ALL rows + override choices for slot. Use when the transmog target item changes so stale identities don't
@@ -226,7 +253,7 @@ namespace Transmog::ColorOverride::SwatchTable
      */
     void clear_explicit_wipe_flag(int slot) noexcept;
 
-    // ---- Reinit gates (owned by SwatchTable, read by setter) --------
+    // Reinit gates (owned by SwatchTable, read by setter)
 
     /**
      * Post-reinit lock: once Finalize completes, the slot's identity set is closed. The setter's lookup_or_insert
@@ -269,7 +296,7 @@ namespace Transmog::ColorOverride::SwatchTable
     };
     KeepResult apply_keep_set(int slot, const SwatchIdentity *keep, std::size_t keep_count) noexcept;
 
-    // ---- Cross-session JSON persistence --------------------------
+    // Cross-session JSON persistence
     //
     // Identity is keyed by `(submesh_name, token_name)`, both of which survive engine token-id rebucketing and game
     // patches:
@@ -334,10 +361,13 @@ namespace Transmog::ColorOverride::SwatchTable
      * The slot is left LOCKED after seeding -- subsequent unrecognized submeshes still fall through; only matched
      * identities get promoted on engine writes. Returns the number of rows seeded.
      */
-    std::size_t populate_from_persisted(int slot, const std::vector<PersistEntry> &palette,
-                                        const std::vector<PersistEntry> &overrides) noexcept;
+    std::size_t populate_from_persisted(
+        int slot,
+        const std::vector<PersistEntry> &palette,
+        const std::vector<PersistEntry> &overrides
+    ) noexcept;
 
-    // ---- Diagnostic dump --------------------------------------------
+    // Diagnostic dump
     //
     // Emit a tree-formatted snapshot of the slot's swatch state to the logger so the full structure is reconstructible
     // from a log file alone (no need to open the UI to see what's there). Output shape:

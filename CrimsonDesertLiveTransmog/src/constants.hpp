@@ -4,7 +4,7 @@
 
 namespace Transmog
 {
-    // --- Mod identity ---
+    // Mod identity
     inline constexpr const char *MOD_VERSION = VERSION_STRING;
     inline constexpr const char *MOD_NAME = "CrimsonDesertLiveTransmog";
     inline constexpr const char *MOD_AUTHOR = "tkhquang";
@@ -13,9 +13,9 @@ namespace Transmog
     inline constexpr const char *INI_FILE = "CrimsonDesertLiveTransmog.ini";
     inline constexpr const char *PRESETS_FILE = "CrimsonDesertLiveTransmog_presets.json";
     inline constexpr const char *DISPLAY_NAMES_FILE = "CrimsonDesertLiveTransmog_display_names.tsv";
-    inline constexpr const wchar_t *INSTANCE_MUTEX_PREFIX = L"CrimsonDesertLiveTransmog_";
+    inline constexpr const char *INSTANCE_MUTEX_PREFIX = "CrimsonDesertLiveTransmog_";
 
-    // --- Process gate ---
+    // Process gate
     inline constexpr const char *GAME_PROCESS_NAME = "CrimsonDesert.exe";
 
 } // namespace Transmog

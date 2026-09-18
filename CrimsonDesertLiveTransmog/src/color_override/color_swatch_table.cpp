@@ -58,14 +58,27 @@ namespace Transmog::ColorOverride::SwatchTable
         }
     } // namespace
 
-    int lookup_or_insert(int slot, std::uint32_t content_hash, std::uint64_t stable_id, std::uint16_t template_id,
-                         std::uint16_t token_id, bool expect_open) noexcept
+    int lookup_or_insert(
+        int slot,
+        std::uint32_t content_hash,
+        std::uint64_t stable_id,
+        std::uint16_t template_id,
+        std::uint16_t token_id,
+        bool expect_open
+    ) noexcept
     {
         return lookup_or_insert(slot, content_hash, stable_id, template_id, token_id, expect_open, nullptr);
     }
 
-    int lookup_or_insert(int slot, std::uint32_t content_hash, std::uint64_t stable_id, std::uint16_t template_id,
-                         std::uint16_t token_id, bool expect_open, const char *submesh_name) noexcept
+    int lookup_or_insert(
+        int slot,
+        std::uint32_t content_hash,
+        std::uint64_t stable_id,
+        std::uint16_t template_id,
+        std::uint16_t token_id,
+        bool expect_open,
+        const char *submesh_name
+    ) noexcept
     {
         if (!valid_slot(slot) || content_hash == 0 || token_id == 0)
             return -1;
@@ -94,7 +107,7 @@ namespace Transmog::ColorOverride::SwatchTable
             return static_cast<int>(i);
         }
 
-        // ---- Placeholder promotion pass --------------------------------
+        // Placeholder promotion pass
         //
         // `populate_from_persisted` creates rows with the saved (submesh_name, token_id) but content_hash=0 to mark
         // them as "awaiting promotion". The first engine write whose (submesh_name, token_id) matches a placeholder
@@ -197,8 +210,14 @@ namespace Transmog::ColorOverride::SwatchTable
         return &dye_state()[static_cast<std::size_t>(slot)].swatches[idx];
     }
 
-    void capture_default_if_unset(int slot, std::size_t idx, std::uint8_t r, std::uint8_t g, std::uint8_t b,
-                                  std::uint8_t a) noexcept
+    void capture_default_if_unset(
+        int slot,
+        std::size_t idx,
+        std::uint8_t r,
+        std::uint8_t g,
+        std::uint8_t b,
+        std::uint8_t a
+    ) noexcept
     {
         if (!valid_slot(slot) || idx >= k_dyeSwatchesPerSlot)
             return;
@@ -335,7 +354,7 @@ namespace Transmog::ColorOverride::SwatchTable
             b.store(false, std::memory_order_relaxed);
     }
 
-    // ---- Reinit-aware accessors -------------------------------------
+    // Reinit-aware accessors
 
     void wipe_swatch_table_for_slot(int slot) noexcept
     {
@@ -498,7 +517,7 @@ namespace Transmog::ColorOverride::SwatchTable
         std::size_t drop_no_token_id = 0;    // token_id == 0
         std::size_t drop_no_token_label = 0; // label lookup fails
 
-        auto &logger = DetourModKit::Logger::get_instance();
+        auto &logger = DetourModKit::log();
 
         for (std::size_t i = 0; i < upper; ++i)
         {
@@ -513,33 +532,56 @@ namespace Transmog::ColorOverride::SwatchTable
             if (ovr.submesh_name[0] == '\0')
             {
                 ++drop_no_submesh;
-                logger.trace("[persist-probe] slot={} row={} DROP (empty "
-                             "submesh) tok=0x{:04X} rgb=({:02X},{:02X},"
-                             "{:02X})",
-                             slot, i, e.token_id.load(std::memory_order_relaxed), ovr.r, ovr.g, ovr.b);
+                logger.trace(
+                    "[persist-probe] slot={} row={} DROP (empty "
+                    "submesh) tok=0x{:04X} rgb=({:02X},{:02X},"
+                    "{:02X})",
+                    slot,
+                    i,
+                    e.token_id.load(std::memory_order_relaxed),
+                    ovr.r,
+                    ovr.g,
+                    ovr.b
+                );
                 continue;
             }
             const auto tokenId = e.token_id.load(std::memory_order_relaxed);
             if (tokenId == 0)
             {
                 ++drop_no_token_id;
-                logger.trace("[persist-probe] slot={} row={} DROP "
-                             "(token_id=0) submesh='{}' rgb=({:02X},"
-                             "{:02X},{:02X})",
-                             slot, i, ovr.submesh_name, ovr.r, ovr.g, ovr.b);
+                logger.trace(
+                    "[persist-probe] slot={} row={} DROP "
+                    "(token_id=0) submesh='{}' rgb=({:02X},"
+                    "{:02X},{:02X})",
+                    slot,
+                    i,
+                    ovr.submesh_name,
+                    ovr.r,
+                    ovr.g,
+                    ovr.b
+                );
                 continue;
             }
             const char *tokenName = TokenTable::token_label_for(static_cast<std::uint16_t>(tokenId));
             if (tokenName == nullptr)
             {
                 ++drop_no_token_label;
-                logger.trace("[persist-probe] slot={} row={} DROP "
-                             "(unresolved token 0x{:04X}) submesh='{}' "
-                             "hash={:#x} stable={:#x} tpl={:#x} rgb=({:02X},"
-                             "{:02X},{:02X})",
-                             slot, i, tokenId, ovr.submesh_name, e.content_hash.load(std::memory_order_relaxed),
-                             e.stable_id.load(std::memory_order_relaxed), e.template_id.load(std::memory_order_relaxed),
-                             ovr.r, ovr.g, ovr.b);
+                logger.trace(
+                    "[persist-probe] slot={} row={} DROP "
+                    "(unresolved token 0x{:04X}) submesh='{}' "
+                    "hash={:#x} stable={:#x} tpl={:#x} rgb=({:02X},"
+                    "{:02X},{:02X})",
+                    slot,
+                    i,
+                    tokenId,
+                    ovr.submesh_name,
+                    e.content_hash.load(std::memory_order_relaxed),
+                    e.stable_id.load(std::memory_order_relaxed),
+                    e.template_id.load(std::memory_order_relaxed),
+                    ovr.r,
+                    ovr.g,
+                    ovr.b
+                );
                 continue;
             }
             PersistEntry pe{};
@@ -556,10 +598,18 @@ namespace Transmog::ColorOverride::SwatchTable
         // under identical `total_rows=0 kept=0` lines.
         if (total != 0)
         {
-            logger.trace("[persist-probe] slot={} total_rows={} kept={} "
-                         "drop_inactive={} drop_no_submesh={} drop_no_token_id={} "
-                         "drop_no_token_label={}",
-                         slot, total, kept, drop_inactive, drop_no_submesh, drop_no_token_id, drop_no_token_label);
+            logger.trace(
+                "[persist-probe] slot={} total_rows={} kept={} "
+                "drop_inactive={} drop_no_submesh={} drop_no_token_id={} "
+                "drop_no_token_label={}",
+                slot,
+                total,
+                kept,
+                drop_inactive,
+                drop_no_submesh,
+                drop_no_token_id,
+                drop_no_token_label
+            );
         }
 
         return out;
@@ -599,7 +649,7 @@ namespace Transmog::ColorOverride::SwatchTable
             return;
         if (!valid_slot(slot))
             return;
-        auto &log = DetourModKit::Logger::get_instance();
+        auto &log = DetourModKit::log();
         std::size_t queued = 0;
         std::size_t immediate = 0;
         const auto s = static_cast<std::size_t>(slot);
@@ -641,9 +691,13 @@ namespace Transmog::ColorOverride::SwatchTable
         }
         if (queued != 0 || immediate != 0)
         {
-            log.debug("[swatch-persist] slot {} queued {} ({} also "
-                      "applied immediately to live rows)",
-                      slot, queued, immediate);
+            log.debug(
+                "[swatch-persist] slot {} queued {} ({} also "
+                "applied immediately to live rows)",
+                slot,
+                queued,
+                immediate
+            );
         }
     }
 
@@ -673,9 +727,17 @@ namespace Transmog::ColorOverride::SwatchTable
         return -1;
     }
 
-    bool promote_placeholder_identity(const char *submesh_name, std::uint16_t token_id, std::uint32_t content_hash,
-                                      std::uint64_t stable_id, std::uint16_t template_id, std::uint8_t def_r,
-                                      std::uint8_t def_g, std::uint8_t def_b, std::uint8_t def_a) noexcept
+    bool promote_placeholder_identity(
+        const char *submesh_name,
+        std::uint16_t token_id,
+        std::uint32_t content_hash,
+        std::uint64_t stable_id,
+        std::uint16_t template_id,
+        std::uint8_t def_r,
+        std::uint8_t def_g,
+        std::uint8_t def_b,
+        std::uint8_t def_a
+    ) noexcept
     {
         if (token_id == 0 || content_hash == 0 || submesh_name == nullptr || submesh_name[0] == '\0')
             return false;
@@ -718,14 +780,17 @@ namespace Transmog::ColorOverride::SwatchTable
         return false;
     }
 
-    std::size_t populate_from_persisted(int slot, const std::vector<PersistEntry> &palette,
-                                        const std::vector<PersistEntry> &overrides) noexcept
+    std::size_t populate_from_persisted(
+        int slot,
+        const std::vector<PersistEntry> &palette,
+        const std::vector<PersistEntry> &overrides
+    ) noexcept
     {
         if (!::Transmog::flag_color_override().load(std::memory_order_acquire))
             return 0;
         if (!valid_slot(slot))
             return 0;
-        auto &log = DetourModKit::Logger::get_instance();
+        auto &log = DetourModKit::log();
         const auto s = static_cast<std::size_t>(slot);
         // Repopulating from saved JSON replaces any prior wipe state, so the snapshot guard should treat this slot as
         // "has saved content" again. Reached on preset load, preset switch, and restore_swatches_from -- all paths that
@@ -878,14 +943,20 @@ namespace Transmog::ColorOverride::SwatchTable
 
         if (seeded != 0 || skippedUnresolved != 0)
         {
-            log.info("[swatch-seed] slot {} palette={} overrides_merged={} "
-                     "overrides_orphan={} unresolved={}; slot LOCKED",
-                     slot, palette.size(), mergedOverrides, orphanOverrides, skippedUnresolved);
+            log.info(
+                "[swatch-seed] slot {} palette={} overrides_merged={} "
+                "overrides_orphan={} unresolved={}; slot LOCKED",
+                slot,
+                palette.size(),
+                mergedOverrides,
+                orphanOverrides,
+                skippedUnresolved
+            );
         }
         return seeded;
     }
 
-    // ---- Diagnostic dump --------------------------------------------
+    // Diagnostic dump
 
     void dump_slot(int slot) noexcept
     {
@@ -893,7 +964,7 @@ namespace Transmog::ColorOverride::SwatchTable
             return;
         if (!valid_slot(slot))
             return;
-        auto &log = DetourModKit::Logger::get_instance();
+        auto &log = DetourModKit::log();
         const auto s = static_cast<std::size_t>(slot);
         const auto cnt = g_count[s].load(std::memory_order_acquire);
         const auto upper = (cnt < k_dyeSwatchesPerSlot) ? cnt : k_dyeSwatchesPerSlot;
@@ -919,9 +990,17 @@ namespace Transmog::ColorOverride::SwatchTable
         const bool slotEn = dye_state()[s].slot_enabled;
         const auto frozenFlag = State::swatch_frozen(slot).load(std::memory_order_acquire);
         const auto postLock = g_postReinitLock[s].load(std::memory_order_acquire);
-        log.debug("[swatch-dump] slot={} rows={}/{} unique_submeshes={} "
-                  "slot_enabled={} swatch_frozen={} post_reinit_lock={}",
-                  slot, upper, k_dyeSwatchesPerSlot, bySubmesh.size(), slotEn, frozenFlag, postLock);
+        log.debug(
+            "[swatch-dump] slot={} rows={}/{} unique_submeshes={} "
+            "slot_enabled={} swatch_frozen={} post_reinit_lock={}",
+            slot,
+            upper,
+            k_dyeSwatchesPerSlot,
+            bySubmesh.size(),
+            slotEn,
+            frozenFlag,
+            postLock
+        );
         if (upper == 0)
             return;
 
@@ -933,8 +1012,13 @@ namespace Transmog::ColorOverride::SwatchTable
             // is observation, not invariant -- if it diverges the first one is still useful as a hint).
             const auto firstTpl = g_table[s][rows.front()].template_id.load(std::memory_order_relaxed);
             const auto firstStable = g_table[s][rows.front()].stable_id.load(std::memory_order_relaxed);
-            log.trace("  submesh='{}' tpl=0x{:04X} stable=0x{:016X} rows={}", name, firstTpl,
-                      static_cast<unsigned long long>(firstStable), rows.size());
+            log.trace(
+                "  submesh='{}' tpl=0x{:04X} stable=0x{:016X} rows={}",
+                name,
+                firstTpl,
+                static_cast<unsigned long long>(firstStable),
+                rows.size()
+            );
             for (auto idx : rows)
             {
                 const auto &e = g_table[s][idx];
@@ -953,17 +1037,27 @@ namespace Transmog::ColorOverride::SwatchTable
                                         ? "FROZEN" // pruned by Reinit
                                                    // first-fire pending capture
                                         : "PENDING";
-                log.trace("    {} (0x{:04X}) def=#{:02X}{:02X}{:02X} "
-                          "user=#{:02X}{:02X}{:02X} hash=0x{:08X} [{}]",
-                          tokName ? tokName : "(unnamed-tok)", tok, def_r, def_g, def_b, ovr.r, ovr.g, ovr.b, hash,
-                          state);
+                log.trace(
+                    "    {} (0x{:04X}) def=#{:02X}{:02X}{:02X} "
+                    "user=#{:02X}{:02X}{:02X} hash=0x{:08X} [{}]",
+                    tokName ? tokName : "(unnamed-tok)",
+                    tok,
+                    def_r,
+                    def_g,
+                    def_b,
+                    ovr.r,
+                    ovr.g,
+                    ovr.b,
+                    hash,
+                    state
+                );
             }
         }
     }
 
     void dump_all_slots() noexcept
     {
-        auto &log = DetourModKit::Logger::get_instance();
+        auto &log = DetourModKit::log();
         log.trace("[swatch-dump] ===== begin all-slot snapshot =====");
         for (std::size_t s = 0; s < k_slotCount; ++s)
             dump_slot(static_cast<int>(s));
@@ -976,8 +1070,10 @@ namespace Transmog::ColorOverride::SwatchTable
             b.store(true, std::memory_order_release);
         for (auto &b : g_reinitCaptureOpen)
             b.store(false, std::memory_order_release);
-        DetourModKit::Logger::get_instance().info("[swatch-table] strict-init default applied: all slots "
-                                                  "LOCKED (inserts blocked outside Reinit capture window)");
+        DetourModKit::log().info(
+            "[swatch-table] strict-init default applied: all slots "
+            "LOCKED (inserts blocked outside Reinit capture window)"
+        );
     }
 
     SlotCounts slot_counts(int slot) noexcept
@@ -1014,9 +1110,14 @@ namespace Transmog::ColorOverride::SwatchTable
         const auto s = static_cast<std::size_t>(slot);
         const auto cnt = g_count[s].load(std::memory_order_acquire);
         const auto upper = (cnt < k_dyeSwatchesPerSlot) ? cnt : k_dyeSwatchesPerSlot;
-        DetourModKit::Logger::get_instance().info("[swatch-table] apply_keep_set slot={} cnt={} upper={} "
-                                                  "keep_count={}",
-                                                  slot, cnt, upper, keep_count);
+        DetourModKit::log().info(
+            "[swatch-table] apply_keep_set slot={} cnt={} upper={} "
+            "keep_count={}",
+            slot,
+            cnt,
+            upper,
+            keep_count
+        );
         for (std::size_t i = 0; i < upper; ++i)
         {
             auto &e = g_table[s][i];

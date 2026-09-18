@@ -39,6 +39,15 @@ namespace Transmog::ColorOverride::TokenSlotDiscovery
     void retry_if_underpopulated(std::size_t expectedMin) noexcept;
 
     /**
+     * @brief Stops any re-scan worker and waits for it to exit.
+     * @details Must run before the module can be unmapped. The worker walks the host image and touches this module's
+     *          code and statics, so a hot reload that unmapped the logic DLL while it ran would fault. Idempotent,
+     *          and safe when no worker was ever started.
+     * @note Setup/control-plane only: joins a thread. Never call it from a detour or under the loader lock.
+     */
+    void stop_and_join_rescan() noexcept;
+
+    /**
      * True after `run()` has finished its scan (whether or not it discovered any slots).
      */
     bool is_complete() noexcept;

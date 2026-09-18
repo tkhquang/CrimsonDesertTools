@@ -7,8 +7,9 @@
 
 #include <cdcore/controlled_char.hpp>
 
-#include <DetourModKit.hpp>
-#include <DetourModKit/worker.hpp>
+#include <DetourModKit/detail/worker.hpp>
+#include <DetourModKit/logger.hpp>
+#include <DetourModKit/memory.hpp>
 
 #include <Windows.h>
 
@@ -34,7 +35,7 @@ namespace EquipHide
         std::unique_ptr<DetourModKit::StoppableWorker> s_lazyProbeWorker;
         std::unique_ptr<DetourModKit::StoppableWorker> s_resolvePollWorker;
 
-        // --- Deferred IndexedStringA scan tuning ---
+        // Deferred IndexedStringA scan tuning
         // Convergence rests on two gates plus a stability window:
         //   (1) World-ready: user+0xD8 must hold a non-null controlled
         //       actor. In main-menu / loading-screen state the
@@ -82,7 +83,7 @@ namespace EquipHide
 
         void deferred_scan_body(std::stop_token st) noexcept
         {
-            auto &logger = DMK::Logger::get_instance();
+            auto &logger = DMK::log();
             const auto mapLookupAddr = resolved_addrs().mapLookup;
             if (!mapLookupAddr)
                 return;
@@ -110,10 +111,12 @@ namespace EquipHide
                 if (read_controlled_actor_ptr_seh() == 0)
                 {
                     if (attempt % k_scanHeartbeatEvery == 0)
-                        logger.debug("IndexedStringA deferred scan: still waiting "
-                                     "after {} attempts (controlled actor not yet "
-                                     "live)",
-                                     attempt);
+                        logger.debug(
+                            "IndexedStringA deferred scan: still waiting "
+                            "after {} attempts (controlled actor not yet "
+                            "live)",
+                            attempt
+                        );
                     stableStreak = 0;
                     prevCount = 0;
                     continue;
@@ -126,9 +129,11 @@ namespace EquipHide
                 {
                     // Table still entirely empty: reset streak so we never commit the empty state on stability.
                     if (attempt % k_scanHeartbeatEvery == 0)
-                        logger.debug("IndexedStringA deferred scan: still waiting "
-                                     "after {} attempts (table empty)",
-                                     attempt);
+                        logger.debug(
+                            "IndexedStringA deferred scan: still waiting "
+                            "after {} attempts (table empty)",
+                            attempt
+                        );
                     stableStreak = 0;
                     prevCount = 0;
                     continue;
@@ -141,15 +146,23 @@ namespace EquipHide
                     if (curCount != prevCount)
                     {
                         prevCount = curCount;
-                        logger.trace("IndexedStringA deferred scan: attempt {}, "
-                                     "{} entries (below min {}, awaiting growth)",
-                                     attempt, curCount, k_minStableCount);
+                        logger.trace(
+                            "IndexedStringA deferred scan: attempt {}, "
+                            "{} entries (below min {}, awaiting growth)",
+                            attempt,
+                            curCount,
+                            k_minStableCount
+                        );
                     }
                     if (attempt % k_scanHeartbeatEvery == 0)
-                        logger.debug("IndexedStringA deferred scan: {} entries "
-                                     "after {} attempts (below min commit "
-                                     "threshold {}, registry still loading)",
-                                     curCount, attempt, k_minStableCount);
+                        logger.debug(
+                            "IndexedStringA deferred scan: {} entries "
+                            "after {} attempts (below min commit "
+                            "threshold {}, registry still loading)",
+                            curCount,
+                            attempt,
+                            k_minStableCount
+                        );
                     stableStreak = 0;
                     continue;
                 }
@@ -159,30 +172,47 @@ namespace EquipHide
                     // Growing or shrinking: not stable yet, reset streak and update the baseline.
                     stableStreak = 0;
                     prevCount = curCount;
-                    logger.trace("IndexedStringA deferred scan: attempt {}, {} "
-                                 "entries (changed, stability streak reset)",
-                                 attempt, curCount);
+                    logger.trace(
+                        "IndexedStringA deferred scan: attempt {}, {} "
+                        "entries (changed, stability streak reset)",
+                        attempt,
+                        curCount
+                    );
 
                     if (attempt % k_scanHeartbeatEvery == 0)
-                        logger.debug("IndexedStringA deferred scan: still waiting "
-                                     "after {} attempts ({} entries currently, "
-                                     "table still settling)",
-                                     attempt, curCount);
+                        logger.debug(
+                            "IndexedStringA deferred scan: still waiting "
+                            "after {} attempts ({} entries currently, "
+                            "table still settling)",
+                            attempt,
+                            curCount
+                        );
                     continue;
                 }
 
                 ++stableStreak;
                 if (stableStreak < k_stabilityRequired)
                 {
-                    logger.trace("IndexedStringA deferred scan: attempt {}, {} "
-                                 "entries (stable {}/{}, awaiting commit)",
-                                 attempt, curCount, stableStreak, k_stabilityRequired);
+                    logger.trace(
+                        "IndexedStringA deferred scan: attempt {}, {} "
+                        "entries (stable {}/{}, awaiting commit)",
+                        attempt,
+                        curCount,
+                        stableStreak,
+                        k_stabilityRequired
+                    );
 
                     if (attempt % k_scanHeartbeatEvery == 0)
-                        logger.debug("IndexedStringA deferred scan: {} entries "
-                                     "after {} attempts (stable streak {}/{}, "
-                                     "need {} consecutive identical scans)",
-                                     curCount, attempt, stableStreak, k_stabilityRequired, k_stabilityRequired);
+                        logger.debug(
+                            "IndexedStringA deferred scan: {} entries "
+                            "after {} attempts (stable streak {}/{}, "
+                            "need {} consecutive identical scans)",
+                            curCount,
+                            attempt,
+                            stableStreak,
+                            k_stabilityRequired,
+                            k_stabilityRequired
+                        );
                     continue;
                 }
 
@@ -197,10 +227,16 @@ namespace EquipHide
                 auto unresolved = get_unresolved_parts(runtimeHashes);
                 const auto resolvedCount = totalParts - unresolved.size();
 
-                logger.info("IndexedStringA deferred scan: stable at {} entries "
-                            "across {} consecutive scans, committing "
-                            "({}/{} resolved, {} attempts)",
-                            curCount, k_stabilityRequired, resolvedCount, totalParts, attempt);
+                logger.info(
+                    "IndexedStringA deferred scan: stable at {} entries "
+                    "across {} consecutive scans, committing "
+                    "({}/{} resolved, {} attempts)",
+                    curCount,
+                    k_stabilityRequired,
+                    resolvedCount,
+                    totalParts,
+                    attempt
+                );
 
                 set_runtime_hashes(std::move(runtimeHashes));
                 rebuild_part_lookup();
@@ -223,7 +259,7 @@ namespace EquipHide
 
         void lazy_probe_body(std::stop_token st) noexcept
         {
-            auto &logger = DMK::Logger::get_instance();
+            auto &logger = DMK::log();
             const auto mapLookupAddr = resolved_addrs().mapLookup;
             int probeCount = 0;
 
@@ -241,9 +277,11 @@ namespace EquipHide
             // sentinel, which it re-arms on immediately, collapsing the real interval to this loop's sleep period.
             int64_t lastSignal = 0;
 
-            logger.info("Lazy probe started for demand-loaded parts "
-                        "(interval: {}s)",
-                        k_lazyProbeIntervalMs / 1000);
+            logger.info(
+                "Lazy probe started for demand-loaded parts "
+                "(interval: {}s)",
+                k_lazyProbeIntervalMs / 1000
+            );
 
             while (lazy_probe_pending().load(std::memory_order_relaxed))
             {
@@ -272,9 +310,12 @@ namespace EquipHide
                     // No new INI parts resolved since the last commit. Common stable state on saves whose INI carries
                     // unresolvable entries (typos or parts the game never registers). Keep the probe alive in case the
                     // registry grows later but skip the rebuild work for this tick.
-                    logger.trace("Lazy probe #{}: {} parts unresolved "
-                                 "(no progress since last commit)",
-                                 probeCount, unresolvedCount);
+                    logger.trace(
+                        "Lazy probe #{}: {} parts unresolved "
+                        "(no progress since last commit)",
+                        probeCount,
+                        unresolvedCount
+                    );
                     continue;
                 }
 
@@ -298,16 +339,22 @@ namespace EquipHide
                 if (fullyResolved)
                 {
                     lazy_probe_pending().store(false, std::memory_order_relaxed);
-                    logger.info("Lazy probe resolved all remaining parts "
-                                "({} probes)",
-                                probeCount);
+                    logger.info(
+                        "Lazy probe resolved all remaining parts "
+                        "({} probes)",
+                        probeCount
+                    );
                     return;
                 }
 
-                logger.info("Lazy probe #{}: committed {} runtime hashes; "
-                            "{} INI parts still unresolved (will keep "
-                            "polling for late registrations)",
-                            probeCount, newHashCount, unresolvedCount);
+                logger.info(
+                    "Lazy probe #{}: committed {} runtime hashes; "
+                    "{} INI parts still unresolved (will keep "
+                    "polling for late registrations)",
+                    probeCount,
+                    newHashCount,
+                    unresolvedCount
+                );
             }
         }
 
@@ -332,16 +379,22 @@ namespace EquipHide
             auto &addrs = resolved_addrs();
             if (!addrs.worldSystem)
                 return 0;
-            // seh_read_chain walks WorldSystem -> ActorManager ->
-            // UserActor -> controlled actor and performs the terminal
-            // deref INSIDE its own SEH frame, so a half-torn rotation state faults safely instead of crashing. The
-            // final >= 0x10000 guard rejects the not-yet-wired-up sentinel range. Layout offsets come from
-            // CDCore::ActorChainOffsets (controlled_char.hpp), the single authority shared with LiveTransmog and
-            // CDCore's own resolver.
+            // The walk steps WorldSystem -> ActorManager -> UserActor -> controlled-actor SLOT under one fault
+            // guard, and the trailing read performs the terminal deref, so a half-torn rotation state faults safely
+            // instead of crashing. The final >= 0x10000 guard rejects the not-yet-wired-up sentinel range. Layout
+            // offsets come from CDCore::ActorChainOffsets (controlled_char.hpp), the single authority shared with
+            // LiveTransmog and CDCore's own resolver.
             namespace AC = CDCore::ActorChainOffsets;
-            auto r = DMK::Memory::seh_read_chain<std::uintptr_t>(
-                addrs.worldSystem,
-                {0x00, AC::k_worldSystemToActorManager, AC::k_actorManagerToUserActor, AC::k_userActorToControlled});
+            const auto r = DMK::memory::walk(
+                               DMK::Address{addrs.worldSystem},
+                               std::array<std::ptrdiff_t, 4>{
+                                   0x00,
+                                   AC::k_worldSystemToActorManager,
+                                   AC::k_actorManagerToUserActor,
+                                   AC::k_userActorToControlled,
+                               }
+            )
+                               .and_then([](DMK::Address leaf) { return DMK::memory::read<std::uintptr_t>(leaf); });
             return (r && *r >= 0x10000) ? *r : 0;
         }
 
@@ -357,7 +410,7 @@ namespace EquipHide
         // uses the (size_t)-1 uninit sentinel so the first observation does not double-fire.
         void resolve_poll_body(std::stop_token st) noexcept
         {
-            auto &logger = DMK::Logger::get_instance();
+            auto &logger = DMK::log();
             logger.info("Resolve poll thread started (interval: {}ms)", k_resolvePollIntervalMs);
 
             std::uintptr_t prevActor = 0;
@@ -397,9 +450,12 @@ namespace EquipHide
                     continue;
 
                 if (rosterChanged)
-                    logger.info("Player roster changed {} -> {}; re-resolving "
-                                "vis-ctrls",
-                                prevSnapshotCountForLog, curSnapshotCount);
+                    logger.info(
+                        "Player roster changed {} -> {}; re-resolving "
+                        "vis-ctrls",
+                        prevSnapshotCountForLog,
+                        curSnapshotCount
+                    );
 
                 resolve_player_vis_ctrls();
             }
@@ -458,7 +514,7 @@ namespace EquipHide
         //
         // Request stop on all three first so the bodies start unwinding concurrently while we sequentially join,
         // shaving wall-clock shutdown latency without changing the join order.
-        auto &logger = DMK::Logger::get_instance();
+        auto &logger = DMK::log();
 
         std::unique_ptr<DetourModKit::StoppableWorker> deferredLocal;
         std::unique_ptr<DetourModKit::StoppableWorker> lazyLocal;

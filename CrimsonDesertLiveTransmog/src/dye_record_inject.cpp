@@ -19,8 +19,6 @@
 #include "aob_resolver.hpp"
 #include "shared_state.hpp"
 
-#include <cdcore/dmk_glue.hpp>
-
 #include <DetourModKit.hpp>
 
 #include <Windows.h>
@@ -48,16 +46,16 @@ namespace Transmog::DyeRecordInject
     // (the restore path) set this, because the original mesh never colored those channels.
     static thread_local bool s_injectSparse = false;
 
-    // -- Counters -----------------------------------------------------
+    // -- Counters
     static std::atomic<std::uint64_t> g_dyeInjectCount{0};
 
-    // -- SEH-protected memory primitives ------------------------------
+    // -- SEH-protected memory primitives
     //
     // The DyeCopy call can transiently fault on alloc or vector-header access during asset reload. Wrap it in SEH so a
     // bad state fails the call instead of crashing the game thread. The SEH __try block lives in its own function
     // because it cannot share scope with C++ object unwinding (string, etc.).
 
-    // -- DyeCopier inline detour (the injection site) -----------------
+    // -- DyeCopier inline detour (the injection site)
     //
     // After the engine's own dye-copy completes (with empty source for LT-fake), the detour writes up to
     // `k_dyeChannelCount` records into the destination vector through the engine's record-copy primitive. Dense mode
@@ -90,7 +88,7 @@ namespace Transmog::DyeRecordInject
         }
     }
 
-    // --- Engine layout constants ------------------------------------
+    // Engine layout constants
     //
     // The dye-record vector geometry (header offsets and record size) is published in dye_record_inject.hpp, because
     // the socket-mesh override produces the same records and must agree with this file byte for byte. What stays
@@ -116,9 +114,16 @@ namespace Transmog::DyeRecordInject
     // Build a 16-byte ARMOR_MOD record. See ChannelState in the header for the offset map. The +13 = 0x04 marker on
     // indices 0 and 3 mirrors what natural captures show. The engine accepts records without it, but matching the
     // natural shape avoids any shape validation that is not yet mapped.
-    void build_dye_record(std::uint8_t *out, std::size_t channel_idx, std::uint32_t group_hash, std::uint8_t r,
-                                 std::uint8_t g, std::uint8_t b, std::uint16_t material_id,
-                                 std::uint8_t repair_byte) noexcept
+    void build_dye_record(
+        std::uint8_t *out,
+        std::size_t channel_idx,
+        std::uint32_t group_hash,
+        std::uint8_t r,
+        std::uint8_t g,
+        std::uint8_t b,
+        std::uint16_t material_id,
+        std::uint8_t repair_byte
+    ) noexcept
     {
         std::memset(out, 0, 16);
         std::memcpy(out + 0, &group_hash, 4);
@@ -193,15 +198,19 @@ namespace Transmog::DyeRecordInject
         // unreadable or the count is implausible, that scan cannot prove a channel is absent. A blind append then
         // duplicates records on every call and grows the vector without bound. When the scan is not possible, skip
         // this call instead. Another DyeCopier call follows.
-        const auto scan_data = DMKMemory::seh_read<std::uintptr_t>(target_vec + k_vecDataOffset).value_or(0);
+        const auto scan_data =
+            DMK::memory::read<std::uintptr_t>(DMK::Address{target_vec + k_vecDataOffset}).value_or(0);
         const auto scan_count =
-            DMKMemory::seh_read<std::uint32_t>(target_vec + k_vecCountOffset).value_or(k_invalidCount);
+            DMK::memory::read<std::uint32_t>(DMK::Address{target_vec + k_vecCountOffset}).value_or(k_invalidCount);
         const bool scannable = (scan_count == 0) || (scan_data >= k_minPlausiblePtr && scan_count <= k_maxScanRecords);
         if (!scannable)
         {
-            DMK::Logger::get_instance().debug("[dye-inject] skipped: destination vector not scannable "
-                                              "(data=0x{:X} count={})",
-                                              scan_data, scan_count);
+            DMK::log().debug(
+                "[dye-inject] skipped: destination vector not scannable "
+                "(data=0x{:X} count={})",
+                scan_data,
+                scan_count
+            );
             return result;
         }
 
@@ -215,8 +224,16 @@ namespace Transmog::DyeRecordInject
                 continue;
             const auto &channel = active ? s_injectChannels[i] : *fallback;
             std::uint8_t record[k_dyeRecordSize];
-            build_dye_record(record, i, channel.group_hash, channel.r, channel.g, channel.b, channel.material_id,
-                             channel.repair_byte);
+            build_dye_record(
+                record,
+                i,
+                channel.group_hash,
+                channel.r,
+                channel.g,
+                channel.b,
+                channel.material_id,
+                channel.repair_byte
+            );
 
             // Upsert this channel instead of appending it.
             //
@@ -229,9 +246,10 @@ namespace Transmog::DyeRecordInject
             //
             // The header is re-read every iteration because an append can grow and relocate the array.
             bool replaced = false;
-            const auto vec_data = DMKMemory::seh_read<std::uintptr_t>(target_vec + k_vecDataOffset).value_or(0);
+            const auto vec_data =
+                DMK::memory::read<std::uintptr_t>(DMK::Address{target_vec + k_vecDataOffset}).value_or(0);
             const auto vec_count =
-                DMKMemory::seh_read<std::uint32_t>(target_vec + k_vecCountOffset).value_or(k_invalidCount);
+                DMK::memory::read<std::uint32_t>(DMK::Address{target_vec + k_vecCountOffset}).value_or(k_invalidCount);
             if (vec_count > k_maxScanRecords || (vec_count > 0 && vec_data < k_minPlausiblePtr))
             {
                 // Dedup is no longer possible mid-loop. Stop rather than append blind.
@@ -244,10 +262,18 @@ namespace Transmog::DyeRecordInject
                 {
                     const auto rec_addr = vec_data + static_cast<std::uintptr_t>(k) * k_dyeRecordSize;
                     const auto existing_channel =
-                        DMKMemory::seh_read<std::uint8_t>(rec_addr + k_recordChannelOffset).value_or(k_noChannel);
+                        DMK::memory::read<std::uint8_t>(DMK::Address{rec_addr + k_recordChannelOffset})
+                            .value_or(k_noChannel);
                     if (existing_channel != static_cast<std::uint8_t>(i))
                         continue;
-                    replaced = DMKMemory::seh_write_bytes(rec_addr, record, k_dyeRecordCopySpan);
+                    // write_in_place never changes page protection: the dye vector is already writable engine
+                    // data, so a target that is not writable is a sign the pointer is wrong, and failing closed
+                    // there is the correct outcome.
+                    replaced = DMK::memory::write_in_place(
+                                   DMK::Address{rec_addr},
+                                   std::span{reinterpret_cast<const std::byte *>(record), k_dyeRecordCopySpan}
+                    )
+                                   .has_value();
                     break;
                 }
             }
@@ -265,74 +291,100 @@ namespace Transmog::DyeRecordInject
             return result;
 
         const auto inject_count = g_dyeInjectCount.fetch_add(1, std::memory_order_relaxed);
-        DMK::Logger::get_instance().debug("[dye-inject] #{} vec=0x{:X} mode={} emitted={}/{} "
-                                          "first_hash=0x{:08X} rgb=({:02X},{:02X},{:02X}) ok={}",
-                                          inject_count, target_vec, sparse ? "sparse" : "dense", emitted,
-                                          k_dyeChannelCount, fallback->group_hash, fallback->r, fallback->g,
-                                          fallback->b, all_ok);
+        DMK::log().debug(
+            "[dye-inject] #{} vec=0x{:X} mode={} emitted={}/{} "
+            "first_hash=0x{:08X} rgb=({:02X},{:02X},{:02X}) ok={}",
+            inject_count,
+            target_vec,
+            sparse ? "sparse" : "dense",
+            emitted,
+            k_dyeChannelCount,
+            fallback->group_hash,
+            fallback->r,
+            fallback->g,
+            fallback->b,
+            all_ok
+        );
         return result;
     }
 
-    // -- Public API ---------------------------------------------------
+    // -- Public API
 
-    bool init() noexcept
+    bool init(DMK::hook::HookStack &hooks) noexcept
     {
-        auto &logger = DMK::Logger::get_instance();
+        auto &logger = DMK::log();
 
-        // Resolve all targets through patch-proof AOB cascades before any hook is installed. resolve_address returns 0
-        // on cascade failure. A hook against address 0 smashes the PE header.
-        const auto copy_target = resolve_address(k_dyeCopyCandidates, "DyeRecordInject_DyeCopy");
+        // Both addresses come from the anchor registry, which already rejected a value outside the host image and,
+        // for these code entries, a first byte that cannot begin an instruction. That validator is what used to be an
+        // explicit entry check here: both DyeCopier rows below P1 reach the entry through a negative walk-back, so a
+        // prologue that changes length resolves them short WITHOUT failing the pattern match, and an inline detour
+        // written into the middle of a live instruction is a delayed crash. A rejected anchor arrives as 0.
+        const auto copy_target = anchor_address(AnchorId::DyeCopy);
         if (copy_target == 0)
         {
-            logger.warning("[dye-inject] AOB resolve failed for DyeCopy primitive; "
-                           "dye injection disabled");
+            logger.warning(
+                "[dye-inject] AOB resolve failed for DyeCopy primitive; "
+                "dye injection disabled"
+            );
             return false;
         }
 
-        const auto copier_target = resolve_address(k_dyeCopierCandidates, "DyeRecordInject_DyeCopier");
+        const auto copier_target = anchor_address(AnchorId::DyeCopier);
         if (copier_target == 0)
         {
-            logger.warning("[dye-inject] AOB resolve failed for DyeCopier; "
-                           "dye injection disabled");
+            logger.warning(
+                "[dye-inject] AOB resolve failed for DyeCopier; "
+                "dye injection disabled"
+            );
             return false;
         }
 
-        // Both DyeCopier rows below P1 reach the entry through a negative walk-back, so a prologue that changes
-        // length resolves them short WITHOUT failing the pattern match. This hook is an inline detour, so a short
-        // resolve writes its jump into the middle of a live instruction. Verify the target is a real function entry
-        // before hooking rather than trusting the offset.
-        if (!CDCore::Glue::looks_like_function_entry(copier_target, "DyeRecordInject_DyeCopier"))
-        {
-            logger.warning("[dye-inject] DyeCopier resolved to a non-entry address; "
-                           "dye injection disabled");
-            return false;
-        }
-
-        auto &hookMgr = DMK::HookManager::get_instance();
-
-        // Bind the DyeCopy function pointer to the AOB-resolved address. The inline detour calls it directly to append
-        // records.
+        // Bind the DyeCopy function pointer to the AOB-resolved address. The inline detour calls it directly to
+        // append records.
         g_dye_copy_fn = reinterpret_cast<DyeCopy_t>(copy_target);
 
         // DyeCopier inline detour (the injection site).
-        auto copier_res = hookMgr.create_inline_hook("DyeCopierInjectInline", copier_target,
-                                                     reinterpret_cast<void *>(&dye_copier_inline_detour),
-                                                     reinterpret_cast<void **>(&g_dye_copier_trampoline));
-        if (copier_res.has_value())
-            logger.info("[dye-inject] DyeCopier inline-hook installed at 0x{:X}; "
-                        "DyeCopy fn at 0x{:X}",
-                        copier_target, reinterpret_cast<std::uintptr_t>(g_dye_copy_fn));
-        else
-            logger.warning("[dye-inject] DyeCopier inline-hook FAILED: {}",
-                           DetourModKit::Hook::error_to_string(copier_res.error()));
+        auto copier = DMK::hook::inline_at(
+            DMK::hook::InlineRequest{.name = "DyeCopierInjectInline", .target = DMK::Address{copier_target}},
+            &dye_copier_inline_detour
+        );
+        if (!copier)
+        {
+            logger.warning(
+                "[dye-inject] DyeCopier inline-hook creation failed at 0x{:X}: {}",
+                copier_target,
+                copier.error().message()
+            );
+            return false;
+        }
+
+        // Publish the trampoline BEFORE enable() arms the patch, so no game thread can enter the detour while its
+        // original pointer is still null.
+        g_dye_copier_trampoline = copier->original<DyeCopier_t>();
+        if (auto armed = copier->enable(); !armed)
+        {
+            logger.warning(
+                "[dye-inject] DyeCopier inline-hook could not be armed at 0x{:X}: {}",
+                copier_target,
+                armed.error().message()
+            );
+            g_dye_copier_trampoline = nullptr;
+            return false;
+        }
+        hooks.push(std::move(*copier));
+
+        logger.info(
+            "[dye-inject] DyeCopier inline-hook installed at 0x{:X}; DyeCopy fn at 0x{:X}",
+            copier_target,
+            reinterpret_cast<std::uintptr_t>(g_dye_copy_fn)
+        );
 
         return true;
     }
 
     void log_counters() noexcept
     {
-        DMK::Logger::get_instance().debug("[dye-inject] counters: injects={}",
-                                          g_dyeInjectCount.load(std::memory_order_relaxed));
+        DMK::log().debug("[dye-inject] counters: injects={}", g_dyeInjectCount.load(std::memory_order_relaxed));
     }
 
     void restore_all() noexcept
@@ -382,11 +434,18 @@ namespace Transmog::DyeRecordInject
                                  : 0;
         g_publishedRGB.store(snap, std::memory_order_release);
 
-        DMK::Logger::get_instance().debug("[dye-inject] state set: active_count={} firstHash=0x{:08X} "
-                                          "firstRGB=({:02X},{:02X},{:02X}) snapshot=0x{:08X} "
-                                          "&snap={:#x}",
-                                          active_count, first_hash, first_r, first_g, first_b, snap,
-                                          reinterpret_cast<std::uintptr_t>(&g_publishedRGB));
+        DMK::log().debug(
+            "[dye-inject] state set: active_count={} firstHash=0x{:08X} "
+            "firstRGB=({:02X},{:02X},{:02X}) snapshot=0x{:08X} "
+            "&snap={:#x}",
+            active_count,
+            first_hash,
+            first_r,
+            first_g,
+            first_b,
+            snap,
+            reinterpret_cast<std::uintptr_t>(&g_publishedRGB)
+        );
     }
 
     void clear_slot_dye_state() noexcept
@@ -416,16 +475,16 @@ namespace Transmog::DyeRecordInject
         return true;
     }
 
-    void log_dye_snapshot(const char *source, const char *slotName,
-                          const ChannelState (&state)[k_dyeChannelCount]) noexcept
+    void
+    log_dye_snapshot(const char *source, const char *slotName, const ChannelState (&state)[k_dyeChannelCount]) noexcept
     {
-        auto &logger = DMK::Logger::get_instance();
+        auto &logger = DMK::log();
         std::size_t active = 0;
         for (const auto &ch : state)
             if (ch.group_hash != 0)
                 ++active;
-        logger.trace("[dye-snapshot] src={} slot={} active_channels={}/{}", source, slotName, active,
-                     k_dyeChannelCount);
+        logger
+            .trace("[dye-snapshot] src={} slot={} active_channels={}/{}", source, slotName, active, k_dyeChannelCount);
         for (std::size_t i = 0; i < k_dyeChannelCount; ++i)
         {
             const auto &ch = state[i];
@@ -434,9 +493,17 @@ namespace Transmog::DyeRecordInject
                 logger.trace("[dye-snapshot]   ch[{:02}] (empty)", i);
                 continue;
             }
-            logger.trace("[dye-snapshot]   ch[{:02}] hash=0x{:08X} mat=0x{:04X} "
-                         "rgb=({:02X},{:02X},{:02X}) repair=0x{:02X}",
-                         i, ch.group_hash, ch.material_id, ch.r, ch.g, ch.b, ch.repair_byte);
+            logger.trace(
+                "[dye-snapshot]   ch[{:02}] hash=0x{:08X} mat=0x{:04X} "
+                "rgb=({:02X},{:02X},{:02X}) repair=0x{:02X}",
+                i,
+                ch.group_hash,
+                ch.material_id,
+                ch.r,
+                ch.g,
+                ch.b,
+                ch.repair_byte
+            );
         }
     }
 
@@ -454,9 +521,10 @@ namespace Transmog::DyeRecordInject
         // stride and MUST move with it: see k_entryStride and k_entrySlotTagOffset in real_part_tear_down.cpp. A
         // stale value lands on the neighboring field and dereferences a garbage pointer instead of failing closed.
         const auto data =
-            DMKMemory::seh_read<std::uintptr_t>(entryBase + k_dyeVectorOffset + k_vecDataOffset).value_or(0);
-        auto count =
-            DMKMemory::seh_read<std::uint32_t>(entryBase + k_dyeVectorOffset + k_vecCountOffset).value_or(0);
+            DMK::memory::read<std::uintptr_t>(DMK::Address{entryBase + k_dyeVectorOffset + k_vecDataOffset})
+                .value_or(0);
+        auto count = DMK::memory::read<std::uint32_t>(DMK::Address{entryBase + k_dyeVectorOffset + k_vecCountOffset})
+                         .value_or(0);
         if (data < k_minPlausiblePtr || count == 0)
             return 0;
         if (count > k_dyeChannelCount)
@@ -469,7 +537,7 @@ namespace Transmog::DyeRecordInject
             // Copy the whole record under one fault guard, then parse from the local buffer so a torn record cannot
             // fault mid-field.
             std::uint8_t buf[k_dyeRecordSize];
-            if (!DMKMemory::seh_read_bytes(rec, buf, sizeof(buf)))
+            if (!DMK::memory::read_into(DMK::Address{rec}, std::span{reinterpret_cast<std::byte *>(buf), sizeof(buf)}))
                 continue;
 
             std::uint32_t group_hash = 0;

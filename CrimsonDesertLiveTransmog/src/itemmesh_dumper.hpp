@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <stop_token>
 #include <string>
 #include <vector>
 
@@ -36,5 +37,20 @@ namespace Transmog
      * @note Both registry holders (`iteminfo` and `stringinfo`) are AOB-resolved per call -- no hardcoded RVAs survive
      *       a game patch.
      */
-    void dump_itemmesh_tsv();
+    /**
+     * @brief Writes the item-prefab TSV, waiting for the swap catalog first.
+     * @param stop Cooperative stop signal. The catalog wait polls it and abandons the dump when stop is
+     *             requested, which is what lets the owning worker be joined at teardown.
+     * @note Setup/control-plane only: walks registries and writes a file. Runs on a worker, never a detour.
+     */
+    void dump_itemmesh_tsv(std::stop_token stop);
+
+    /**
+     * @brief Starts the TSV dump on a DMK worker, or does nothing when one is already running.
+     * @note The worker holds a counted module reference, so it is visible in the pin ledger while it lives.
+     */
+    void launch_itemmesh_dump();
+
+    /// Requests stop and joins the dump worker. Idempotent, and safe when none was started.
+    void join_itemmesh_dump() noexcept;
 } // namespace Transmog

@@ -3,7 +3,12 @@
 #include <Windows.h>
 
 #include <cdcore/anchors.hpp>
-#include <cdcore/dmk_glue.hpp>
+
+#include <DetourModKit/logger.hpp>
+#include <DetourModKit/memory.hpp>
+#include <DetourModKit/rtti.hpp>
+#include <DetourModKit/rtti_dissect.hpp>
+#include <DetourModKit/scan.hpp>
 
 #include <atomic>
 #include <cstddef>
@@ -12,7 +17,6 @@
 #include <string>
 #include <string_view>
 
-// ---------------------------------------------------------------------------
 // Controlled-character resolver.
 //
 // Static-chain + body-mesh asset-path resolver. See controlled_char.hpp for the architecture overview. This translation
@@ -26,7 +30,6 @@
 //     address change is the correct signal for "world rebuilt, drop session-local caches".
 //   - s_worldGeneration: monotonic counter bumped each time the
 //     Kliff CCOIA pointer changes.
-// ---------------------------------------------------------------------------
 
 namespace CDCore
 {
@@ -102,7 +105,7 @@ namespace CDCore
             if (configured <= 0)
                 return static_cast<std::size_t>(k_healWindowDefault);
             const auto w = static_cast<std::size_t>(configured);
-            return w > DMKRtti::MAX_HEAL_WINDOW ? DMKRtti::MAX_HEAL_WINDOW : w;
+            return w > DMK::rtti::MAX_HEAL_WINDOW ? DMK::rtti::MAX_HEAL_WINDOW : w;
         }
 
         [[nodiscard]] std::ptrdiff_t off_user_actor() noexcept
@@ -135,16 +138,16 @@ namespace CDCore
             if (s_chainOffsetsHealed.load(std::memory_order_acquire))
                 return;
 
-            DMKRtti::Landmark lm{};
-            lm.base = mgrBase;
+            DMK::rtti::Landmark lm{};
+            lm.base = DMK::Address{mgrBase};
             lm.nominal_offset = k_offUserActorNominal;
             lm.window = heal_window();
-            lm.expected_mangled = k_userActorMangled;
+            lm.expected_mangled = std::string{k_userActorMangled};
             // mgr+0x58 is a qword POINTER to a single-COL pa::ClientUserActor (COL offset 0, no multiple inheritance),
             // so PointerToObject is the exact slot shape.
-            lm.indirection = DMKRtti::Indirection::PointerToObject;
+            lm.indirection = DMK::rtti::Indirection::PointerToObject;
 
-            const auto hit = DMKRtti::heal_landmark(lm);
+            const auto hit = DMK::rtti::heal_landmark(lm);
             if (!hit.has_value())
             {
                 // NoMatch / Ambiguous / BadDescriptor: keep the nominal seeds and retry on the next walk. NoMatch is
@@ -153,10 +156,12 @@ namespace CDCore
                 // stays diagnosable without spamming the per-walk path or alarming on the normal main-menu wait.
                 const int n = s_chainHealAttempts.fetch_add(1, std::memory_order_acq_rel) + 1;
                 if ((n & (n - 1)) == 0)
-                    DetourModKit::Logger::get_instance().debug(
+                    DetourModKit::log().debug(
                         "ActorChainOffsets not healed yet after {} walk(s) ({}); using nominal "
                         "offsets, will keep retrying",
-                        n, DMKRtti::heal_error_to_string(hit.error()));
+                        n,
+                        hit.error().message()
+                    );
                 return;
             }
 
@@ -168,13 +173,18 @@ namespace CDCore
             // pa::ClientUserActor. A nonzero drift is a manager re-layout that self-corrected on a patch; surface it as
             // a WARNING so the offset change is easy to spot.
             if (drift != 0)
-                DetourModKit::Logger::get_instance().warning(
+                DetourModKit::log().warning(
                     "ActorChainOffsets DRIFTED: mgr->userActor {:#x} nominal {:#x} drift {} -- "
                     "self-healed (manager layout changed)",
-                    healed, k_offUserActorNominal, drift);
+                    healed,
+                    k_offUserActorNominal,
+                    drift
+                );
             else
-                DetourModKit::Logger::get_instance().info(
-                    "ActorChainOffsets self-heal OK: mgr->userActor {:#x} (matches nominal)", healed);
+                DetourModKit::log().info(
+                    "ActorChainOffsets self-heal OK: mgr->userActor {:#x} (matches nominal)",
+                    healed
+                );
         }
         constexpr std::ptrdiff_t k_offSubManager = 0x08;   // user +0x08
         constexpr std::ptrdiff_t k_offSubMgrKliff = 0x30;  // sub +0x30
@@ -242,16 +252,18 @@ namespace CDCore
             for (std::ptrdiff_t off = 0; off <= k_mgrArrayHealWindow;
                  off += static_cast<std::ptrdiff_t>(sizeof(std::uintptr_t)))
             {
-                const auto arr = DMKMemory::seh_read<std::uintptr_t>(mgrBase + off).value_or(0);
+                const auto arr = DMK::memory::read<std::uintptr_t>(DMK::Address{mgrBase + off}).value_or(0);
                 if (arr < k_minValidPtr)
                     continue;
-                const auto cap = DMKMemory::seh_read<std::uint32_t>(mgrBase + off + k_mgrArrayCapRel).value_or(0);
+                const auto cap =
+                    DMK::memory::read<std::uint32_t>(DMK::Address{mgrBase + off + k_mgrArrayCapRel}).value_or(0);
                 if (cap < k_mgrArrayCapMin || cap > k_mgrArrayCapHardCap || cap <= bestCap)
                     continue;
-                const auto count = DMKMemory::seh_read<std::uint32_t>(mgrBase + off + k_mgrArrayCountRel).value_or(0);
+                const auto count =
+                    DMK::memory::read<std::uint32_t>(DMK::Address{mgrBase + off + k_mgrArrayCountRel}).value_or(0);
                 if (count > cap)
                     continue;
-                if (DMKMemory::seh_read<std::uintptr_t>(arr).value_or(0) != kliffCcoia)
+                if (DMK::memory::read<std::uintptr_t>(DMK::Address{arr}).value_or(0) != kliffCcoia)
                     continue;
                 bestCap = cap;
                 bestOff = off;
@@ -263,23 +275,29 @@ namespace CDCore
                 // real layout change stays diagnosable without spamming the per-walk path.
                 const int n = s_mgrArrayHealAttempts.fetch_add(1, std::memory_order_acq_rel) + 1;
                 if ((n & (n - 1)) == 0)
-                    DetourModKit::Logger::get_instance().debug(
+                    DetourModKit::log().debug(
                         "MgrActorArray not healed yet after {} walk(s) (no descriptor in the window leads with the "
                         "Kliff CCOIA); using nominal offset {:#x}, will keep retrying",
-                        n, k_offMgrActorArrayNominal);
+                        n,
+                        k_offMgrActorArrayNominal
+                    );
                 return;
             }
 
             s_offMgrActorArray.store(bestOff, std::memory_order_release);
             s_mgrArrayHealed.store(true, std::memory_order_release);
             if (bestOff != k_offMgrActorArrayNominal)
-                DetourModKit::Logger::get_instance().warning(
+                DetourModKit::log().warning(
                     "MgrActorArray DRIFTED: descriptor {:#x} nominal {:#x} drift {} cap {} -- self-healed (manager "
                     "layout changed)",
-                    bestOff, k_offMgrActorArrayNominal, bestOff - k_offMgrActorArrayNominal, bestCap);
+                    bestOff,
+                    k_offMgrActorArrayNominal,
+                    bestOff - k_offMgrActorArrayNominal,
+                    bestCap
+                );
             else
-                DetourModKit::Logger::get_instance().info(
-                    "MgrActorArray self-heal OK: descriptor {:#x} cap {} (matches nominal)", bestOff, bestCap);
+                DetourModKit::log()
+                    .info("MgrActorArray self-heal OK: descriptor {:#x} cap {} (matches nominal)", bestOff, bestCap);
         }
 
         // Appearance-config asset-path chain. The CCOIA's body component holder exposes a std::string carrying the
@@ -314,8 +332,8 @@ namespace CDCore
         //
         // Step 2 (locate the CCC inside p1) walks the table by RTTI/vtable rather than fixed offset, so the chain is
         // session-stable regardless of how many components have registered. The walk runs through
-        // `DMKRtti::find_in_pointer_table` against `k_cccTypeDescriptorName`. Steps 3 (+0x40) and 4 (+0x38) dereference
-        // fixed members of the resolved CCC and are structurally stable.
+        // `DMK::rtti::find_in_pointer_table` against `k_cccTypeDescriptorName`. Steps 3 (+0x40) and 4 (+0x38)
+        // dereference fixed members of the resolved CCC and are structurally stable.
         constexpr std::ptrdiff_t k_offAppearChain1 = 0x68;
         constexpr std::ptrdiff_t k_offAppearChain3 = 0x40;
         constexpr std::ptrdiff_t k_offAppearChain4 = 0x38;
@@ -358,7 +376,7 @@ namespace CDCore
         constexpr std::string_view k_defaultCodenameDamiane = "cd_phw_damian";
         constexpr std::string_view k_defaultCodenameOongka = "cd_phm_oongka";
 
-        // --- Mutable internal state ---
+        // Mutable internal state
 
         // Track Kliff CCOIA pointer to drive world_generation() bumps and kliff_low cache invalidation. The sub-manager
         // pointer is persistent across save-load and cannot be used here; Kliff's CCOIA IS reallocated on every
@@ -374,7 +392,7 @@ namespace CDCore
         std::string s_codenameDamiane{k_defaultCodenameDamiane};
         std::string s_codenameOongka{k_defaultCodenameOongka};
 
-        // ---- Player base resolution -------------------------------------
+        // Player base resolution
 
         std::uintptr_t resolve_player_base_address() noexcept
         {
@@ -386,23 +404,41 @@ namespace CDCore
             const auto cached = s_cached.load(std::memory_order_acquire);
             if (cached >= k_minValidPtr)
                 return cached;
-            const auto addr = CDCore::Glue::resolve_address(CDCore::Anchors::k_clientActorManagerGlobalCandidates,
-                                                            "ClientActorManagerGlobal");
+
+            // The scan scope is the host image: faster than a whole-process walk, and immune to a generic-shaped
+            // candidate first-matching inside a sibling mod or an overlay. Pages::Executable narrows the byte sweep to
+            // code pages, because every rung anchors on an instruction inside the publishing function and an identical
+            // run in .rdata would be an alias, never the intended site.
+            const auto hit = DMK::scan::resolve(
+                DMK::scan::ScanRequest{
+                    .ladder = Anchors::k_clientActorManagerGlobalCandidates,
+                    .label = "ClientActorManagerGlobal",
+                    .scope = DMK::Region::host(),
+                    .pages = DMK::scan::Pages::Executable,
+                }
+            );
+            if (!hit)
+            {
+                DMK::log().warning("ClientActorManagerGlobal did not resolve: {}", hit.error().message());
+                return 0;
+            }
+
+            const auto addr = hit->address.raw();
             if (addr < k_minValidPtr)
                 return 0;
             s_cached.store(addr, std::memory_order_release);
             return addr;
         }
 
-        // ---- Chain walks (SEH-guarded, single __try per call) -----------
+        // Chain walks (SEH-guarded, single __try per call)
         //
         // Each chain walk bundles every dereference along its path under a single SEH frame. Splitting the dereferences
-        // into individual `DMKMemory::seh_read<T>` calls would pay N SEH-frame costs in place of one and would lose the
+        // into individual `DMK::memory::read<T>` calls would pay N SEH-frame costs in place of one and would lose the
         // "any fault aborts the walk" property that mid-teardown windows rely on (a torn intermediate pointer must
         // short-circuit the whole walk, not just one leaf).
         //
-        // Single-deref reads outside these chains use `DMKMemory::seh_read<T>(addr).value_or(0)` inline at the call
-        // site.
+        // Single-deref reads outside these chains use `DMK::memory::read<T>(DMK::Address{addr}).value_or(0)` inline at
+        // the call site.
 
         struct ChainAnchors
         {
@@ -449,8 +485,8 @@ namespace CDCore
         // (vec[2] = ChildContainer ptr) -> +0x18 (actor list ptr).
         // Populates @p outVec / @p outChild / @p outList with the intermediate anchors so callers can report them;
         // returns 0 when any link is null/torn, otherwise the actor_list base.
-        std::uintptr_t walk_to_actor_list_seh(std::uintptr_t userActor, std::uintptr_t &outVec,
-                                              std::uintptr_t &outChild) noexcept
+        std::uintptr_t
+        walk_to_actor_list_seh(std::uintptr_t userActor, std::uintptr_t &outVec, std::uintptr_t &outChild) noexcept
         {
             outVec = 0;
             outChild = 0;
@@ -479,7 +515,7 @@ namespace CDCore
             }
         }
 
-        // ---- World-generation tracking ----------------------------------
+        // World-generation tracking
 
         // Update world-generation counter when Kliff CCOIA identity changes (= save-load: the engine reallocates
         // Kliff's CCOIA with a fresh session-local +0x60 lo byte). Flushes the kliff_low cache so the delta classifier
@@ -492,14 +528,18 @@ namespace CDCore
             if (kliffCcoia == last)
                 return;
             std::uintptr_t expected = last;
-            if (s_cachedKliffCcoia.compare_exchange_strong(expected, kliffCcoia, std::memory_order_acq_rel,
-                                                           std::memory_order_acquire))
+            if (s_cachedKliffCcoia.compare_exchange_strong(
+                    expected,
+                    kliffCcoia,
+                    std::memory_order_acq_rel,
+                    std::memory_order_acquire
+                ))
             {
                 s_worldGeneration.fetch_add(1, std::memory_order_acq_rel);
             }
         }
 
-        // ---- ASCII reader for std::string content ----------------------
+        // ASCII reader for std::string content
 
         // Read up to (cap - 1) printable ASCII bytes from @p start into @p buf, stopping at the first NUL. Returns
         // false on torn read or first non-printable byte (rejects garbage early so the classifier doesn't pattern-match
@@ -533,12 +573,12 @@ namespace CDCore
             }
         }
 
-        // ---- RTTI-based component-table walker --------------------------
+        // RTTI-based component-table walker
 
         // Cached vtable address of the target component class (.?AVClientCharacterControlActorComponent@pa@@).
         // Image-resident and stable for the process lifetime; learned once via RTTI scan on the first successful chain
         // walk.
-        std::atomic<std::uintptr_t> s_cccVtable{0};
+        DMK::rtti::PointerTableCache s_cccVtable;
 
         // Walk CCOIA +0x68 -> [CCC via RTTI] -> +0x40 -> +0x38 to
         // reach the appearance-config std::string. Resolves heap-buffer vs inline layout and returns the start address
@@ -547,27 +587,32 @@ namespace CDCore
         {
             if (ccoia < k_minValidPtr)
                 return 0;
-            const auto p1 = DMKMemory::seh_read<std::uintptr_t>(ccoia + k_offAppearChain1).value_or(0);
+            const auto p1 = DMK::memory::read<std::uintptr_t>(DMK::Address{ccoia + k_offAppearChain1}).value_or(0);
             if (p1 < k_minValidPtr)
                 return 0;
-            const auto ccc =
-                DMKRtti::find_in_pointer_table(p1, k_componentTableSlots, k_cccTypeDescriptorName, &s_cccVtable)
-                    .value_or(0);
+            const auto cccHit = DMK::rtti::find_in_pointer_table(
+                DMK::Address{p1},
+                k_componentTableSlots,
+                k_cccTypeDescriptorName,
+                s_cccVtable
+            );
+            const std::uintptr_t ccc = cccHit ? cccHit->raw() : 0;
             if (ccc < k_minValidPtr)
                 return 0;
-            const auto p3 = DMKMemory::seh_read<std::uintptr_t>(ccc + k_offAppearChain3).value_or(0);
+            const auto p3 = DMK::memory::read<std::uintptr_t>(DMK::Address{ccc + k_offAppearChain3}).value_or(0);
             if (p3 < k_minValidPtr)
                 return 0;
-            const auto strStruct = DMKMemory::seh_read<std::uintptr_t>(p3 + k_offAppearChain4).value_or(0);
+            const auto strStruct = DMK::memory::read<std::uintptr_t>(DMK::Address{p3 + k_offAppearChain4}).value_or(0);
             if (strStruct < k_minValidPtr)
                 return 0;
-            const auto bufPtr = DMKMemory::seh_read<std::uintptr_t>(strStruct + k_offStringBufPtr).value_or(0);
-            if (DMKMemory::plausible_userspace_ptr(bufPtr))
+            const auto bufPtr =
+                DMK::memory::read<std::uintptr_t>(DMK::Address{strStruct + k_offStringBufPtr}).value_or(0);
+            if (DMK::memory::is_plausible_ptr(DMK::Address{bufPtr}))
                 return bufPtr;
             return strStruct; // inline fallback
         }
 
-        // ---- CCOIA classification ---------------------------------------
+        // CCOIA classification
 
         // Classifies a CCOIA by reading its appearance-config path and matching the embedded character codename.
         // Returns 1/2/3 for Kliff/Damiane/Oongka, or 0 when the chain is unreachable or the path doesn't contain any
@@ -602,7 +647,7 @@ namespace CDCore
             const auto byAppearance = classify_by_appearance(ccoia);
             if (byAppearance != 0)
                 return byAppearance;
-            const auto packed = DMKMemory::seh_read<std::uint32_t>(ccoia + k_offCcoiaIdentity).value_or(0);
+            const auto packed = DMK::memory::read<std::uint32_t>(DMK::Address{ccoia + k_offCcoiaIdentity}).value_or(0);
             const auto highByte = static_cast<std::uint8_t>((packed >> 24) & 0xFFu);
             if (highByte == k_kliffHighByte)
                 return 1;
@@ -611,7 +656,7 @@ namespace CDCore
 
     } // namespace
 
-    // --- Public API ---
+    // Public API
 
     std::uintptr_t current_controlled_ccoia() noexcept
     {
@@ -782,11 +827,13 @@ namespace CDCore
         // Null/torn slots are skipped (continue), never treated as end-of-array, so an interior hole or a transient
         // unreadable slot cannot truncate the scan and drop a protagonist sitting behind it. The early-out below halts
         // the walk as soon as both companions are found, so the full sweep only runs when one is genuinely absent.
-        const auto actorArray = DMKMemory::seh_read<std::uintptr_t>(chain.mgr + off_mgr_actor_array()).value_or(0);
+        const auto actorArray =
+            DMK::memory::read<std::uintptr_t>(DMK::Address{chain.mgr + off_mgr_actor_array()}).value_or(0);
         if (actorArray < k_minValidPtr)
             return written;
 
-        const auto rawCap = DMKMemory::seh_read<std::uint32_t>(chain.mgr + off_mgr_actor_array_cap()).value_or(0);
+        const auto rawCap =
+            DMK::memory::read<std::uint32_t>(DMK::Address{chain.mgr + off_mgr_actor_array_cap()}).value_or(0);
         const std::size_t scanCap = (rawCap < k_mgrArrayCapMin)       ? k_mgrArrayScanFallback
                                     : (rawCap > k_mgrArrayCapHardCap) ? static_cast<std::size_t>(k_mgrArrayCapHardCap)
                                                                       : static_cast<std::size_t>(rawCap);
@@ -796,7 +843,7 @@ namespace CDCore
         for (std::size_t i = 0; i < scanCap && written < cap; ++i)
         {
             const auto candidate =
-                DMKMemory::seh_read<std::uintptr_t>(actorArray + i * sizeof(std::uintptr_t)).value_or(0);
+                DMK::memory::read<std::uintptr_t>(DMK::Address{actorArray + i * sizeof(std::uintptr_t)}).value_or(0);
             if (candidate < k_minValidPtr || candidate == chain.kliffCcoia)
                 continue;
             const auto idx = classify_ccoia(candidate);
@@ -850,7 +897,7 @@ namespace CDCore
                     continue;
                 std::uint32_t ident = 0;
                 if (ccoia >= k_minValidPtr)
-                    ident = DMKMemory::seh_read<std::uint32_t>(ccoia + k_offCcoiaIdentity).value_or(0);
+                    ident = DMK::memory::read<std::uint32_t>(DMK::Address{ccoia + k_offCcoiaIdentity}).value_or(0);
                 out[n].ccoia = ccoia;
                 out[n].flag = flag;
                 out[n].identity = ident;
@@ -890,27 +937,38 @@ namespace CDCore
             s_codenameOongka = oongka;
     }
 
-    std::uintptr_t find_component_in_table(std::uintptr_t p1, std::string_view rttiName,
-                                           std::atomic<std::uintptr_t> &vtableCache) noexcept
+    std::uintptr_t find_component_in_table(
+        std::uintptr_t p1,
+        std::string_view rttiName,
+        DMK::rtti::PointerTableCache &vtableCache
+    ) noexcept
     {
-        return DMKRtti::find_in_pointer_table(p1, k_componentTableSlots, rttiName, &vtableCache).value_or(0);
+        const auto hit =
+            DMK::rtti::find_in_pointer_table(DMK::Address{p1}, k_componentTableSlots, rttiName, vtableCache);
+        return hit ? hit->raw() : 0;
     }
 
-    std::uintptr_t find_component_for_equipslot(std::uintptr_t equipSlot, std::string_view rttiName,
-                                                std::atomic<std::uintptr_t> &vtableCache) noexcept
+    std::uintptr_t find_component_for_equipslot(
+        std::uintptr_t equipSlot,
+        std::string_view rttiName,
+        DMK::rtti::PointerTableCache &vtableCache
+    ) noexcept
     {
         if (equipSlot < k_minValidPtr)
             return 0;
         // ClientEquipSlotActorComponent + 0x08 = back-pointer to pa::ClientChildOnlyInGameActor (the CCOIA). Then the
         // standard CCOIA + k_offAppearChain1 hop to the component table.
         constexpr std::ptrdiff_t k_offEquipSlotCcoiaBackref = 0x08;
-        const auto ccoia = DMKMemory::seh_read<std::uintptr_t>(equipSlot + k_offEquipSlotCcoiaBackref).value_or(0);
+        const auto ccoia =
+            DMK::memory::read<std::uintptr_t>(DMK::Address{equipSlot + k_offEquipSlotCcoiaBackref}).value_or(0);
         if (ccoia < k_minValidPtr)
             return 0;
-        const auto p1 = DMKMemory::seh_read<std::uintptr_t>(ccoia + k_offAppearChain1).value_or(0);
+        const auto p1 = DMK::memory::read<std::uintptr_t>(DMK::Address{ccoia + k_offAppearChain1}).value_or(0);
         if (p1 < k_minValidPtr)
             return 0;
-        return DMKRtti::find_in_pointer_table(p1, k_componentTableSlots, rttiName, &vtableCache).value_or(0);
+        const auto hit =
+            DMK::rtti::find_in_pointer_table(DMK::Address{p1}, k_componentTableSlots, rttiName, vtableCache);
+        return hit ? hit->raw() : 0;
     }
 
 } // namespace CDCore

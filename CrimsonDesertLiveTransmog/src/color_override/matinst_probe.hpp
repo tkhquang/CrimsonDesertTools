@@ -15,7 +15,7 @@
 
 namespace Transmog::ColorOverride::MatInstProbe
 {
-    // ---- Engine struct offsets ---------------------------------------
+    // Engine struct offsets
     //
     // Centralised here so a future patch that shifts them needs a single edit; every reader picks up the new value at
     // once.
@@ -31,10 +31,10 @@ namespace Transmog::ColorOverride::MatInstProbe
     inline constexpr std::ptrdiff_t k_offWrapper_SubMeshNameSw = 0x28;
     inline constexpr std::ptrdiff_t k_offStringWrapper_Inline = 0x18;
 
-    // ---- Address range sanity ----------------------------------------
+    // Address range sanity
     //
     // The engine heap pool sits above `0x200000000`; this floor is stricter than the generic user-space lower bound and
-    // screens out bogus-low pointers that the weaker `plausible_userspace_ptr` floor (0x10000) would let through.
+    // screens out bogus-low pointers that the weaker `memory::is_plausible_ptr` floor (0x10000) would let through.
     inline constexpr std::uintptr_t k_heapFloor = 0x200000000ULL;
     inline constexpr std::uintptr_t k_heapCeiling = 0x800000000000ULL;
 
@@ -48,10 +48,10 @@ namespace Transmog::ColorOverride::MatInstProbe
     // mapped.
     inline bool is_module_resident(std::uintptr_t p) noexcept
     {
-        return DMKMemory::contains(DMKMemory::host_module_range(), p);
+        return DMK::Region::host().contains(DMK::Address{p});
     }
 
-    // ---- Identity probe ----------------------------------------------
+    // Identity probe
 
     struct MatInstFields
     {
@@ -73,7 +73,7 @@ namespace Transmog::ColorOverride::MatInstProbe
      */
     bool probe_from_wrapper(std::uintptr_t wrapper, MatInstFields &out) noexcept;
 
-    // ---- Submesh-name reader -----------------------------------------
+    // Submesh-name reader
 
     /**
      * Read `_subMeshName` ASCIIZ from the SkinnedMeshMaterialWrapper parent of `material`. Returns true with `out`

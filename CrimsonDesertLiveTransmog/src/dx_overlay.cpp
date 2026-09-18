@@ -19,6 +19,8 @@
 
 #include <algorithm>
 #include <atomic>
+#include <optional>
+#include <stop_token>
 #include <cmath>
 #include <cstring>
 
@@ -60,9 +62,9 @@ namespace Transmog
     static HBITMAP s_dib = nullptr;
     static void *s_dibPixels = nullptr;
 
-    static HANDLE s_renderThread = nullptr;
+    static std::optional<DMK::StoppableWorker> s_renderWorker;
 
-    // --- Render target + staging + DIB management ---
+    // Render target + staging + DIB management
 
     static void release_targets()
     {
@@ -216,8 +218,8 @@ namespace Transmog
         box.right = static_cast<UINT>(x1);
         box.bottom = static_cast<UINT>(y1);
         box.back = 1;
-        s_context->CopySubresourceRegion(s_stagingTex, 0, static_cast<UINT>(x0), static_cast<UINT>(y0), 0, s_rtTex, 0,
-                                         &box);
+        s_context
+            ->CopySubresourceRegion(s_stagingTex, 0, static_cast<UINT>(x0), static_cast<UINT>(y0), 0, s_rtTex, 0, &box);
 
         D3D11_MAPPED_SUBRESOURCE mapped{};
         if (FAILED(s_context->Map(s_stagingTex, 0, D3D11_MAP_READ, 0, &mapped)))
@@ -275,7 +277,7 @@ namespace Transmog
         UpdateLayeredWindowIndirect(s_overlayHwnd, &ulwi);
     }
 
-    // --- Helpers ---
+    // Helpers
 
     static HWND find_game_hwnd()
     {
@@ -301,11 +303,12 @@ namespace Transmog
                 reinterpret_cast<Ctx *>(lp)->result = hwnd;
                 return FALSE;
             },
-            reinterpret_cast<LPARAM>(&ctx));
+            reinterpret_cast<LPARAM>(&ctx)
+        );
         return ctx.result;
     }
 
-    // --- Overlay WndProc ---
+    // Overlay WndProc
 
     static LRESULT CALLBACK overlay_wndproc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
     {
@@ -324,11 +327,11 @@ namespace Transmog
         return DefWindowProcW(hWnd, msg, wParam, lParam);
     }
 
-    // --- Render loop ---
+    // Render loop
 
-    static DWORD WINAPI render_thread(LPVOID)
+    static void render_thread(std::stop_token stop) noexcept
     {
-        auto &logger = DMK::Logger::get_instance();
+        auto &logger = DMK::log();
 
         // Wait for game world. Slow boots, intro cinematics, OS-level game updates and similar can all push this past
         // the old 5-minute cap; with no upper bound the overlay simply waits until the world resolves OR the mod is
@@ -337,8 +340,8 @@ namespace Transmog
         logger.info("[dx_overlay] Waiting for game world...");
         for (int tick = 0;; ++tick)
         {
-            if (s_shutdownRequested.load(std::memory_order_relaxed))
-                return 0;
+            if (stop.stop_requested() || s_shutdownRequested.load(std::memory_order_relaxed))
+                return;
             if (Transmog::is_world_ready())
                 break;
             // 600 * 100ms == 60s. Log a heartbeat at each minute mark so a user looking at the log can confirm the
@@ -353,7 +356,7 @@ namespace Transmog
         if (!s_gameHwnd)
         {
             logger.error("[dx_overlay] Game window not found");
-            return 0;
+            return;
         }
 
         RECT gr{};
@@ -362,8 +365,8 @@ namespace Transmog
         const UINT gh = static_cast<UINT>(gr.bottom);
         logger.info("[dx_overlay] Game {}x{}", gw, gh);
 
-        // --- Overlay window (layered, never receives its own
-        //     D3D/DXGI objects, purely a GDI composite target) ---
+        // Overlay window (layered, never receives its own
+        // D3D/DXGI objects, purely a GDI composite target)
         WNDCLASSEXW wc{sizeof(wc)};
         wc.lpfnWndProc = overlay_wndproc;
         wc.hInstance = GetModuleHandleW(nullptr);
@@ -373,25 +376,46 @@ namespace Transmog
         GetWindowRect(s_gameHwnd, &gr);
         // No WS_EX_TOPMOST: we position relative to the game window each frame so the overlay doesn't cover the taskbar
         // or appear above other apps when the game isn't focused.
-        s_overlayHwnd = CreateWindowExW(WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
-                                        wc.lpszClassName, L"", WS_POPUP, gr.left, gr.top, static_cast<int>(gw),
-                                        static_cast<int>(gh), nullptr, nullptr, wc.hInstance, nullptr);
+        s_overlayHwnd = CreateWindowExW(
+            WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
+            wc.lpszClassName,
+            L"",
+            WS_POPUP,
+            gr.left,
+            gr.top,
+            static_cast<int>(gw),
+            static_cast<int>(gh),
+            nullptr,
+            nullptr,
+            wc.hInstance,
+            nullptr
+        );
         if (!s_overlayHwnd)
         {
             logger.error("[dx_overlay] Window creation failed");
-            return 0;
+            return;
         }
 
         ShowWindow(s_overlayHwnd, SW_SHOWNOACTIVATE);
 
-        // --- D3D11 WARP device (NO swap chain) ---
+        // D3D11 WARP device (NO swap chain)
         const D3D_FEATURE_LEVEL fl = D3D_FEATURE_LEVEL_11_0;
-        if (FAILED(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_WARP, nullptr, 0, &fl, 1, D3D11_SDK_VERSION, &s_device,
-                                     nullptr, &s_context)))
+        if (FAILED(D3D11CreateDevice(
+                nullptr,
+                D3D_DRIVER_TYPE_WARP,
+                nullptr,
+                0,
+                &fl,
+                1,
+                D3D11_SDK_VERSION,
+                &s_device,
+                nullptr,
+                &s_context
+            )))
         {
             logger.error("[dx_overlay] WARP device failed");
             DestroyWindow(s_overlayHwnd);
-            return 0;
+            return;
         }
 
         if (!create_targets(gw, gh))
@@ -400,10 +424,10 @@ namespace Transmog
             s_context->Release();
             s_device->Release();
             DestroyWindow(s_overlayHwnd);
-            return 0;
+            return;
         }
 
-        // --- ImGui ---
+        // ImGui
         IMGUI_CHECKVERSION();
         ImGui::CreateContext();
         ImGuiIO &io = ImGui::GetIO();
@@ -445,8 +469,8 @@ namespace Transmog
         // (popup closed, tooltip dismissed, etc.) -- ULWI's prcDirty only refreshes inside the supplied rect.
         RECT prevDirty{0, 0, 0, 0};
 
-        // --- Render loop ---
-        while (!s_shutdownRequested.load(std::memory_order_relaxed))
+        // Render loop
+        while (!stop.stop_requested() && !s_shutdownRequested.load(std::memory_order_relaxed))
         {
             MSG msg;
             while (PeekMessageW(&msg, s_overlayHwnd, 0, 0, PM_REMOVE))
@@ -474,8 +498,15 @@ namespace Transmog
                 if (ngr.left != s_lastGR.left || ngr.top != s_lastGR.top || ngr.right != s_lastGR.right ||
                     ngr.bottom != s_lastGR.bottom)
                 {
-                    SetWindowPos(s_overlayHwnd, HWND_TOP, ngr.left, ngr.top, ngr.right - ngr.left, ngr.bottom - ngr.top,
-                                 SWP_NOACTIVATE);
+                    SetWindowPos(
+                        s_overlayHwnd,
+                        HWND_TOP,
+                        ngr.left,
+                        ngr.top,
+                        ngr.right - ngr.left,
+                        ngr.bottom - ngr.top,
+                        SWP_NOACTIVATE
+                    );
                     s_lastGR = ngr;
                 }
 
@@ -645,26 +676,31 @@ namespace Transmog
         DestroyWindow(s_overlayHwnd);
         UnregisterClassW(L"TransmogOverlay", GetModuleHandleW(nullptr));
         s_overlayHwnd = nullptr;
-        return 0;
+        return;
     }
 
-    // --- Public API ---
+    // Public API
 
     bool init_dx_overlay()
     {
-        s_renderThread = CreateThread(nullptr, 0, render_thread, nullptr, 0, nullptr);
-        return s_renderThread != nullptr;
+        try
+        {
+            s_renderWorker.emplace("LtOverlayRender", &render_thread);
+        }
+        catch (const std::exception &e)
+        {
+            DMK::log().warning("[dx_overlay] could not start the render worker: {}", e.what());
+            return false;
+        }
+        return true;
     }
 
     void shutdown_dx_overlay() noexcept
     {
         s_shutdownRequested.store(true, std::memory_order_release);
-        if (s_renderThread)
-        {
-            WaitForSingleObject(s_renderThread, 5000);
-            CloseHandle(s_renderThread);
-            s_renderThread = nullptr;
-        }
+        // ~StoppableWorker requests stop and joins. Unlike the WaitForSingleObject timeout this replaced, there is
+        // no path where the wait expires and leaves a render thread running inside a module about to unmap.
+        s_renderWorker.reset();
     }
 
     void toggle_overlay_visible() noexcept

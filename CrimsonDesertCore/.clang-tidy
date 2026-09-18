@@ -2,7 +2,13 @@
 # the DetourModKit profile it is built against. Start from nothing and opt into
 # high-signal families. Win32, SEH, and low-level pointer idioms are intentional
 # in a game-memory library, so the checks that flag them are disabled rather than
-# worked around at the call site.
+# worked around at the call site:
+#   - performance-no-int-to-ptr: integer <-> pointer conversion at Win32 and
+#     hook/scan boundaries is the core idiom of this game-memory library (see the
+#     DetourModKit Address type), not an accidental pessimization.
+#   - bugprone-empty-catch: an empty catch(...) is the deliberate fail-closed
+#     swallow on noexcept teardown and best-effort paths (a sink or format
+#     failure must never escape into the host).
 Checks: >
   -*,
   bugprone-*,
@@ -15,9 +21,15 @@ Checks: >
   cppcoreguidelines-slicing,
   -bugprone-easily-swappable-parameters,
   -bugprone-reserved-identifier,
-  -bugprone-assignment-in-if-condition
+  -bugprone-assignment-in-if-condition,
+  -bugprone-empty-catch,
+  -performance-no-int-to-ptr
 # Advisory only: never fail a build on a tidy finding.
 WarningsAsErrors: ''
 # Only diagnose this project's own public headers (include/cdcore/), not external/ submodules.
 HeaderFilterRegex: 'include/cdcore/.*\.hpp$'
 FormatStyle: file
+CheckOptions:
+  # `(void)expr;` is the sanctioned discard of a [[nodiscard]] return (the deliberate
+  # release()-to-leak verbs, the fail-soft live-rebind). Honour it instead of flagging the cast.
+  bugprone-unused-return-value.AllowCastToVoid: 'true'

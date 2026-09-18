@@ -9,7 +9,8 @@
 #include "../shared_state.hpp"
 
 #include <DetourModKit.hpp>
-#include <safetyhook.hpp>
+
+#include <DetourModKit/hook.hpp>
 
 #include <Windows.h>
 
@@ -17,17 +18,14 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace DMK = DetourModKit;
-
 namespace Transmog::ColorOverride::PublisherHook
 {
     namespace
     {
         // Per-(dst, src) matInst hook invoked from the matInst-list copy loop. Signature: `__fastcall(matInst* dst
         // [rcx], matInst* src [rdx], ... [r8])`. Both rcx and rdx are captured as candidate carrier matInsts. Target
-        // resolution lives in `k_colorPublisherCandidates` (aob_resolver.hpp).
+        // resolution lives in `color_publisher()` (aob_resolver.hpp).
 
-        SafetyHookMid g_hook{};
         std::atomic<bool> g_initDone{false};
 
         std::atomic<std::uint64_t> g_entries{0};
@@ -41,7 +39,7 @@ namespace Transmog::ColorOverride::PublisherHook
         // probe_matinst never validates +0x70. Returns 0 on fault.
         std::uint16_t read_permut_token(std::uintptr_t mi) noexcept
         {
-            return DMK::Memory::seh_read<std::uint16_t>(mi + MatInstProbe::k_offMi_PermutTok).value_or(0);
+            return DMK::memory::read<std::uint16_t>(DMK::Address{mi + MatInstProbe::k_offMi_PermutTok}).value_or(0);
         }
 
         // Per-matInst validate + capture. Identity is established via the apply-window-scoped slot + non-zero
@@ -79,7 +77,7 @@ namespace Transmog::ColorOverride::PublisherHook
             }
         }
 
-        void on_publisher_mid(safetyhook::Context &ctx) noexcept
+        void on_publisher_mid(DMK::hook::MidContext &ctx) noexcept
         {
             g_entries.fetch_add(1, std::memory_order_relaxed);
 
@@ -109,29 +107,36 @@ namespace Transmog::ColorOverride::PublisherHook
             // Capture both dst and src matInsts. No host-scope gate here -- host scope is only meaningful for the
             // setter call frame; the publisher fires per-matInst inside the matInst-list copy loop, not from an actor's
             // render frame.
-            try_insert(ctx.rcx, slot);
-            try_insert(ctx.rdx, slot);
+            try_insert(DMK::hook::gpr(ctx, DMK::hook::Gpr::Rcx), slot);
+            try_insert(DMK::hook::gpr(ctx, DMK::hook::Gpr::Rdx), slot);
         }
     } // namespace
 
-    bool init()
+    bool init(DMK::hook::HookStack &hooks)
     {
         if (g_initDone.load(std::memory_order_acquire))
             return true;
 
-        auto &log = DMK::Logger::get_instance();
-        const auto addr = ::Transmog::resolve_address(::Transmog::k_colorPublisherCandidates, "ColorPublisher");
+        auto &log = DMK::log();
+        const auto addr = anchor_address(AnchorId::ColorPublisher);
         if (addr == 0)
             return false;
 
-        auto &hookMgr = DMK::HookManager::get_instance();
-        auto res = hookMgr.create_mid_hook("ColorPublisher", addr, &on_publisher_mid);
-        if (!res.has_value())
+        auto hook = DMK::hook::mid_at(
+            DMK::hook::MidRequest{.name = "ColorPublisher", .target = DMK::Address{addr}},
+            &on_publisher_mid
+        );
+        if (!hook)
         {
-            log.warning("[color-publisher] hook FAILED at {:#x}: {}", addr,
-                        DetourModKit::Hook::error_to_string(res.error()));
+            log.warning("[color-publisher] hook FAILED at {:#x}: {}", addr, hook.error().message());
             return false;
         }
+        if (auto armed = hook->enable(); !armed)
+        {
+            log.warning("[color-publisher] hook could not be armed at {:#x}: {}", addr, armed.error().message());
+            return false;
+        }
+        hooks.push(std::move(*hook));
         g_initDone.store(true, std::memory_order_release);
         return true;
     }
@@ -139,9 +144,12 @@ namespace Transmog::ColorOverride::PublisherHook
     Stats snapshot_stats() noexcept
     {
         return Stats{
-            g_entries.load(std::memory_order_relaxed),      g_inserts.load(std::memory_order_relaxed),
-            g_batchRejects.load(std::memory_order_relaxed), g_windowRejects.load(std::memory_order_relaxed),
-            g_hostRejects.load(std::memory_order_relaxed),  g_arecRejects.load(std::memory_order_relaxed),
+            g_entries.load(std::memory_order_relaxed),
+            g_inserts.load(std::memory_order_relaxed),
+            g_batchRejects.load(std::memory_order_relaxed),
+            g_windowRejects.load(std::memory_order_relaxed),
+            g_hostRejects.load(std::memory_order_relaxed),
+            g_arecRejects.load(std::memory_order_relaxed),
         };
     }
 

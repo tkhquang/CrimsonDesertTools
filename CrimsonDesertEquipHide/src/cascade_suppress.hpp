@@ -4,7 +4,7 @@
 
 namespace EquipHide
 {
-    // --- VisualEquipChange hook (equipment change detection) ---
+    // VisualEquipChange hook (equipment change detection)
 
     using VisualEquipChangeFn = __int64(__fastcall *)(__int64, int16_t, int16_t, __int64);
 
@@ -12,7 +12,7 @@ namespace EquipHide
 
     void set_visual_equip_change_trampoline(VisualEquipChangeFn original);
 
-    // --- VisualEquipSwap hook (direct item-to-item swap detection) ---
+    // VisualEquipSwap hook (direct item-to-item swap detection)
 
     using VisualEquipSwapFn = __int64(__fastcall *)(__int64 *, __int64 *, __int64 **, __int64 **);
 

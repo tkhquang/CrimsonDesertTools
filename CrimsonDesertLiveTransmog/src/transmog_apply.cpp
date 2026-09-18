@@ -165,8 +165,13 @@ namespace Transmog
      * @return false when the list is already populated, so a live exclusion set is never displaced. POD-only frame so
      *         the SEH guard is legal.
      */
-    static bool arm_slot_exclusion_seh(std::int64_t a1, std::uint16_t *buf, std::uint16_t excludeTag,
-                                       std::uint64_t &savedPtr, std::uint32_t &savedCount) noexcept
+    static bool arm_slot_exclusion_seh(
+        std::int64_t a1,
+        std::uint16_t *buf,
+        std::uint16_t excludeTag,
+        std::uint64_t &savedPtr,
+        std::uint32_t &savedCount
+    ) noexcept
     {
         if (a1 < k_minPlausiblePtr || !buf || excludeTag == k_noGameTag)
             return false;
@@ -177,8 +182,7 @@ namespace Transmog
             if (savedCount != 0)
                 return false; // something already uses it -- do not displace
             *buf = excludeTag;
-            *reinterpret_cast<std::uint64_t *>(a1 + k_compSlotExcludeListOffset) =
-                reinterpret_cast<std::uint64_t>(buf);
+            *reinterpret_cast<std::uint64_t *>(a1 + k_compSlotExcludeListOffset) = reinterpret_cast<std::uint64_t>(buf);
             *reinterpret_cast<std::uint32_t *>(a1 + k_compSlotExcludeCountOffset) = 1;
             return true;
         }
@@ -228,8 +232,13 @@ namespace Transmog
      *          dereferences through a lookup. Passing the tag for both faults.
      * @return false when either pointer is null, the tag names no live part record, or the call faulted.
      */
-    static bool call_part_slot_refresh_seh(PartSlotRefreshFn fn, SlotTagToHandleFn resolve, __int64 a1,
-                                           std::uint16_t slotTag, __int64 swapEntry) noexcept
+    static bool call_part_slot_refresh_seh(
+        PartSlotRefreshFn fn,
+        SlotTagToHandleFn resolve,
+        __int64 a1,
+        std::uint16_t slotTag,
+        __int64 swapEntry
+    ) noexcept
     {
         if (!fn || !resolve)
             return false;
@@ -258,8 +267,8 @@ namespace Transmog
     // `k_noGameTag` means "derive the slot from the item", which the engine resolves through an item -> slot lookup.
     // For a PAIRED slot that derivation can only ever produce one answer -- both halves share one item type -- so the
     // second half is unreachable and its carrier lands in the first. Naming the slot explicitly reaches the other half.
-    static void apply_transmog_core(__int64 a1, uint16_t id, uint16_t slotSel = k_noGameTag,
-                                    uint16_t excludeTag = k_noGameTag)
+    static void
+    apply_transmog_core(__int64 a1, uint16_t id, uint16_t slotSel = k_noGameTag, uint16_t excludeTag = k_noGameTag)
     {
         auto slotPop = slot_populator_fn();
         auto initEntry = init_swap_entry_fn();
@@ -282,12 +291,13 @@ namespace Transmog
             // it land here instead, without naming a destination the engine would refuse.
             excludeFirstHalf = (excludeTag != k_noGameTag);
             if (excludeFirstHalf)
-                DMK::Logger::get_instance().debug(
-                    "[dispatch] slot {:#06x} has no live part record -- deriving with {:#06x} excluded", slotSel,
-                    excludeTag);
+                DMK::log().debug(
+                    "[dispatch] slot {:#06x} has no live part record -- deriving with {:#06x} excluded",
+                    slotSel,
+                    excludeTag
+                );
             else
-                DMK::Logger::get_instance().debug(
-                    "[dispatch] slot {:#06x} has no live part record -- deriving", slotSel);
+                DMK::log().debug("[dispatch] slot {:#06x} has no live part record -- deriving", slotSel);
             slotSel = k_noGameTag;
         }
 
@@ -367,8 +377,13 @@ namespace Transmog
             // Only for an explicit slotSel -- with `k_noGameTag` the engine's own derivation is already right.
             if (slotSel != k_noGameTag && static_cast<std::uint16_t>(slotPopRc & 0xFFFF) != k_noGameTag && refreshFn)
             {
-                refreshCalled = call_part_slot_refresh_seh(refreshFn, slot_tag_to_handle_fn(), a1, slotSel,
-                                                           reinterpret_cast<__int64>(swapEntry));
+                refreshCalled = call_part_slot_refresh_seh(
+                    refreshFn,
+                    slot_tag_to_handle_fn(),
+                    a1,
+                    slotSel,
+                    reinterpret_cast<__int64>(swapEntry)
+                );
                 refreshFaulted = !refreshCalled;
             }
         }
@@ -387,14 +402,19 @@ namespace Transmog
         const auto rcWord = static_cast<std::uint16_t>(slotPopRc & 0xFFFF);
         if (!slotPopCompleted)
         {
-            DMK::Logger::get_instance().warning(
+            DMK::log().warning(
                 "[dispatch] SlotPopulator FAULTED item={:#06x} slotSel={:#06x} -- the call raised, it did not refuse",
-                id, slotSel);
+                id,
+                slotSel
+            );
         }
         else if (rcWord == k_noGameTag)
         {
-            DMK::Logger::get_instance().warning(
-                "[dispatch] SlotPopulator REFUSED item={:#06x} slotSel={:#06x} -- nothing was equipped", id, slotSel);
+            DMK::log().warning(
+                "[dispatch] SlotPopulator REFUSED item={:#06x} slotSel={:#06x} -- nothing was equipped",
+                id,
+                slotSel
+            );
         }
         else
         {
@@ -402,15 +422,20 @@ namespace Transmog
             // ITS choice, not ours, so logging it separates "the carrier was equipped where we wanted" from "it was
             // equipped somewhere else and the slot we care about stayed empty" -- two outcomes that are otherwise
             // both just "ok".
-            DMK::Logger::get_instance().trace(
-                "[dispatch] SlotPopulator ok item={:#06x} slotSel={:#06x} derivedTag={:#06x} refresh={}", id, slotSel,
-                derivedTag, refreshFaulted ? "FAULTED" : (refreshCalled ? "yes" : "no"));
+            DMK::log().trace(
+                "[dispatch] SlotPopulator ok item={:#06x} slotSel={:#06x} derivedTag={:#06x} refresh={}",
+                id,
+                slotSel,
+                derivedTag,
+                refreshFaulted ? "FAULTED" : (refreshCalled ? "yes" : "no")
+            );
             if (slotResolveFn && slotSel == k_noGameTag && derivedTag == k_noGameTag)
             {
-                DMK::Logger::get_instance().warning(
+                DMK::log().warning(
                     "[dispatch] carrier {:#06x} has NO slot mapping -- SlotPopulator placed nothing and the slot "
                     "stays empty. Pick a carrier the engine can place, or name the slot explicitly.",
-                    id);
+                    id
+                );
             }
         }
     }
@@ -426,7 +451,7 @@ namespace Transmog
      */
     static bool refresh_slot_visual(TransmogSlot slot)
     {
-        auto &logger = DMK::Logger::get_instance();
+        auto &logger = DMK::log();
 
         const auto a1 = static_cast<__int64>(player_a1().load(std::memory_order_acquire));
         if (!a1)
@@ -457,15 +482,23 @@ namespace Transmog
         ColorOverride::HostScope::begin_apply_window();
         ColorOverride::SetterSubstitute::set_apply_window(true);
 
-        const bool ok =
-            call_part_slot_refresh_seh(refresh, resolve, a1, static_cast<std::uint16_t>(tag),
-                                       reinterpret_cast<__int64>(swapEntry));
+        const bool ok = call_part_slot_refresh_seh(
+            refresh,
+            resolve,
+            a1,
+            static_cast<std::uint16_t>(tag),
+            reinterpret_cast<__int64>(swapEntry)
+        );
 
         ColorOverride::SetterSubstitute::set_apply_window(false);
         in_transmog().store(false, std::memory_order_relaxed);
 
-        logger.debug("[dispatch] refresh_slot_visual slot={} tag={:#06x} -> {}", slot_name(slot),
-                     static_cast<std::uint16_t>(tag), ok ? "ok" : "failed");
+        logger.debug(
+            "[dispatch] refresh_slot_visual slot={} tag={:#06x} -> {}",
+            slot_name(slot),
+            static_cast<std::uint16_t>(tag),
+            ok ? "ok" : "failed"
+        );
         return ok;
     }
 
@@ -502,8 +535,8 @@ namespace Transmog
         const bool ok = refresh_slot_visual(slot);
         DyeRecordInject::clear_slot_dye_state();
 
-        DMK::Logger::get_instance().debug("[dispatch] refresh_slot_appearance slot={} -> {}", slot_name(slot),
-                                          ok ? "rebuilt" : "unavailable");
+        DMK::log()
+            .debug("[dispatch] refresh_slot_appearance slot={} -> {}", slot_name(slot), ok ? "rebuilt" : "unavailable");
         return ok;
     }
 
@@ -512,7 +545,7 @@ namespace Transmog
         apply_transmog_core(a1, targetId);
     }
 
-    // -- Default carrier set (per character) -----------------------------
+    // -- Default carrier set (per character)
     // Each entry must be a valid item for THAT character in the given slot -- something the engine's equip class-gate
     // accepts. Kliff and Oongka share Kliff_PlateArmor_* because the engine treats their equip class the same. Damiane
     // has her own armor namespace (Demian_*) which Kliff cannot wear, but the engine accepts those items on Damiane
@@ -564,8 +597,13 @@ namespace Transmog
      *       fake. SafeTearDown does not mutate the authoritative entry array, so a redundant detach of an
      *       already-gone rig is a safe no-op.
      */
-    static void tear_down_direct_fake_second_pass(__int64 a1, std::uint16_t fakeId, std::uint16_t gameTag,
-                                                  std::uint16_t liveRealId, bool distinctCarrierTorn) noexcept
+    static void tear_down_direct_fake_second_pass(
+        __int64 a1,
+        std::uint16_t fakeId,
+        std::uint16_t gameTag,
+        std::uint16_t liveRealId,
+        bool distinctCarrierTorn
+    ) noexcept
     {
         if (fakeId == 0 || distinctCarrierTorn || liveRealId == fakeId)
             return;
@@ -573,10 +611,15 @@ namespace Transmog
         RealPartTearDown::tear_down_by_item_id(reinterpret_cast<void *>(a1), fakeId, gameTag);
     }
 
-    void apply_transmog_with_carrier(__int64 a1, uint16_t carrierId, uint16_t targetId, uint16_t slotSel,
-                                     uint16_t excludeTag)
+    void apply_transmog_with_carrier(
+        __int64 a1,
+        uint16_t carrierId,
+        uint16_t targetId,
+        uint16_t slotSel,
+        uint16_t excludeTag
+    )
     {
-        auto &logger = DMK::Logger::get_instance();
+        auto &logger = DMK::log();
 
         // The carrier is equipped AS ITSELF; it does not impersonate the target.
         //
@@ -599,9 +642,12 @@ namespace Transmog
         if (carrierId == targetId)
             PrefabWrapperSwap::register_direct_fake(targetId);
 
-        logger.trace("[carrier] equipping carrier={:#06x} as itself (visual for target={:#06x} comes from the prefab "
-                     "swap)",
-                     carrierId, targetId);
+        logger.trace(
+            "[carrier] equipping carrier={:#06x} as itself (visual for target={:#06x} comes from the prefab "
+            "swap)",
+            carrierId,
+            targetId
+        );
         apply_transmog_core(a1, carrierId, slotSel, excludeTag);
     }
 
@@ -642,11 +688,17 @@ namespace Transmog
         if (hostIdx == activeIdx || hostIdx == editingIdx)
             return true;
 
-        DMK::Logger::get_instance().warning(
+        DMK::log().warning(
             "{}: HOST MISMATCH -- a1 0x{:X} is charIdx {}'s body, but the preset axes are active='{}' ({}) "
             "editing='{}' ({}); skipping so the wrong character is not dressed",
-            site, static_cast<std::uint64_t>(a1), hostIdx, pm.active_character(), activeIdx,
-            pm.editing_pinned() ? pm.editing_character() : std::string{}, editingIdx);
+            site,
+            static_cast<std::uint64_t>(a1),
+            hostIdx,
+            pm.active_character(),
+            activeIdx,
+            pm.editing_pinned() ? pm.editing_character() : std::string{},
+            editingIdx
+        );
         return false;
     }
 
@@ -655,7 +707,7 @@ namespace Transmog
         if (slotIdx >= k_slotCount)
             return;
 
-        auto &logger = DMK::Logger::get_instance();
+        auto &logger = DMK::log();
         auto &mappings = slot_mappings();
         auto &lastIds = last_applied_ids();
         auto &m = mappings[slotIdx];
@@ -708,7 +760,7 @@ namespace Transmog
             return;
         }
 
-        // --- Scoped dispatch cache clear ---
+        // Scoped dispatch cache clear
         // Walk the 24-byte stride cache and zero subCount only for entries whose slotNativeId matches this slot's game
         // tag. This leaves other slots' blobs untouched, so VEC does not re-dispatch them.
         __try
@@ -732,7 +784,7 @@ namespace Transmog
             return;
         }
 
-        // --- Tear-down scoped to this slot ---
+        // Tear-down scoped to this slot
         std::uint16_t realId = 0;
         if (RealPartTearDown::is_ready())
         {
@@ -747,14 +799,21 @@ namespace Transmog
                 {
                     RealPartTearDown::tear_down_by_item_id(reinterpret_cast<void *>(a1), prevCarrier, gameTag);
                 }
-                RealPartTearDown::tear_down_by_item_id(reinterpret_cast<void *>(a1), static_cast<uint16_t>(prevId),
-                                                       gameTag);
+                RealPartTearDown::tear_down_by_item_id(
+                    reinterpret_cast<void *>(a1),
+                    static_cast<uint16_t>(prevId),
+                    gameTag
+                );
 
                 // Direct-applied fake with no matching real underneath: it needs a second detach.
                 // See tear_down_direct_fake_second_pass.
-                tear_down_direct_fake_second_pass(a1, static_cast<std::uint16_t>(prevId), gameTag, realId,
-                                                  prevCarrier != 0 &&
-                                                      prevCarrier != static_cast<std::uint16_t>(prevId));
+                tear_down_direct_fake_second_pass(
+                    a1,
+                    static_cast<std::uint16_t>(prevId),
+                    gameTag,
+                    realId,
+                    prevCarrier != 0 && prevCarrier != static_cast<std::uint16_t>(prevId)
+                );
             }
 
             // Phase B: tear down the real item. Runs unconditionally (fake == real is treated the same as fake !=
@@ -766,7 +825,7 @@ namespace Transmog
             }
         }
 
-        // --- Apply ---
+        // Apply
         if (targetId != 0)
         {
             // Arm the prefab-wrapper swap for this install.
@@ -842,14 +901,21 @@ namespace Transmog
             }
             if (useCarrier && carrierId != 0)
             {
-                logger.debug("apply_single_slot: slot={} target={:#06x} "
-                             "carrier={:#06x}",
-                             slot_name(tmSlot), targetId, carrierId);
-                apply_transmog_with_carrier(a1, carrierId, targetId,
-                                            slot_needs_explicit_destination(tmSlot)
-                                                ? static_cast<uint16_t>(game_slot_from_transmog(tmSlot))
-                                                : k_noGameTag,
-                                            paired_first_half_tag(tmSlot));
+                logger.debug(
+                    "apply_single_slot: slot={} target={:#06x} "
+                    "carrier={:#06x}",
+                    slot_name(tmSlot),
+                    targetId,
+                    carrierId
+                );
+                apply_transmog_with_carrier(
+                    a1,
+                    carrierId,
+                    targetId,
+                    slot_needs_explicit_destination(tmSlot) ? static_cast<uint16_t>(game_slot_from_transmog(tmSlot))
+                                                            : k_noGameTag,
+                    paired_first_half_tag(tmSlot)
+                );
             }
             else
             {
@@ -904,18 +970,23 @@ namespace Transmog
             {
                 if (realId != 0)
                 {
-                    logger.debug("apply_single_slot: slot={} restoring "
-                                 "real {:#06x}",
-                                 slot_name(static_cast<TransmogSlot>(slotIdx)), realId);
+                    logger.debug(
+                        "apply_single_slot: slot={} restoring "
+                        "real {:#06x}",
+                        slot_name(static_cast<TransmogSlot>(slotIdx)),
+                        realId
+                    );
                     ColorOverride::SetterSubstitute::set_active_slot(static_cast<int>(slotIdx));
                     apply_transmog(a1, realId);
                 }
             }
             else if (reinitActive)
             {
-                logger.debug("apply_single_slot: slot={} real-restore SKIPPED "
-                             "(reinit teardown -- slot goes empty by design)",
-                             slotIdx);
+                logger.debug(
+                    "apply_single_slot: slot={} real-restore SKIPPED "
+                    "(reinit teardown -- slot goes empty by design)",
+                    slotIdx
+                );
             }
             lastIds[slotIdx] = 0;
             last_applied_carrier_ids()[slotIdx] = 0;
@@ -933,11 +1004,12 @@ namespace Transmog
             const auto &sm = mappings[k];
             if (!sm.active)
                 continue;
-            const std::uint16_t slotReal =
-                RealPartTearDown::is_ready()
-                    ? RealPartTearDown::get_real_item_id(reinterpret_cast<void *>(a1),
-                                                         static_cast<std::uint16_t>(k_slotMetadata[k].gameTag))
-                    : 0;
+            const std::uint16_t slotReal = RealPartTearDown::is_ready()
+                                               ? RealPartTearDown::get_real_item_id(
+                                                     reinterpret_cast<void *>(a1),
+                                                     static_cast<std::uint16_t>(k_slotMetadata[k].gameTag)
+                                                 )
+                                               : 0;
             if (sm.targetItemId != 0 && static_cast<uint16_t>(sm.targetItemId) == slotReal)
                 continue;
             suppressMask |= (std::uint32_t{1} << k);
@@ -945,7 +1017,6 @@ namespace Transmog
         PartShowSuppress::set_mask(suppressMask);
 
         logger.trace("apply_single_slot: slot={} done, suppress={:#x}", slotIdx, suppressMask);
-
     }
 
     /**
@@ -975,15 +1046,19 @@ namespace Transmog
             const auto placed = item_to_slot_seh(fn, a1, carrier);
             if (!line.empty())
                 line += ", ";
-            line += std::format("{}:{:#06x}->{}", slot_name(sl), carrier,
-                                placed == 0xFFFF ? std::string{"REFUSED"} : std::format("{:#06x}", placed));
+            line += std::format(
+                "{}:{:#06x}->{}",
+                slot_name(sl),
+                carrier,
+                placed == 0xFFFF ? std::string{"REFUSED"} : std::format("{:#06x}", placed)
+            );
         }
-        DMK::Logger::get_instance().trace("[dispatch] carrier resolution [{}]", line);
+        DMK::log().trace("[dispatch] carrier resolution [{}]", line);
     }
 
     void apply_all_transmog(__int64 a1)
     {
-        auto &logger = DMK::Logger::get_instance();
+        auto &logger = DMK::log();
         // Local copy of slot_mappings. It carries a synthesized "all-slots-cleared" view when the user toggles LT off,
         // and it leaves the persisted preset state untouched. See the flag_enabled() block immediately below.
         auto mappings = slot_mappings();
@@ -1044,9 +1119,12 @@ namespace Transmog
         constexpr std::uint64_t k_applyReadyRetryMs = 1000;
         if (!RealPartTearDown::is_actor_apply_ready(reinterpret_cast<void *>(a1)))
         {
-            logger.debug("apply_all_transmog: actor not ready (a1={:#018x}), "
-                         "re-arming in {} ms",
-                         static_cast<uint64_t>(a1), k_applyReadyRetryMs);
+            logger.debug(
+                "apply_all_transmog: actor not ready (a1={:#018x}), "
+                "re-arming in {} ms",
+                static_cast<uint64_t>(a1),
+                k_applyReadyRetryMs
+            );
             schedule_transmog_ms(k_applyReadyRetryMs);
             return;
         }
@@ -1139,18 +1217,31 @@ namespace Transmog
                 std::size_t rOff = 0;
                 for (std::size_t i = 0; i < k_slotCount; ++i)
                 {
-                    const int np = std::snprintf(prevBuf + pOff, sizeof(prevBuf) - pOff, "%s0x%04x", i ? "," : "",
-                                                 static_cast<unsigned>(prevIds[i]));
+                    const int np = std::snprintf(
+                        prevBuf + pOff,
+                        sizeof(prevBuf) - pOff,
+                        "%s0x%04x",
+                        i ? "," : "",
+                        static_cast<unsigned>(prevIds[i])
+                    );
                     if (np > 0)
                         pOff += static_cast<std::size_t>(np);
-                    const int nr = std::snprintf(realBuf + rOff, sizeof(realBuf) - rOff, "%s0x%04x", i ? "," : "",
-                                                 static_cast<unsigned>(liveRealIds[i]));
+                    const int nr = std::snprintf(
+                        realBuf + rOff,
+                        sizeof(realBuf) - rOff,
+                        "%s0x%04x",
+                        i ? "," : "",
+                        static_cast<unsigned>(liveRealIds[i])
+                    );
                     if (nr > 0)
                         rOff += static_cast<std::size_t>(nr);
                 }
-                logger.trace("apply_all_transmog: no state change "
-                             "(prev=[{}] real=[{}]), skipping",
-                             prevBuf, realBuf);
+                logger.trace(
+                    "apply_all_transmog: no state change "
+                    "(prev=[{}] real=[{}]), skipping",
+                    prevBuf,
+                    realBuf
+                );
                 return;
             }
 
@@ -1162,18 +1253,31 @@ namespace Transmog
                 std::size_t nOff = 0;
                 for (std::size_t i = 0; i < k_slotCount; ++i)
                 {
-                    const int no = std::snprintf(oldBuf + oOff, sizeof(oldBuf) - oOff, "%s0x%04x", i ? "," : "",
-                                                 static_cast<unsigned>(last_applied_real_ids()[i]));
+                    const int no = std::snprintf(
+                        oldBuf + oOff,
+                        sizeof(oldBuf) - oOff,
+                        "%s0x%04x",
+                        i ? "," : "",
+                        static_cast<unsigned>(last_applied_real_ids()[i])
+                    );
                     if (no > 0)
                         oOff += static_cast<std::size_t>(no);
-                    const int nn = std::snprintf(newBuf + nOff, sizeof(newBuf) - nOff, "%s0x%04x", i ? "," : "",
-                                                 static_cast<unsigned>(liveRealIds[i]));
+                    const int nn = std::snprintf(
+                        newBuf + nOff,
+                        sizeof(newBuf) - nOff,
+                        "%s0x%04x",
+                        i ? "," : "",
+                        static_cast<unsigned>(liveRealIds[i])
+                    );
                     if (nn > 0)
                         nOff += static_cast<std::size_t>(nn);
                 }
-                logger.debug("apply_all_transmog: real item changed, re-applying "
-                             "(real=[{}] -> [{}])",
-                             oldBuf, newBuf);
+                logger.debug(
+                    "apply_all_transmog: real item changed, re-applying "
+                    "(real=[{}] -> [{}])",
+                    oldBuf,
+                    newBuf
+                );
 
                 // Real swap means any previously-damaged slot now has a NEW real item that is NOT damaged yet. Clear
                 // the damage flags for slots whose real id changed so the fake==real skip works correctly for the new
@@ -1339,11 +1443,17 @@ namespace Transmog
                     const auto &m = mappings[idx];
                     if (m.active && m.targetItemId == 0 && liveRealIds[idx] != 0)
                     {
-                        logger.trace("[dispatch] tear_down_fake slot={:#06x} "
-                                     "itemId={:#06x} (first-claim hide)",
-                                     td.gameTag, static_cast<std::uint16_t>(liveRealIds[idx]));
-                        RealPartTearDown::tear_down_by_item_id(reinterpret_cast<void *>(a1), liveRealIds[idx],
-                                                               td.gameTag);
+                        logger.trace(
+                            "[dispatch] tear_down_fake slot={:#06x} "
+                            "itemId={:#06x} (first-claim hide)",
+                            td.gameTag,
+                            static_cast<std::uint16_t>(liveRealIds[idx])
+                        );
+                        RealPartTearDown::tear_down_by_item_id(
+                            reinterpret_cast<void *>(a1),
+                            liveRealIds[idx],
+                            td.gameTag
+                        );
                     }
                     continue;
                 }
@@ -1352,22 +1462,32 @@ namespace Transmog
                 // live real item is still torn down.
                 if (prevCarrier != 0 && prevCarrier != static_cast<std::uint16_t>(prevId))
                 {
-                    logger.trace("[dispatch] tear_down_fake slot={:#06x} "
-                                 "carrier={:#06x} (then target={:#06x})",
-                                 td.gameTag, prevCarrier, static_cast<std::uint16_t>(prevId));
+                    logger.trace(
+                        "[dispatch] tear_down_fake slot={:#06x} "
+                        "carrier={:#06x} (then target={:#06x})",
+                        td.gameTag,
+                        prevCarrier,
+                        static_cast<std::uint16_t>(prevId)
+                    );
                     RealPartTearDown::tear_down_by_item_id(reinterpret_cast<void *>(a1), prevCarrier, td.gameTag);
                 }
-                RealPartTearDown::tear_down_by_item_id(reinterpret_cast<void *>(a1), static_cast<std::uint16_t>(prevId),
-                                                       td.gameTag);
+                RealPartTearDown::tear_down_by_item_id(
+                    reinterpret_cast<void *>(a1),
+                    static_cast<std::uint16_t>(prevId),
+                    td.gameTag
+                );
 
                 // Direct-applied fake (Mask/Necklace, or any carrier==target collapse) with no matching real
                 // underneath: give it the extra detach its rendered per-body rig needs to come off. No-op for
                 // distinct-carrier items and when Phase B re-tears the same hash (live real == fake). See
                 // tear_down_direct_fake_second_pass.
-                tear_down_direct_fake_second_pass(a1, static_cast<std::uint16_t>(prevId),
-                                                  static_cast<std::uint16_t>(td.gameTag), realItemId[k],
-                                                  prevCarrier != 0 &&
-                                                      prevCarrier != static_cast<std::uint16_t>(prevId));
+                tear_down_direct_fake_second_pass(
+                    a1,
+                    static_cast<std::uint16_t>(prevId),
+                    static_cast<std::uint16_t>(td.gameTag),
+                    realItemId[k],
+                    prevCarrier != 0 && prevCarrier != static_cast<std::uint16_t>(prevId)
+                );
             }
 
             // Phase B: real items for any active slot. Runs unconditionally -- fake and real get equal treatment, so
@@ -1396,21 +1516,31 @@ namespace Transmog
         // fixed 5-armor order of the prefab-wrapper-swap notify_apply_starting contract.
         {
             const std::uint16_t newItems[5] = {
-                static_cast<std::uint16_t>(mappings[static_cast<std::size_t>(TransmogSlot::Helm)].active
-                                               ? mappings[static_cast<std::size_t>(TransmogSlot::Helm)].targetItemId
-                                               : 0),
-                static_cast<std::uint16_t>(mappings[static_cast<std::size_t>(TransmogSlot::Chest)].active
-                                               ? mappings[static_cast<std::size_t>(TransmogSlot::Chest)].targetItemId
-                                               : 0),
-                static_cast<std::uint16_t>(mappings[static_cast<std::size_t>(TransmogSlot::Cloak)].active
-                                               ? mappings[static_cast<std::size_t>(TransmogSlot::Cloak)].targetItemId
-                                               : 0),
-                static_cast<std::uint16_t>(mappings[static_cast<std::size_t>(TransmogSlot::Gloves)].active
-                                               ? mappings[static_cast<std::size_t>(TransmogSlot::Gloves)].targetItemId
-                                               : 0),
-                static_cast<std::uint16_t>(mappings[static_cast<std::size_t>(TransmogSlot::Boots)].active
-                                               ? mappings[static_cast<std::size_t>(TransmogSlot::Boots)].targetItemId
-                                               : 0),
+                static_cast<std::uint16_t>(
+                    mappings[static_cast<std::size_t>(TransmogSlot::Helm)].active
+                        ? mappings[static_cast<std::size_t>(TransmogSlot::Helm)].targetItemId
+                        : 0
+                ),
+                static_cast<std::uint16_t>(
+                    mappings[static_cast<std::size_t>(TransmogSlot::Chest)].active
+                        ? mappings[static_cast<std::size_t>(TransmogSlot::Chest)].targetItemId
+                        : 0
+                ),
+                static_cast<std::uint16_t>(
+                    mappings[static_cast<std::size_t>(TransmogSlot::Cloak)].active
+                        ? mappings[static_cast<std::size_t>(TransmogSlot::Cloak)].targetItemId
+                        : 0
+                ),
+                static_cast<std::uint16_t>(
+                    mappings[static_cast<std::size_t>(TransmogSlot::Gloves)].active
+                        ? mappings[static_cast<std::size_t>(TransmogSlot::Gloves)].targetItemId
+                        : 0
+                ),
+                static_cast<std::uint16_t>(
+                    mappings[static_cast<std::size_t>(TransmogSlot::Boots)].active
+                        ? mappings[static_cast<std::size_t>(TransmogSlot::Boots)].targetItemId
+                        : 0
+                ),
             };
             PrefabWrapperSwap::notify_apply_starting(newItems);
         }
@@ -1470,9 +1600,11 @@ namespace Transmog
                 (activePreset && i < activePreset->slots.size()) ? &activePreset->slots[i].dye : nullptr;
             if (slotDye && any_dye_active(*slotDye))
             {
-                static_assert(Transmog::k_dyeChannelCount == DyeRecordInject::k_dyeChannelCount,
-                              "channel-count mismatch between preset model "
-                              "and dye injector");
+                static_assert(
+                    Transmog::k_dyeChannelCount == DyeRecordInject::k_dyeChannelCount,
+                    "channel-count mismatch between preset model "
+                    "and dye injector"
+                );
                 DyeRecordInject::ChannelState state[DyeRecordInject::k_dyeChannelCount];
                 for (std::size_t k = 0; k < DyeRecordInject::k_dyeChannelCount; ++k)
                 {
@@ -1500,24 +1632,37 @@ namespace Transmog
             }
             if (useCarrier && carrierId != 0)
             {
-                logger.debug("Transmog APPLY (carrier): slot={}, "
-                             "target={:#06x}, carrier={:#06x}",
-                             slot_name(tmSlot), targetId, carrierId);
-                logger.trace("[dispatch] applying slot={} targetId={:#06x} "
-                             "via carrier={:#06x}",
-                             i, targetId, carrierId);
-                apply_transmog_with_carrier(a1, carrierId, targetId,
-                                            slot_needs_explicit_destination(tmSlot)
-                                                ? static_cast<uint16_t>(game_slot_from_transmog(tmSlot))
-                                                : k_noGameTag,
-                                            paired_first_half_tag(tmSlot));
+                logger.debug(
+                    "Transmog APPLY (carrier): slot={}, "
+                    "target={:#06x}, carrier={:#06x}",
+                    slot_name(tmSlot),
+                    targetId,
+                    carrierId
+                );
+                logger.trace(
+                    "[dispatch] applying slot={} targetId={:#06x} "
+                    "via carrier={:#06x}",
+                    i,
+                    targetId,
+                    carrierId
+                );
+                apply_transmog_with_carrier(
+                    a1,
+                    carrierId,
+                    targetId,
+                    slot_needs_explicit_destination(tmSlot) ? static_cast<uint16_t>(game_slot_from_transmog(tmSlot))
+                                                            : k_noGameTag,
+                    paired_first_half_tag(tmSlot)
+                );
             }
             else
             {
                 if (useCarrier)
-                    logger.warning("Transmog APPLY: slot={} needs carrier "
-                                   "but none resolved, falling back to direct",
-                                   slot_name(tmSlot));
+                    logger.warning(
+                        "Transmog APPLY: slot={} needs carrier "
+                        "but none resolved, falling back to direct",
+                        slot_name(tmSlot)
+                    );
                 logger.debug("Transmog APPLY: slot={}, target={:#06x}", slot_name(tmSlot), targetId);
                 logger.trace("[dispatch] applying slot={} itemId={:#06x}", i, targetId);
                 apply_transmog(a1, targetId);
@@ -1540,9 +1685,12 @@ namespace Transmog
                 const std::uint16_t realId = lookup_real_id(i);
                 if (realId != 0)
                 {
-                    logger.info("[dispatch] slot={} unticked -- "
-                                "restoring real item {:#06x}",
-                                slot_name(static_cast<TransmogSlot>(i)), realId);
+                    logger.info(
+                        "[dispatch] slot={} unticked -- "
+                        "restoring real item {:#06x}",
+                        slot_name(static_cast<TransmogSlot>(i)),
+                        realId
+                    );
                     // Snapshot the live dye records on this slot's auth-table entry and publish via the inject channel
                     // so apply_transmog repaints the restored real item in the user's actual inventory dye instead of
                     // the item's factory palette. Same pattern as Pass B in clear_all_transmog.
@@ -1574,12 +1722,18 @@ namespace Transmog
                         const auto oldReal = last_applied_real_ids()[i];
                         if (oldReal != 0)
                         {
-                            logger.info("[dispatch] slot={} unticked + "
-                                        "unequipped -- tearing down restored "
-                                        "mesh {:#06x}",
-                                        slot_name(static_cast<TransmogSlot>(i)), oldReal);
-                            RealPartTearDown::tear_down_by_item_id(reinterpret_cast<void *>(a1), oldReal,
-                                                                   k_tearDownSlots[k].gameTag);
+                            logger.info(
+                                "[dispatch] slot={} unticked + "
+                                "unequipped -- tearing down restored "
+                                "mesh {:#06x}",
+                                slot_name(static_cast<TransmogSlot>(i)),
+                                oldReal
+                            );
+                            RealPartTearDown::tear_down_by_item_id(
+                                reinterpret_cast<void *>(a1),
+                                oldReal,
+                                k_tearDownSlots[k].gameTag
+                            );
                         }
                         break;
                     }
@@ -1612,9 +1766,12 @@ namespace Transmog
             const auto oldReal = last_applied_real_ids()[idx];
             if (oldReal == 0)
                 continue;
-            logger.info("[dispatch] slot={} cleanup -- tearing down "
-                        "stale restore mesh {:#06x}",
-                        slot_name(td.slot), oldReal);
+            logger.info(
+                "[dispatch] slot={} cleanup -- tearing down "
+                "stale restore mesh {:#06x}",
+                slot_name(td.slot),
+                oldReal
+            );
             RealPartTearDown::tear_down_by_item_id(reinterpret_cast<void *>(a1), oldReal, td.gameTag);
         }
 
@@ -1623,9 +1780,12 @@ namespace Transmog
         __try
         {
             uint32_t liveCount = *reinterpret_cast<volatile uint32_t *>(a1 + k_compSlotCacheCountOffset);
-            logger.trace("[dispatch] post-apply liveCount={} "
-                         "ourWrittenCount={}",
-                         liveCount, ourWrittenCount);
+            logger.trace(
+                "[dispatch] post-apply liveCount={} "
+                "ourWrittenCount={}",
+                liveCount,
+                ourWrittenCount
+            );
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
@@ -1665,19 +1825,34 @@ namespace Transmog
             std::size_t nOff = 0;
             for (std::size_t i = 0; i < k_slotCount; ++i)
             {
-                const int np = std::snprintf(prevBuf + pOff, sizeof(prevBuf) - pOff, "%s0x%04x", i ? "," : "",
-                                             static_cast<unsigned>(prevIds[i]));
+                const int np = std::snprintf(
+                    prevBuf + pOff,
+                    sizeof(prevBuf) - pOff,
+                    "%s0x%04x",
+                    i ? "," : "",
+                    static_cast<unsigned>(prevIds[i])
+                );
                 if (np > 0)
                     pOff += static_cast<std::size_t>(np);
-                const int nn = std::snprintf(nowBuf + nOff, sizeof(nowBuf) - nOff, "%s0x%04x", i ? "," : "",
-                                             static_cast<unsigned>(lastIds[i]));
+                const int nn = std::snprintf(
+                    nowBuf + nOff,
+                    sizeof(nowBuf) - nOff,
+                    "%s0x%04x",
+                    i ? "," : "",
+                    static_cast<unsigned>(lastIds[i])
+                );
                 if (nn > 0)
                     nOff += static_cast<std::size_t>(nn);
             }
             logger.info("apply_all_transmog prev=[{}]", prevBuf);
-            logger.info("apply_all_transmog now=[{}] target={:#x} "
-                        "active={:#x} suppress={:#x}",
-                        nowBuf, targetMask, activeMask, suppressMask);
+            logger.info(
+                "apply_all_transmog now=[{}] target={:#x} "
+                "active={:#x} suppress={:#x}",
+                nowBuf,
+                targetMask,
+                activeMask,
+                suppressMask
+            );
         }
 
         PartShowSuppress::set_mask(static_cast<uint32_t>(suppressMask));
@@ -1746,7 +1921,7 @@ namespace Transmog
 
     void clear_all_transmog(__int64 a1)
     {
-        auto &logger = DMK::Logger::get_instance();
+        auto &logger = DMK::log();
         auto &lastIds = last_applied_ids();
 
         // Fallback only -- see apply_single_slot_transmog comment.
@@ -1798,23 +1973,35 @@ namespace Transmog
                 const auto realId = RealPartTearDown::get_real_item_id(reinterpret_cast<void *>(a1), gameTag);
                 if (realId == fakeId && cId == 0)
                 {
-                    logger.trace("[clear] orphan-check slot={:#06x} fake={:#06x} "
-                                 "skipped (matches real, no carrier)",
-                                 gameTag, fakeId);
+                    logger.trace(
+                        "[clear] orphan-check slot={:#06x} fake={:#06x} "
+                        "skipped (matches real, no carrier)",
+                        gameTag,
+                        fakeId
+                    );
                     continue;
                 }
 
                 // Tear the carrier's own identity down first when it is a distinct item.
                 if (cId != 0 && cId != fakeId)
                 {
-                    logger.info("[clear] tearing carrier slot={:#06x} "
-                                "carrier={:#06x} (real={:#06x})",
-                                gameTag, cId, realId);
+                    logger.info(
+                        "[clear] tearing carrier slot={:#06x} "
+                        "carrier={:#06x} (real={:#06x})",
+                        gameTag,
+                        cId,
+                        realId
+                    );
                     RealPartTearDown::tear_down_by_item_id(reinterpret_cast<void *>(a1), cId, gameTag);
                 }
-                logger.info("[clear] tearing orphan fake slot={:#06x} itemId={:#06x} "
-                            "(real={:#06x} carrier={:#06x})",
-                            gameTag, fakeId, realId, cId);
+                logger.info(
+                    "[clear] tearing orphan fake slot={:#06x} itemId={:#06x} "
+                    "(real={:#06x} carrier={:#06x})",
+                    gameTag,
+                    fakeId,
+                    realId,
+                    cId
+                );
                 RealPartTearDown::tear_down_by_item_id(reinterpret_cast<void *>(a1), fakeId, gameTag);
 
                 // Direct-applied orphan fake with no matching real underneath: it needs a second detach.

@@ -3,16 +3,15 @@
 #include "../aob_resolver.hpp"
 #include "../shared_state.hpp"
 
-#include <DetourModKit.hpp>
-#include <safetyhook.hpp>
+#include <DetourModKit/hook.hpp>
+#include <DetourModKit/logger.hpp>
+#include <DetourModKit/memory.hpp>
 
 #include <Windows.h>
 
 #include <array>
 #include <atomic>
 #include <cstdint>
-
-namespace DMK = DetourModKit;
 
 namespace Transmog::ColorOverride::HostScope
 {
@@ -50,11 +49,11 @@ namespace Transmog::ColorOverride::HostScope
 
         std::atomic<bool> g_initDone{false};
 
-        // Tests whether @p p lies inside the host EXE's mapped range. `host_module_range()` is magic-static cached, so
+        // Tests whether @p p lies inside the host EXE's mapped range. `Region::host()` is cached, so
         // the warm path is a single atomic load plus the constexpr point-in-range comparison performed by `contains`.
         bool ptr_in_text_or_rdata(std::uintptr_t p) noexcept
         {
-            return DMKMemory::contains(DMKMemory::host_module_range(), p);
+            return DMK::Region::host().contains(DMK::Address{p});
         }
 
         bool looks_like_live_host(std::uintptr_t parent) noexcept
@@ -65,7 +64,7 @@ namespace Transmog::ColorOverride::HostScope
             // boundary is either a small int or stack/junk -- reject.
             if (parent < 0x100000000ull)
                 return false;
-            const auto vtbl = DMKMemory::seh_read<std::uintptr_t>(parent).value_or(0);
+            const auto vtbl = DMK::memory::read<std::uintptr_t>(DMK::Address{parent}).value_or(0);
             return vtbl != 0 && ptr_in_text_or_rdata(vtbl);
         }
 
@@ -151,12 +150,12 @@ namespace Transmog::ColorOverride::HostScope
         // Mid-hook on the per-host owner-container vfuncs. RCX at entry IS the owner container; the iter that
         // dispatches the publisher (and ultimately the setter) lives below this frame on the stack, so the setter's RSP
         // < tl_ownerRsp for live captures.
-        void on_iter_entry(SafetyHookContext &ctx) noexcept
+        void on_iter_entry(DMK::hook::MidContext &ctx) noexcept
         {
             g_dbgEntered.fetch_add(1, std::memory_order_relaxed);
 
-            const auto iter_rsp = ctx.rsp;
-            const auto rcx = ctx.rcx;
+            const auto iter_rsp = DMK::hook::stack_pointer(ctx);
+            const auto rcx = DMK::hook::gpr(ctx, DMK::hook::Gpr::Rcx);
 
             if (!looks_like_live_host(rcx))
             {
@@ -212,49 +211,58 @@ namespace Transmog::ColorOverride::HostScope
         cluster_reset();
     }
 
-    bool init()
+    namespace
+    {
+        /**
+         * @brief Installs one owner-container mid-hook and pushes it onto @p hooks.
+         * @return true when the site resolved, the hook was created, and it armed.
+         * @details Both vfuncs share one callback and one failure shape, so they share one installer. A missing
+         *          address is a resolution miss the caller already logged through the anchor report, so it degrades
+         *          quietly here; a creation or arm failure is a live-code failure and says so.
+         */
+        [[nodiscard]] bool install_iter_hook(DMK::hook::HookStack &hooks, std::string name, std::uintptr_t addr)
+        {
+            auto &log = DMK::log();
+            if (addr == 0)
+                return false;
+
+            auto hook =
+                DMK::hook::mid_at(DMK::hook::MidRequest{.name = name, .target = DMK::Address{addr}}, &on_iter_entry);
+            if (!hook)
+            {
+                log.warning("[dye-host-scope] {} hook FAILED at {:#x}: {}", name, addr, hook.error().message());
+                return false;
+            }
+            if (auto armed = hook->enable(); !armed)
+            {
+                log.warning(
+                    "[dye-host-scope] {} hook could not be armed at {:#x}: {}",
+                    name,
+                    addr,
+                    armed.error().message()
+                );
+                return false;
+            }
+            hooks.push(std::move(*hook));
+            return true;
+        }
+    } // namespace
+
+    bool init(DMK::hook::HookStack &hooks)
     {
         if (g_initDone.load(std::memory_order_acquire))
             return true;
 
-        auto &log = DMK::Logger::get_instance();
-        const auto addr1 = ::Transmog::resolve_address(::Transmog::k_hostScopeVfunc1Candidates, "HostScopeVfunc1");
-        const auto addr2 = ::Transmog::resolve_address(::Transmog::k_hostScopeVfunc2Candidates, "HostScopeVfunc2");
+        const auto addr1 = anchor_address(AnchorId::HostScopeVfunc1);
+        const auto addr2 = anchor_address(AnchorId::HostScopeVfunc2);
         if (addr1 == 0 && addr2 == 0)
             return false;
 
-        auto &hookMgr = DMK::HookManager::get_instance();
-        bool ok = true;
-
-        if (addr1 != 0)
-        {
-            auto r1 = hookMgr.create_mid_hook("HostScopeVfunc1", addr1, &on_iter_entry);
-            if (!r1.has_value())
-            {
-                log.warning("[dye-host-scope] vfunc1 hook FAILED at {:#x}: {}", addr1,
-                            DetourModKit::Hook::error_to_string(r1.error()));
-                ok = false;
-            }
-        }
-        else
-        {
-            ok = false;
-        }
-
-        if (addr2 != 0)
-        {
-            auto r2 = hookMgr.create_mid_hook("HostScopeVfunc2", addr2, &on_iter_entry);
-            if (!r2.has_value())
-            {
-                log.warning("[dye-host-scope] vfunc2 hook FAILED at {:#x}: {}", addr2,
-                            DetourModKit::Hook::error_to_string(r2.error()));
-                ok = false;
-            }
-        }
-        else
-        {
-            ok = false;
-        }
+        // Deliberately not short-circuiting: both sites are installed even when the first fails, because the cluster
+        // reset only sees a complete iteration when every owner-container entry point reports.
+        const bool ok1 = install_iter_hook(hooks, "HostScopeVfunc1", addr1);
+        const bool ok2 = install_iter_hook(hooks, "HostScopeVfunc2", addr2);
+        const bool ok = ok1 && ok2;
 
         g_initDone.store(ok, std::memory_order_release);
         return ok;
@@ -263,8 +271,10 @@ namespace Transmog::ColorOverride::HostScope
     Stats snapshot_stats() noexcept
     {
         return Stats{
-            g_dbgEntered.load(std::memory_order_relaxed), g_dbgPlayer.load(std::memory_order_relaxed),
-            g_dbgNpc.load(std::memory_order_relaxed),     g_dbgFreed.load(std::memory_order_relaxed),
+            g_dbgEntered.load(std::memory_order_relaxed),
+            g_dbgPlayer.load(std::memory_order_relaxed),
+            g_dbgNpc.load(std::memory_order_relaxed),
+            g_dbgFreed.load(std::memory_order_relaxed),
             g_dbgStale.load(std::memory_order_relaxed),
         };
     }

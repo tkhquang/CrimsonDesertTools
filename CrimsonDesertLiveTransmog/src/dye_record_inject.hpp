@@ -1,5 +1,7 @@
 #pragma once
 
+#include <DetourModKit/hook.hpp>
+
 // Per-slot dye-record injector for fake transmog.
 //
 // LT-fake transmog items have no real-item backing, so the engine has no natural ARMOR_MOD records to publish for them.
@@ -78,15 +80,22 @@ namespace Transmog::DyeRecordInject
      * @param out Destination, at least @ref k_dyeRecordSize bytes.
      * @param channel_idx Channel this record describes, below @ref k_dyeChannelCount.
      */
-    void build_dye_record(std::uint8_t *out, std::size_t channel_idx, std::uint32_t group_hash, std::uint8_t r,
-                          std::uint8_t g, std::uint8_t b, std::uint16_t material_id,
-                          std::uint8_t repair_byte) noexcept;
+    void build_dye_record(
+        std::uint8_t *out,
+        std::size_t channel_idx,
+        std::uint32_t group_hash,
+        std::uint8_t r,
+        std::uint8_t g,
+        std::uint8_t b,
+        std::uint16_t material_id,
+        std::uint8_t repair_byte
+    ) noexcept;
 
     /**
      * Resolve target functions via AOB cascades and install hooks. Returns true on success. Failure to resolve any
      * required target disables injection (logged as a warning); the rest of LT continues to function.
      */
-    bool init() noexcept;
+    bool init(DetourModKit::hook::HookStack &hooks) noexcept;
 
     /// Diagnostic: log SlotPopulator observation counters.
     void log_counters() noexcept;
@@ -141,8 +150,8 @@ namespace Transmog::DyeRecordInject
      * slot the records belong to. Channels with `group_hash == 0` are included so the diff catches missing channels
      * too.
      */
-    void log_dye_snapshot(const char *source, const char *slotName,
-                          const ChannelState (&state)[k_dyeChannelCount]) noexcept;
+    void
+    log_dye_snapshot(const char *source, const char *slotName, const ChannelState (&state)[k_dyeChannelCount]) noexcept;
 
     /**
      * Read the first ACTIVE channel's RGB from the currently published slot dye state. Returns true if the slot has any

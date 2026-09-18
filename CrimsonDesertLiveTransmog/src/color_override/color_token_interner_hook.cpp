@@ -12,8 +12,6 @@
 #include <cstring>
 #include <mutex>
 
-namespace DMK = DetourModKit;
-
 namespace Transmog::ColorOverride::InternerHook
 {
     namespace
@@ -99,8 +97,8 @@ namespace Transmog::ColorOverride::InternerHook
         // resolving the slot correctly both before and after the engine populates it. A non-zero, non-heap value (small
         // int / sentinel) still rejects, preserving the guard against unrelated early-init globals that share the
         // encoding.
-        std::uintptr_t find_state_slot_in_function(std::uintptr_t funcAddr, std::uintptr_t modBase,
-                                                   std::size_t modSize) noexcept
+        std::uintptr_t
+        find_state_slot_in_function(std::uintptr_t funcAddr, std::uintptr_t modBase, std::size_t modSize) noexcept
         {
             __try
             {
@@ -152,8 +150,8 @@ namespace Transmog::ColorOverride::InternerHook
             for (; i < k_maxWalk; ++i)
             {
                 const auto entryAddr = entriesBase + i * k_entryStride;
-                const auto namePtr = DMKMemory::seh_read<std::uint64_t>(entryAddr + k_offName).value_or(0);
-                const auto token = DMKMemory::seh_read<std::uint32_t>(entryAddr + k_offToken).value_or(0);
+                const auto namePtr = DMK::memory::read<std::uint64_t>(DMK::Address{entryAddr + k_offName}).value_or(0);
+                const auto token = DMK::memory::read<std::uint32_t>(DMK::Address{entryAddr + k_offToken}).value_or(0);
                 // Bail when we walk off the end -- consecutive entries with null/garbage indicate we've left the
                 // allocated array.
                 if (namePtr < 0x10000ULL || namePtr > 0x7FFFFFFFFFFFULL || token == 0 || token > 0x100000u)
@@ -185,54 +183,62 @@ namespace Transmog::ColorOverride::InternerHook
 
         void do_init() noexcept
         {
-            auto &logger = DMK::Logger::get_instance();
+            auto &logger = DMK::log();
 
-            // --- Stage 1: resolve the interner function and the state-slot ADDRESS. Timing-independent -- it locates
+            // Stage 1: resolve the interner function and the state-slot ADDRESS. Timing-independent -- it locates
             // the publish *instruction*, not a populated value -- so it succeeds even at startup, before the engine has
             // run the interner's once-only init path. Runs once; the resolved slot is cached in g_stateSlot and reused
             // on every retry.
             auto stateSlot = g_stateSlot.load(std::memory_order_acquire);
             if (stateSlot == 0)
             {
-                const auto range = DMKMemory::host_module_range();
-                if (!range.valid())
+                const auto range = DMK::Region::host();
+                if (range.size == 0)
                     return;
-                const auto modBase = range.base;
-                const auto modSize = static_cast<std::size_t>(range.end - range.base);
-                const auto funcAddr =
-                    Transmog::resolve_address(Transmog::k_colorTokenInternerCandidates, "ColorTokenInterner");
+                const auto modBase = range.base.raw();
+                const auto modSize = range.size;
+                const auto funcAddr = anchor_address(AnchorId::ColorTokenInterner);
                 if (funcAddr == 0)
                 {
-                    logger.warning("[interner-hook] ColorTokenInterner not "
-                                   "resolved");
+                    logger.warning(
+                        "[interner-hook] ColorTokenInterner not "
+                        "resolved"
+                    );
                     return;
                 }
                 stateSlot = find_state_slot_in_function(funcAddr, modBase, modSize);
                 if (stateSlot == 0)
                 {
-                    logger.warning("[interner-hook] state-publish store not "
-                                   "found in interner body (func=0x{:X})",
-                                   funcAddr);
+                    logger.warning(
+                        "[interner-hook] state-publish store not "
+                        "found in interner body (func=0x{:X})",
+                        funcAddr
+                    );
                     return;
                 }
                 g_stateSlot.store(stateSlot, std::memory_order_release);
-                logger.info("[interner-hook] resolved state slot 0x{:X} "
-                            "(func=0x{:X})",
-                            stateSlot, funcAddr);
+                logger.info(
+                    "[interner-hook] resolved state slot 0x{:X} "
+                    "(func=0x{:X})",
+                    stateSlot,
+                    funcAddr
+                );
             }
 
-            // --- Stage 2: read the published state pointer and walk the entries array. Retry-able -- the engine
+            // Stage 2: read the published state pointer and walk the entries array. Retry-able -- the engine
             // publishes the state lazily on first shader-property registration, which can occur after mod startup.
             // While the slot still reads 0 we leave g_dumped false and return; refresh() re-drives this until the slot
             // is populated.
-            const auto stateAddr = DMKMemory::seh_read<std::uint64_t>(stateSlot).value_or(0);
+            const auto stateAddr = DMK::memory::read<std::uint64_t>(DMK::Address{stateSlot}).value_or(0);
             if (stateAddr < 0x10000ULL)
             {
                 if (!g_loggedPending.exchange(true, std::memory_order_acq_rel))
-                    logger.info("[interner-hook] state slot 0x{:X} not yet "
-                                "published; will capture lazily on first "
-                                "interner use",
-                                stateSlot);
+                    logger.info(
+                        "[interner-hook] state slot 0x{:X} not yet "
+                        "published; will capture lazily on first "
+                        "interner use",
+                        stateSlot
+                    );
                 return;
             }
             // State-struct field layout (decompile of sub_140F46680):
@@ -251,8 +257,8 @@ namespace Transmog::ColorOverride::InternerHook
                 for (std::size_t i = 0; i < 256; ++i)
                 {
                     const auto e = base + i * 32;
-                    const auto np = DMKMemory::seh_read<std::uint64_t>(e + 0x08).value_or(0);
-                    const auto tk = DMKMemory::seh_read<std::uint32_t>(e + 0x18).value_or(0);
+                    const auto np = DMK::memory::read<std::uint64_t>(DMK::Address{e + 0x08}).value_or(0);
+                    const auto tk = DMK::memory::read<std::uint32_t>(DMK::Address{e + 0x18}).value_or(0);
                     if (np < 0x10000ULL || np > 0x7FFFFFFFFFFFULL)
                         continue;
                     if (tk == 0 || tk > 0x100000u)
@@ -262,27 +268,42 @@ namespace Transmog::ColorOverride::InternerHook
                 }
                 return valid;
             };
-            const auto base40 = DMKMemory::seh_read<std::uint64_t>(stateAddr + 0x40).value_or(0);
-            const auto base48 = DMKMemory::seh_read<std::uint64_t>(stateAddr + 0x48).value_or(0);
+            const auto base40 = DMK::memory::read<std::uint64_t>(DMK::Address{stateAddr + 0x40}).value_or(0);
+            const auto base48 = DMK::memory::read<std::uint64_t>(DMK::Address{stateAddr + 0x48}).value_or(0);
             const auto v40 = probe(base40);
             const auto v48 = probe(base48);
-            logger.info("[interner-hook] probe state=0x{:X} "
-                        "base40=0x{:X} valid40={} base48=0x{:X} valid48={}",
-                        stateAddr, base40, v40, base48, v48);
+            logger.info(
+                "[interner-hook] probe state=0x{:X} "
+                "base40=0x{:X} valid40={} base48=0x{:X} valid48={}",
+                stateAddr,
+                base40,
+                v40,
+                base48,
+                v48
+            );
             const bool pick40 = (v40 >= v48 && base40 >= 0x10000ULL);
             const auto entriesBase = pick40 ? base40 : base48;
             const std::ptrdiff_t entriesOff = pick40 ? 0x40 : 0x48;
             if (entriesBase < 0x10000ULL)
             {
-                logger.warning("[interner-hook] neither state+0x40 nor +0x48 "
-                               "has a valid entries-array pointer");
+                logger.warning(
+                    "[interner-hook] neither state+0x40 nor +0x48 "
+                    "has a valid entries-array pointer"
+                );
                 return;
             }
             std::size_t nextIdx = 0;
             const auto captured = walk_entries_array(entriesBase, 0, nextIdx);
-            logger.info("[interner-hook] stateSlot=0x{:X} state=0x{:X} "
-                        "entries=0x{:X} off=0x{:X} captured={} nextIdx={}",
-                        stateSlot, stateAddr, entriesBase, entriesOff, captured, nextIdx);
+            logger.info(
+                "[interner-hook] stateSlot=0x{:X} state=0x{:X} "
+                "entries=0x{:X} off=0x{:X} captured={} nextIdx={}",
+                stateSlot,
+                stateAddr,
+                entriesBase,
+                entriesOff,
+                captured,
+                nextIdx
+            );
             g_offEntriesArray.store(entriesOff, std::memory_order_release);
             g_lastEntriesBase.store(entriesBase, std::memory_order_release);
             g_lastEntriesIdx.store(nextIdx, std::memory_order_release);
@@ -343,12 +364,12 @@ namespace Transmog::ColorOverride::InternerHook
         if (!s_busy.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
             return 0;
         s_lastMs.store(nowMs, std::memory_order_release);
-        const auto stateAddr = DMKMemory::seh_read<std::uint64_t>(slot).value_or(0);
+        const auto stateAddr = DMK::memory::read<std::uint64_t>(DMK::Address{slot}).value_or(0);
         std::size_t added = 0;
         if (stateAddr >= 0x10000ULL)
         {
             const auto entriesOff = g_offEntriesArray.load(std::memory_order_acquire);
-            const auto entriesBase = DMKMemory::seh_read<std::uint64_t>(stateAddr + entriesOff).value_or(0);
+            const auto entriesBase = DMK::memory::read<std::uint64_t>(DMK::Address{stateAddr + entriesOff}).value_or(0);
             if (entriesBase >= 0x10000ULL)
             {
                 // Resume the walk where the previous one stopped if the engine hasn't reallocated the entries array;
@@ -367,19 +388,29 @@ namespace Transmog::ColorOverride::InternerHook
                 const auto prev = s_lastCount.exchange(after, std::memory_order_acq_rel);
                 if (added > 0)
                 {
-                    DMK::Logger::get_instance().info("[interner-hook] refresh: entries=0x{:X} "
-                                                     "off=0x{:X} resumeFrom={} added={} total={} "
-                                                     "prev_total={} nextIdx={}",
-                                                     entriesBase, entriesOff, startIdx, added, after, prev, nextIdx);
+                    DMK::log().info(
+                        "[interner-hook] refresh: entries=0x{:X} "
+                        "off=0x{:X} resumeFrom={} added={} total={} "
+                        "prev_total={} nextIdx={}",
+                        entriesBase,
+                        entriesOff,
+                        startIdx,
+                        added,
+                        after,
+                        prev,
+                        nextIdx
+                    );
                 }
                 // Two consecutive walks with the same total = the interner has stopped growing. Require a non-zero
                 // baseline so an early empty-table walk can't latch settled immediately.
                 if (after == prev && after > 0)
                 {
                     s_settled.store(true, std::memory_order_release);
-                    DMK::Logger::get_instance().info("[interner-hook] settled at {} captures; "
-                                                     "no further refreshes this session",
-                                                     after);
+                    DMK::log().info(
+                        "[interner-hook] settled at {} captures; "
+                        "no further refreshes this session",
+                        after
+                    );
                 }
             }
         }

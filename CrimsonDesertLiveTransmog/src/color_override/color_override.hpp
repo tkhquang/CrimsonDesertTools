@@ -1,5 +1,7 @@
 #pragma once
 
+#include <DetourModKit/hook.hpp>
+
 // Runtime color-substitute path for materials whose dye-record propagation does not reach the per-property setter
 // (typically monster-mesh transmog carriers like `cd_m0001_00_no_phm_ub_12002`).
 //
@@ -33,8 +35,9 @@ namespace Transmog::ColorOverride
     /**
      * Install all sub-hooks. Returns true when ALL hooks installed cleanly. Failures are logged and individual hooks
      * become inert without affecting the rest of the subsystem.
+     * @param hooks The mod's hook stack; every installed hook is pushed onto it so teardown restores newest-first.
      */
-    bool init();
+    bool init(DetourModKit::hook::HookStack &hooks);
 
     /**
      * Mark the LT apply window for `slot`. Publisher inserts and setter substitutes are gated by this. Call from

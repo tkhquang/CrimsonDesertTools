@@ -54,8 +54,13 @@
 namespace Transmog
 {
 
-    void draw_color_override_tab_body(std::size_t slot, std::size_t detected, bool detectedReady, SlotUIState &ui,
-                                      ColorOverride::DyeSlot &dyeSlot)
+    void draw_color_override_tab_body(
+        std::size_t slot,
+        std::size_t detected,
+        bool detectedReady,
+        SlotUIState &ui,
+        ColorOverride::DyeSlot &dyeSlot
+    )
     {
         if (!s_coAutoTriggered[slot] && detected == 0 && !Transmog::ColorOverride::Reinit::any_slot_reinit_active())
         {
@@ -64,7 +69,7 @@ namespace Transmog
             s_coAutoTriggered[slot] = true;
         }
 
-        // --- Per-slot color override picker ---
+        // Per-slot color override picker
         // Each transmog slot maps to one or more dye-able regions ("swatches"). The hook auto-detects how many regions
         // the currently equipped item has from the per-(slot, channel) write counter, and captures each region's
         // asset-default color so the UI displays it as a starting value.
@@ -95,10 +100,12 @@ namespace Transmog
         if (!detectedReady && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
         {
             ImGui::BeginTooltip();
-            ImGui::TextUnformatted("No apply yet -- swatches unknown.\n"
-                                   "Run Re-init to capture the slot's dye\n"
-                                   "swatches before toggling the master Dye\n"
-                                   "switch.");
+            ImGui::TextUnformatted(
+                "No apply yet -- swatches unknown.\n"
+                "Run Re-init to capture the slot's dye\n"
+                "swatches before toggling the master Dye\n"
+                "switch."
+            );
             ImGui::EndTooltip();
         }
 
@@ -123,12 +130,14 @@ namespace Transmog
             if (ImGui::IsItemHovered())
             {
                 ImGui::BeginTooltip();
-                ImGui::TextUnformatted("Single clear + apply (~1.5s) to capture\n"
-                                       "the slot's swatches. Use when the list\n"
-                                       "looks empty or stale.\n\n"
-                                       "Replaces the manual 'untick / retick'\n"
-                                       "loop -- you can leave this slot alone\n"
-                                       "while it runs.");
+                ImGui::TextUnformatted(
+                    "Single clear + apply (~1.5s) to capture\n"
+                    "the slot's swatches. Use when the list\n"
+                    "looks empty or stale.\n\n"
+                    "Replaces the manual 'untick / retick'\n"
+                    "loop -- you can leave this slot alone\n"
+                    "while it runs."
+                );
                 ImGui::EndTooltip();
             }
             if (reinitClicked)
@@ -146,13 +155,15 @@ namespace Transmog
             if (ImGui::IsItemHovered())
             {
                 ImGui::BeginTooltip();
-                ImGui::TextUnformatted("Wipe ALL captured swatches for THIS slot,\n"
-                                       "clear the post-reinit lock + frozen-hidden\n"
-                                       "rows, then trigger a fresh apply.\n\n"
-                                       "Use when the slot is stuck with stale rows\n"
-                                       "(e.g. JSON-restored entries that no longer\n"
-                                       "match the current item) and Re-init can't\n"
-                                       "make progress.");
+                ImGui::TextUnformatted(
+                    "Wipe ALL captured swatches for THIS slot,\n"
+                    "clear the post-reinit lock + frozen-hidden\n"
+                    "rows, then trigger a fresh apply.\n\n"
+                    "Use when the slot is stuck with stale rows\n"
+                    "(e.g. JSON-restored entries that no longer\n"
+                    "match the current item) and Re-init can't\n"
+                    "make progress."
+                );
                 ImGui::EndTooltip();
             }
             if (topResetClicked)
@@ -215,13 +226,27 @@ namespace Transmog
             // Plain text label -- the popup tab is the container, so there is no CollapsingHeader ID-stability concern.
             if (coloured > 0)
             {
-                std::snprintf(dyeHdrBuf, sizeof(dyeHdrBuf), "%zu rows (%zu coloured)%s%s%s", detected, coloured,
-                              hasOverride ? " *" : "", reticking ? " (applying)" : "", masterDisabled ? " (off)" : "");
+                std::snprintf(
+                    dyeHdrBuf,
+                    sizeof(dyeHdrBuf),
+                    "%zu rows (%zu coloured)%s%s%s",
+                    detected,
+                    coloured,
+                    hasOverride ? " *" : "",
+                    reticking ? " (applying)" : "",
+                    masterDisabled ? " (off)" : ""
+                );
             }
             else
             {
-                std::snprintf(dyeHdrBuf, sizeof(dyeHdrBuf), "%zu rows%s%s", detected, reticking ? " (applying)" : "",
-                              masterDisabled ? " (off)" : "");
+                std::snprintf(
+                    dyeHdrBuf,
+                    sizeof(dyeHdrBuf),
+                    "%zu rows%s%s",
+                    detected,
+                    reticking ? " (applying)" : "",
+                    masterDisabled ? " (off)" : ""
+                );
             }
             ui_text("%s", dyeHdrBuf);
             ImGui::Separator();
@@ -370,8 +395,13 @@ namespace Transmog
                             // state. Active=> write current RGB into pending; inactive=>erase so substitute stops
                             // firing for this (submesh, token).
                             if (active)
-                                mirror_override_to_pending(static_cast<int>(slot), static_cast<std::size_t>(idx), row.r,
-                                                           row.g, row.b);
+                                mirror_override_to_pending(
+                                    static_cast<int>(slot),
+                                    static_cast<std::size_t>(idx),
+                                    row.r,
+                                    row.g,
+                                    row.b
+                                );
                             else
                                 erase_override_from_pending(static_cast<int>(slot), static_cast<std::size_t>(idx));
                         }
@@ -443,8 +473,8 @@ namespace Transmog
                         const float yOff = (diameter - refDiam) * 0.5f;
                         const ImVec2 refCenter(refCursor.x + refDiam * 0.5f, refCursor.y + yOff + refDiam * 0.5f);
                         const float refRadius = refDiam * 0.5f - 1.0f;
-                        const ImVec4 refColVec(primary.def_r / 255.0f, primary.def_g / 255.0f, primary.def_b / 255.0f,
-                                               1.0f);
+                        const ImVec4
+                            refColVec(primary.def_r / 255.0f, primary.def_g / 255.0f, primary.def_b / 255.0f, 1.0f);
                         const ImU32 refColU = ImGui::ColorConvertFloat4ToU32(refColVec);
                         ImGui::Dummy(ImVec2(refDiam, diameter));
                         const bool refHovered = ImGui::IsItemHovered();
@@ -453,8 +483,14 @@ namespace Transmog
                         if (refHovered)
                         {
                             char refTip[48];
-                            std::snprintf(refTip, sizeof(refTip), "Asset default #%02X%02X%02X", primary.def_r,
-                                          primary.def_g, primary.def_b);
+                            std::snprintf(
+                                refTip,
+                                sizeof(refTip),
+                                "Asset default #%02X%02X%02X",
+                                primary.def_r,
+                                primary.def_g,
+                                primary.def_b
+                            );
                             ImGui::BeginTooltip();
                             ImGui::TextUnformatted(refTip);
                             ImGui::EndTooltip();
@@ -480,8 +516,13 @@ namespace Transmog
                                 row.g = row.def_g;
                                 row.b = row.def_b;
                                 // Mirror to pending so the substitute path agrees with the row's new default RGB.
-                                mirror_override_to_pending(static_cast<int>(slot), static_cast<std::size_t>(idx), row.r,
-                                                           row.g, row.b);
+                                mirror_override_to_pending(
+                                    static_cast<int>(slot),
+                                    static_cast<std::size_t>(idx),
+                                    row.r,
+                                    row.g,
+                                    row.b
+                                );
                             }
                             if (!Transmog::ColorOverride::Reinit::any_slot_reinit_active())
                             {
@@ -508,8 +549,11 @@ namespace Transmog
                             primary.g / 255.0f,
                             primary.b / 255.0f,
                         };
-                        if (ImGui::ColorPicker3("##sw_pick", pickerRgb,
-                                                ImGuiColorEditFlags_NoSidePreview | ImGuiColorEditFlags_NoSmallPreview))
+                        if (ImGui::ColorPicker3(
+                                "##sw_pick",
+                                pickerRgb,
+                                ImGuiColorEditFlags_NoSidePreview | ImGuiColorEditFlags_NoSmallPreview
+                            ))
                         {
                             const std::uint8_t r = clampByte(pickerRgb[0]);
                             const std::uint8_t g = clampByte(pickerRgb[1]);
@@ -525,8 +569,13 @@ namespace Transmog
                                 row.b = b;
                                 // Mirror to pending so the substitute path picks up the user's edit on the next engine
                                 // write.
-                                mirror_override_to_pending(static_cast<int>(slot), static_cast<std::size_t>(idx), r, g,
-                                                           b);
+                                mirror_override_to_pending(
+                                    static_cast<int>(slot),
+                                    static_cast<std::size_t>(idx),
+                                    r,
+                                    g,
+                                    b
+                                );
                             }
                             // The picker applies overrides live but does NOT write JSON; dye_dirty lights up the
                             // top-level "Save *" button so the user commits to disk explicitly. Preset switch with
@@ -560,23 +609,37 @@ namespace Transmog
                         char tipBuf[256];
                         if (cascadeCount > 1)
                         {
-                            std::snprintf(tipBuf, sizeof(tipBuf),
-                                          "Linked R/G/B  %s\n"
-                                          "submesh 0x%016llX  tpl 0x%04X\n"
-                                          "asset def #%02X%02X%02X  blend=%u/255",
-                                          tokenBuf, static_cast<unsigned long long>(primary.submesh_stable_id),
-                                          static_cast<unsigned>(primary.template_id), primary.def_r, primary.def_g,
-                                          primary.def_b, primary.def_a);
+                            std::snprintf(
+                                tipBuf,
+                                sizeof(tipBuf),
+                                "Linked R/G/B  %s\n"
+                                "submesh 0x%016llX  tpl 0x%04X\n"
+                                "asset def #%02X%02X%02X  blend=%u/255",
+                                tokenBuf,
+                                static_cast<unsigned long long>(primary.submesh_stable_id),
+                                static_cast<unsigned>(primary.template_id),
+                                primary.def_r,
+                                primary.def_g,
+                                primary.def_b,
+                                primary.def_a
+                            );
                         }
                         else
                         {
-                            std::snprintf(tipBuf, sizeof(tipBuf),
-                                          "%s\n"
-                                          "submesh 0x%016llX  tpl 0x%04X\n"
-                                          "asset def #%02X%02X%02X  blend=%u/255",
-                                          tokenBuf, static_cast<unsigned long long>(primary.submesh_stable_id),
-                                          static_cast<unsigned>(primary.template_id), primary.def_r, primary.def_g,
-                                          primary.def_b, primary.def_a);
+                            std::snprintf(
+                                tipBuf,
+                                sizeof(tipBuf),
+                                "%s\n"
+                                "submesh 0x%016llX  tpl 0x%04X\n"
+                                "asset def #%02X%02X%02X  blend=%u/255",
+                                tokenBuf,
+                                static_cast<unsigned long long>(primary.submesh_stable_id),
+                                static_cast<unsigned>(primary.template_id),
+                                primary.def_r,
+                                primary.def_g,
+                                primary.def_b,
+                                primary.def_a
+                            );
                         }
                         ImGui::TextUnformatted(tipBuf);
                         ImGui::EndTooltip();
@@ -621,8 +684,11 @@ namespace Transmog
                             displayColor.y,
                             displayColor.z,
                         };
-                        if (ImGui::ColorPicker3("##rb_pick", prgb,
-                                                ImGuiColorEditFlags_NoSidePreview | ImGuiColorEditFlags_NoSmallPreview))
+                        if (ImGui::ColorPicker3(
+                                "##rb_pick",
+                                prgb,
+                                ImGuiColorEditFlags_NoSidePreview | ImGuiColorEditFlags_NoSmallPreview
+                            ))
                         {
                             const std::uint8_t pr = clampByte(prgb[0]);
                             const std::uint8_t pg = clampByte(prgb[1]);
@@ -637,8 +703,13 @@ namespace Transmog
                                 row.g = pg;
                                 row.b = pb;
                                 // Mirror to pending so the substitute path picks up the recolor-all edit.
-                                mirror_override_to_pending(static_cast<int>(slot), static_cast<std::size_t>(idx), pr,
-                                                           pg, pb);
+                                mirror_override_to_pending(
+                                    static_cast<int>(slot),
+                                    static_cast<std::size_t>(idx),
+                                    pr,
+                                    pg,
+                                    pb
+                                );
                             }
                             if (!Transmog::ColorOverride::Reinit::any_slot_reinit_active())
                             {
@@ -656,7 +727,7 @@ namespace Transmog
                     ImGui::PopID();
                 };
 
-                // --- Slot-level "Recolor all" + auto-clusters ---
+                // Slot-level "Recolor all" + auto-clusters
                 // Single picker drives every visible swatch in the slot. Lets users do "make this whole helm red"
                 // without touching individual rows.
                 ImGui::TextUnformatted("Recolor all:");
@@ -675,13 +746,15 @@ namespace Transmog
                 if (ImGui::IsItemHovered())
                 {
                     ImGui::BeginTooltip();
-                    ImGui::TextUnformatted("Wipe ALL captured swatches for THIS slot.\n"
-                                           "Use when cross-slot bleed has misattributed\n"
-                                           "rows from another transmog item (common with\n"
-                                           "Kairos and other shared-material sets).\n\n"
-                                           "Triggers a fresh apply on this slot, which\n"
-                                           "re-captures cleanly. Loses any colours you've\n"
-                                           "picked for this slot.");
+                    ImGui::TextUnformatted(
+                        "Wipe ALL captured swatches for THIS slot.\n"
+                        "Use when cross-slot bleed has misattributed\n"
+                        "rows from another transmog item (common with\n"
+                        "Kairos and other shared-material sets).\n\n"
+                        "Triggers a fresh apply on this slot, which\n"
+                        "re-captures cleanly. Loses any colours you've\n"
+                        "picked for this slot."
+                    );
                     ImGui::EndTooltip();
                 }
                 if (resetClicked)
@@ -707,14 +780,16 @@ namespace Transmog
                 if (ImGui::IsItemHovered())
                 {
                     ImGui::BeginTooltip();
-                    ImGui::TextUnformatted("Revert ALL user overrides on THIS slot\n"
-                                           "back to engine defaults. Keeps the\n"
-                                           "captured swatch list intact (no Re-init\n"
-                                           "needed afterwards).\n\n"
-                                           "Use to compare your dye picks against\n"
-                                           "the original asset colours, or to undo\n"
-                                           "a slot's colour edits without losing\n"
-                                           "the captured row structure.");
+                    ImGui::TextUnformatted(
+                        "Revert ALL user overrides on THIS slot\n"
+                        "back to engine defaults. Keeps the\n"
+                        "captured swatch list intact (no Re-init\n"
+                        "needed afterwards).\n\n"
+                        "Use to compare your dye picks against\n"
+                        "the original asset colours, or to undo\n"
+                        "a slot's colour edits without losing\n"
+                        "the captured row structure."
+                    );
                     ImGui::EndTooltip();
                 }
                 if (revertClicked)
@@ -753,15 +828,17 @@ namespace Transmog
                 if (ImGui::IsItemHovered())
                 {
                     ImGui::BeginTooltip();
-                    ImGui::TextUnformatted("Show per-region per-token trees with full\n"
-                                           "shader-property granularity beneath the\n"
-                                           "merchant-like flat picker list.\n\n"
-                                           "Default off -- most users get the same UX\n"
-                                           "as the merchant dye UI: one picker per\n"
-                                           "distinct asset-default colour. Tick this\n"
-                                           "only if you need to dye individual tokens\n"
-                                           "(e.g. tint vs. mask vs. detail layers\n"
-                                           "separately).");
+                    ImGui::TextUnformatted(
+                        "Show per-region per-token trees with full\n"
+                        "shader-property granularity beneath the\n"
+                        "merchant-like flat picker list.\n\n"
+                        "Default off -- most users get the same UX\n"
+                        "as the merchant dye UI: one picker per\n"
+                        "distinct asset-default colour. Tick this\n"
+                        "only if you need to dye individual tokens\n"
+                        "(e.g. tint vs. mask vs. detail layers\n"
+                        "separately)."
+                    );
                     ImGui::EndTooltip();
                 }
 
@@ -775,10 +852,12 @@ namespace Transmog
                     if (ImGui::IsItemHovered())
                     {
                         ImGui::BeginTooltip();
-                        ImGui::TextUnformatted("Hide rows / regions whose colour is\n"
-                                               "still at the captured engine default.\n"
-                                               "Untick to see every swatch this slot\n"
-                                               "exposed during apply.");
+                        ImGui::TextUnformatted(
+                            "Hide rows / regions whose colour is\n"
+                            "still at the captured engine default.\n"
+                            "Untick to see every swatch this slot\n"
+                            "exposed during apply."
+                        );
                         ImGui::EndTooltip();
                     }
                 }
@@ -898,8 +977,11 @@ namespace Transmog
                                 for (int C = 0; C < 3 && !hasHair; ++C)
                                     if (rv.layerSlot[3][C] >= 0)
                                         hasHair = true;
-                            std::snprintf(hdrBuf, sizeof(hdrBuf),
-                                          hasHair ? "[Hair -- hidden under helm]" : "[Unnamed]");
+                            std::snprintf(
+                                hdrBuf,
+                                sizeof(hdrBuf),
+                                hasHair ? "[Hair -- hidden under helm]" : "[Unnamed]"
+                            );
                         }
 
                         ImGui::PushID(static_cast<int>(rv.stable_id) ^ static_cast<int>(rv.stable_id >> 32) ^ 0xC0DE);
@@ -910,8 +992,10 @@ namespace Transmog
                         std::snprintf(treeBuf, sizeof(treeBuf), "%s  (tpl 0x%04X)", hdrBuf, rv.tpl);
                         // Default-open: the Color Override tab is now the wrapper, so collapsing each submesh by
                         // default just hides what the user came to see.
-                        const bool open = ImGui::TreeNodeEx(treeBuf, ImGuiTreeNodeFlags_SpanAvailWidth |
-                                                                         ImGuiTreeNodeFlags_DefaultOpen);
+                        const bool open = ImGui::TreeNodeEx(
+                            treeBuf,
+                            ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_DefaultOpen
+                        );
                         // Channel-coverage marker. Stays on the header row so it's visible whether the user expands the
                         // region or not. See `dye_picker_compute_channel_gap_tip`.
                         {
@@ -927,17 +1011,20 @@ namespace Transmog
                                 if (ImGui::IsItemHovered())
                                 {
                                     char fullTip[900];
-                                    std::snprintf(fullTip, sizeof(fullTip),
-                                                  "This submesh's shader doesn't "
-                                                  "expose all dye channels.\n"
-                                                  "You can still edit the channels "
-                                                  "that ARE present, but missing "
-                                                  "channels keep their baked default.\n"
-                                                  "This limits how dark / bright you "
-                                                  "can drive the rendered color.\n"
-                                                  "\n"
-                                                  "Gaps:\n%s",
-                                                  gapTip);
+                                    std::snprintf(
+                                        fullTip,
+                                        sizeof(fullTip),
+                                        "This submesh's shader doesn't "
+                                        "expose all dye channels.\n"
+                                        "You can still edit the channels "
+                                        "that ARE present, but missing "
+                                        "channels keep their baked default.\n"
+                                        "This limits how dark / bright you "
+                                        "can drive the rendered color.\n"
+                                        "\n"
+                                        "Gaps:\n%s",
+                                        gapTip
+                                    );
                                     ui_tooltip(fullTip);
                                 }
                             }
@@ -961,8 +1048,11 @@ namespace Transmog
                         {
                             if (chRows[ch].empty())
                                 continue;
-                            renderSwatchControls(chRows[ch].data(), static_cast<int>(chRows[ch].size()),
-                                                 k_channelLabels[ch]);
+                            renderSwatchControls(
+                                chRows[ch].data(),
+                                static_cast<int>(chRows[ch].size()),
+                                k_channelLabels[ch]
+                            );
                         }
                         // Hair singletons (any `_hair*` token -- `_hairDyeingColor`, `_hairDyeingScratch`, etc.). Each
                         // one gets its own row so the user can recolor hair / hair-overlay independently from a single
@@ -1071,8 +1161,12 @@ namespace Transmog
                                         hasHair = true;
                             if (hasHair)
                             {
-                                std::snprintf(headerBuf, sizeof(headerBuf), "[Hair -- hidden under helm]  (tpl 0x%04X)",
-                                              rv.tpl);
+                                std::snprintf(
+                                    headerBuf,
+                                    sizeof(headerBuf),
+                                    "[Hair -- hidden under helm]  (tpl 0x%04X)",
+                                    rv.tpl
+                                );
                             }
                             else
                             {
@@ -1095,17 +1189,20 @@ namespace Transmog
                                 if (ImGui::IsItemHovered())
                                 {
                                     char fullTip[900];
-                                    std::snprintf(fullTip, sizeof(fullTip),
-                                                  "This submesh's shader doesn't expose "
-                                                  "all dye channels.\n"
-                                                  "You can still edit the channels that "
-                                                  "ARE present, but missing channels "
-                                                  "keep their baked default -- limiting "
-                                                  "how dark / bright you can drive the "
-                                                  "rendered color.\n"
-                                                  "\n"
-                                                  "Gaps:\n%s",
-                                                  gapTip);
+                                    std::snprintf(
+                                        fullTip,
+                                        sizeof(fullTip),
+                                        "This submesh's shader doesn't expose "
+                                        "all dye channels.\n"
+                                        "You can still edit the channels that "
+                                        "ARE present, but missing channels "
+                                        "keep their baked default -- limiting "
+                                        "how dark / bright you can drive the "
+                                        "rendered color.\n"
+                                        "\n"
+                                        "Gaps:\n%s",
+                                        gapTip
+                                    );
                                     ui_tooltip(fullTip);
                                 }
                             }
@@ -1144,8 +1241,13 @@ namespace Transmog
                                     const int onlyCh = (idxR >= 0) ? 0 : (idxG >= 0) ? 1 : 2;
                                     const int onlyIdx = (onlyCh == 0) ? idxR : (onlyCh == 1) ? idxG : idxB;
                                     char labelBuf[48];
-                                    std::snprintf(labelBuf, sizeof(labelBuf), "%s\xC2\xB7%s", layerName,
-                                                  Transmog::ColorOverride::TokenTable::channel_short_name(onlyCh));
+                                    std::snprintf(
+                                        labelBuf,
+                                        sizeof(labelBuf),
+                                        "%s\xC2\xB7%s",
+                                        layerName,
+                                        Transmog::ColorOverride::TokenTable::channel_short_name(onlyCh)
+                                    );
                                     ImGui::TextUnformatted(labelBuf);
                                     ImGui::SameLine(0.0f, 6.0f);
                                     int single[1] = {onlyIdx};
@@ -1175,8 +1277,13 @@ namespace Transmog
                                         chList[chLen++] = 'B';
                                     }
                                     chList[chLen] = '\0';
-                                    std::snprintf(layerHdrBuf, sizeof(layerHdrBuf), "%s \xC2\xB7 %s", layerName,
-                                                  chList);
+                                    std::snprintf(
+                                        layerHdrBuf,
+                                        sizeof(layerHdrBuf),
+                                        "%s \xC2\xB7 %s",
+                                        layerName,
+                                        chList
+                                    );
                                     ImGui::TextUnformatted(layerHdrBuf);
                                     ImGui::SameLine(0.0f, 6.0f);
 
@@ -1188,11 +1295,13 @@ namespace Transmog
                                     if (ImGui::IsItemHovered())
                                     {
                                         ImGui::BeginTooltip();
-                                        ImGui::TextUnformatted("When ON: pick one colour, all "
-                                                               "present R/G/B channel-suffix\n"
-                                                               "Properties get it (merchant "
-                                                               "behaviour).\nUntick to edit "
-                                                               "each channel independently.");
+                                        ImGui::TextUnformatted(
+                                            "When ON: pick one colour, all "
+                                            "present R/G/B channel-suffix\n"
+                                            "Properties get it (merchant "
+                                            "behaviour).\nUntick to edit "
+                                            "each channel independently."
+                                        );
                                         ImGui::EndTooltip();
                                     }
                                     ImGui::SameLine(0.0f, 6.0f);
@@ -1222,7 +1331,10 @@ namespace Transmog
                                             firstShown = false;
                                             int single[1] = {order[c]};
                                             renderSwatchControls(
-                                                single, 1, Transmog::ColorOverride::TokenTable::channel_short_name(c));
+                                                single,
+                                                1,
+                                                Transmog::ColorOverride::TokenTable::channel_short_name(c)
+                                            );
                                         }
                                     }
                                     ImGui::PopID();
@@ -1244,8 +1356,13 @@ namespace Transmog
                                     }
                                     else
                                     {
-                                        std::snprintf(nameBuf, sizeof(nameBuf), "%s \xC2\xB7 0x%04X", layerName,
-                                                      sw.token_id & 0xFFFFu);
+                                        std::snprintf(
+                                            nameBuf,
+                                            sizeof(nameBuf),
+                                            "%s \xC2\xB7 0x%04X",
+                                            layerName,
+                                            sw.token_id & 0xFFFFu
+                                        );
                                     }
                                     ImGui::TextUnformatted(nameBuf);
                                     ImGui::SameLine(0.0f, 6.0f);

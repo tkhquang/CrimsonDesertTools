@@ -42,6 +42,7 @@ option(EQUIPHIDE_DEV_BUILD "Build two-DLL hot-reload configuration for developme
 
 # --- Source Files ---
 set(COMMON_SOURCES
+    src/aob_resolver.cpp
     src/dllmain.cpp
     src/version.cpp
     src/shared_state.cpp
@@ -76,20 +77,35 @@ if(EQUIPHIDE_DEV_BUILD)
     # =====================================================================
     message(STATUS "DEV BUILD enabled: building loader + logic DLL pair")
 
-    # --- Loader ASI (thin stub, no DetourModKit) ---
+    # --- Loader ASI (resident staged-generation loader) ---
     # Sources live in CrimsonDesertCore; parameterized via CDCORE_LOADER_* macros.
     add_library(equip_hide_loader SHARED ${CDCORE_DEV_LOADER_SRC})
 
     target_compile_definitions(equip_hide_loader PRIVATE
-        CDCORE_LOADER_DLL_NAME="CrimsonDesertEquipHide_Logic.dll"
-        CDCORE_LOADER_PDB_NAME="CrimsonDesertEquipHide_Logic.pdb"
-        CDCORE_LOADER_LOG_PREFIX="[EquipHideLoader] "
+        CDCORE_LOADER_MOD_NAME="CrimsonDesertEquipHide"
+        CDCORE_LOADER_PROCESS_NAME="CrimsonDesert.exe"
     )
 
+    target_include_directories(equip_hide_loader PRIVATE ${CDCORE_DEV_INCLUDE_DIR})
+
+    # The loader hosts wheel capture for the process, so a user-bound mouse-wheel
+    # combo books its permanent module keepalive HERE instead of in the logic DLL,
+    # which is what lets a generation unmap. It links the resident host ONLY.
     target_link_libraries(equip_hide_loader PRIVATE
+        DetourModKit::WheelHost
         kernel32
         user32
     )
+
+    # Guard the property above: linking the full archive would give the loader its
+    # own DetourModKit instance, which is the arrangement DMK's unload proofs exclude.
+    get_target_property(_eh_loader_links equip_hide_loader LINK_LIBRARIES)
+    if(NOT _eh_loader_links MATCHES "DetourModKit::WheelHost")
+        message(FATAL_ERROR "equip_hide_loader must link DetourModKit::WheelHost.")
+    endif()
+    if(_eh_loader_links MATCHES "DetourModKit::DetourModKit" OR _eh_loader_links MATCHES "(^|;)DetourModKit(;|$)")
+        message(FATAL_ERROR "equip_hide_loader must not link the full DetourModKit archive.")
+    endif()
 
     # Build loader to build dir; post-build tries to copy to game folder.
     # If the ASI is locked (game running), the copy silently fails.
@@ -124,10 +140,10 @@ endif()
     # --- Logic DLL (all mod code) ---
     add_library(equip_hide_logic SHARED
         ${COMMON_SOURCES}
-        src/dev/logic_exports.cpp
+        src/dev/mod_logic.cpp
     )
 
-    target_include_directories(equip_hide_logic PRIVATE ${COMMON_INCLUDE_DIRS})
+    target_include_directories(equip_hide_logic PRIVATE ${COMMON_INCLUDE_DIRS} ${CDCORE_DEV_INCLUDE_DIR})
 
     target_compile_definitions(equip_hide_logic PRIVATE EQUIPHIDE_DEV_BUILD)
 
@@ -141,23 +157,12 @@ endif()
 
     # Build to staging/ so the linker never conflicts with a game-locked DLL.
     # The loader copies from staging/ before LoadLibrary.
+    # Fallback drop point for a deploy that loses a race with the loader reading the deployed DLL.
     set(GAME_STAGING_DIR "${GAME_BIN_DIR}/staging")
 
     set_target_properties(equip_hide_logic PROPERTIES
-        OUTPUT_NAME "CrimsonDesertEquipHide_Logic"
+        OUTPUT_NAME "CrimsonDesertEquipHide.logic"
         PREFIX ""
-        RUNTIME_OUTPUT_DIRECTORY "${GAME_STAGING_DIR}"
-        RUNTIME_OUTPUT_DIRECTORY_DEBUG "${GAME_STAGING_DIR}"
-        RUNTIME_OUTPUT_DIRECTORY_RELEASE "${GAME_STAGING_DIR}"
-        RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO "${GAME_STAGING_DIR}"
-        LIBRARY_OUTPUT_DIRECTORY "${GAME_STAGING_DIR}"
-        LIBRARY_OUTPUT_DIRECTORY_DEBUG "${GAME_STAGING_DIR}"
-        LIBRARY_OUTPUT_DIRECTORY_RELEASE "${GAME_STAGING_DIR}"
-        LIBRARY_OUTPUT_DIRECTORY_RELWITHDEBINFO "${GAME_STAGING_DIR}"
-        PDB_OUTPUT_DIRECTORY "${GAME_STAGING_DIR}"
-        PDB_OUTPUT_DIRECTORY_DEBUG "${GAME_STAGING_DIR}"
-        PDB_OUTPUT_DIRECTORY_RELEASE "${GAME_STAGING_DIR}"
-        PDB_OUTPUT_DIRECTORY_RELWITHDEBINFO "${GAME_STAGING_DIR}"
     )
 
     # Generate deploy script at configure time (no source file needed).
@@ -165,37 +170,42 @@ endif()
     # On success, cleans the staging copies so the hot-reload loader
     # does not pick up a stale build.  If the DLL is locked (game
     # running), both files stay in staging/ for hot-reload instead.
+    # Link to the build tree (the CMake default) and deploy from there. The loader maps a per-generation COPY of
+    # the deployed DLL, never the file itself, so the direct copy is not racing a mapped image and succeeds in the
+    # normal case. Staging remains the fallback for the one window where it can fail: the loader reads this file
+    # while staging a new generation, and a build landing exactly then loses the copy. The loader promotes whatever
+    # it finds in staging on the next reload.
     file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/deploy_logic.cmake" [=[
 execute_process(
     COMMAND "${CMAKE_COMMAND}" -E copy "${SRC_DLL}" "${DST_DLL}"
     RESULT_VARIABLE rc
 )
 if(rc EQUAL 0)
-    message(STATUS "Direct deploy OK -- cleaning staging")
-    file(REMOVE "${STAGING_DLL}")
-    # PDB: best-effort copy alongside the DLL
+    message(STATUS "Direct deploy OK")
     if(EXISTS "${SRC_PDB}")
-        execute_process(
-            COMMAND "${CMAKE_COMMAND}" -E copy "${SRC_PDB}" "${DST_PDB}"
-            RESULT_VARIABLE pdb_rc
-        )
-        if(pdb_rc EQUAL 0)
-            file(REMOVE "${STAGING_PDB}")
-        endif()
+        execute_process(COMMAND "${CMAKE_COMMAND}" -E copy "${SRC_PDB}" "${DST_PDB}")
     endif()
+    # Clear anything an earlier fallback left behind, so the loader cannot promote a stale build over this one.
+    file(REMOVE "${STAGING_DLL}" "${STAGING_PDB}")
 else()
-    message(STATUS "Direct deploy skipped (file locked); using staging")
+    message(STATUS "Direct deploy skipped (file locked) -- staging for the loader to promote on next reload")
+    get_filename_component(staging_dir "${STAGING_DLL}" DIRECTORY)
+    file(MAKE_DIRECTORY "${staging_dir}")
+    execute_process(COMMAND "${CMAKE_COMMAND}" -E copy "${SRC_DLL}" "${STAGING_DLL}")
+    if(EXISTS "${SRC_PDB}")
+        execute_process(COMMAND "${CMAKE_COMMAND}" -E copy "${SRC_PDB}" "${STAGING_PDB}")
+    endif()
 endif()
 ]=])
 
     add_custom_command(TARGET equip_hide_logic POST_BUILD
         COMMAND ${CMAKE_COMMAND}
             -DSRC_DLL=$<TARGET_FILE:equip_hide_logic>
-            -DDST_DLL=${GAME_BIN_DIR}/CrimsonDesertEquipHide_Logic.dll
-            -DSTAGING_DLL=${GAME_STAGING_DIR}/CrimsonDesertEquipHide_Logic.dll
+            -DDST_DLL=${GAME_BIN_DIR}/CrimsonDesertEquipHide.logic.dll
+            -DSTAGING_DLL=${GAME_STAGING_DIR}/CrimsonDesertEquipHide.logic.dll
             -DSRC_PDB=$<TARGET_PDB_FILE:equip_hide_logic>
-            -DDST_PDB=${GAME_BIN_DIR}/CrimsonDesertEquipHide_Logic.pdb
-            -DSTAGING_PDB=${GAME_STAGING_DIR}/CrimsonDesertEquipHide_Logic.pdb
+            -DDST_PDB=${GAME_BIN_DIR}/CrimsonDesertEquipHide.logic.pdb
+            -DSTAGING_PDB=${GAME_STAGING_DIR}/CrimsonDesertEquipHide.logic.pdb
             -P "${CMAKE_CURRENT_BINARY_DIR}/deploy_logic.cmake"
         COMMENT "Deploying Logic DLL+PDB (falls back to staging if locked)"
     )

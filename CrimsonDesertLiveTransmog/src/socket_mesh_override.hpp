@@ -1,5 +1,7 @@
 #pragma once
 
+#include <DetourModKit/hook.hpp>
+
 /**
  * @file socket_mesh_override.hpp
  * @brief Replaces the mesh a socket is about to wear, instead of removing it afterwards.
@@ -28,7 +30,7 @@ namespace Transmog::SocketMeshOverride
      * @return true when the hook is installed.
      * @note Safe to call more than once; later calls are no-ops.
      */
-    [[nodiscard]] bool install() noexcept;
+    [[nodiscard]] bool install(DetourModKit::hook::HookStack &hooks) noexcept;
 
     /// Descriptors rewritten so far. Diagnostic.
     [[nodiscard]] unsigned overridden_count() noexcept;

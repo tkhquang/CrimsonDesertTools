@@ -9,8 +9,6 @@
 #include <cstdint>
 #include <cstring>
 
-namespace DMK = DetourModKit;
-
 namespace Transmog::ColorOverride::TokenTable
 {
     namespace
@@ -23,15 +21,14 @@ namespace Transmog::ColorOverride::TokenTable
     void bootstrap_snapshot()
     {
         TokenSlotDiscovery::run();
-        DMK::Logger::get_instance().info("[color-tokens] slot discovery: {} slot(s) recorded",
-                                         TokenSlotDiscovery::slot_count());
+        DMK::log().info("[color-tokens] slot discovery: {} slot(s) recorded", TokenSlotDiscovery::slot_count());
         // Hook the engine's string interner so we capture every (name, token) pair the engine intern-resolves. Catches
         // tokens not covered by the static registrar tables that TokenSlotDiscovery walks.
         const bool internerOk = InternerHook::init();
         // ready=false here is expected: the engine publishes the interner state lazily, so it is captured on first
         // interner use via the setter retry path rather than at startup.
-        DMK::Logger::get_instance().info("[color-tokens] interner hook: ready={} captured={}", internerOk,
-                                         InternerHook::capture_count());
+        DMK::log()
+            .info("[color-tokens] interner hook: ready={} captured={}", internerOk, InternerHook::capture_count());
     }
 
     namespace

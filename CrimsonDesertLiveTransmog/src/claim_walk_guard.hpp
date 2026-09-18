@@ -1,5 +1,7 @@
 #pragma once
 
+#include <DetourModKit/hook.hpp>
+
 /**
  * @file claim_walk_guard.hpp
  * @brief Null-owner guard for the engine's claim-vector walks.
@@ -35,10 +37,13 @@ namespace Transmog::ClaimWalkGuard
 {
     /**
      * @brief Install the guard at every claim-walk site found in the host module.
+     * @param hooks The mod's hook stack; every installed guard is pushed onto it so teardown restores the sites
+     *              newest-first while the code pages are still mapped.
      * @return true if at least one site was patched.
      * @note Safe to call more than once; later calls are no-ops.
+     * @note Setup/control-plane only: scans the host image and patches code. Never call it under the loader lock.
      */
-    [[nodiscard]] bool install() noexcept;
+    [[nodiscard]] bool install(DetourModKit::hook::HookStack &hooks) noexcept;
 
     /// Number of sites patched by @ref install.
     [[nodiscard]] unsigned patched_site_count() noexcept;

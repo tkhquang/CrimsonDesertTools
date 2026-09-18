@@ -13,8 +13,6 @@
 #include <mutex>
 #include <vector>
 
-namespace DMK = DetourModKit;
-
 namespace Transmog::ColorOverride::Reinit
 {
     namespace
@@ -72,9 +70,13 @@ namespace Transmog::ColorOverride::Reinit
         auto &m = slot_mappings()[static_cast<std::size_t>(slot)];
         if (!m.active || m.targetItemId == 0)
         {
-            DMK::Logger::get_instance().debug("[color-reinit] start-once slot={} REJECTED "
-                                              "(active={} target={:#06x})",
-                                              slot, m.active, m.targetItemId);
+            DMK::log().debug(
+                "[color-reinit] start-once slot={} REJECTED "
+                "(active={} target={:#06x})",
+                slot,
+                m.active,
+                m.targetItemId
+            );
             return false;
         }
         auto &st = g_state[static_cast<std::size_t>(slot)];
@@ -90,7 +92,7 @@ namespace Transmog::ColorOverride::Reinit
         }
         SwatchTable::post_reinit_lock(slot).store(false, std::memory_order_release);
         SwatchTable::reinit_capture_open(slot).store(true, std::memory_order_release);
-        DMK::Logger::get_instance().debug("[color-reinit] slot={} START 1-pass target={:#06x}", slot, m.targetItemId);
+        DMK::log().debug("[color-reinit] slot={} START 1-pass target={:#06x}", slot, m.targetItemId);
         return true;
     }
 
@@ -120,9 +122,12 @@ namespace Transmog::ColorOverride::Reinit
             return st.mode.load(std::memory_order_acquire) == SlotReinitState::ModeCommitRetick;
         st.mode.store(SlotReinitState::ModeCommitRetick, std::memory_order_release);
         st.pass.store(0, std::memory_order_release);
-        DMK::Logger::get_instance().debug("[color-reinit] slot={} commit-retick scheduled "
-                                          "target={:#06x}",
-                                          slot, m.targetItemId);
+        DMK::log().debug(
+            "[color-reinit] slot={} commit-retick scheduled "
+            "target={:#06x}",
+            slot,
+            m.targetItemId
+        );
         return true;
     }
 
@@ -211,10 +216,14 @@ namespace Transmog::ColorOverride::Reinit
                 // reinit's whole point is to force the engine through a full tear-down + restore cycle, even if the
                 // engine thinks state is unchanged.
                 force_apply_pending()[static_cast<std::size_t>(slot)] = true;
-                DMK::Logger::get_instance().debug("[color-reinit] slot={} TeardownApply pass={} "
-                                                  "(prev_target={:#06x}, m.active=false; engine "
-                                                  "should tear down fake + restore real if any)",
-                                                  slot, st.pass.load(std::memory_order_acquire), prevTarget);
+                DMK::log().debug(
+                    "[color-reinit] slot={} TeardownApply pass={} "
+                    "(prev_target={:#06x}, m.active=false; engine "
+                    "should tear down fake + restore real if any)",
+                    slot,
+                    st.pass.load(std::memory_order_acquire),
+                    prevTarget
+                );
                 ::Transmog::manual_apply_slot(static_cast<std::size_t>(slot));
                 st.deadline_ms.store(now + k_reinitTeardownMs, std::memory_order_release);
                 st.phase.store(SlotReinitState::TeardownWait, std::memory_order_release);
@@ -225,10 +234,13 @@ namespace Transmog::ColorOverride::Reinit
                 if (now < st.deadline_ms.load(std::memory_order_acquire))
                     continue;
                 const auto lastApplied = last_applied_ids()[static_cast<std::size_t>(slot)];
-                DMK::Logger::get_instance().debug("[color-reinit] slot={} TeardownWait done "
-                                                  "(lastIds[slot]={:#06x}; expected 0 if untick "
-                                                  "completed)",
-                                                  slot, lastApplied);
+                DMK::log().debug(
+                    "[color-reinit] slot={} TeardownWait done "
+                    "(lastIds[slot]={:#06x}; expected 0 if untick "
+                    "completed)",
+                    slot,
+                    lastApplied
+                );
                 st.phase.store(SlotReinitState::CarrierApply, std::memory_order_release);
                 continue;
             }
@@ -243,10 +255,14 @@ namespace Transmog::ColorOverride::Reinit
                 // Without this reset, active_this_apply persists (it's only set true on insert/hit, never cleared) so
                 // the snapshot would return the full accumulated set rather than the live identities for this capture.
                 SwatchTable::mark_all_inactive(slot);
-                DMK::Logger::get_instance().debug("[color-reinit] slot={} CarrierApply pass={} "
-                                                  "(target={:#06x}, m.active=true, all rows "
-                                                  "reset to inactive)",
-                                                  slot, st.pass.load(std::memory_order_acquire), m.targetItemId);
+                DMK::log().debug(
+                    "[color-reinit] slot={} CarrierApply pass={} "
+                    "(target={:#06x}, m.active=true, all rows "
+                    "reset to inactive)",
+                    slot,
+                    st.pass.load(std::memory_order_acquire),
+                    m.targetItemId
+                );
                 ::Transmog::manual_apply_slot(static_cast<std::size_t>(slot));
                 st.deadline_ms.store(now + k_reinitCaptureMs, std::memory_order_release);
                 st.phase.store(SlotReinitState::CarrierWait, std::memory_order_release);
@@ -258,7 +274,7 @@ namespace Transmog::ColorOverride::Reinit
                     continue;
                 if (st.mode.load(std::memory_order_acquire) == SlotReinitState::ModeCommitRetick)
                 {
-                    DMK::Logger::get_instance().debug("[color-reinit] slot={} commit-retick done", slot);
+                    DMK::log().debug("[color-reinit] slot={} commit-retick done", slot);
                     st.pass.store(0, std::memory_order_release);
                     st.phase.store(SlotReinitState::Idle, std::memory_order_release);
                     continue;
@@ -277,8 +293,7 @@ namespace Transmog::ColorOverride::Reinit
                             st.seen[pass].push_back(buf[i]);
                     }
                 }
-                DMK::Logger::get_instance().debug("[color-reinit] slot={} pass={} captured={}", slot, pass + 1,
-                                                  captured);
+                DMK::log().debug("[color-reinit] slot={} pass={} captured={}", slot, pass + 1, captured);
                 // Single-pass capture: go straight to Finalize. The intersection logic there handles non-empty pass
                 // selection -- with only seen[0] populated it becomes "keep everything captured this pass" (no ghost
                 // filtering).
@@ -305,14 +320,20 @@ namespace Transmog::ColorOverride::Reinit
                     // per-pass `captured` lines, something is racing on g_mutex.
                     for (int p = 0; p < 3; ++p)
                     {
-                        DMK::Logger::get_instance().debug("[color-reinit] slot={} seen[{}] size={}", slot, p,
-                                                          st.seen[p].size());
+                        DMK::log().debug("[color-reinit] slot={} seen[{}] size={}", slot, p, st.seen[p].size());
                         for (std::size_t i = 0; i < st.seen[p].size(); ++i)
                         {
                             const auto &k = st.seen[p][i];
-                            DMK::Logger::get_instance().debug("[color-reinit]   p{}[{}] hash={:08X} "
-                                                              "stable={:016X} tpl={:04X} token={:04X}",
-                                                              p + 1, i, k.hash, k.stable, k.tpl, k.token);
+                            DMK::log().debug(
+                                "[color-reinit]   p{}[{}] hash={:08X} "
+                                "stable={:016X} tpl={:04X} token={:04X}",
+                                p + 1,
+                                i,
+                                k.hash,
+                                k.stable,
+                                k.tpl,
+                                k.token
+                            );
                         }
                     }
                     int firstNonEmpty = -1;
@@ -362,11 +383,19 @@ namespace Transmog::ColorOverride::Reinit
                 // unrelated pending edits (e.g. user picks the user might want to revert before saving), which breaks
                 // the "pending until Save" contract the other UI buttons honour.
                 ::Transmog::dye_dirty().store(true, std::memory_order_release);
-                DMK::Logger::get_instance().debug("[color-reinit] slot={} DONE intersection={} "
-                                                  "kept={} hidden={} (pass1={} pass2={} pass3={} "
-                                                  "nonEmpty={}) -- slot LOCKED",
-                                                  slot, keep.size(), kr.kept, kr.hidden, passCounts[0], passCounts[1],
-                                                  passCounts[2], nonEmpty);
+                DMK::log().debug(
+                    "[color-reinit] slot={} DONE intersection={} "
+                    "kept={} hidden={} (pass1={} pass2={} pass3={} "
+                    "nonEmpty={}) -- slot LOCKED",
+                    slot,
+                    keep.size(),
+                    kr.kept,
+                    kr.hidden,
+                    passCounts[0],
+                    passCounts[1],
+                    passCounts[2],
+                    nonEmpty
+                );
                 st.pass.store(0, std::memory_order_release);
                 st.phase.store(SlotReinitState::Idle, std::memory_order_release);
                 continue;

@@ -4,7 +4,7 @@
 
 namespace EquipHide
 {
-    // --- Mod identity ---
+    // Mod identity
     inline constexpr const char *MOD_VERSION = VERSION_STRING;
     inline constexpr const char *MOD_NAME = "CrimsonDesertEquipHide";
     inline constexpr const char *MOD_AUTHOR = "tkhquang";
@@ -12,9 +12,9 @@ namespace EquipHide
     inline constexpr const char *MOD_NEXUS = "https://www.nexusmods.com/crimsondesert/mods/554";
     inline constexpr const char *LOG_FILE = "CrimsonDesertEquipHide.log";
     inline constexpr const char *INI_FILE = "CrimsonDesertEquipHide.ini";
-    inline constexpr const wchar_t *INSTANCE_MUTEX_PREFIX = L"CrimsonDesertEquipHide_";
+    inline constexpr const char *INSTANCE_MUTEX_PREFIX = "CrimsonDesertEquipHide_";
 
-    // --- Process gate ---
+    // Process gate
     inline constexpr const char *GAME_PROCESS_NAME = "CrimsonDesert.exe";
 
 } // namespace EquipHide

@@ -6,15 +6,18 @@
 namespace Transmog
 {
     /**
-     * @brief Initialise the standalone ImGui overlay.
+     * @brief Brings up the transmog UI, preferring a ReShade addon tab and falling back to a standalone window.
      *
-     * Spawns a background render thread that waits for the game world to load, then creates a transparent overlay
-     * window with a D3D11 WARP device for swap-chain-free rendering via GDI blit.
+     * The standalone path spawns a background render thread that waits for the game world to load, then creates a
+     * transparent overlay window with a D3D11 WARP device for swap-chain-free rendering via GDI blit.
      *
-     * @param hModule Handle of the current DLL module (reserved).
-     * @return true if the render thread was started successfully.
+     * @return true if either path came up.
+     * @note Takes no module handle on purpose. ReShade addon registration needs the handle of the module the overlay
+     *       code itself lives in, and only this module can name that: a caller in the same DLL has to derive it from
+     *       a lifecycle accessor that is null on some paths, and ReShade latches the first value it is given for the
+     *       process. Resolving it here makes the production ASI and the dev logic DLL take the identical path.
      */
-    [[nodiscard]] bool init_overlay(HMODULE hModule);
+    [[nodiscard]] bool init_overlay();
 
     /**
      * @brief Signal the overlay render thread to shut down and wait for it to exit. Safe to call if init failed.

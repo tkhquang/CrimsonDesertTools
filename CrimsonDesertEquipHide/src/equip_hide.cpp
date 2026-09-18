@@ -13,18 +13,30 @@
 #include "shared_state.hpp"
 #include "visibility_write.hpp"
 
+#include <cdcore/anchors.hpp>
 #include <cdcore/controlled_char.hpp>
-#include <cdcore/dmk_glue.hpp>
 
-#include <DetourModKit.hpp>
+#include <DetourModKit/abi/wheel_host.h>
+#include <DetourModKit/config.hpp>
+#include <DetourModKit/diagnostics.hpp>
+#include <DetourModKit/error.hpp>
+#include <DetourModKit/hook.hpp>
+#include <DetourModKit/input.hpp>
+#include <DetourModKit/logger.hpp>
+#include <DetourModKit/memory.hpp>
+#include <DetourModKit/scan.hpp>
+#include <DetourModKit/session.hpp>
 
 #include <Windows.h>
 
 #include <atomic>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 namespace EquipHide
@@ -57,82 +69,121 @@ namespace EquipHide
      */
     static constexpr uintptr_t k_selectorSkipGate = 2;
 
-    // --- Config ---
-    static void load_config()
-    {
-        DMK::Config::register_log_level("General", "LogLevel", "INFO");
+    /**
+     * @brief Prologue window searched for the `mov rax, [rip+disp32]` that names the IndexedStringA global.
+     * @details The instruction sits early in MapLookup, but the compiler is free to schedule other setup ahead of it,
+     *          so the window covers the whole prologue rather than one fixed offset.
+     */
+    static constexpr std::size_t k_mapLookupPrologueBytes = 0x40;
 
-        DMK::Config::register_atomic<bool>("General", "BaldFix", "Bald Fix", flag_bald_fix(), true);
-        DMK::Config::register_atomic<bool>("General", "GlidingFix", "Gliding Fix", flag_gliding_fix(), true);
-        DMK::Config::register_atomic<bool>("General", "IndependentToggle", "Independent Toggle",
-                                           flag_independent_toggle(), false);
-        DMK::Config::register_atomic<bool>("General", "CascadeFix", "Cascade Fix", flag_cascade_fix(), false);
+    // Every hook the mod installs. A HookStack restores newest first, the only safe order for layered hooks on
+    // one target: an older layer's restore would otherwise clobber a prologue a newer layer's live trampoline still
+    // chains through. shutdown() clears it while the code pages are still mapped.
+    static DMK::hook::HookStack s_hooks;
+
+    /// Latched when a hooked prologue could not be proved restored; the dev loader refuses the unmap on it.
+    static std::atomic<bool> s_hookRestoreFailed{false};
+
+    // Config
+    static void load_config(DMK::Session &session)
+    {
+        // Section-scoped binders, so each INI section name is written once here instead of heading every call.
+        const DMK::config::SectionBinder general = DMK::config::section("General");
+        const DMK::config::SectionBinder advanced = DMK::config::section("Advanced");
+
+        general.bind_log_level("LogLevel", "INFO");
+
+        general.bind<bool>("BaldFix", "Bald Fix", flag_bald_fix(), true);
+        general.bind<bool>("GlidingFix", "Gliding Fix", flag_gliding_fix(), true);
+        general.bind<bool>("IndependentToggle", "Independent Toggle", flag_independent_toggle(), false);
+        general.bind<bool>("CascadeFix", "Cascade Fix", flag_cascade_fix(), false);
 
         // Advanced: rtti_dissect self-heal search radius (bytes, per side) for the manager->userActor offset recovery
         // in CDCore. The default 0x200 leaves about ten times the margin of the largest drift to date. Raise it
         // toward MAX_HEAL_WINDOW only if a game patch shifts the field further. Not for normal users.
-        DMK::Config::register_atomic<int>("Advanced", "SelfHealWindow", "Self Heal Window",
-                                          CDCore::heal_window_setting(), 0x200);
+        advanced.bind<int>("SelfHealWindow", "Self Heal Window", CDCore::heal_window_setting(), 0x200);
 
         // Protagonist codename overrides for CDCore's appearance-config classifier. Each codename is a substring search
         // target inside the actor's appearance-config asset path. The defaults match the shipped engine subfolder
         // names. The overrides exist in case a future patch or mod renames a subfolder. The loader ignores empty
         // values.
-        DMK::Config::register_string(
-            "General", "KliffCodename", "Kliff Codename",
-            [](const std::string &val) { CDCore::set_protagonist_codenames(val, {}, {}); }, "cd_phm_macduff");
-        DMK::Config::register_string(
-            "General", "DamianeCodename", "Damiane Codename",
-            [](const std::string &val) { CDCore::set_protagonist_codenames({}, val, {}); }, "cd_phw_damian");
-        DMK::Config::register_string(
-            "General", "OongkaCodename", "Oongka Codename",
-            [](const std::string &val) { CDCore::set_protagonist_codenames({}, {}, val); }, "cd_phm_oongka");
+        general.bind_string(
+            "KliffCodename",
+            "Kliff Codename",
+            [](std::string_view val) { CDCore::set_protagonist_codenames(val, {}, {}); },
+            "cd_phm_macduff"
+        );
+        general.bind_string(
+            "DamianeCodename",
+            "Damiane Codename",
+            [](std::string_view val) { CDCore::set_protagonist_codenames({}, val, {}); },
+            "cd_phw_damian"
+        );
+        general.bind_string(
+            "OongkaCodename",
+            "Oongka Codename",
+            [](std::string_view val) { CDCore::set_protagonist_codenames({}, {}, val); },
+            "cd_phm_oongka"
+        );
 
         for (std::size_t i = 0; i < CATEGORY_COUNT; ++i)
         {
             const auto cat = static_cast<Category>(i);
             const std::string section{category_section(cat)};
+            const DMK::config::SectionBinder category = DMK::config::section(section);
 
             const bool active = (cat == Category::Shields || cat == Category::Helm || cat == Category::Mask);
 
-            DMK::Config::register_bool(
-                section, "Enabled", section + " Enabled",
-                [i](bool val) { category_states()[i].enabled.store(val, std::memory_order_relaxed); }, active);
+            category.bind_bool(
+                "Enabled",
+                section + " Enabled",
+                [i](bool val) { category_states()[i].enabled.store(val, std::memory_order_relaxed); },
+                active
+            );
 
-            DMK::Config::register_bool(
-                section, "DefaultHidden", section + " Default Hidden",
-                [i](bool val) { category_states()[i].hidden.store(val, std::memory_order_relaxed); }, active);
+            category.bind_bool(
+                "DefaultHidden",
+                section + " Default Hidden",
+                [i](bool val) { category_states()[i].hidden.store(val, std::memory_order_relaxed); },
+                active
+            );
 
-            DMK::Config::register_string(
-                section, "Parts", section + " Parts", [cat](const std::string &val) { register_parts(cat, val); },
-                default_parts_string(cat));
+            category.bind_string(
+                "Parts",
+                section + " Parts",
+                [cat](std::string_view val) { register_parts(cat, std::string{val}); },
+                default_parts_string(cat)
+            );
 
             // Per-character Parts overrides: [Section:Kliff], [Section:Damiane], [Section:Oongka]. Empty value (section
             // missing) inherits from base.
             for (std::size_t charIdx = 0; charIdx < k_charIdxCount; ++charIdx)
             {
                 const std::string charName{character_name_for_idx(charIdx)};
-                const std::string charSection = section + ":" + charName;
                 const std::string logLabel = section + " Parts (" + charName + ")";
-                DMK::Config::register_string(
-                    charSection, "Parts", logLabel,
-                    [cat, charIdx](const std::string &val) { set_per_char_parts(cat, charIdx, val); }, "");
+                const DMK::config::SectionBinder perCharacter = DMK::config::section(section + ":" + charName);
+                perCharacter.bind_string(
+                    "Parts",
+                    logLabel,
+                    [cat, charIdx](std::string_view val) { set_per_char_parts(cat, charIdx, std::string{val}); },
+                    ""
+                );
             }
         }
 
         // Auto-reload toggle. Off-by-default forces a relaunch for every INI tweak. On-by-default keeps the iteration
         // loop tight. Setters invoked from the watcher thread are idempotent.
         static std::atomic<bool> s_autoReload{true};
-        DMK::Config::register_atomic<bool>("General", "AutoReloadConfig", "Auto-Reload Config", s_autoReload, true);
+        general.bind<bool>("AutoReloadConfig", "Auto-Reload Config", s_autoReload, true);
 
-        // Hotkey bindings (Toggle/Show/Hide per category + ShowAll/HideAll) are registered via
-        // DMK::Config::register_press_combo, which fuses the INI key registration with the InputManager press
-        // registration. Must precede Config::load() so the press_combo INI keys land in the same load pass as the rest
-        // of the config items above.
-        register_hotkeys();
+        // Hotkey bindings (Toggle/Show/Hide per category + ShowAll/HideAll) are registered through
+        // DMK::config::press_combo, which fuses the INI key binding with the input press registration. Must precede
+        // the INI load so the press_combo keys land in the same load pass as the config items above. The returned
+        // guards go into the Session's input scope, which ~Session clears first and in reverse insertion order.
+        register_hotkeys(session.scope());
 
-        DMK::Config::load(INI_FILE);
-        DMK::Config::log_all();
+        session.ini().load(INI_FILE);
+        DMK::config::log_all();
 
         build_part_lookup();
         update_hidden_mask();
@@ -148,41 +199,40 @@ namespace EquipHide
             // s_activeMap. rebuild_part_lookup() rebuilds from the stored per-category strings, honors per-character
             // overrides, and atomically publishes the new buffer, so the mid-hook and direct-write paths see edited
             // part lists on the next tick.
-            const auto status =
-                DMK::Config::enable_auto_reload(std::chrono::milliseconds{250},
-                                                [](bool content_changed)
-                                                {
-                                                    auto &logger = DMK::Logger::get_instance();
-                                                    if (!content_changed)
-                                                    {
-                                                        logger.info("INI auto-reload: skipped (no content delta)");
-                                                        return;
-                                                    }
+            const auto status = DMK::config::enable_auto_reload(
+                std::chrono::milliseconds{250},
+                [](bool content_changed)
+                {
+                    auto &logger = DMK::log();
+                    if (!content_changed)
+                    {
+                        logger.info("INI auto-reload: skipped (no content delta)");
+                        return;
+                    }
 
-                                                    rebuild_part_lookup();
-                                                    update_hidden_mask();
+                    rebuild_part_lookup();
+                    update_hidden_mask();
 
-                                                    auto &ps = player_state();
-                                                    for (int i = 0; i < k_maxProtagonists; ++i)
-                                                        ps.armorInjected[i].store(false, std::memory_order_relaxed);
+                    auto &ps = player_state();
+                    for (int i = 0; i < k_maxProtagonists; ++i)
+                        ps.armorInjected[i].store(false, std::memory_order_relaxed);
 
-                                                    needs_direct_write().store(true, std::memory_order_release);
+                    needs_direct_write().store(true, std::memory_order_release);
 
-                                                    logger.info("INI auto-reload: setters applied, "
-                                                                "visibility scheduled");
-                                                });
-            if (status != DMK::Config::AutoReloadStatus::Started &&
-                status != DMK::Config::AutoReloadStatus::AlreadyRunning)
+                    logger.info("INI auto-reload: setters applied, visibility scheduled");
+                }
+            );
+            if (status != DMK::config::AutoReloadStatus::Started &&
+                status != DMK::config::AutoReloadStatus::AlreadyRunning)
             {
-                DMK::Logger::get_instance().warning("INI auto-reload could not start (status enum {})",
-                                                    static_cast<int>(status));
+                DMK::log().warning("INI auto-reload could not start (status enum {})", static_cast<int>(status));
             }
         }
     }
 
-    // --- Mid-hook callback ---
+    // Mid-hook callback
 
-    static void on_vis_check_impl(SafetyHookContext &ctx)
+    static void on_vis_check_impl(DMK::hook::MidContext &ctx)
     {
         if (needs_direct_write().load(std::memory_order_relaxed) &&
             needs_direct_write().exchange(false, std::memory_order_relaxed))
@@ -238,12 +288,12 @@ namespace EquipHide
         // DWORD. That dereference is the check -- a register the walk does not read THROUGH is the wrong one.
         //
         // Reading the wrong register here fails SILENTLY. The neighboring registers hold small integers (R11 carries
-        // the visibility byte the hooked movzx just loaded, R10 the exclusion count), so `plausible_userspace_ptr`
+        // the visibility byte the hooked movzx just loaded, R10 the exclusion count), so `memory::is_plausible_ptr`
         // rejects the value, this handler returns before reaching any of the logic below, and the cascade fix goes
         // dead with the hook still reporting installed.
-        // See the register map on k_hookSiteCandidates in aob_resolver.hpp.
-        auto hashPtr = ctx.rdx;
-        if (!DMK::Memory::plausible_userspace_ptr(hashPtr))
+        // See the register map on equip_vis_check() in aob_resolver.hpp.
+        const auto hashPtr = DMK::hook::gpr(ctx, DMK::hook::Gpr::Rdx);
+        if (!DMK::memory::is_plausible_ptr(DMK::Address{hashPtr}))
             return;
 
         auto partHash = *reinterpret_cast<const uint32_t *>(hashPtr);
@@ -258,11 +308,11 @@ namespace EquipHide
         // PartInOut struct pointer, the decision function's third argument. The hooked `movzx r11d, byte [r8+0x20]`
         // reads the visibility byte through it and the branch after the exclusion walk reads its transition byte at
         // `cmp byte [r8+3],0`. Take it from R8, not from RCX: RCX carries the a1 context here, which is also a live
-        // heap pointer, so it passes plausible_userspace_ptr() and a read of the wrong register does not fail
+        // heap pointer, so it passes memory::is_plausible_ptr() and a read of the wrong register does not fail
         // loudly. The mid-hook would then write the visibility byte inside the context struct instead.
-        // See the register map on k_hookSiteCandidates in aob_resolver.hpp.
-        auto partInOut = ctx.r8;
-        if (!DMK::Memory::plausible_userspace_ptr(partInOut))
+        // See the register map on equip_vis_check() in aob_resolver.hpp.
+        const auto partInOut = DMK::hook::gpr(ctx, DMK::hook::Gpr::R8);
+        if (!DMK::memory::is_plausible_ptr(DMK::Address{partInOut}))
             return;
 
         const bool cascadeOn = flag_cascade_fix().load(std::memory_order_relaxed);
@@ -279,7 +329,7 @@ namespace EquipHide
                 if ((mask & k_cascadeBodyMask) != 0 && !is_any_category_hidden(mask) &&
                     is_category_hidden(Category::Chest))
                 {
-                    ctx.r9 = k_selectorSkipGate;
+                    DMK::hook::gpr(ctx, DMK::hook::Gpr::R9) = k_selectorSkipGate;
                     return;
                 }
             }
@@ -299,13 +349,13 @@ namespace EquipHide
                 return;
             }
             *visPtr = 2;
-            ctx.r9 = k_selectorSkipGate;
+            DMK::hook::gpr(ctx, DMK::hook::Gpr::R9) = k_selectorSkipGate;
             return;
         }
 
         // a1 visibility-control context, the decision function's first argument. check_player_filter() gates the
         // pointer itself, so no separate plausibility check is needed here.
-        auto a1 = ctx.rcx;
+        const auto a1 = DMK::hook::gpr(ctx, DMK::hook::Gpr::Rcx);
         if (!check_player_filter(a1))
             return;
 
@@ -349,7 +399,7 @@ namespace EquipHide
             if (cascadeOn && isChest)
             {
                 if (s_hideLocked[hashIdx])
-                    ctx.r9 = k_selectorSkipGate; // gate skip on locked frames
+                    DMK::hook::gpr(ctx, DMK::hook::Gpr::R9) = k_selectorSkipGate; // gate skip on locked frames
                 else
                     s_hideLocked[hashIdx] = 1;
             }
@@ -363,7 +413,7 @@ namespace EquipHide
 
     /* SEH wrapper: separate function because MSVC SEH cannot coexist with C++ destructors in the same frame. It
        swallows faults when the mod is outdated and the register layout changed -- do not crash the game. */
-    static void on_vis_check(SafetyHookContext &ctx)
+    static void on_vis_check(DMK::hook::MidContext &ctx)
     {
         __try
         {
@@ -374,54 +424,55 @@ namespace EquipHide
         }
     }
 
-    // --- Public interface ---
-    bool init()
+    // Public interface
+
+    DMK::Result<void> init(DMK::Session &session, const WheelHostTable *wheel_host)
     {
-        auto &logger = DMK::Logger::get_instance();
+        auto &logger = DMK::log();
 
         // Apply config before the resolver and hook-install steps so the INI LogLevel takes effect for any TRACE/DEBUG
-        // emissions that follow. Setters dispatched by Config::load() touch only atomics, per-category state, and
-        // InputManager bindings. None of them depend on resolved addresses, which the code below populates.
-        load_config();
+        // emissions that follow. Setters dispatched by the INI load touch only atomics, per-category state, and input
+        // bindings. None of them depend on resolved addresses, which the code below populates.
+        load_config(session);
 
-        if (!DMK::Memory::init_cache())
+        if (!DMK::memory::init_cache())
             logger.warning("Memory cache init failed -- pointer reads may be slower");
 
         auto &addrs = resolved_addrs();
 
-        // EH-local chain walks (background_threads / player_detection) consume WorldSystem for user+0xD8 body
-        // resolution. CDCore::controlled_char uses its own independent static-chain anchor and does not need a
-        // published holder. These four targets are independent (no resolution reads another's result) and all live in
-        // the host EXE, so resolve them in one fork-join batch rather than four serial host-module scans. Each request
-        // keeps the host-scope + prologue-fallback semantics of the single resolve_address. Only the wall-clock
-        // collapses to the slowest single scan. initAddrs is parallel to the request-array order.
-        const CDCore::Glue::BatchRequest initBatch[] = {
-            {k_worldSystemCandidates, "WorldSystem"},
-            {k_childActorVtblCandidates, "ChildActorVtbl"},
-            {k_mapLookupCandidates, "MapLookup"},
-            {k_mapInsertCandidates, "MapInsert"},
-        };
-        std::uintptr_t initAddrs[std::size(initBatch)] = {};
-        CDCore::Glue::resolve_address_batch(initBatch, initAddrs);
-        addrs.worldSystem = initAddrs[0];
-        addrs.childActorVtbl = initAddrs[1];
-        addrs.mapLookup = initAddrs[2];
-        addrs.mapInsert = initAddrs[3];
+        // One parallel pass resolves the whole registry. The targets are independent (no resolution reads
+        // another's result) and all live in the host EXE, so the wall-clock collapses to the slowest single scan
+        // instead of the sum. Each entry's validator rejects a value outside the image, and a code entry also rejects
+        // a site that cannot begin an instruction.
+        resolve_all_anchors();
 
-        // Resolve IndexedStringA global from MapLookup: mov rax, [rip+disp] at +20
+        addrs.worldSystem = anchor_address(AnchorId::WorldSystem);
+        addrs.childActorVtbl = anchor_address(AnchorId::ChildActorVtbl);
+        addrs.mapLookup = anchor_address(AnchorId::MapLookup);
+        addrs.mapInsert = anchor_address(AnchorId::MapInsert);
+
+        // Resolve the IndexedStringA global from MapLookup: `mov rax, [rip+disp]` inside the prologue. The resolver
+        // skips a decoy occurrence whose displacement lands on an implausible or unreadable address, so a compiler
+        // shuffle inside the prologue still resolves.
         if (addrs.mapLookup)
         {
-            auto resolved = DMK::Scanner::find_and_resolve_rip_relative(
-                reinterpret_cast<const std::byte *>(addrs.mapLookup + 20), 7, DMK::Scanner::PREFIX_MOV_RAX_RIP, 7);
+            const auto resolved = DMK::scan::find_and_resolve_rip_relative(
+                DMK::Region{DMK::Address{addrs.mapLookup}, k_mapLookupPrologueBytes},
+                DMK::scan::PREFIX_MOV_RAX_RIP,
+                7
+            );
             if (resolved)
             {
-                addrs.indexedStringGlobal = *resolved;
+                addrs.indexedStringGlobal = resolved->raw();
                 logger.info("IndexedStringA global resolved at 0x{:X}", addrs.indexedStringGlobal);
             }
             else
             {
-                logger.warning("IndexedStringA global: expected MOV RAX,[rip+disp] at "
-                               "MapLookup+20, armor injection disabled");
+                logger.warning(
+                    "IndexedStringA global: no MOV RAX,[rip+disp] resolved inside the MapLookup prologue ({}), "
+                    "armor injection disabled",
+                    resolved.error().message()
+                );
             }
         }
 
@@ -458,17 +509,21 @@ namespace EquipHide
             const bool fullyResolved = totalExpected > 0 && initialResolved == totalExpected;
             if (!fullyResolved)
             {
-                logger.info("IndexedStringA scan: {}/{} entries at init, "
-                            "starting deferred scan thread (stability-check mode)",
-                            initialResolved, totalExpected);
+                logger.info(
+                    "IndexedStringA scan: {}/{} entries at init, starting deferred scan thread (stability-check mode)",
+                    initialResolved,
+                    totalExpected
+                );
                 deferred_scan_pending().store(true, std::memory_order_relaxed);
                 launch_deferred_scan();
             }
             else
             {
-                logger.info("IndexedStringA scan: {}/{} entries at init "
-                            "(fully resolved, no deferred retry)",
-                            initialResolved, totalExpected);
+                logger.info(
+                    "IndexedStringA scan: {}/{} entries at init (fully resolved, no deferred retry)",
+                    initialResolved,
+                    totalExpected
+                );
             }
 
             // Rebuild the part lookup against whatever subset got committed so the active map reflects the
@@ -477,61 +532,68 @@ namespace EquipHide
                 rebuild_part_lookup();
         }
 
-        // Mid-body scan with the host-EXE-scoped, prologue-fallback cascade resolver. Host scope bounds this
-        // safety-critical match -- its callback writes engine structs (visPtr, ctx.r9) -- to CrimsonDesert.exe, where
-        // the real target lives. A generic-shaped candidate then cannot first-match elsewhere in the process image.
-        // The prologue-fallback variant survives dev hot-reload: when a prior Logic-DLL load left a SafetyHook
-        // detour-jump in place at this site, every original-bytes candidate fails on rescan, and the resolver retries
-        // each Direct candidate with the first five byte-tokens replaced by the near-JMP signature E9 ?? ?? ?? ??. The
-        // candidate's disp_offset is preserved, so the returned address still lands on the original cmp instr.
-        auto hookHit = DMK::Scanner::resolve_cascade_in_host_module_with_prologue_fallback(
-            std::span<const AddrCandidate>{k_hookSiteCandidates, std::size(k_hookSiteCandidates)},
-            "EquipVisCheckHookSite");
-
-        if (!hookHit.has_value())
+        // Mid-body scan through the shared code-target policy. The host-EXE scope bounds this safety-critical match --
+        // its callback writes engine structs (visPtr, the In/Out selector) -- to CrimsonDesert.exe, where the real
+        // target lives, so a generic-shaped candidate cannot first-match elsewhere in the process image. The
+        // prologue-recovery fallback survives dev hot-reload: when a prior Logic-DLL generation left a detour jump at
+        // this site, every original-bytes candidate fails on rescan and the resolver retries each Direct candidate
+        // with its prologue rebuilt as a near JMP. The candidate's walk-back is preserved, so the returned address
+        // still lands on the original instruction.
+        const auto hookAddr = anchor_address(AnchorId::EquipVisCheck);
+        if (!hookAddr)
         {
             logger.error("No AOB pattern matched. The mod may be outdated for this game version.");
-            return false;
+            return std::unexpected(DMK::Error{DMK::ErrorCode::NoMatch, "EquipHide::init"});
         }
-
-        const auto hookAddr = hookHit->address;
 
         // Warm the self-healing vis-byte offset BEFORE the mid-hook install: the decode re-resolves the EquipVisCheck
-        // instruction by AOB, and the SafetyHook install that follows overwrites those bytes with a jmp.
+        // instruction by AOB, and the install that follows overwrites those bytes with a jmp.
         (void)vis_byte_offset();
 
-        auto &hookMgr = DMK::HookManager::get_instance();
-        auto hookResult = hookMgr.create_mid_hook("EquipVisCheck", hookAddr, on_vis_check);
-
-        if (!hookResult.has_value())
+        auto visCheck = DMK::hook::mid_at(
+            DMK::hook::MidRequest{.name = "EquipVisCheck", .target = DMK::Address{hookAddr}},
+            &on_vis_check
+        );
+        if (!visCheck)
         {
-            logger.error("Hook creation failed at 0x{:X}: {}", hookAddr,
-                         DetourModKit::Hook::error_to_string(hookResult.error()));
-            return false;
+            logger.error("Hook creation failed at 0x{:X}: {}", hookAddr, visCheck.error().message());
+            return std::unexpected(visCheck.error());
         }
-
-        logger.info("Hook installed via pattern '{}' at 0x{:X}", hookHit->winning_name, hookAddr);
+        if (auto armed = visCheck->enable(); !armed)
+        {
+            logger.error("Hook could not be armed at 0x{:X}: {}", hookAddr, armed.error().message());
+            return std::unexpected(armed.error());
+        }
+        s_hooks.push(std::move(*visCheck));
+        logger.info("Hook installed at 0x{:X}", hookAddr);
 
         // Prevents hidden parts from flashing during state transitions (gliding exit).
         if (flag_gliding_fix().load(std::memory_order_relaxed))
         {
-            auto partAddShowAddr =
-                resolve_address(k_partAddShowCandidates, std::size(k_partAddShowCandidates), "PartAddShow");
+            const auto partAddShowAddr = anchor_address(AnchorId::PartAddShow);
 
             if (partAddShowAddr)
             {
-                PartAddShowFn trampoline = nullptr;
-                auto result = hookMgr.create_inline_hook("PartAddShow", partAddShowAddr,
-                                                         reinterpret_cast<void *>(on_part_add_show),
-                                                         reinterpret_cast<void **>(&trampoline));
-
-                if (result.has_value())
+                auto hook = DMK::hook::inline_at(
+                    DMK::hook::InlineRequest{.name = "PartAddShow", .target = DMK::Address{partAddShowAddr}},
+                    &on_part_add_show
+                );
+                if (!hook)
                 {
-                    set_part_add_show_trampoline(trampoline);
+                    logger.warning("PartAddShow hook failed: {} -- gliding flash fix disabled", hook.error().message());
                 }
                 else
-                    logger.warning("PartAddShow hook failed: {} -- gliding flash fix disabled",
-                                   DetourModKit::Hook::error_to_string(result.error()));
+                {
+                    // Publish the trampoline BEFORE enable() arms the patch.
+                    set_part_add_show_trampoline(hook->original<PartAddShowFn>());
+                    if (auto armed = hook->enable(); !armed)
+                        logger.warning(
+                            "PartAddShow hook could not be armed: {} -- gliding flash fix disabled",
+                            armed.error().message()
+                        );
+                    else
+                        s_hooks.push(std::move(*hook));
+                }
             }
             else
             {
@@ -546,33 +608,45 @@ namespace EquipHide
         // window for that landmark and rejects NPC calls.
         if (flag_bald_fix().load(std::memory_order_relaxed))
         {
-            auto postfixEvalAddr =
-                resolve_address(k_postfixEvalCandidates, std::size(k_postfixEvalCandidates), "PostfixEval");
+            const auto postfixEvalAddr = anchor_address(AnchorId::PostfixEval);
 
-            // The cascade's disp_offset already walks from the match start to the byte after the rule-eval call, so
-            // the resolved value IS the return address an NPC stack frame carries. Do NOT add a fixup here: the
-            // offset belongs in the candidate row, and applying it twice yields an address no call ever pushes,
-            // which makes is_npc_call_stack() reject every call while the install still logs "bald fix active".
-            addrs.npcPfeReturnAddr = resolve_address(k_npcPfeReturnAddrCandidates,
-                                                     std::size(k_npcPfeReturnAddrCandidates), "NpcPfeReturnAddr");
+            // The row's own walk-back already reaches the byte after the rule-eval call, so the resolved value IS the
+            // return address an NPC stack frame carries. Do NOT add a fixup here: the offset belongs in the candidate
+            // row, and applying it twice yields an address no call ever pushes, which makes is_npc_call_stack() reject
+            // every call while the install still logs "bald fix active".
+            addrs.npcPfeReturnAddr = anchor_address(AnchorId::NpcPfeReturnAddr);
 
             if (postfixEvalAddr && addrs.npcPfeReturnAddr)
             {
-                PostfixEvalFn trampoline = nullptr;
-                auto result = hookMgr.create_inline_hook("PostfixEval", postfixEvalAddr,
-                                                         reinterpret_cast<void *>(on_postfix_eval),
-                                                         reinterpret_cast<void **>(&trampoline));
-
-                if (result.has_value())
+                auto hook = DMK::hook::inline_at(
+                    DMK::hook::InlineRequest{.name = "PostfixEval", .target = DMK::Address{postfixEvalAddr}},
+                    &on_postfix_eval
+                );
+                if (!hook)
                 {
-                    set_postfix_eval_trampoline(trampoline);
-                    logger.info("PostfixEval inline hook installed at 0x{:X}, "
-                                "npc-caller landmark 0x{:X} -- bald fix active",
-                                postfixEvalAddr, addrs.npcPfeReturnAddr);
+                    logger.warning("PostfixEval hook failed: {} -- bald fix disabled", hook.error().message());
                 }
                 else
-                    logger.warning("PostfixEval hook failed: {} -- bald fix disabled",
-                                   DetourModKit::Hook::error_to_string(result.error()));
+                {
+                    set_postfix_eval_trampoline(hook->original<PostfixEvalFn>());
+                    if (auto armed = hook->enable(); !armed)
+                    {
+                        logger.warning(
+                            "PostfixEval hook could not be armed: {} -- bald fix disabled",
+                            armed.error().message()
+                        );
+                    }
+                    else
+                    {
+                        s_hooks.push(std::move(*hook));
+                        logger.info(
+                            "PostfixEval inline hook installed at 0x{:X}, npc-caller landmark 0x{:X} -- "
+                            "bald fix active",
+                            postfixEvalAddr,
+                            addrs.npcPfeReturnAddr
+                        );
+                    }
+                }
             }
             else if (!postfixEvalAddr)
             {
@@ -580,8 +654,10 @@ namespace EquipHide
             }
             else
             {
-                logger.warning("NpcPfeReturnAddr AOB scan failed -- bald fix disabled "
-                               "(refusing to run without the call-graph filter)");
+                logger.warning(
+                    "NpcPfeReturnAddr AOB scan failed -- bald fix disabled "
+                    "(refusing to run without the call-graph filter)"
+                );
             }
         }
         else
@@ -589,53 +665,69 @@ namespace EquipHide
             logger.info("BaldFix disabled in config -- hair-hiding rules will apply normally");
         }
 
-        // Equipment change detection for CascadeFix re-sync. Clears the gate-skip locks when chest armor changes,
-        // so the new gear gets a fresh Out transition.
+        // Equipment change detection for CascadeFix re-sync. Clears the gate-skip locks when chest armor changes, so
+        // the new gear gets a fresh Out transition.
         if (flag_cascade_fix().load(std::memory_order_relaxed))
         {
-            auto vecAddr = resolve_address(k_visualEquipChangeCandidates, std::size(k_visualEquipChangeCandidates),
-                                           "VisualEquipChange");
-
+            const auto vecAddr = anchor_address(AnchorId::VisualEquipChange);
             if (vecAddr)
             {
-                VisualEquipChangeFn trampoline = nullptr;
-                auto result = hookMgr.create_inline_hook("VisualEquipChange", vecAddr,
-                                                         reinterpret_cast<void *>(on_visual_equip_change),
-                                                         reinterpret_cast<void **>(&trampoline));
-
-                if (result.has_value())
+                auto hook = DMK::hook::inline_at(
+                    DMK::hook::InlineRequest{.name = "VisualEquipChange", .target = DMK::Address{vecAddr}},
+                    &on_visual_equip_change
+                );
+                if (!hook)
                 {
-                    set_visual_equip_change_trampoline(trampoline);
+                    logger.warning("VisualEquipChange hook failed: {}", hook.error().message());
                 }
                 else
-                    logger.warning("VisualEquipChange hook failed: {}",
-                                   DetourModKit::Hook::error_to_string(result.error()));
+                {
+                    set_visual_equip_change_trampoline(hook->original<VisualEquipChangeFn>());
+                    if (auto armed = hook->enable(); !armed)
+                        logger.warning("VisualEquipChange hook could not be armed: {}", armed.error().message());
+                    else
+                        s_hooks.push(std::move(*hook));
+                }
             }
 
-            auto vesAddr =
-                resolve_address(k_visualEquipSwapCandidates, std::size(k_visualEquipSwapCandidates), "VisualEquipSwap");
-
+            const auto vesAddr = anchor_address(AnchorId::VisualEquipSwap);
             if (vesAddr)
             {
-                VisualEquipSwapFn trampoline = nullptr;
-                auto result = hookMgr.create_inline_hook("VisualEquipSwap", vesAddr,
-                                                         reinterpret_cast<void *>(on_visual_equip_swap),
-                                                         reinterpret_cast<void **>(&trampoline));
-
-                if (result.has_value())
+                auto hook = DMK::hook::inline_at(
+                    DMK::hook::InlineRequest{.name = "VisualEquipSwap", .target = DMK::Address{vesAddr}},
+                    &on_visual_equip_swap
+                );
+                if (!hook)
                 {
-                    set_visual_equip_swap_trampoline(trampoline);
+                    logger.warning("VisualEquipSwap hook failed: {}", hook.error().message());
                 }
                 else
-                    logger.warning("VisualEquipSwap hook failed: {}",
-                                   DetourModKit::Hook::error_to_string(result.error()));
+                {
+                    set_visual_equip_swap_trampoline(hook->original<VisualEquipSwapFn>());
+                    if (auto armed = hook->enable(); !armed)
+                        logger.warning("VisualEquipSwap hook could not be armed: {}", armed.error().message());
+                    else
+                        s_hooks.push(std::move(*hook));
+                }
             }
         }
 
-        // load_config() registers the hotkey bindings, so Config::load() picks up the press_combo INI keys in the same
-        // pass. Now flip InputManager live.
-        auto &inputMgr = DMK::InputManager::get_instance();
-        inputMgr.start();
+        // load_config() bound the hotkeys, so the INI load already picked up their combo keys. Now bring the poll
+        // engine live. The wheel backend is the loader's resident host when the dev loader supplied one, so a
+        // user-bound mouse-wheel combo books its permanent keepalive against that module instead of this one and the
+        // logic DLL stays unmappable. Without a host (the production ASI, and a dev loader whose host failed to
+        // start) the local message hook is the correct backend and takes that keepalive here.
+        DMK::input::Input::Settings inputSettings{};
+        if (wheel_host != nullptr)
+        {
+            inputSettings.wheel_backend = DMK::input::Input::WheelBackend::ExternalHost;
+            inputSettings.wheel_host = wheel_host;
+            inputSettings.wheel_host_required = false;
+        }
+        if (auto started = session.input().start(inputSettings); !started)
+        {
+            logger.warning("Input engine did not start: {} -- hotkeys are inactive", started.error().message());
+        }
 
         // Drives resolve_player_vis_ctrls on a fixed cadence so cold load and in-session character swaps are detected
         // without depending on the EquipVisCheck hook's event stream. See background_threads.cpp for the thread body.
@@ -648,11 +740,16 @@ namespace EquipHide
 
         // One-shot DMK health snapshot for at-a-glance per-launch diagnostics: hook population plus any intentional
         // loader-lock leak/detach events.
-        const auto health = DMK::Diagnostics::collect(DMK::HookManager::get_instance());
-        logger.info("DMK health: hooks total={} active={} disabled={}, intentional-leaks={}", health.hooks_total,
-                    health.hooks_active, health.hooks_disabled, health.total_intentional_leaks);
+        const auto health = DMK::diagnostics::collect({}, anchor_report());
+        logger.info(
+            "DMK health: hooks total={} active={} disabled={}, intentional-leaks={}",
+            health.hooks_total,
+            health.hooks_active,
+            health.hooks_disabled,
+            health.total_intentional_leaks
+        );
 
-        return true;
+        return {};
     }
 
     void arm_flush_guard() noexcept
@@ -661,19 +758,46 @@ namespace EquipHide
             s_flushGuard.store(500, std::memory_order_relaxed);
     }
 
-    void shutdown()
+    bool shutdown()
     {
-        auto &logger = DMK::Logger::get_instance();
+        auto &logger = DMK::log();
         logger.info("{} shutting down...", MOD_NAME);
 
+        // Module pins, by reason, sampled HERE rather than at the end of init(). The input engine mounts its
+        // wheel route and installs its XInput interception from the poll thread's cycle loop, which only starts
+        // after session.input().start() returns, so an init-time sample reads a state where neither has happened
+        // yet and reports zeros that mean nothing. This runs before any teardown, so the hooks and pins are both
+        // still in place.
+        //
+        // XInputKeepalive is taken before XInput hook creation: nonzero means a binding asked to consume and the
+        // interception pair went in. That set is retained and inert after teardown, so it keeps this image mapped
+        // and costs one generation against the dev loader's reload budget.
+        //
+        // MessageHookKeepalive is the wheel-capture keepalive. In the dev build it should be ZERO: the resident
+        // loader owns wheel capture, so the pin lands on the loader and this generation can still unmap. Nonzero
+        // means the external host was refused and the engine fell back to a local message hook.
+        {
+            const auto pins = DMK::diagnostics::collect();
+            const auto pin = [&pins](DMK::diagnostics::ModulePinReason reason)
+            { return pins.module_pins[static_cast<std::size_t>(reason)]; };
+
+            DMK::log().info(
+                "DMK pins: xinput_self={} xinput_targets={} wheel_msghook={} input_poller={} total={}",
+                pin(DMK::diagnostics::ModulePinReason::XInputKeepalive),
+                pin(DMK::diagnostics::ModulePinReason::XInputTarget),
+                pin(DMK::diagnostics::ModulePinReason::MessageHookKeepalive),
+                pin(DMK::diagnostics::ModulePinReason::InputPoller),
+                pins.total_module_pins
+            );
+        }
+
         // Per-step bracket logs around each blocking call pin a shutdown stall to the exact step (worker join,
-        // vis-byte cleanup, DMK teardown, and so on). The teardown path crosses several mutexes and the SafetyHook
-        // trampoline drain window. Without the brackets, a silent hang stays undiagnosable from the user's log alone.
-        // Logger::flush() between steps drains the async queue, so a hang inside a step still surfaces every line the
-        // prior step emitted.
+        // vis-byte cleanup, hook teardown, and so on). The teardown path crosses several mutexes and the hook drain
+        // window. Without the brackets, a silent hang stays undiagnosable from the user's log alone. flush() between
+        // steps drains the async queue, so a hang inside a step still surfaces every line the prior step emitted.
         logger.info("{} shutdown: step 1 disable_auto_reload", MOD_NAME);
         // Disable the INI watcher up front so an in-flight save event cannot fire setters during the state teardown.
-        DMK::Config::disable_auto_reload();
+        DMK::config::disable_auto_reload();
         logger.flush();
 
         logger.info("{} shutdown: step 2 signal stop", MOD_NAME);
@@ -682,32 +806,39 @@ namespace EquipHide
         logger.flush();
 
         logger.info("{} shutdown: step 3 join workers", MOD_NAME);
-        // Drain workers before the DMK teardown removes the hooks they call into. shutdown_requested is the
-        // cooperative stop signal that each StoppableWorker body polls. A join here guarantees that no worker is
-        // mid-call into a SafetyHook trampoline when the loader unmaps the trampoline pages.
+        // Drain workers before the hooks they call into come down. shutdown_requested is the cooperative stop signal
+        // that each StoppableWorker body polls. A join here guarantees that no worker is mid-call into a trampoline
+        // when the loader unmaps the trampoline pages.
         join_background_threads();
         logger.flush();
 
         logger.info("{} shutdown: step 4 cleanup vis bytes", MOD_NAME);
-        // Restore visibility bytes while the hooks are still installed and the game's part registry is reachable. The
-        // vis-byte cleanup walks per-actor arrays and writes back the original bytes recorded at first hide. A run
-        // after DMK_Shutdown races the loader, which unmaps the Logic-DLL pages that back the cleanup function itself.
+        // Restore visibility bytes while the hooks are still installed and the game's part registry is reachable. A
+        // run after the hook teardown races the loader, which unmaps the Logic-DLL pages that back the cleanup
+        // function itself.
         cleanup_vis_bytes();
         logger.flush();
 
-        logger.info("{} shutdown: step 5 DMK_Shutdown", MOD_NAME);
-        // Full DMK teardown: removes every managed hook (EquipVisCheck, PartAddShow, PostfixEval, VisualEquipChange,
-        // VisualEquipSwap), stops and clears the InputManager poller along with its registered bindings, stops the
-        // ConfigWatcher, and clears the Config registered-items list. It is idempotent, so the next Logic-DLL load can
-        // re-init cleanly from this state. Each detour body snapshots its trampoline pointer at entry and bails to a
-        // benign default when the snapshot is null. That defends the drain window between hook removal and DLL unmap.
-        DMK_Shutdown();
-        logger.flush();
-
-        logger.info("{} shutdown: step 6 clear hotkey guards", MOD_NAME);
-        clear_hotkey_guards();
+        logger.info("{} shutdown: step 5 restore hooked prologues", MOD_NAME);
+        // Newest-first teardown of every hook this mod owns. A teardown that cannot prove the restore pins the backend
+        // instead and books the leak against LeakSubsystem::HookManager, so the delta across the clear IS the unmap
+        // verdict the dev loader needs. Each detour body snapshots its trampoline pointer at entry and bails to a
+        // benign default when the snapshot is null, which defends the drain window between restore and DLL unmap.
+        // A hook that cannot prove it restored its target pins its backend, and that pin books one leak against
+        // LeakSubsystem::HookManager, so the delta across the clear IS the unmap verdict. Comparing a delta rather
+        // than an absolute is required, because the counter also carries caller-requested leaks from elsewhere.
+        const auto pinsBefore = DMK::diagnostics::intentional_leak_count(DMK::diagnostics::LeakSubsystem::HookManager);
+        s_hooks.clear();
+        const bool restored =
+            DMK::diagnostics::intentional_leak_count(DMK::diagnostics::LeakSubsystem::HookManager) == pinsBefore;
+        if (!restored)
+        {
+            s_hookRestoreFailed.store(true, std::memory_order_relaxed);
+            logger.error("{} shutdown: a hooked prologue could not be restored and stays pinned", MOD_NAME);
+        }
         logger.info("{} shutdown complete", MOD_NAME);
         logger.flush();
+        return restored && !s_hookRestoreFailed.load(std::memory_order_relaxed);
     }
 
 } // namespace EquipHide

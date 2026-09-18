@@ -4,7 +4,7 @@
 
 namespace Transmog
 {
-    // --- Debounce timing ---
+    // Debounce timing
 
     inline constexpr std::uint64_t k_applyDebounceMs = 1500;
     inline constexpr std::uint64_t k_manualDebounceMs = 100;
@@ -24,7 +24,7 @@ namespace Transmog
     // clicking, at the cost of a longer wait after the last one.
     inline constexpr std::uint64_t k_burstCoalesceMs = 500;
 
-    // --- Player component resolution ---
+    // Player component resolution
 
     /**
      * Walks the WorldSystem pointer chain to resolve the player's equipment component (a1 for SlotPopulator). Returns 0
@@ -32,7 +32,7 @@ namespace Transmog
      */
     __int64 resolve_player_component() noexcept;
 
-    // --- Debounce worker ---
+    // Debounce worker
 
     /**
      * Bumps the debounce deadline forward by @p debounce_ms and kicks the persistent worker. Multiple rapid calls
@@ -49,17 +49,17 @@ namespace Transmog
     void ensure_apply_worker_started();
     void stop_apply_worker();
 
-    // --- Load-detection thread ---
+    // Load-detection thread
 
     void start_load_detect_thread();
     void stop_load_detect_thread();
 
-    // --- Deferred nametable scan ---
+    // Deferred nametable scan
 
     void launch_deferred_nametable_scan() noexcept;
     void join_deferred_nametable_scan();
 
-    // --- Deferred PartShowSuppress slot-hash scan ---
+    // Deferred PartShowSuppress slot-hash scan
     //
     // IndexedStringA carries the `CD_Helm` / `CD_Upperbody` / ... part names PartShowSuppress keys on; the table is
     // populated by the engine during world load. Loading LT at cold-launch (before main menu finishes wiring) would
@@ -70,7 +70,7 @@ namespace Transmog
     void launch_deferred_slot_hash_scan() noexcept;
     void join_deferred_slot_hash_scan();
 
-    // --- Targeted-apply redirect ---
+    // Targeted-apply redirect
     //
     // When the user has the editing dropdown pinned to a non-controlled character AND `flag_apply_to_editing` is on,
     // overlay-UI entry points (manual_apply, manual_apply_slot, manual_clear, picker changes, preset cycles) call this

@@ -7,7 +7,7 @@
 
 namespace Transmog
 {
-    // --- Equip type hashes (Jenkins hashlittle) ---
+    // Equip type hashes (Jenkins hashlittle)
 
     inline constexpr uint32_t k_hashHelm = 0x750BE4D5;
     inline constexpr uint32_t k_hashUpperbody = 0x9EFCCE6C;

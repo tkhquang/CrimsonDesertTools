@@ -10,6 +10,8 @@
 #include <string_view>
 #include <vector>
 
+#include <DetourModKit/logger.hpp>
+
 namespace EquipHide
 {
     static std::array<CategoryState, CATEGORY_COUNT> s_states{};
@@ -22,7 +24,7 @@ namespace EquipHide
     /* Part names and categories. Hashes resolved at runtime via IndexedStringA table scan. See .idea/research/ for full
        mapping. */
 
-    // --- Name -> hash table ---
+    // Name -> hash table
     struct NamedPart
     {
         const char *name;
@@ -214,7 +216,7 @@ namespace EquipHide
     };
     // clang-format on
 
-    // --- Runtime hash resolution state ---
+    // Runtime hash resolution state
     static std::unordered_map<std::string, uint32_t> s_runtimeHashes;
     static bool s_hasRuntimeHashes = false;
 
@@ -294,7 +296,7 @@ namespace EquipHide
     {
         if (!s_nameToHashBuilt)
         {
-            auto &logger = DMK::Logger::get_instance();
+            auto &logger = DMK::log();
 
             if (s_hasRuntimeHashes)
             {
@@ -302,8 +304,10 @@ namespace EquipHide
             }
             else
             {
-                logger.info("No runtime hashes available, part map empty "
-                            "(pending deferred scan)");
+                logger.info(
+                    "No runtime hashes available, part map empty "
+                    "(pending deferred scan)"
+                );
             }
             s_nameToHashBuilt = true;
         }
@@ -330,7 +334,7 @@ namespace EquipHide
         return result;
     }
 
-    // --- Parts parser + lookup map ---
+    // Parts parser + lookup map
     static std::unordered_map<uint32_t, CategoryMask> s_partMaps[2];
     static std::atomic<int> s_activeMap{0};
 
@@ -366,8 +370,8 @@ namespace EquipHide
      *          duplication. Logging is suppressed to avoid the per-character build loop spamming the same warnings the
      *          active-map build already emits.
      */
-    static void register_parts_into(Category cat, const std::string &partsStr,
-                                    std::unordered_map<uint32_t, CategoryMask> &target)
+    static void
+    register_parts_into(Category cat, const std::string &partsStr, std::unordered_map<uint32_t, CategoryMask> &target)
     {
         const auto bit = category_bit(cat);
 
@@ -458,7 +462,7 @@ namespace EquipHide
         if (storeBase)
             s_categoryParts[static_cast<std::size_t>(cat)] = partsStr;
 
-        auto &logger = DMK::Logger::get_instance();
+        auto &logger = DMK::log();
         auto &writeMap = s_partMaps[1 - s_activeMap.load(std::memory_order_relaxed)];
 
         // Clear previous entries for this category so that a second callback (e.g. INI override after default
@@ -565,7 +569,6 @@ namespace EquipHide
         }
     }
 
-    // ---------------------------------------------------------------------
     // Per-character part maps, keyed as a separate per-character unordered_map. Rationale: hot path is
     // classify_part_for() called from apply_direct_vis_write per (vis_ctrl, hash) pair on every schedule. Tagging every
     // entry of a single merged map with an array<CategoryMask, k_charIdxCount> (12 bytes per value vs 4) would triple
@@ -575,7 +578,6 @@ namespace EquipHide
     //
     // The per-character maps are built alongside the active-map double-buffer flip in build_part_lookup() so all
     // consumers see the same generation. Each is keyed (hash -> CategoryMask) exactly like the legacy maps.
-    // ---------------------------------------------------------------------
     static std::unordered_map<uint32_t, CategoryMask> s_partMapsPerChar[k_charIdxCount];
 
     // Per-character flat tables, mirroring the active-map flat-table fast path for the contiguous range. Outliers are
@@ -583,7 +585,7 @@ namespace EquipHide
     // maintaining a sorted vector alongside is not worth the rebuild cost.
     static std::array<CategoryMask, k_flatSize> s_flatTablesPerChar[k_charIdxCount]{};
 
-    // --- Outlier hash set ---
+    // Outlier hash set
     static constexpr std::size_t k_maxOutliers = 8;
     static std::atomic<uint32_t> s_outliers[k_maxOutliers]{};
     static std::atomic<int> s_outlierCount{0};
@@ -616,8 +618,11 @@ namespace EquipHide
                 bitset[hash / 64] |= (1ULL << (hash % 64));
         }
 
-        std::sort(outlierTable.begin(), outlierTable.end(),
-                  [](const OutlierEntry &a, const OutlierEntry &b) { return a.hash < b.hash; });
+        std::sort(
+            outlierTable.begin(),
+            outlierTable.end(),
+            [](const OutlierEntry &a, const OutlierEntry &b) { return a.hash < b.hash; }
+        );
 
         std::vector<uint32_t> hashes;
         hashes.reserve(writeMap.size());
@@ -663,7 +668,7 @@ namespace EquipHide
 
         s_outlierCount.store(outlierCount, std::memory_order_release);
 
-        auto &logger = DMK::Logger::get_instance();
+        auto &logger = DMK::log();
         // Skip the summary emit when the part map is empty. The empty case is the initial build that runs before any
         // runtime hash has been resolved; name_to_hash_map() already logs "No runtime hashes available, part map empty
         // (pending deferred scan)" for that state, so a "0 entries" companion here carries no extra signal.
@@ -683,10 +688,18 @@ namespace EquipHide
                 }
             }
 
-            logger.info("Part lookup {}: {} entries across {} categories "
-                        "({}/{} resolved, range 0x{:X}-0x{:X}, {} outliers)",
-                        verb, writeMap.size(), CATEGORY_COUNT, resolved, std::size(k_allParts), rangeMin, rangeMax,
-                        outlierCount);
+            logger.info(
+                "Part lookup {}: {} entries across {} categories "
+                "({}/{} resolved, range 0x{:X}-0x{:X}, {} outliers)",
+                verb,
+                writeMap.size(),
+                CATEGORY_COUNT,
+                resolved,
+                std::size(k_allParts),
+                rangeMin,
+                rangeMax,
+                outlierCount
+            );
 
             if (outlierCount > 0 && logger.is_enabled(DMK::LogLevel::Debug))
             {
@@ -768,7 +781,7 @@ namespace EquipHide
         // Per-category TRACE summary. Runs at the tail of every rebuild_part_lookup() caller (init post-scan,
         // deferred-scan converge, lazy-probe progress, set_active_character, INI auto-reload) so the reported counts
         // reflect the part map that was just published.
-        auto &logger = DMK::Logger::get_instance();
+        auto &logger = DMK::log();
         if (logger.get_log_level() <= DMK::LogLevel::Trace)
         {
             const auto &partMap = s_partMaps[s_activeMap.load(std::memory_order_relaxed)];
@@ -787,8 +800,12 @@ namespace EquipHide
                 if (!enabled)
                     logger.trace("Category {}: disabled ({} parts registered)", category_section(cat), count);
                 else
-                    logger.trace("Category {}: enabled, default={} ({} parts)", category_section(cat),
-                                 hidden ? "hidden" : "visible", count);
+                    logger.trace(
+                        "Category {}: enabled, default={} ({} parts)",
+                        category_section(cat),
+                        hidden ? "hidden" : "visible",
+                        count
+                    );
             }
         }
     }
@@ -800,10 +817,13 @@ namespace EquipHide
         if (prev == clamped)
             return;
 
-        auto &logger = DMK::Logger::get_instance();
+        auto &logger = DMK::log();
         if (clamped >= 0)
-            logger.info("Active character -> {} (idx={})", character_name_for_idx(static_cast<std::size_t>(clamped)),
-                        clamped);
+            logger.info(
+                "Active character -> {} (idx={})",
+                character_name_for_idx(static_cast<std::size_t>(clamped)),
+                clamped
+            );
         else
             logger.info("Active character -> (base, no override)");
 
@@ -822,8 +842,12 @@ namespace EquipHide
         const auto &outliers = s_outlierTables[idx];
         if (!outliers.empty())
         {
-            auto it = std::lower_bound(outliers.begin(), outliers.end(), hash,
-                                       [](const OutlierEntry &e, uint32_t h) { return e.hash < h; });
+            auto it = std::lower_bound(
+                outliers.begin(),
+                outliers.end(),
+                hash,
+                [](const OutlierEntry &e, uint32_t h) { return e.hash < h; }
+            );
             if (it != outliers.end() && it->hash == hash)
                 return it->mask;
         }

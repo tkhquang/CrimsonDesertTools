@@ -1,5 +1,7 @@
 #pragma once
 
+#include <DetourModKit/hook.hpp>
+
 // host_scope: host-scoped gate for the dye-setter substitute.
 //
 // Problem: the engine's frame-render walks every host (player + ~30 NPCs) every apply.
@@ -39,7 +41,7 @@ namespace Transmog::ColorOverride::HostScope
 
     // Install MidHooks on the per-host owner-container vfuncs. Idempotent. Returns true when both hooks installed
     // cleanly.
-    bool init();
+    bool init(DetourModKit::hook::HookStack &hooks);
 
     // Per-window diagnostic counters surfaced via snapshot_stats().
     struct Stats

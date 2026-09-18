@@ -3,11 +3,15 @@
 #include "shared_state.hpp"
 #include "visibility_write.hpp" // vis_byte_offset: the live decode every vis-byte write shares
 
-#include <DetourModKit.hpp>
+#include <DetourModKit/logger.hpp>
+#include <DetourModKit/memory.hpp>
 
 #include <Windows.h>
 
+#include <array>
+#include <cstddef>
 #include <format>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -56,9 +60,14 @@ namespace EquipHide
      * mesh lies at the character's feet and other socket parts disappear. An undersized buffer is worse, because the
      * engine then reads whatever follows it on the stack. Prefer copying the live entry and editing one byte.
      */
-    using MapInsertFn = __int64 *(__fastcall *)(unsigned int *map_base, int **part_hash_pp, unsigned int bucket_key,
-                                                __int64 entry_data, int extra, uint8_t *out_existed,
-                                                __int64 *out_hash_ptr, __int64 *out_data_ptr);
+    using MapInsertFn = __int64 *(__fastcall *)(unsigned int *map_base,
+                                                int **part_hash_pp,
+                                                unsigned int bucket_key,
+                                                __int64 entry_data,
+                                                int extra,
+                                                uint8_t *out_existed,
+                                                __int64 *out_hash_ptr,
+                                                __int64 *out_data_ptr);
 
     // Reject a mapBase that passed the plausible-pointer gate but does not look like a real part-visibility hashtable.
     // A stale/reallocated vis-ctrl descriptor (e.g. a companion despawned between the resolve pass and this write) can
@@ -73,22 +82,23 @@ namespace EquipHide
         // *writes* through [+0x18][entryCount], so a bad entry-pointer array (or a garbage capacity that skips the grow
         // path) faults inside the game. A stale/reallocated descriptor -- or a wrong map offset after a struct
         // re-layout -- fails one of these. Part-vis maps are tiny per-character hashtables.
-        const auto count = DMKMemory::seh_read<std::uint32_t>(mapBase);
-        const auto entryCount = DMKMemory::seh_read<std::uint32_t>(mapBase + 4);
-        const auto cap = DMKMemory::seh_read<std::uint32_t>(mapBase + 8);
-        const auto buckets = DMKMemory::seh_read<std::uintptr_t>(mapBase + 0x10);
-        const auto entryPtrs = DMKMemory::seh_read<std::uintptr_t>(mapBase + 0x18);
+        const auto count = DMK::memory::read<std::uint32_t>(DMK::Address{mapBase});
+        const auto entryCount = DMK::memory::read<std::uint32_t>(DMK::Address{mapBase + 4});
+        const auto cap = DMK::memory::read<std::uint32_t>(DMK::Address{mapBase + 8});
+        const auto buckets = DMK::memory::read<std::uintptr_t>(DMK::Address{mapBase + 0x10});
+        const auto entryPtrs = DMK::memory::read<std::uintptr_t>(DMK::Address{mapBase + 0x18});
         if (!count || !entryCount || !cap || !buckets || !entryPtrs)
             return false;
         if (*count == 0 || *count > 0x400)
             return false;
         if (*cap == 0 || *cap > 0x10000 || *entryCount > *cap)
             return false;
-        if (!DMKMemory::plausible_userspace_ptr(*buckets) || !DMKMemory::plausible_userspace_ptr(*entryPtrs))
+        if (!DMK::memory::is_plausible_ptr(DMK::Address{*buckets}) ||
+            !DMK::memory::is_plausible_ptr(DMK::Address{*entryPtrs}))
             return false;
         // Both arrays MapInsert will index/write must be readable.
-        return DMKMemory::seh_read<std::uint32_t>(*buckets).has_value() &&
-               DMKMemory::seh_read<std::uintptr_t>(*entryPtrs).has_value();
+        return DMK::memory::read<std::uint32_t>(DMK::Address{*buckets}).has_value() &&
+               DMK::memory::read<std::uintptr_t>(DMK::Address{*entryPtrs}).has_value();
     }
 
     static uint32_t compute_bucket_key(uint32_t partHash) noexcept
@@ -101,27 +111,27 @@ namespace EquipHide
 
             // Walk globalAddr -> [+0] -> [+0x58] to the bucket table.
             // The trailing 0 dereferences the +0x58 link so the result is the table pointer itself; without it the
-            // chain would stop at the slot address and corrupt every bucket key.
-            auto tbl = DMKMemory::seh_resolve_chain(globalAddr, {0x00, 0x58, 0x00});
+            // walk would stop at the slot address and corrupt every bucket key.
+            const auto tbl =
+                DMK::memory::walk(DMK::Address{globalAddr}, std::array<std::ptrdiff_t, 3>{0x00, 0x58, 0x00});
             if (!tbl)
             {
                 static std::atomic<bool> s_logOnce{false};
                 if (!s_logOnce.exchange(true, std::memory_order_relaxed))
-                    DMK::Logger::get_instance().warning("compute_bucket_key: tablePtr=NULL "
-                                                        "(globalAddr=0x{:X} +0x58)",
-                                                        globalAddr);
+                    DMK::log().warning("compute_bucket_key: tablePtr=NULL (globalAddr=0x{:X} +0x58)", globalAddr);
                 return 0;
             }
 
             // 16-byte stride table indexed by part hash; the bucket key lives at +8 within the entry. Kept as a
             // separate typed read (not a chain offset) so the indexed arithmetic stays explicit.
-            return DMKMemory::seh_read<uint32_t>(*tbl + 16ULL * partHash + 8).value_or(0);
+            return DMK::memory::read<uint32_t>(tbl->offset(static_cast<std::ptrdiff_t>(16ULL * partHash + 8)))
+                .value_or(0);
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
             static std::atomic<bool> s_logOnce{false};
             if (!s_logOnce.exchange(true, std::memory_order_relaxed))
-                DMK::Logger::get_instance().warning("compute_bucket_key: SEH fault for hash 0x{:04X}", partHash);
+                DMK::log().warning("compute_bucket_key: SEH fault for hash 0x{:04X}", partHash);
             return 0;
         }
     }
@@ -155,7 +165,7 @@ namespace EquipHide
                 auto insert = reinterpret_cast<MapInsertFn>(addrs.mapInsert);
                 auto lookup = reinterpret_cast<MapLookupFn>(addrs.mapLookup);
 
-                auto &logger = DMK::Logger::get_instance();
+                auto &logger = DMK::log();
                 int injected = 0;
                 int existing_set = 0;
                 int skipped_key = 0;
@@ -247,7 +257,9 @@ namespace EquipHide
                     const auto visOff = vis_byte_offset();
 
                     const bool preserved =
-                        existing && DMK::Memory::seh_read_bytes(existing, entryData, k_entryDataSize);
+                        existing &&
+                        DMK::memory::read_into(DMK::Address{existing}, std::as_writable_bytes(std::span{entryData}))
+                            .has_value();
 
                     if (!preserved)
                     {
@@ -269,8 +281,16 @@ namespace EquipHide
 
                     auto *mapBasePtr = reinterpret_cast<unsigned int *>(mapBase);
 
-                    insert(mapBasePtr, &hashPtr, bucketKey, reinterpret_cast<__int64>(entryData), 0, &outExisted,
-                           &outHashPtr, &outDataPtr);
+                    insert(
+                        mapBasePtr,
+                        &hashPtr,
+                        bucketKey,
+                        reinterpret_cast<__int64>(entryData),
+                        0,
+                        &outExisted,
+                        &outHashPtr,
+                        &outDataPtr
+                    );
 
                     if (!outExisted)
                     {
@@ -295,16 +315,22 @@ namespace EquipHide
                     logger.trace("  re-injected visible cache-flush ({}): {}", s_v_reinjected.size(), s_v_joined);
                 }
 
-                logger.debug("ArmorInject map: {} injected, {} existing updated, "
-                             "{} re-injected, {} socket re-injections skipped, {} skipped (no bucket key)",
-                             injected, existing_set, reinjected, socket_reinjection_skipped, skipped_key);
+                logger.debug(
+                    "ArmorInject map: {} injected, {} existing updated, "
+                    "{} re-injected, {} socket re-injections skipped, {} skipped (no bucket key)",
+                    injected,
+                    existing_set,
+                    reinjected,
+                    socket_reinjection_skipped,
+                    skipped_key
+                );
                 result = injected;
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
                 static std::atomic<bool> s_crashLogged{false};
                 if (!s_crashLogged.exchange(true, std::memory_order_relaxed))
-                    DMK::Logger::get_instance().warning("ArmorInject: SEH caught crash during map insertion");
+                    DMK::log().warning("ArmorInject: SEH caught crash during map insertion");
                 result = -1;
             }
         }
@@ -349,7 +375,7 @@ namespace EquipHide
         if (n <= 0)
             return;
 
-        auto &logger = DMK::Logger::get_instance();
+        auto &logger = DMK::log();
         int totalInjected = 0;
 
         for (int i = 0; i < n; ++i)
@@ -370,14 +396,23 @@ namespace EquipHide
             {
                 // Resolve the part-info descriptor and its part-visibility map. Offsets and the re-verification
                 // recipe live on the k_visCtrl* constants in visibility_write.hpp; the direct-write pass walks the
-                // same three. seh_read_chain dereferences the terminal link, so `*desc` (the optional unwrap) IS the
-                // descriptor pointer.
-                auto desc =
-                    DMKMemory::seh_read_chain<std::uintptr_t>(vc, {k_visCtrlToCccOffset, k_cccToDescriptorOffset});
+                // same three. The walk stops at the descriptor SLOT, so the trailing read is what yields the
+                // descriptor pointer itself.
+                const auto desc =
+                    DMK::memory::walk(
+                        DMK::Address{vc},
+                        std::array<std::ptrdiff_t, 2>{k_visCtrlToCccOffset, k_cccToDescriptorOffset}
+                    )
+                        .and_then([](DMK::Address leaf) { return DMK::memory::read<std::uintptr_t>(leaf); });
                 if (!desc)
                 {
-                    logger.trace("ArmorInject [{}]: vc=0x{:X} descriptor=NULL (+{:#x} -> +{:#x})", i, vc,
-                                 k_visCtrlToCccOffset, k_cccToDescriptorOffset);
+                    logger.trace(
+                        "ArmorInject [{}]: vc=0x{:X} descriptor=NULL (+{:#x} -> +{:#x})",
+                        i,
+                        vc,
+                        k_visCtrlToCccOffset,
+                        k_cccToDescriptorOffset
+                    );
                     continue;
                 }
                 auto mapBase = *desc + k_descriptorToPartVisMapOffset;
@@ -385,25 +420,41 @@ namespace EquipHide
                 // Reject a non-faulting garbage mapBase from a drifted chain (the SEH read only traps an actual
                 // fault, not a wrong-but-mapped pointer). Skip this vis-controller rather than inject into a wrong
                 // map.
-                if (!DMKMemory::plausible_userspace_ptr(mapBase))
+                if (!DMK::memory::is_plausible_ptr(DMK::Address{mapBase}))
                 {
-                    logger.trace("ArmorInject [{}]: vc=0x{:X} implausible mapBase=0x{:X} (+{:#x} -> +{:#x} -> +{:#x})",
-                                 i, vc, mapBase, k_visCtrlToCccOffset, k_cccToDescriptorOffset,
-                                 k_descriptorToPartVisMapOffset);
+                    logger.trace(
+                        "ArmorInject [{}]: vc=0x{:X} implausible mapBase=0x{:X} (+{:#x} -> +{:#x} -> +{:#x})",
+                        i,
+                        vc,
+                        mapBase,
+                        k_visCtrlToCccOffset,
+                        k_cccToDescriptorOffset,
+                        k_descriptorToPartVisMapOffset
+                    );
                     continue;
                 }
 
                 if (!part_vis_map_looks_valid(mapBase))
                 {
-                    logger.trace("ArmorInject [{}]: vc=0x{:X} mapBase=0x{:X} not a valid part-vis map "
-                                 "(stale/reallocated descriptor) -- skipping",
-                                 i, vc, mapBase);
+                    logger.trace(
+                        "ArmorInject [{}]: vc=0x{:X} mapBase=0x{:X} not a valid part-vis map "
+                        "(stale/reallocated descriptor) -- skipping",
+                        i,
+                        vc,
+                        mapBase
+                    );
                     continue;
                 }
 
-                logger.trace("ArmorInject [{}]: vc=0x{:X} descriptor=0x{:X} "
-                             "mapBase=0x{:X} char_idx={}",
-                             i, vc, *desc, mapBase, charIdx);
+                logger.trace(
+                    "ArmorInject [{}]: vc=0x{:X} descriptor=0x{:X} "
+                    "mapBase=0x{:X} char_idx={}",
+                    i,
+                    vc,
+                    *desc,
+                    mapBase,
+                    charIdx
+                );
 
                 int result = inject_armor_entries_for_map(mapBase, charIdx);
                 if (result >= 0)

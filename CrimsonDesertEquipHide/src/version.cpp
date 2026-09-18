@@ -6,7 +6,7 @@ namespace EquipHide::Version
 {
     void log_version_info()
     {
-        auto &logger = DMK::Logger::get_instance();
+        auto &logger = DMK::log();
         logger.info("----------------------------------------------------------");
         logger.info("{} {} ({} {})", MOD_NAME, TAG, BUILD_DATE, BUILD_TIME);
         logger.info("Author: {}", AUTHOR);

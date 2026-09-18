@@ -2,6 +2,8 @@
 
 #include <Windows.h>
 
+#include <DetourModKit/memory.hpp>
+
 namespace Transmog::ColorOverride::MatInstProbe
 {
     bool probe_matinst(std::uintptr_t mi, MatInstFields &out) noexcept
@@ -10,19 +12,19 @@ namespace Transmog::ColorOverride::MatInstProbe
         if (!is_likely_heap(mi))
             return false;
 
-        const auto vtable = DMKMemory::seh_read<std::uintptr_t>(mi);
-        const auto template_id = DMKMemory::seh_read<std::uint16_t>(mi + k_offMi_TemplateId);
-        const auto stable_id = DMKMemory::seh_read<std::uint64_t>(mi + k_offMi_StableId);
+        const auto vtable = DMK::memory::read<std::uintptr_t>(DMK::Address{mi});
+        const auto template_id = DMK::memory::read<std::uint16_t>(DMK::Address{mi + k_offMi_TemplateId});
+        const auto stable_id = DMK::memory::read<std::uint64_t>(DMK::Address{mi + k_offMi_StableId});
         if (!vtable || !template_id || !stable_id)
             return false;
 
-        // Resolve the arec backref EXPLICITLY (not via seh_read_chain):
-        // its `is_likely_heap` floor (0x200000000) is stricter than the chain primitive's `plausible_userspace_ptr`
+        // Resolve the arec backref EXPLICITLY (not via memory::walk):
+        // its `is_likely_heap` floor (0x200000000) is stricter than the chain primitive's default `min_valid`
         // floor (0x10000), which would let a bogus-low arec through.
-        const auto arec = DMKMemory::seh_read<std::uintptr_t>(mi + k_offMi_ArecBackref);
+        const auto arec = DMK::memory::read<std::uintptr_t>(DMK::Address{mi + k_offMi_ArecBackref});
         if (!arec || !is_likely_heap(*arec))
             return false;
-        const auto content_hash = DMKMemory::seh_read<std::uint32_t>(*arec + k_offArec_ContentHash);
+        const auto content_hash = DMK::memory::read<std::uint32_t>(DMK::Address{*arec + k_offArec_ContentHash});
         if (!content_hash)
             return false;
 
@@ -39,7 +41,7 @@ namespace Transmog::ColorOverride::MatInstProbe
         out = {};
         if (wrapper == 0)
             return false;
-        const auto mi = DMKMemory::seh_read<std::uintptr_t>(wrapper + k_offMat_WrapperBackref).value_or(0);
+        const auto mi = DMK::memory::read<std::uintptr_t>(DMK::Address{wrapper + k_offMat_WrapperBackref}).value_or(0);
         return probe_matinst(mi, out);
     }
 

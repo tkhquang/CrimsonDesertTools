@@ -34,18 +34,22 @@ endif()
 
 add_library(CrimsonDesertCore STATIC
     src/controlled_char.cpp
-    src/dev_helpers.cpp
-    src/dmk_glue.cpp
     src/indexed_string_table.cpp
 )
 
-# Path to the shared dev-build hot-reload loader source. Consumers that
-# build the dev two-DLL variant reference this directly from their own
-# add_library(..._loader SHARED ...) call and supply the three
-# CDCORE_LOADER_* macros via target_compile_definitions.
+# Shared dev-build hot-reload loader. A consumer that builds the dev two-DLL
+# variant references the source directly from its own
+# add_library(..._loader SHARED ...) call, adds the dev directory to its
+# include path for protocol.h, and supplies the two CDCORE_LOADER_* macros via
+# target_compile_definitions. The loader links DetourModKit::WheelHost ONLY: a
+# second full-archive instance would give it its own hook ledger and pin the
+# logic DLL again, which is exactly the arrangement DMK's unload proofs exclude.
 set(CDCORE_DEV_LOADER_SRC
-    "${CMAKE_CURRENT_SOURCE_DIR}/dev/loader_main.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/dev/mod_loader.cpp"
     CACHE INTERNAL "Path to CrimsonDesertCore shared dev loader source")
+set(CDCORE_DEV_INCLUDE_DIR
+    "${CMAKE_CURRENT_SOURCE_DIR}/dev"
+    CACHE INTERNAL "Path to the CrimsonDesertCore dev protocol header")
 
 add_library(CrimsonDesertCore::core ALIAS CrimsonDesertCore)
 

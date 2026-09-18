@@ -1,8 +1,10 @@
 #pragma once
 
+#include <DetourModKit/hook.hpp>
+
 // Body-shader publisher MidHook. Fires per-matInst during the engine's frame-render walk; captures matInsts (RCX + RDX)
 // into the active slot's carrier set + hash set + matInst-owner map. The target is AOB-resolved via
-// `k_colorPublisherCandidates` in aob_resolver.hpp.
+// `color_publisher()` in aob_resolver.hpp.
 
 #include <cstdint>
 
@@ -12,7 +14,7 @@ namespace Transmog::ColorOverride::PublisherHook
      * Install the MidHook. Returns true on success, false if the AOB cascade fails to resolve the publisher entry
      * point.
      */
-    bool init();
+    bool init(DetourModKit::hook::HookStack &hooks);
 
     struct Stats
     {

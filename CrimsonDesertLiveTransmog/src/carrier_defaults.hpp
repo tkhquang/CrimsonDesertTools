@@ -176,7 +176,7 @@ namespace Transmog
     };
     // clang-format on
 
-    // Lookup helpers ----------------------------------------------------
+    // Lookup helpers
 
     inline std::optional<CarrierChar> carrier_char_from_name(std::string_view name) noexcept
     {
@@ -189,8 +189,10 @@ namespace Transmog
         return std::nullopt;
     }
 
-    /// Character name for a CarrierChar. Inverse of @ref carrier_char_from_name; the names are the same keys
-    /// PresetManager stores per-character state under.
+    /**
+     * @brief Character name for a CarrierChar. Inverse of @ref carrier_char_from_name; the names are the same keys
+     * PresetManager stores per-character state under.
+     */
     inline constexpr std::string_view carrier_char_name(CarrierChar c) noexcept
     {
         switch (c)

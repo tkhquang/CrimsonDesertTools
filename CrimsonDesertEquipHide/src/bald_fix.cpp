@@ -41,8 +41,8 @@ namespace EquipHide
             if (v == 0)
             {
                 uintptr_t expected = 0;
-                if (table[i].compare_exchange_strong(expected, ctx, std::memory_order_relaxed,
-                                                     std::memory_order_relaxed))
+                if (table[i]
+                        .compare_exchange_strong(expected, ctx, std::memory_order_relaxed, std::memory_order_relaxed))
                     return true;
                 /* Race: another thread claimed this slot. If it claimed the slot with the same ctx, we are done.
                    Otherwise keep scanning. */
@@ -245,13 +245,15 @@ namespace EquipHide
                     (is_category_hidden(Category::Helm) || is_category_hidden(Category::Cloak) ||
                      is_category_hidden(Category::Mask)))
                 {
-                    auto &logger = DMK::Logger::get_instance();
+                    auto &logger = DMK::log();
                     if (is_npc_call_stack(resolved_addrs().npcPfeReturnAddr))
                     {
                         if (log_dedup_claim(s_loggedRejectCtxs, ctx))
-                            logger.trace("BaldFix: filtered prefab-instantiation "
-                                         "call (ctx=0x{:X})",
-                                         ctx);
+                            logger.trace(
+                                "BaldFix: filtered prefab-instantiation "
+                                "call (ctx=0x{:X})",
+                                ctx
+                            );
                         /* Fall through to original evaluator untouched. */
                     }
                     else

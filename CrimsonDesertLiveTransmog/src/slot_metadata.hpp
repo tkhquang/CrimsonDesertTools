@@ -116,8 +116,10 @@ namespace Transmog
         // clang-format on
     };
 
-    static_assert(sizeof(k_slotMetadata) / sizeof(k_slotMetadata[0]) == k_slotCount,
-                  "k_slotMetadata length must match TransmogSlot::Count");
+    static_assert(
+        sizeof(k_slotMetadata) / sizeof(k_slotMetadata[0]) == k_slotCount,
+        "k_slotMetadata length must match TransmogSlot::Count"
+    );
 
     // Compile-time index/slot drift check. The constexpr loop expands into per-row static_asserts so a misordered or
     // duplicated row is caught at build time rather than at runtime.
@@ -133,8 +135,11 @@ namespace Transmog
             return true;
         }
     } // namespace detail
-    static_assert(detail::slot_metadata_indices_match(), "k_slotMetadata row order must match TransmogSlot enum order "
-                                                         "(SlotMetadata.slot at row i must equal TransmogSlot(i)).");
+    static_assert(
+        detail::slot_metadata_indices_match(),
+        "k_slotMetadata row order must match TransmogSlot enum order "
+        "(SlotMetadata.slot at row i must equal TransmogSlot(i))."
+    );
 
     // Direct accessor by enum value. O(1).
     inline constexpr const SlotMetadata &slot_meta(TransmogSlot s) noexcept
@@ -214,7 +219,7 @@ namespace Transmog
             }
         }
 
-        // --- Specific-name weapons (unambiguous slot) ---
+        // Specific-name weapons (unambiguous slot)
         if (has("_dagger_"))
             return TransmogSlot::SubWeapon;
         if (has("_alebard_") || has("_pike_") || has("_spear_") || has("_greekfire_") || has("_icethrower_") ||
@@ -226,7 +231,7 @@ namespace Transmog
             has("_shotgun_") || has("_bomb_") || has("_blowpipe_"))
             return TransmogSlot::Ranged;
 
-        // --- Ambiguous weapon tags: disambiguate by numeric role ---
+        // Ambiguous weapon tags: disambiguate by numeric role
         // Convention from the v1.05.01 prefab catalog (TSV scan):
         //   _01_ = 1H, _02_ = 2H, _03_ = shield, _04..06,08,10,13 = ranged.
         if (has("_sword_") || has("_axe_") || has("_mace_") || has("_lance_") || has("_hammer_") || has("_cannon_") ||
@@ -249,7 +254,7 @@ namespace Transmog
             }
         }
 
-        // --- Body parts (substring tags work across all role prefixes) ---
+        // Body parts (substring tags work across all role prefixes)
         if (has("_hel_"))
             return TransmogSlot::Helm;
         if (has("_ub_"))
@@ -308,8 +313,10 @@ namespace Transmog
     // real_part_tear_down.cpp. What is pinned is this function's own contract -- a slot that is not the second half
     // of a pair must name no first half, or the apply path would exclude an unrelated slot from resolution.
     static_assert(paired_first_half_tag(TransmogSlot::Helm) == k_noGameTag, "only paired slots may name a first half");
-    static_assert(paired_first_half_tag(TransmogSlot::Earring1) == k_noGameTag,
-                  "the FIRST half of a pair must name no first half");
+    static_assert(
+        paired_first_half_tag(TransmogSlot::Earring1) == k_noGameTag,
+        "the FIRST half of a pair must name no first half"
+    );
 
     /**
      * @brief Does this slot share its item TYPE with a sibling slot?

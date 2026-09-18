@@ -59,7 +59,7 @@ namespace EquipHide::Version
     }
 
     /**
-     * @brief Logs mod identity, version, and build timestamp via DMK::Logger. Requires the logger to already be
+     * @brief Logs mod identity, version, and build timestamp through DMK::log(). Requires the logger to already be
      *        configured.
      */
     void log_version_info();

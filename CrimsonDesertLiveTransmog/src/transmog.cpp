@@ -2,6 +2,7 @@
 #include "aob_resolver.hpp"
 #include "auth_table.hpp"
 #include "color_override/color_override.hpp"
+#include "color_override/color_token_discovery.hpp"
 #include "color_override/color_token_table.hpp"
 #include "color_override/host_scope.hpp"
 #include "dye_record_inject.hpp"
@@ -26,10 +27,19 @@
 #include "transmog_worker.hpp"
 #include "helm_audio_filter.hpp"
 
+#include <cdcore/anchors.hpp>
 #include <cdcore/controlled_char.hpp>
-#include <cdcore/dmk_glue.hpp>
 
-#include <DetourModKit.hpp>
+#include <DetourModKit/abi/wheel_host.h>
+#include <DetourModKit/config.hpp>
+#include <DetourModKit/diagnostics.hpp>
+#include <DetourModKit/error.hpp>
+#include <DetourModKit/hook.hpp>
+#include <DetourModKit/input.hpp>
+#include <DetourModKit/logger.hpp>
+#include <DetourModKit/memory.hpp>
+#include <DetourModKit/scan.hpp>
+#include <DetourModKit/session.hpp>
 
 #include <Windows.h>
 
@@ -38,119 +48,142 @@
 #include <chrono>
 #include <fstream>
 #include <string>
+#include <string_view>
 #include <thread>
 
 namespace Transmog
 {
-    // --- Config ---
+    // Every hook the mod installs, from every feature module. A HookStack restores newest first, the only safe order
+    // for layered hooks on one target: an older layer's restore would otherwise clobber a prologue a newer layer's
+    // live trampoline still chains through. Each installer takes it by reference and pushes what it armed, so the
+    // whole mod tears down through one clear() in shutdown(), while the code pages are still mapped.
+    static DMK::hook::HookStack s_hooks;
 
-    static void load_config()
+    // EquipHide's module name, used to yield the shared PartAddShow target to it. Both of EquipHide's shipped shapes
+    // -- the release single ASI and the dev resident loader that stages a logic DLL -- load under this exact name.
+    inline constexpr std::string_view k_equipHideModule = "CrimsonDesertEquipHide.asi";
+
+    // Config
+
+    static void load_config(DMK::Session &session)
     {
-        DMK::Config::register_log_level("General", "LogLevel", "INFO");
+        // Section-scoped binders, so each INI section name is written once here instead of heading every call.
+        const DMK::config::SectionBinder general = DMK::config::section("General");
+        const DMK::config::SectionBinder experimental = DMK::config::section("Experimental");
+        const DMK::config::SectionBinder diagnostics = DMK::config::section("Diagnostics");
+        const DMK::config::SectionBinder advanced = DMK::config::section("Advanced");
 
-        DMK::Config::register_atomic<bool>("General", "Enabled", "Enabled", flag_enabled(), true);
+        general.bind_log_level("LogLevel", "INFO");
 
-        DMK::Config::register_atomic<bool>("General", "PlayerOnly", "Player Only", flag_player_only(), true);
+        general.bind<bool>("Enabled", "Enabled", flag_enabled(), true);
+
+        general.bind<bool>("PlayerOnly", "Player Only", flag_player_only(), true);
 
         // When the dropdown is pinned to a non-controlled character, route overlay-UI edits onto that character's body
         // instead of cross-applying onto whoever you control. Engine-triggered equip events still target the
         // controlled body, so the controlled character's transmog stays consistent across their own gear changes.
         // Disable to restore the legacy cross-body behavior (preset items rendered on the controlled body regardless
         // of the dropdown).
-        DMK::Config::register_atomic<bool>("General", "ApplyToSelectedCharacter", "Apply To Selected Character",
-                                           flag_apply_to_editing(), true);
+        general.bind<bool>("ApplyToSelectedCharacter", "Apply To Selected Character", flag_apply_to_editing(), true);
 
         // Advanced: rtti_dissect self-heal search radius (bytes, per side) for the manager->userActor offset recovery
         // in CDCore. The default 0x200 covers roughly ten times the worst drift seen so far. Raise it toward
         // MAX_HEAL_WINDOW only if a game patch pushes the field further. Not for normal users.
-        DMK::Config::register_atomic<int>("Advanced", "SelfHealWindow", "Self Heal Window",
-                                          CDCore::heal_window_setting(), 0x200);
+        advanced.bind<int>("SelfHealWindow", "Self Heal Window", CDCore::heal_window_setting(), 0x200);
 
         // When true, always use the standalone transparent overlay window instead of the ReShade addon tab. Useful if
         // ReShade is installed but the user prefers the standalone overlay.
-        DMK::Config::register_bool(
-            "General", "ForceStandaloneOverlay", "Force Standalone Overlay",
-            [](bool val) { set_force_standalone(val); }, false);
+        general.bind_bool(
+            "ForceStandaloneOverlay",
+            "Force Standalone Overlay",
+            [](bool val) { set_force_standalone(val); },
+            false
+        );
 
         // Protagonist codename overrides for CDCore's appearance-config classifier. Each codename is a substring
         // search target inside the actor's appearance-config asset path. The defaults match the shipped engine
         // subfolder names. The overrides exist in case a future patch or mod renames a subfolder. Empty values are
         // ignored.
-        DMK::Config::register_string(
-            "General", "KliffCodename", "Kliff Codename",
-            [](const std::string &val) { CDCore::set_protagonist_codenames(val, {}, {}); }, "cd_phm_macduff");
-        DMK::Config::register_string(
-            "General", "DamianeCodename", "Damiane Codename",
-            [](const std::string &val) { CDCore::set_protagonist_codenames({}, val, {}); }, "cd_phw_damian");
-        DMK::Config::register_string(
-            "General", "OongkaCodename", "Oongka Codename",
-            [](const std::string &val) { CDCore::set_protagonist_codenames({}, {}, val); }, "cd_phm_oongka");
+        general.bind_string(
+            "KliffCodename",
+            "Kliff Codename",
+            [](std::string_view val) { CDCore::set_protagonist_codenames(val, {}, {}); },
+            "cd_phm_macduff"
+        );
+        general.bind_string(
+            "DamianeCodename",
+            "Damiane Codename",
+            [](std::string_view val) { CDCore::set_protagonist_codenames({}, val, {}); },
+            "cd_phw_damian"
+        );
+        general.bind_string(
+            "OongkaCodename",
+            "Oongka Codename",
+            [](std::string_view val) { CDCore::set_protagonist_codenames({}, {}, val); },
+            "cd_phm_oongka"
+        );
 
         // Experimental: master toggle for the per-shader-property ColorOverride pipeline (publisher hook, setter
         // substitute, host-scope owner-vfunc midhooks, and the per-region color picker UI). Disabled by default. The
         // feature relies on AOB-resolved engine entry points that can shift under a major game patch.
-        DMK::Config::register_atomic<bool>("Experimental", "ColorOverride", "Color Override", flag_color_override(),
-                                           false);
+        experimental.bind<bool>("ColorOverride", "Color Override", flag_color_override(), false);
 
         // Experimental: helm voice-unmuffle filter. Disabled by default. Enable it to remove the engine's stock
         // plate/heavy-helm voice muffle on protagonists. The hook installs at startup only when this is true, so a
         // toggle change takes effect on the next game launch. NPC voice muffle is unaffected either way.
-        DMK::Config::register_atomic<bool>("Experimental", "UnmuffleHelmVoice", "Unmuffle Helm Voice",
-                                           flag_helm_audio_unmuffle(), false);
+        experimental.bind<bool>("UnmuffleHelmVoice", "Unmuffle Helm Voice", flag_helm_audio_unmuffle(), false);
 
         // One-shot diagnostic TSV dumps. Off by default. Enable them to capture item-catalog and item->prefab
         // snapshots after ItemNameTable::build() lands. Both files are written to the plugin's runtime directory.
-        DMK::Config::register_atomic<bool>("Diagnostics", "DumpItemPrefabsTsv", "Dump Item->Prefab TSV",
-                                           flag_dump_item_prefabs(), false);
-        DMK::Config::register_atomic<bool>("Diagnostics", "DumpItemCatalogTsv", "Dump Item Catalog TSV",
-                                           flag_dump_item_catalog(), false);
+        diagnostics.bind<bool>("DumpItemPrefabsTsv", "Dump Item->Prefab TSV", flag_dump_item_prefabs(), false);
+        diagnostics.bind<bool>("DumpItemCatalogTsv", "Dump Item Catalog TSV", flag_dump_item_catalog(), false);
 
         // Auto-reload toggle. An off-by-default watcher forces a relaunch for every INI tweak. On-by-default keeps the
-        // iteration loop tight. Setters invoked from the watcher thread are idempotent (every register_atomic and
-        // register_press_combo path is safe to re-fire).
+        // iteration loop tight. Setters invoked from the watcher thread are idempotent (every bind and press_combo
+        // path is safe to re-fire).
         static std::atomic<bool> s_autoReload{true};
-        DMK::Config::register_atomic<bool>("General", "AutoReloadConfig", "Auto-Reload Config", s_autoReload, true);
+        general.bind<bool>("AutoReloadConfig", "Auto-Reload Config", s_autoReload, true);
 
-        // Hotkey bindings are registered here, while the Config registry fills, so the press_combo INI keys
-        // participate in the same Config::load() pass below. register_press_combo also ties each binding to
-        // InputManager directly. InputManager::start() must therefore run after this call (handled in init() further
-        // down).
-        register_hotkeys();
+        // Hotkey bindings are registered here, while the config registry fills, so the press_combo INI keys
+        // participate in the same load pass below. press_combo also registers each binding with the input engine, so
+        // Input::start() has to run after this call (handled in init() further down). The returned guards go into the
+        // Session's input scope, which ~Session clears first and in reverse insertion order.
+        register_hotkeys(session.scope());
 
         PrefabWrapperSwap::register_config();
 
-        DMK::Config::load(INI_FILE);
-        DMK::Config::log_all();
+        session.ini().load(INI_FILE);
+        DMK::config::log_all();
 
         if (s_autoReload.load(std::memory_order_relaxed))
         {
             // Atomic flags update silently through their per-setter callbacks. The watcher does not drive any
             // game-state work. A re-apply or a clear of transmog still requires a hotkey or an in-game action.
-            const auto status =
-                DMK::Config::enable_auto_reload(std::chrono::milliseconds{250},
-                                                [](bool content_changed)
-                                                {
-                                                    auto &logger = DMK::Logger::get_instance();
-                                                    if (content_changed)
-                                                        logger.info("INI auto-reload: setters applied");
-                                                    else
-                                                        logger.info("INI auto-reload: skipped (no content delta)");
-                                                });
-            if (status != DMK::Config::AutoReloadStatus::Started &&
-                status != DMK::Config::AutoReloadStatus::AlreadyRunning)
+            const auto status = DMK::config::enable_auto_reload(
+                std::chrono::milliseconds{250},
+                [](bool content_changed)
+                {
+                    auto &logger = DMK::log();
+                    if (content_changed)
+                        logger.info("INI auto-reload: setters applied");
+                    else
+                        logger.info("INI auto-reload: skipped (no content delta)");
+                }
+            );
+            if (status != DMK::config::AutoReloadStatus::Started &&
+                status != DMK::config::AutoReloadStatus::AlreadyRunning)
             {
-                DMK::Logger::get_instance().warning("INI auto-reload could not start (status enum {})",
-                                                    static_cast<int>(status));
+                DMK::log().warning("INI auto-reload could not start (status enum {})", static_cast<int>(status));
             }
         }
     }
 
-    // --- Player-component layout ---
+    // Player-component layout
     //
     // Auth-table geometry (container pointer, entry stride, field offsets) lives in auth_table.hpp -- one copy for
     // the whole mod, because the whole struct moves as a unit on patch day.
 
-    // --- Public interface ---
+    // Public interface
 
     static __int64 get_player_a1()
     {
@@ -211,10 +244,13 @@ namespace Transmog
             }
             if (!live)
             {
-                DMK::Logger::get_instance().info("[targeted-apply] editing '{}' not currently "
-                                                 "loaded -- preset edit saved, render deferred "
-                                                 "until {} is in the world",
-                                                 editName, editName);
+                DMK::log().info(
+                    "[targeted-apply] editing '{}' not currently "
+                    "loaded -- preset edit saved, render deferred "
+                    "until {} is in the world",
+                    editName,
+                    editName
+                );
                 return false;
             }
 
@@ -227,18 +263,18 @@ namespace Transmog
     {
         if (!slot_populator_fn())
         {
-            DMK::Logger::get_instance().debug("Manual apply: SlotPopulator not resolved (AOB failed)");
+            DMK::log().debug("Manual apply: SlotPopulator not resolved (AOB failed)");
             return;
         }
         if (!is_world_ready())
         {
-            DMK::Logger::get_instance().debug("Manual apply: player not found");
+            DMK::log().debug("Manual apply: player not found");
             return;
         }
         if (!prime_targeted_apply_if_pinned())
             return;
 
-        DMK::Logger::get_instance().debug("Manual apply: scheduling (debounced)");
+        DMK::log().debug("Manual apply: scheduling (debounced)");
         clear_pending().store(false, std::memory_order_release);
         // Reset to "all slots" so the worker runs the full path.
         pending_slot_index().store(k_slotCount, std::memory_order_release);
@@ -251,13 +287,13 @@ namespace Transmog
             return;
         if (!is_world_ready())
         {
-            DMK::Logger::get_instance().debug("Manual apply slot={}: player not found", slotIdx);
+            DMK::log().debug("Manual apply slot={}: player not found", slotIdx);
             return;
         }
         if (!prime_targeted_apply_if_pinned())
             return;
 
-        DMK::Logger::get_instance().debug("Manual apply slot={}: scheduling (debounced)", slotIdx);
+        DMK::log().debug("Manual apply slot={}: scheduling (debounced)", slotIdx);
         clear_pending().store(false, std::memory_order_release);
         pending_slot_index().store(slotIdx, std::memory_order_release);
         schedule_transmog_ms(k_manualDebounceMs);
@@ -269,13 +305,13 @@ namespace Transmog
             return;
         if (!is_world_ready())
         {
-            DMK::Logger::get_instance().warning("Manual clear: player not found");
+            DMK::log().warning("Manual clear: player not found");
             return;
         }
         if (!prime_targeted_apply_if_pinned())
             return;
 
-        DMK::Logger::get_instance().info("Manual clear: scheduling (debounced)");
+        DMK::log().info("Manual clear: scheduling (debounced)");
         clear_pending().store(true, std::memory_order_release);
         schedule_transmog_ms(k_manualDebounceMs);
     }
@@ -291,7 +327,8 @@ namespace Transmog
     // capture_outfit() owns one. Keep this function out of every __try frame.
     static std::size_t apply_live_dye_to_preset_slot(
         PresetSlot &slotPreset,
-        const DyeRecordInject::ChannelState (&live)[DyeRecordInject::k_dyeChannelCount]) noexcept
+        const DyeRecordInject::ChannelState (&live)[DyeRecordInject::k_dyeChannelCount]
+    ) noexcept
     {
         slotPreset.dyeSparse = true;
         std::size_t written = 0;
@@ -332,7 +369,7 @@ namespace Transmog
     // caller passes a stale or torn auth table. capture_outfit()'s __try/__except is the only line of defense.
     static void capture_live_dye_into_active_preset(uintptr_t entryArray, uint32_t entryCount) noexcept
     {
-        auto &logger = DMK::Logger::get_instance();
+        auto &logger = DMK::log();
         auto *activePreset = PresetManager::instance().active_preset_mut();
         if (activePreset == nullptr)
             return;
@@ -388,7 +425,7 @@ namespace Transmog
     {
         if (!slot_populator_fn())
             return;
-        auto &logger = DMK::Logger::get_instance();
+        auto &logger = DMK::log();
         auto a1 = get_player_a1();
         if (a1 < 0x10000)
         {
@@ -471,7 +508,7 @@ namespace Transmog
 
     void capture_real_equipment()
     {
-        auto &logger = DMK::Logger::get_instance();
+        auto &logger = DMK::log();
         auto a1 = get_player_a1();
         if (a1 < 0x10000)
         {
@@ -563,7 +600,7 @@ namespace Transmog
 
     bool sync_live_dye_for_slot(std::size_t slotIdx) noexcept
     {
-        auto &logger = DMK::Logger::get_instance();
+        auto &logger = DMK::log();
         if (slotIdx >= k_slotCount)
             return false;
         if (!Transmog::slot_enabled(slotIdx))
@@ -591,9 +628,12 @@ namespace Transmog
         const auto entryBase = find_auth_entry_for_game_tag(a1, gameTag);
         if (entryBase == 0)
         {
-            logger.info("[dye-sync] no auth-table entry for slot {} "
-                        "(gameTag={:#x}) -- skipped",
-                        slot_name(tslot), gameTag);
+            logger.info(
+                "[dye-sync] no auth-table entry for slot {} "
+                "(gameTag={:#x}) -- skipped",
+                slot_name(tslot),
+                gameTag
+            );
             return false;
         }
 
@@ -601,9 +641,11 @@ namespace Transmog
         const auto dyeFilled = DyeRecordInject::read_entry_dye_records(entryBase, live);
         if (dyeFilled == 0)
         {
-            logger.info("[dye-sync] slot {} has no live dye records -- "
-                        "preset slot left untouched",
-                        slot_name(tslot));
+            logger.info(
+                "[dye-sync] slot {} has no live dye records -- "
+                "preset slot left untouched",
+                slot_name(tslot)
+            );
             return false;
         }
 
@@ -625,13 +667,13 @@ namespace Transmog
         return any;
     }
 
-    // --- Init / Shutdown ---
+    // Init / Shutdown
 
-    bool init()
+    DMK::Result<void> init(DMK::Session &session, const WheelHostTable *wheel_host)
     {
-        auto &logger = DMK::Logger::get_instance();
+        auto &logger = DMK::log();
 
-        // --- Required asset gate ---
+        // Required asset gate
         //
         // The display-names TSV ships with the mod and is required for the catalog UI and name-keyed preset
         // resolution. A missing file means the user installed the mod incorrectly. Surface a hard, visible error
@@ -650,63 +692,47 @@ namespace Transmog
                                    "verify all files are present.\n\nThe mod will not "
                                    "function.";
                 logger.error("{}", body);
-                ::MessageBoxA(nullptr, body.c_str(), "CrimsonDesertLiveTransmog -- missing asset",
-                              MB_OK | MB_ICONERROR | MB_TOPMOST | MB_SYSTEMMODAL);
-                return false;
+                ::MessageBoxA(
+                    nullptr,
+                    body.c_str(),
+                    "CrimsonDesertLiveTransmog -- missing asset",
+                    MB_OK | MB_ICONERROR | MB_TOPMOST | MB_SYSTEMMODAL
+                );
+                return std::unexpected(DMK::Error{DMK::ErrorCode::FileOpenFailed, "Transmog::init"});
             }
         }
 
         // Apply config before the resolver and hook-install steps so the INI LogLevel takes effect for any TRACE/DEBUG
-        // emissions that follow. Setters dispatched by Config::load() touch only atomics, preset/state structures and
-        // InputManager bindings. None of them depend on resolved addresses, which are populated below.
-        load_config();
+        // emissions that follow. Setters dispatched by the INI load touch only atomics, preset/state structures and
+        // input bindings. None of them depend on resolved addresses, which are populated below.
+        load_config(session);
 
-        if (!DMK::Memory::init_cache())
+        if (!DMK::memory::init_cache())
             logger.warning("Memory cache init failed -- pointer reads may be slower");
 
-        // --- Resolve AOB addresses ---
+        // Resolve AOB addresses
         //
         // These targets are independent: each scans a static candidate table and none reads another's resolved
-        // address. They all live in the host EXE, so resolve them in one fork-join batch rather than one serial
-        // host-module scan each. Each per-target validation and side-effect block below runs in the batch order, and
-        // every block touches only its own address, so the hoisted scans preserve behavior.
-        //
-        // The InitAddr enumerators ARE the initBatch order. Index the results through them and never through a
-        // literal or an offset from the end -- inserting a row otherwise silently re-points every later consumer.
+        // address. They all live in the host EXE, so ONE parallel pass over the whole anchor registry resolves every
+        // target the mod will ever need -- these and the ones each feature module reads later -- and the wall-clock
+        // collapses to the slowest single scan instead of the sum. The targets are independent (no resolution reads
+        // another's result), so the order below is presentation only. Every per-target validation and side-effect
+        // block reads its address back through anchor_address(), which returns 0 for a ladder that missed or a value
+        // its validator rejected.
 
         auto &addrs = resolved_addrs();
 
-        enum InitAddr : std::size_t
-        {
-            SlotPopulatorAddr = 0,
-            MapLookupAddr,
-            SubTranslatorAddr,
-            SafeTearDownAddr,
-            InitSwapEntryAddr,
-            PartSlotRefreshAddr,
-            SlotTagToHandleAddr,
-            InitAddrCount,
-        };
-
-        const CDCore::Glue::BatchRequest initBatch[] = {
-            {k_slotPopulatorCandidates, "SlotPopulator"},   {k_mapLookupCandidates, "MapLookup"},
-            {k_subTranslatorCandidates, "SubTranslator"},   {k_safeTearDownCandidates, "SafeTearDown"},
-            {k_initSwapEntryCandidates, "InitSwapEntry"},   {k_partSlotRefreshCandidates, "PartSlotRefresh"},
-            {k_slotTagToHandleCandidates, "SlotTagToHandle"},
-        };
-        static_assert(std::size(initBatch) == InitAddrCount, "InitAddr must mirror initBatch one-for-one");
-        std::uintptr_t initAddrs[std::size(initBatch)] = {};
-        CDCore::Glue::resolve_address_batch(initBatch, initAddrs);
+        resolve_all_anchors();
 
         // SlotPopulator: the KEY function for transmog.
-        addrs.slotPopulator = initAddrs[SlotPopulatorAddr];
+        addrs.slotPopulator = anchor_address(AnchorId::SlotPopulator);
 
         // PartSlotRefresh: rebuilds ONE slot's visual. SlotPopulator calls it with the slot derived from the ITEM,
         // which is the same value for both halves of a paired slot, so an apply to the second half rebuilds the
         // first. Calling it directly with the intended slot is what reaches the other half.
         {
-            const auto refreshAddr = initAddrs[PartSlotRefreshAddr];
-            const auto tagToHandleAddr = initAddrs[SlotTagToHandleAddr];
+            const auto refreshAddr = anchor_address(AnchorId::PartSlotRefresh);
+            const auto tagToHandleAddr = anchor_address(AnchorId::SlotTagToHandle);
             if (tagToHandleAddr)
             {
                 slot_tag_to_handle_fn() = reinterpret_cast<SlotTagToHandleFn>(tagToHandleAddr);
@@ -723,8 +749,10 @@ namespace Transmog
             }
             else
             {
-                logger.warning("PartSlotRefresh AOB scan failed -- the second half of a paired slot "
-                               "(Ring2/Earring2) will not refresh");
+                logger.warning(
+                    "PartSlotRefresh AOB scan failed -- the second half of a paired slot "
+                    "(Ring2/Earring2) will not refresh"
+                );
             }
         }
 
@@ -733,7 +761,7 @@ namespace Transmog
 
         // MapLookup: IndexedStringA::lookup. Not hooked -- RIP anchor for scan_indexed_string_table(). Must be resolved
         // before PartShowSuppress::init_slot_hashes.
-        addrs.mapLookup = initAddrs[MapLookupAddr];
+        addrs.mapLookup = anchor_address(AnchorId::MapLookup);
 
         if (addrs.mapLookup)
         {
@@ -742,18 +770,22 @@ namespace Transmog
             // PartShowSuppress inert for the whole session. The deferred worker polls until world-ready, then commits
             // after every expected slot hash is present. See transmog_worker.hpp for the contract.
             launch_deferred_slot_hash_scan();
-            logger.info("[dispatch] slot-hash resolution scheduled "
-                        "(deferred until world-ready)");
+            logger.info(
+                "[dispatch] slot-hash resolution scheduled "
+                "(deferred until world-ready)"
+            );
         }
         else
         {
-            logger.warning("MapLookup AOB scan failed -- cannot resolve CD_* slot hashes, "
-                           "PartShowSuppress will be inert this session");
+            logger.warning(
+                "MapLookup AOB scan failed -- cannot resolve CD_* slot hashes, "
+                "PartShowSuppress will be inert this session"
+            );
         }
 
         // SubTranslator: anchor for the item-name catalog scan, and the item -> slot resolver LT calls to ask whether
         // a carrier can be placed at all. One function, both roles -- see its cascade doc in aob_resolver.hpp.
-        addrs.subTranslator = initAddrs[SubTranslatorAddr];
+        addrs.subTranslator = anchor_address(AnchorId::SubTranslator);
         if (addrs.subTranslator)
         {
             // Wire the resolver BEFORE the catalog build: the build can take the deferred path and hand off to the
@@ -764,9 +796,11 @@ namespace Transmog
             const auto result = ItemNameTable::instance().build(addrs.subTranslator);
             if (result == BR::Ok)
             {
-                logger.info("[nametable] built synchronously at init "
-                            "({} entries)",
-                            ItemNameTable::instance().size());
+                logger.info(
+                    "[nametable] built synchronously at init "
+                    "({} entries)",
+                    ItemNameTable::instance().size()
+                );
                 // Load display names BEFORE dump_catalog_tsv, so the sorted cache that the dump builds lazily already
                 // contains display names. A second rebuild stalls the overlay render thread.
                 {
@@ -778,22 +812,26 @@ namespace Transmog
                     ItemNameTable::instance().dump_catalog_tsv();
                 if (flag_dump_item_prefabs().load(std::memory_order_relaxed))
                 {
-                    // The targeted phantom-recovery sweep can take minutes on a cold registry. Detach it so the rest
-                    // of transmog init (hooks, color-override) does not block on the TSV write. Nothing downstream
-                    // depends on the dump.
-                    std::thread{[] { dump_itemmesh_tsv(); }}.detach();
+                    // The targeted phantom-recovery sweep can take minutes on a cold registry, so it runs on its own
+                    // worker rather than blocking the rest of transmog init (hooks, color-override). Nothing
+                    // downstream depends on the dump.
+                    launch_itemmesh_dump();
                 }
             }
             else if (result == BR::Deferred)
             {
-                logger.info("[nametable] iteminfo global not initialized yet -- "
-                            "starting background scan thread");
+                logger.info(
+                    "[nametable] iteminfo global not initialized yet -- "
+                    "starting background scan thread"
+                );
                 launch_deferred_nametable_scan();
             }
             else // Fatal
             {
-                logger.warning("[nametable] address chain resolution failed -- "
-                               "item-name table disabled this session");
+                logger.warning(
+                    "[nametable] address chain resolution failed -- "
+                    "item-name table disabled this session"
+                );
             }
 
             addrs.indexedStringLookup = ItemNameTable::instance().indexed_string_lookup_addr();
@@ -804,29 +842,27 @@ namespace Transmog
         }
         else
         {
-            logger.warning("SubTranslator AOB scan failed -- cannot build the item-name table (presets fall back to "
-                           "raw itemIds) and carrier equip-eligibility checks are unavailable");
+            logger.warning(
+                "SubTranslator AOB scan failed -- cannot build the item-name table (presets fall back to "
+                "raw itemIds) and carrier equip-eligibility checks are unavailable"
+            );
         }
 
         // SafeTearDown: scene-graph tear-down.
-        addrs.safeTearDown = initAddrs[SafeTearDownAddr];
+        addrs.safeTearDown = anchor_address(AnchorId::SafeTearDown);
         if (!addrs.safeTearDown)
         {
-            logger.warning("SafeTearDown AOB scan failed -- real_part_tear_down will "
-                           "be disabled this session");
+            logger.warning(
+                "SafeTearDown AOB scan failed -- real_part_tear_down will "
+                "be disabled this session"
+            );
         }
 
         // InitSwapEntry: zero-init helper for the 0x80-byte swap entry passed to SlotPopulator.
         {
-            auto iseAddr = initAddrs[InitSwapEntryAddr];
-
-            if (iseAddr && !DMK::Scanner::is_likely_function_prologue(iseAddr))
-            {
-                logger.warning("InitSwapEntry resolved to 0x{:X} but prologue byte "
-                               "looks wrong -- rejecting",
-                               iseAddr);
-                iseAddr = 0;
-            }
+            // The registry's code_site validator already applied the prologue-plausibility screen, so a site
+            // that failed it arrives here as 0.
+            const auto iseAddr = anchor_address(AnchorId::InitSwapEntry);
 
             if (iseAddr)
             {
@@ -835,12 +871,14 @@ namespace Transmog
             }
             else
             {
-                logger.warning("InitSwapEntry AOB scan failed -- transmog apply will "
-                               "be disabled this session");
+                logger.warning(
+                    "InitSwapEntry AOB scan failed -- transmog apply will "
+                    "be disabled this session"
+                );
             }
         }
 
-        // --- Load presets ---
+        // Load presets
 
         {
             const auto rtDir = runtime_dir_utf8();
@@ -851,23 +889,23 @@ namespace Transmog
             pm.apply_to_state();
         }
 
-        // --- Install hooks ---
-
-        auto &hookMgr = DMK::HookManager::get_instance();
+        // Install hooks
 
         // SlotPopulator: resolved for direct call (not hooked).
         if (addrs.slotPopulator)
         {
-            if (DMK::Scanner::is_likely_function_prologue(addrs.slotPopulator))
+            if (DMK::scan::is_likely_function_prologue(DMK::Address{addrs.slotPopulator}))
             {
                 slot_populator_fn() = reinterpret_cast<SlotPopulatorFn>(addrs.slotPopulator);
                 logger.info("SlotPopulator resolved at 0x{:X}", addrs.slotPopulator);
             }
             else
             {
-                logger.warning("SlotPopulator resolved to 0x{:X} but prologue byte "
-                               "looks wrong -- rejecting, transmog apply disabled",
-                               addrs.slotPopulator);
+                logger.warning(
+                    "SlotPopulator resolved to 0x{:X} but prologue byte "
+                    "looks wrong -- rejecting, transmog apply disabled",
+                    addrs.slotPopulator
+                );
                 addrs.slotPopulator = 0;
             }
         }
@@ -899,41 +937,56 @@ namespace Transmog
         // did not install its hook yet (load-order race during the worker thread's init pass), or where EH hooks
         // through a non-DMK route. A yield on module presence avoids the race entirely. The substring match covers
         // both the dev two-DLL ("..._Logic.dll") and the release single-ASI (".asi") layouts in one call.
-        const bool ehPresent = CDCore::Glue::is_sibling_mod_loaded("CrimsonDesertEquipHide");
+        // EquipHide ships as a single ASI in release and, in its dev configuration, as a resident loader ASI that
+        // stages the logic DLL. Both shapes load the same .asi module name, so one exact-basename query covers them.
+        const bool ehPresent = DMK::memory::is_module_loaded(k_equipHideModule);
         if (ehPresent)
         {
-            logger.info("[dispatch] PartAddShow hook skipped -- "
-                        "CrimsonDesertEquipHide detected; yielding to "
-                        "its gliding-fix hook to avoid dual-install "
-                        "ordering issues.");
+            logger.info(
+                "[dispatch] PartAddShow hook skipped -- "
+                "CrimsonDesertEquipHide detected; yielding to "
+                "its gliding-fix hook to avoid dual-install "
+                "ordering issues."
+            );
         }
         else
         {
-            auto pasAddr = resolve_address(k_partAddShowCandidates, std::size(k_partAddShowCandidates), "PartAddShow");
-
-            if (pasAddr && !DMK::Scanner::is_likely_function_prologue(pasAddr))
-            {
-                logger.warning("PartAddShow resolved to 0x{:X} but prologue byte "
-                               "looks wrong -- rejecting",
-                               pasAddr);
-                pasAddr = 0;
-            }
+            // The registry's code_site validator already applied the prologue-plausibility screen, so a site that
+            // failed it arrives here as 0.
+            const auto pasAddr = anchor_address(AnchorId::PartAddShow);
 
             if (pasAddr)
             {
-                PartShowSuppress::PartAddShowFn trampoline = nullptr;
-                auto result = hookMgr.create_inline_hook("PartAddShow", pasAddr,
-                                                         reinterpret_cast<void *>(PartShowSuppress::on_part_add_show),
-                                                         reinterpret_cast<void **>(&trampoline));
-
-                if (result.has_value())
+                auto pasHook = DMK::hook::inline_at(
+                    DMK::hook::InlineRequest{.name = "PartAddShow", .target = DMK::Address{pasAddr}},
+                    &PartShowSuppress::on_part_add_show
+                );
+                bool pasOk = false;
+                if (!pasHook)
                 {
-                    PartShowSuppress::set_part_add_show_trampoline(trampoline);
+                    logger.warning("PartAddShow hook creation failed: {}", pasHook.error().message());
                 }
                 else
                 {
-                    logger.warning("PartAddShow hook failed: {} -- transition flash suppression disabled",
-                                   DetourModKit::Hook::error_to_string(result.error()));
+                    // Publish the trampoline BEFORE enable() arms the patch, so no game thread can enter the detour
+                    // while its original pointer is still null.
+                    PartShowSuppress::set_part_add_show_trampoline(
+                        pasHook->original<PartShowSuppress::PartAddShowFn>()
+                    );
+                    if (auto armed = pasHook->enable(); !armed)
+                    {
+                        logger.warning("PartAddShow hook could not be armed: {}", armed.error().message());
+                        PartShowSuppress::set_part_add_show_trampoline(nullptr);
+                    }
+                    else
+                    {
+                        s_hooks.push(std::move(*pasHook));
+                        pasOk = true;
+                    }
+                }
+                if (!pasOk)
+                {
+                    logger.warning("PartAddShow hook failed -- transition flash suppression disabled");
                 }
             }
             else
@@ -945,17 +998,19 @@ namespace Transmog
         // Real-part scene-graph tear-down.
         if (!RealPartTearDown::resolve_helpers())
         {
-            logger.warning("[dispatch] tear_down: helper resolution failed -- "
-                           "feature disabled");
+            logger.warning(
+                "[dispatch] tear_down: helper resolution failed -- "
+                "feature disabled"
+            );
         }
 
-        // --- Input ---
+        // Input
 
         // Resolve WorldSystem pointer for LT-local chain walks (per-character presets, load-detect, apply-side a1
         // fallbacks). Independent of CDCore::controlled_char, which uses its own static-chain anchor and does not need
         // a published WorldSystem holder.
         {
-            auto wsAddr = resolve_address(k_worldSystemCandidates, std::size(k_worldSystemCandidates), "WorldSystem");
+            const auto wsAddr = anchor_address(AnchorId::WorldSystem);
             if (wsAddr)
             {
                 world_system_ptr().store(wsAddr, std::memory_order_release);
@@ -963,8 +1018,10 @@ namespace Transmog
             }
             else
             {
-                logger.warning("WorldSystem AOB failed -- load-time transmog and "
-                               "per-character presets disabled");
+                logger.warning(
+                    "WorldSystem AOB failed -- load-time transmog and "
+                    "per-character presets disabled"
+                );
             }
         }
 
@@ -972,13 +1029,13 @@ namespace Transmog
         // walks tolerate the null-owner window its own non-atomic erase opens; until it is in place, any erase that
         // overlaps a walk on a job thread can fault. See claim_walk_guard.hpp.
         // Each install() logs its own failure, and neither is fatal, so the result is deliberately discarded.
-        (void)ClaimWalkGuard::install();
+        (void)ClaimWalkGuard::install(s_hooks);
 
-        PrefabWrapperSwap::init();
+        (void)PrefabWrapperSwap::init(s_hooks);
 
         // Override the mesh a socket is about to wear, so a real item is never built for a slot LT is dressing.
         // Installed after PWS because it reads PWS's per-slot target. See socket_mesh_override.hpp.
-        (void)SocketMeshOverride::install();
+        (void)SocketMeshOverride::install(s_hooks);
 
         // Helm-audio filter. It intervenes at the passive-skill REGISTRATION boundary, BEFORE the muffle tag enters
         // the character's skill registry, so no downstream Wwise / RTPC / Switch path ever observes it. The combined
@@ -992,89 +1049,158 @@ namespace Transmog
         // safety lever for that bypass.
         if (flag_helm_audio_unmuffle().load(std::memory_order_relaxed))
         {
-            HelmAudioFilter::init();
+            HelmAudioFilter::init(s_hooks);
         }
         else
         {
-            DMK::Logger::get_instance().info("[helm-audio] disabled; set "
-                                             "`[Experimental] UnmuffleHelmVoice = true` to remove "
-                                             "the stock plate/heavy-helm voice muffle.");
+            DMK::log().info(
+                "[helm-audio] disabled; set "
+                "`[Experimental] UnmuffleHelmVoice = true` to remove "
+                "the stock plate/heavy-helm voice muffle."
+            );
         }
 
         // Per-slot dye-record injector. Hooks the engine's dye-copier primitive and appends fabricated ARMOR_MOD
         // records so fake transmog items render with user-chosen colors regardless of the underlying real item.
-        DyeRecordInject::init();
+        DyeRecordInject::init(s_hooks);
 
         // ColorOverride is a tri-hook subsystem (host-scope owner vfuncs, setter property substitute, publisher
         // per-matInst capture). It is gated behind the `[Experimental] ColorOverride` INI key, so the hooks do not
         // install on the default configuration. The picker UI keys off the same flag.
         if (flag_color_override().load(std::memory_order_acquire))
         {
-            ColorOverride::HostScope::init();
-            ColorOverride::SetterSubstitute::init();
-            Transmog::ColorOverride::init();
+            ColorOverride::HostScope::init(s_hooks);
+            ColorOverride::SetterSubstitute::init(s_hooks);
+            Transmog::ColorOverride::init(s_hooks);
         }
         else
         {
-            DMK::Logger::get_instance().info("[color-override] disabled by [Experimental] "
-                                             "ColorOverride=false; subsystem skipped");
+            DMK::log().info(
+                "[color-override] disabled by [Experimental] "
+                "ColorOverride=false; subsystem skipped"
+            );
         }
 
         // Crimson Desert has TWO independent dye layers:
         //   1. Bench/menu UI dyeability -- gated by the partprefabdyeslotinfo.pabgb registry. LT does not modify it at
         //      runtime. Static PAZ overlays handle this externally.
         //   2. Render-time dye apply -- the engine reads dye records from a publish vector at dst+120 during slotpop.
-        //      The DyeRecordInject inline detour on DyeCopier (see k_dyeCopierCandidates, init above) injects
+        //      The DyeRecordInject inline detour on DyeCopier (see dye_copier(), init above) injects
         //      user-chosen records here.
 
         start_load_detect_thread();
         ensure_apply_worker_started();
 
-        // Hotkey bindings were registered in load_config() so that Config::load() picks up the press_combo INI keys.
-        // Flip InputManager live now. The bindings start to fire on the next poll tick.
-        DMK::InputManager::get_instance().start();
+        // Hotkey bindings were registered in load_config() so the INI load picked up their combo keys. Bring the poll
+        // engine live now; the bindings start to fire on the next tick. The wheel backend is the dev loader's resident
+        // host when one was supplied, so a user-bound mouse-wheel combo books its permanent module keepalive against
+        // that module instead of this one and the logic DLL stays unmappable. Without a host (the production ASI, and
+        // a dev loader whose host failed to start) the local message hook is the correct backend and takes that
+        // keepalive here.
+        DMK::input::Input::Settings inputSettings{};
+        if (wheel_host != nullptr)
+        {
+            inputSettings.wheel_backend = DMK::input::Input::WheelBackend::ExternalHost;
+            inputSettings.wheel_host = wheel_host;
+            inputSettings.wheel_host_required = false;
+        }
+        if (auto started = session.input().start(inputSettings); !started)
+        {
+            logger.warning("Input engine did not start: {} -- hotkeys are inactive", started.error().message());
+        }
 
-        logger.info("Transmog initialization complete -- SlotPopulator {}",
-                    slot_populator_fn() ? "READY" : "UNAVAILABLE");
+        logger.info(
+            "Transmog initialization complete -- SlotPopulator {}",
+            slot_populator_fn() ? "READY" : "UNAVAILABLE"
+        );
 
         // One-shot DMK health snapshot for at-a-glance per-launch diagnostics:
         // hook population plus any intentional loader-lock leak/detach events.
-        const auto health = DMK::Diagnostics::collect(DMK::HookManager::get_instance());
-        logger.info("DMK health: hooks total={} active={} disabled={}, intentional-leaks={}", health.hooks_total,
-                    health.hooks_active, health.hooks_disabled, health.total_intentional_leaks);
+        const auto health = DMK::diagnostics::collect({}, anchor_report());
+        logger.info(
+            "DMK health: hooks total={} active={} disabled={}, intentional-leaks={}",
+            health.hooks_total,
+            health.hooks_active,
+            health.hooks_disabled,
+            health.total_intentional_leaks
+        );
 
-        return true;
+        return {};
     }
 
-    void shutdown()
+    bool shutdown()
     {
-        DMK::Logger::get_instance().info("{} shutting down...", MOD_NAME);
+        DMK::log().info("{} shutting down...", MOD_NAME);
+
+        // Module pins, by reason, sampled HERE rather than at the end of init(). The input engine mounts its
+        // wheel route and installs its XInput interception from the poll thread's cycle loop, which only starts
+        // after session.input().start() returns, so an init-time sample reads a state where neither has happened
+        // yet and reports zeros that mean nothing. This runs before any teardown, so the hooks and pins are both
+        // still in place.
+        //
+        // XInputKeepalive is taken before XInput hook creation: nonzero means a binding asked to consume and the
+        // interception pair went in. That set is retained and inert after teardown, so it keeps this image mapped
+        // and costs one generation against the dev loader's reload budget.
+        //
+        // MessageHookKeepalive is the wheel-capture keepalive. In the dev build it should be ZERO: the resident
+        // loader owns wheel capture, so the pin lands on the loader and this generation can still unmap. Nonzero
+        // means the external host was refused and the engine fell back to a local message hook.
+        {
+            const auto pins = DMK::diagnostics::collect();
+            const auto pin = [&pins](DMK::diagnostics::ModulePinReason reason)
+            { return pins.module_pins[static_cast<std::size_t>(reason)]; };
+
+            DMK::log().info(
+                "DMK pins: xinput_self={} xinput_targets={} wheel_msghook={} input_poller={} total={}",
+                pin(DMK::diagnostics::ModulePinReason::XInputKeepalive),
+                pin(DMK::diagnostics::ModulePinReason::XInputTarget),
+                pin(DMK::diagnostics::ModulePinReason::MessageHookKeepalive),
+                pin(DMK::diagnostics::ModulePinReason::InputPoller),
+                pins.total_module_pins
+            );
+        }
 
         // Disable the INI watcher up front so an in-flight save event cannot fire setters during the state tear-down.
-        DMK::Config::disable_auto_reload();
+        DMK::config::disable_auto_reload();
 
         shutdown_requested().store(true, std::memory_order_release);
 
-        // Drain workers before the DMK teardown removes the hooks they call into. Every spawned worker calls raw game
-        // functions under SEH (apply_all_transmog -> SlotPopulator, debounce worker -> RealPartTearDown ->
-        // safeTearDown). Join them first to guarantee that no worker sits mid-call inside a SafetyHook trampoline when
-        // the trampoline pages are unmapped.
+        // Drain workers before the hooks they call into come down. Every spawned worker calls raw game functions
+        // under SEH (apply_all_transmog -> SlotPopulator, debounce worker -> RealPartTearDown -> safeTearDown). Join
+        // them first to guarantee that no worker sits mid-call inside a trampoline when the trampoline pages are
+        // unmapped.
         stop_load_detect_thread();
         stop_apply_worker();
         join_deferred_nametable_scan();
         join_deferred_slot_hash_scan();
+        // The token-discovery re-scan walks the host image from its own worker and touches this module's statics, so
+        // it has to be gone before the dev loader can unmap the generation.
+        ColorOverride::TokenSlotDiscovery::stop_and_join_rescan();
+        // The TSV dump waits for a swap catalog that never appears at the main menu, so it must be stopped rather
+        // than waited out.
+        join_itemmesh_dump();
 
         PrefabWrapperSwap::shutdown();
 
-        // Full DMK teardown: it removes every managed hook (PartAddShow, the claim-walk guard, the socket-mesh
-        // override and the rest), stops and clears the InputManager poller together with its registered bindings,
-        // stops the ConfigWatcher, and clears the Config registered-items list. It is idempotent and safe to re-init
-        // from on the next Logic-DLL load. Each detour body snapshots its trampoline pointer at entry and bails to a
-        // benign default if the snapshot is null. That defends the brief drain window between hook removal and DLL
-        // unmap.
-        DMK_Shutdown();
+        // Newest-first teardown of every hook this mod owns (PartAddShow, the claim-walk guard, the socket-mesh
+        // override and the rest). Each detour body snapshots its trampoline pointer at entry and bails to a benign
+        // default if the snapshot is null, which defends the brief drain window between restore and DLL unmap.
+        //
+        // A hook that cannot prove it restored its target pins its backend, and that pin books one leak against
+        // LeakSubsystem::HookManager, so the delta across the clear IS the unmap authorization the dev loader needs.
+        // Comparing a delta rather than an absolute is required, because the counter also carries caller-requested
+        // leaks from elsewhere.
+        const auto pinsBefore = DMK::diagnostics::intentional_leak_count(DMK::diagnostics::LeakSubsystem::HookManager);
+        s_hooks.clear();
+        const bool restored =
+            DMK::diagnostics::intentional_leak_count(DMK::diagnostics::LeakSubsystem::HookManager) == pinsBefore;
+        if (!restored)
+        {
+            DMK::log().error("{} shutdown: a hooked prologue could not be restored and stays pinned", MOD_NAME);
+        }
 
-        clear_hotkey_guards();
+        DMK::log().info("{} shutdown complete", MOD_NAME);
+        return restored;
     }
 
 } // namespace Transmog

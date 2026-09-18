@@ -1,5 +1,7 @@
 #pragma once
 
+#include <DetourModKit/hook.hpp>
+
 /**
  * @file helm_audio_filter.hpp
  * @brief PlateHelm voice-muffle suppression at the passive-skill registration boundary.
@@ -96,10 +98,10 @@ namespace Transmog::HelmAudioFilter
      * @brief Resolve dependencies and install the passive-skill registrar inline hook.
      *
      * Idempotent. Resolves three signatures here and defers a fourth:
-     *   1. the per-tag passive-skill registrar entry (see `k_helmAudioRegistrarCandidates`)
+     *   1. the per-tag passive-skill registrar entry (see `helm_audio_registrar()`)
      *   2. `pa::GameAudioEffectBuffData` vtable, the class marker for muffle-class identification (see
-     *      `k_gameAudioEffectVtableCandidates`)
-     *   3. engine player static, the root of the Kliff init-race fallback chain (see `k_playerStaticCandidates`). On
+     *      `game_audio_effect_vtable()`)
+     *   3. engine player static, the root of the Kliff init-race fallback chain (see `player_static()`). On
      *      AOB failure the hook still installs. Only the first-frame Kliff fallback goes dark.
      *   4. the engine tag resolver for the chain walk (see `k_skillTagResolverBodyAob`, picked by RTTI class name).
      *      This one binds lazily on the first registrar call, because its scan needs a live pa::SkillInfoManager.
@@ -109,6 +111,6 @@ namespace Transmog::HelmAudioFilter
      *
      * @return true if the hook is now installed (including a prior successful install), false otherwise.
      */
-    bool init();
+    bool init(DetourModKit::hook::HookStack &hooks);
 
 } // namespace Transmog::HelmAudioFilter

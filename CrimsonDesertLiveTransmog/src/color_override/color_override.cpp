@@ -14,8 +14,6 @@
 
 #include <atomic>
 
-namespace DMK = DetourModKit;
-
 namespace Transmog::ColorOverride
 {
     namespace
@@ -23,12 +21,12 @@ namespace Transmog::ColorOverride
         std::atomic<bool> g_initDone{false};
     }
 
-    bool init()
+    bool init(DMK::hook::HookStack &hooks)
     {
         if (g_initDone.load(std::memory_order_acquire))
             return true;
 
-        auto &log = DMK::Logger::get_instance();
+        auto &log = DMK::log();
         log.info("[color-override] init");
 
         // Every slot starts LOCKED. Setter inserts happen only inside an explicit Reinit capture window so unrelated
@@ -39,7 +37,7 @@ namespace Transmog::ColorOverride
 
         // The setter mid-hook is installed separately by `SetterSubstitute::init()` from the top-level startup path;
         // this entry point only wires the publisher hook.
-        const bool pubOk = PublisherHook::init();
+        const bool pubOk = PublisherHook::init(hooks);
 
         log.info("[color-override] hook install: publisher={}", pubOk);
 
@@ -52,8 +50,10 @@ namespace Transmog::ColorOverride
         if (!::Transmog::flag_color_override().load(std::memory_order_acquire))
             return;
         State::active_apply_slot().store(slot, std::memory_order_release);
-        State::active_apply_valid_until_ms().store(State::now_ms() + State::k_batchApplyExtendMs,
-                                                   std::memory_order_release);
+        State::active_apply_valid_until_ms().store(
+            State::now_ms() + State::k_batchApplyExtendMs,
+            std::memory_order_release
+        );
         State::hash_set_last_add_ms(slot).store(0, std::memory_order_release);
         SwatchTable::mark_all_inactive(slot);
     }
@@ -75,9 +75,15 @@ namespace Transmog::ColorOverride
             // engine write -- the user's colours won't substitute until the player re-runs Reinit to capture fresh
             // engine writes for those rows.
             const auto sc = SwatchTable::slot_counts(slot);
-            DMK::Logger::get_instance().info("[swatch-summary] slot={} total={} promoted={} "
-                                             "placeholders={} active_overrides={}",
-                                             slot, sc.total, sc.promoted, sc.placeholders, sc.active_overrides);
+            DMK::log().info(
+                "[swatch-summary] slot={} total={} promoted={} "
+                "placeholders={} active_overrides={}",
+                slot,
+                sc.total,
+                sc.promoted,
+                sc.placeholders,
+                sc.active_overrides
+            );
             SwatchTable::dump_slot(slot);
         }
     }
@@ -99,8 +105,10 @@ namespace Transmog::ColorOverride
     {
         if (!::Transmog::flag_color_override().load(std::memory_order_acquire))
             return;
-        DMK::Logger::get_instance().debug("[color-override] reset_all -- wiping all slot swatch "
-                                          "tables + pending overrides (preset / character switch)");
+        DMK::log().debug(
+            "[color-override] reset_all -- wiping all slot swatch "
+            "tables + pending overrides (preset / character switch)"
+        );
         CarrierSet::clear_all();
         SwatchTable::clear_all();
         MatInstOwner::clear_all();
@@ -118,10 +126,19 @@ namespace Transmog::ColorOverride
     {
         const auto p = PublisherHook::snapshot_stats();
         const auto pe = PendingOverrides::snapshot_stats();
-        DMK::Logger::get_instance().info("[color-override] pub[entries={} inserts={} batch={} window={} "
-                                         "host={} arec={}] "
-                                         "pending[entries={} hits={} misses={}]",
-                                         p.entries, p.inserts, p.batch_rejects, p.window_rejects, p.host_rejects,
-                                         p.arec_rejects, pe.entries_total, pe.lookups_hit, pe.lookups_miss);
+        DMK::log().info(
+            "[color-override] pub[entries={} inserts={} batch={} window={} "
+            "host={} arec={}] "
+            "pending[entries={} hits={} misses={}]",
+            p.entries,
+            p.inserts,
+            p.batch_rejects,
+            p.window_rejects,
+            p.host_rejects,
+            p.arec_rejects,
+            pe.entries_total,
+            pe.lookups_hit,
+            pe.lookups_miss
+        );
     }
 } // namespace Transmog::ColorOverride
