@@ -70,11 +70,23 @@ namespace CDCore::anchors
         // so the window has to run through the empty-check branch and the vcall to be unique. Both rel8 targets are
         // wildcarded. A compiler that widens either short jump to `0F 8x rel32` breaks this row - that is what P2 is
         // for, since it crosses no branch of its own.
+        //
+        // 48 8B 05 ?? ?? ?? ??   mov rax, [rip+d32]
+        // 48 8B 88 D8 00 00 00   mov rcx, [rax+0xD8]
+        // 48 8B 41 20            mov rax, [rcx+0x20]
+        // 83 78 28 00            cmp dword [rax+0x28], 0x0
+        // 77 ??                  ja <rel8>
+        // 33 C9                  xor ecx, ecx
+        // EB ??                  jmp <rel8>
+        // 48 8B 40 20            mov rax, [rax+0x20]
+        // 48 8B 48 10            mov rcx, [rax+0x10]
+        // 48 8B 01               mov rax, [rcx]
+        // FF 50 40               call qword [rax+0x40]
         Candidate::rip_relative(
             "WorldSystem_P1_InlinedGetterThroughVCall",
             Pattern::literal(
-                "48 8B 05 ?? ?? ?? ?? 48 8B 88 D8 00 00 00 48 8B 41 20 83 78 28 00 "
-                "77 ?? 33 C9 EB ?? 48 8B 40 20 48 8B 48 10 48 8B 01 FF 50 40"
+                "48 8B 05 ?? ?? ?? ?? 48 8B 88 D8 00 00 00 48 8B 41 20 83 78 28 00 77 ?? 33 C9 EB ?? 48 8B 40 20 "
+                "48 8B 48 10 48 8B 01 FF 50 40"
             ),
             3,
             7
@@ -92,6 +104,11 @@ namespace CDCore::anchors
         // that case P3 takes over, since it crosses no branch at all. The trailing `48 8B 88 D8 00 00 00` pins the
         // specific WorldSystem follow-on (`mov rcx, [rax+0xD8]`). 0xD8 is a game-struct ABI offset that is stable
         // within a build.
+        //
+        // 80 B8 ?? ?? ?? ?? 00   cmp byte [rax+d32], 0x0
+        // ?? ??                  jne <rel8>
+        // 48 8B 05 ?? ?? ?? ??   mov rax, [rip+d32]   <- result offset
+        // 48 8B 88 D8 00 00 00   mov rcx, [rax+0xD8]
         Candidate::rip_relative(
             "WorldSystem_P2_StructField",
             Pattern::literal("80 B8 ?? ?? ?? ?? 00 ?? ?? | 48 8B 05 ?? ?? ?? ?? 48 8B 88 D8 00 00 00"),
@@ -107,6 +124,11 @@ namespace CDCore::anchors
         // neighboring global's walk, and that near-miss resolves to a DIFFERENT global rather than a failure, which
         // require_unique cannot catch because each site matches only once. Verify the decoded target, not only the
         // match count, whenever this row is re-derived.
+        //
+        // 48 8B 05 ?? ?? ?? ??   mov rax, [rip+d32]
+        // 48 8B 58 58            mov rbx, [rax+0x58]
+        // 48 8D 54 24 ??         lea rdx, [rsp+d8]
+        // 48 8B CB               mov rcx, rbx
         Candidate::rip_relative(
             "WorldSystem_P3_ContainerWalkToCall",
             Pattern::literal("48 8B 05 ?? ?? ?? ?? 48 8B 58 58 48 8D 54 24 ?? 48 8B CB"),
@@ -127,17 +149,37 @@ namespace CDCore::anchors
         // P1 - full function prologue plus the first body instruction. The `83 79 04 00` (cmp [rcx+4], 0) check is
         // distinctive. The 2-byte early-out branch slot is wildcarded (see the section 9 branch-encoding note in the
         // WorldSystem P2 comment above).
+        //
+        // 48 83 EC 08            sub rsp, 0x8
+        // 83 79 04 00            cmp dword [rcx+0x4], 0x0
+        // 4C 8B C1               mov r8, rcx
+        // ?? ??                  jne <rel8>
+        // 33 C0                  xor eax, eax
+        // 48 83 C4 08            add rsp, 0x8
+        // C3                     ret
+        // 48 8B 05 ?? ?? ?? ??   mov rax, [rip+d32]
+        // 48 89 1C 24            mov [rsp], rbx
+        // 8B 1A                  mov ebx, [rdx]
         Candidate::direct(
             "MapLookup_P1_FullPrologue",
             Pattern::literal(
-                "48 83 EC 08 83 79 04 00 4C 8B C1 ?? ?? 33 C0 48 83 C4 08 C3 "
-                "48 8B 05 ?? ?? ?? ?? 48 89 1C 24 8B 1A"
+                "48 83 EC 08 83 79 04 00 4C 8B C1 ?? ?? 33 C0 48 83 C4 08 C3 48 8B 05 ?? ?? ?? ?? 48 89 1C 24 8B 1A"
             )
         ),
 
         // P2 - hash-body anchor (deeper in the function). Re-anchors when the prologue layout changes. Offset -0x24
         // walks back to function start. The 2-byte jz on zero-count is wildcarded (same branch-encoding caveat as
         // above).
+        //
+        // 8B 48 ??         mov ecx, [rax+d8]
+        // 48 03 D2         add rdx, rdx
+        // 44 8B 5C D1 ??   mov r11d, [rcx+rdx*8+d8]
+        // 41 8B 08         mov ecx, [r8]
+        // 85 C9            test ecx, ecx
+        // ?? ??            je <rel8>
+        // 33 D2            xor edx, edx
+        // 41 8B C3         mov eax, r11d
+        // F7 F1            div ecx
         Candidate::direct(
             "MapLookup_P2_HashBody",
             Pattern::literal("8B 48 ?? 48 03 D2 44 8B 5C D1 ?? 41 8B 08 85 C9 ?? ?? 33 D2 41 8B C3 F7 F1"),
@@ -162,6 +204,12 @@ namespace CDCore::anchors
         // The caller is identified by its argument setup: a module global, `+0x28` to the owner, then the large
         // `+0x10778` walk to the map. That displacement is the distinctive part and stays literal. The `|` marker puts
         // the resolved address on the `E8` itself so the caller can follow its rel32.
+        //
+        // 48 8B 05 ?? ?? ?? ??   mov rax, [rip+d32]
+        // 48 8B 48 28            mov rcx, [rax+0x28]
+        // 48 8B 89 78 07 01 00   mov rcx, [rcx+0x10778]
+        // E8 ?? ?? ?? ??         call <rel32>   <- result offset
+        // 4C 8B E8               mov r13, rax
         Candidate::direct(
             "MapLookup_P3_CallerArgSetup",
             Pattern::literal("48 8B 05 ?? ?? ?? ?? 48 8B 48 28 48 8B 89 78 07 01 00 | E8 ?? ?? ?? ?? 4C 8B E8")
@@ -202,6 +250,15 @@ namespace CDCore::anchors
         // The register-save set (`push rbx / rdi / r15`, five bytes) and the register the show-list array base lands in
         // are both compiler-owned and move together. P2's walk-back is measured against that push run, so it has to be
         // re-measured whenever the run changes length.
+        //
+        // 40 53                  push rbx
+        // 57                     push rdi
+        // 41 57                  push r15
+        // 48 83 EC ??            sub rsp, imm8
+        // 48 8B 59 ??            mov rbx, [rcx+d8]
+        // 4D 8B F8               mov r15, r8
+        // 44 8B 89 ?? ?? ?? ??   mov r9d, [rcx+d32]
+        // 48 8B F9               mov rdi, rcx
         Candidate::direct(
             "PartAddShow_P1_FullPrologue",
             Pattern::literal("40 53 57 41 57 48 83 EC ?? 48 8B 59 ?? 4D 8B F8 44 8B 89 ?? ?? ?? ?? 48 8B F9")
@@ -209,6 +266,11 @@ namespace CDCore::anchors
 
         // P2 - post-prologue anchor (sub rsp / mov rbx,[rcx+X] / mov r15,r8 / mov r9d,[rcx+disp32]). Offset -5 backs
         // up to function start.
+        //
+        // 48 83 EC ??            sub rsp, imm8
+        // 48 8B 59 ??            mov rbx, [rcx+d8]
+        // 4D 8B F8               mov r15, r8
+        // 44 8B 89 ?? ?? ?? ??   mov r9d, [rcx+d32]
         Candidate::direct(
             "PartAddShow_P2_PostPrologue",
             Pattern::literal("48 83 EC ?? 48 8B 59 ?? 4D 8B F8 44 8B 89 ?? ?? ?? ??"),
@@ -225,6 +287,14 @@ namespace CDCore::anchors
         // The scale/add pair and the xmm6 spill can be scheduled in either order. A row that stretches to pin more of
         // that ordering is pinning a compiler scheduling choice, so keep the window tight around the two halves that
         // actually carry meaning: the strided walk setup and the blend argument being parked.
+        //
+        // 48 8B F9            mov rdi, rcx
+        // 41 8B C1            mov eax, r9d
+        // 48 C1 E0 04         shl rax, 0x4
+        // 48 03 C3            add rax, rbx
+        // C5 F8 29 74 24 ??   vmovaps [rsp+d8], xmm6
+        // C5 F8 28 F3         vmovaps xmm6, xmm3
+        // 48 3B D8            cmp rbx, rax
         Candidate::direct(
             "PartAddShow_P3_ShowListWalkSetup",
             Pattern::literal("48 8B F9 41 8B C1 48 C1 E0 04 48 03 C3 C5 F8 29 74 24 ?? C5 F8 28 F3 48 3B D8"),
@@ -249,11 +319,21 @@ namespace CDCore::anchors
         // P1 - full prologue from `mov [rsp+0x10], rbx` through the `B8 ?? ?? ?? ??` (mov eax, imm32 = __chkstk
         // function-size marker). Stack frame size and function-size hint are wildcarded: both are compiler-owned and
         // drift between builds (section 2).
+        //
+        // 48 89 5C 24 10            mov [rsp+0x10], rbx
+        // 48 89 74 24 20            mov [rsp+0x20], rsi
+        // 66 44 89 44 24 18         mov [rsp+0x18], r8w
+        // 55                        push rbp
+        // 57                        push rdi
+        // 41 54                     push r12
+        // 41 56                     push r14
+        // 41 57                     push r15
+        // 48 8D AC 24 ?? ?? ?? ??   lea rbp, [rsp-d32]
+        // B8 ?? ?? ?? ??            mov eax, imm32
         Candidate::direct(
             "VisualEquipChange_P1_FullPrologue",
             Pattern::literal(
-                "48 89 5C 24 10 48 89 74 24 20 66 44 89 44 24 18 "
-                "55 57 41 54 41 56 41 57 48 8D AC 24 ?? ?? ?? ?? "
+                "48 89 5C 24 10 48 89 74 24 20 66 44 89 44 24 18 55 57 41 54 41 56 41 57 48 8D AC 24 ?? ?? ?? ?? "
                 "B8 ?? ?? ?? ??"
             )
         ),
@@ -262,12 +342,23 @@ namespace CDCore::anchors
         // post-alloca register moves). The wildcarded stack-size and function-size slots alone match several unrelated
         // prologues. The `48 2B E0 49 8B F1 41 0F B7 D8` tail (the VEC register shuffle through `movzx ebx, r8w`)
         // restores uniqueness without re-introducing a hardcoded stack frame. Offset -0x10 backs up to function start.
+        //
+        // 55                        push rbp
+        // 57                        push rdi
+        // 41 54                     push r12
+        // 41 56                     push r14
+        // 41 57                     push r15
+        // 48 8D AC 24 ?? ?? ?? ??   lea rbp, [rsp-d32]
+        // B8 ?? ?? ?? ??            mov eax, imm32
+        // E8 ?? ?? ?? ??            call <rel32>
+        // 48 2B E0                  sub rsp, rax
+        // 49 8B F1                  mov rsi, r9
+        // 41 0F B7 D8               movzx ebx, r8w
         Candidate::direct(
             "VisualEquipChange_P2_PushFrame",
             Pattern::literal(
-                "55 57 41 54 41 56 41 57 "
-                "48 8D AC 24 ?? ?? ?? ?? B8 ?? ?? ?? ?? "
-                "E8 ?? ?? ?? ?? 48 2B E0 49 8B F1 41 0F B7 D8"
+                "55 57 41 54 41 56 41 57 48 8D AC 24 ?? ?? ?? ?? B8 ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 2B E0 49 8B F1 "
+                "41 0F B7 D8"
             ),
             -0x10
         ),
@@ -275,24 +366,32 @@ namespace CDCore::anchors
         // P3 - post-alloca register shuffle (sub rsp,rax; mov rsi,r9; movzx ebx,r8w; movzx edi,dx; mov r14,rcx) plus
         // the deeper `lea rcx, [rbp+disp32]` and `E8` call. Stack disp32 wildcarded per section 2. Offset -0x2A backs
         // up to function start.
+        //
+        // 48 2B E0               sub rsp, rax
+        // 49 8B F1               mov rsi, r9
+        // 41 0F B7 D8            movzx ebx, r8w
+        // 0F B7 FA               movzx edi, dx
+        // 4C 8B F1               mov r14, rcx
+        // 48 8D 8D ?? ?? ?? ??   lea rcx, [rbp+d32]
+        // E8                     call <rel32>
         Candidate::direct(
             "VisualEquipChange_P3_PostAlloca",
-            Pattern::literal(
-                "48 2B E0 49 8B F1 41 0F B7 D8 0F B7 FA 4C 8B F1 "
-                "48 8D 8D ?? ?? ?? ?? E8"
-            ),
+            Pattern::literal("48 2B E0 49 8B F1 41 0F B7 D8 0F B7 FA 4C 8B F1 48 8D 8D ?? ?? ?? ?? E8"),
             -0x2A
         ),
 
         // P4 - deepest fallback: the same post-alloca shuffle without the leading `sub rsp,rax`, anchored 3 bytes
         // deeper (mov rsi,r9). Stack disp32 in the `lea rcx,[rbp+disp32]` wildcarded. Offset -0x2D backs up to
         // function start.
+        //
+        // 49 8B F1               mov rsi, r9
+        // 41 0F B7 D8            movzx ebx, r8w
+        // 0F B7 FA               movzx edi, dx
+        // 4C 8B F1               mov r14, rcx
+        // 48 8D 8D ?? ?? ?? ??   lea rcx, [rbp+d32]
         Candidate::direct(
             "VisualEquipChange_P4_PreLeaBody",
-            Pattern::literal(
-                "49 8B F1 41 0F B7 D8 0F B7 FA 4C 8B F1 "
-                "48 8D 8D ?? ?? ?? ??"
-            ),
+            Pattern::literal("49 8B F1 41 0F B7 D8 0F B7 FA 4C 8B F1 48 8D 8D ?? ?? ?? ??"),
             -0x2D
         ),
     };
@@ -325,12 +424,28 @@ namespace CDCore::anchors
 
         // P1 - full prologue: save rbx, push 7 callee-saves, lea rbp, mov eax=__chkstk size, call __chkstk, sub
         // rsp,rax, then the four-move arg shuffle.
+        //
+        // 48 89 5C 24 10            mov [rsp+0x10], rbx
+        // 55                        push rbp
+        // 56                        push rsi
+        // 57                        push rdi
+        // 41 54                     push r12
+        // 41 55                     push r13
+        // 41 56                     push r14
+        // 41 57                     push r15
+        // 48 8D AC 24 ?? ?? ?? ??   lea rbp, [rsp-d32]
+        // B8 ?? ?? ?? ??            mov eax, imm32
+        // E8 ?? ?? ?? ??            call <rel32>
+        // 48 2B E0                  sub rsp, rax
+        // 4? 8B ??                  mov reg, arg3
+        // 4? 8B ??                  mov reg, arg2
+        // 4? 8B ??                  mov reg, arg1
+        // 4? 8B ?? 08               mov reg, [arg1+0x8]
         Candidate::direct(
             "BatchEquip_P1_FullPrologue",
             Pattern::literal(
-                "48 89 5C 24 10 55 56 57 41 54 41 55 41 56 41 57 "
-                "48 8D AC 24 ?? ?? ?? ?? B8 ?? ?? ?? ?? "
-                "E8 ?? ?? ?? ?? 48 2B E0 4? 8B ?? 4? 8B ?? 4? 8B ?? 4? 8B ?? 08"
+                "48 89 5C 24 10 55 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 ?? ?? ?? ?? B8 ?? ?? ?? ?? E8 ?? ?? ?? ?? "
+                "48 2B E0 4? 8B ?? 4? 8B ?? 4? 8B ?? 4? 8B ?? 08"
             )
         ),
 
@@ -340,12 +455,18 @@ namespace CDCore::anchors
         //
         // A push-frame-only candidate here is non-unique once its stack disp32 is wildcarded. P1 already covers the
         // push-frame region.
+        //
+        // 48 2B E0      sub rsp, rax
+        // 4? 8B ??      mov reg, arg3
+        // 4? 8B ??      mov reg, arg2
+        // 4? 8B ??      mov reg, arg1
+        // 4? 8B ?? 08   mov reg, [arg1+0x8]
+        // 48 8D 45 ??   lea rax, [rbp+d8]
+        // 48 89 45 ??   mov [rbp+d8], rax
+        // 33 C9         xor ecx, ecx
         Candidate::direct(
             "BatchEquip_P2_PostAlloca",
-            Pattern::literal(
-                "48 2B E0 4? 8B ?? 4? 8B ?? 4? 8B ?? 4? 8B ?? 08 "
-                "48 8D 45 ?? 48 89 45 ?? 33 C9"
-            ),
+            Pattern::literal("48 2B E0 4? 8B ?? 4? 8B ?? 4? 8B ?? 4? 8B ?? 08 48 8D 45 ?? 48 89 45 ?? 33 C9"),
             -0x22
         ),
 
@@ -355,11 +476,21 @@ namespace CDCore::anchors
         // and stay literal per the section 2 exception. Every stack displacement is wildcarded. This row survives an
         // arg-register rotation and a REX change in the shuffle, which is the known failure mode of P1 and P2. Offset
         // -0x32 backs up to function start.
+        //
+        // 48 8D 45 ??                     lea rax, [rbp+d8]
+        // 48 89 45 ??                     mov [rbp+d8], rax
+        // 33 C9                           xor ecx, ecx
+        // 89 4D ??                        mov [rbp+d8], ecx
+        // C7 45 ?? 02 00 00 00            mov [rbp+d8], 0x2
+        // 48 8D 85 ?? ?? ?? ??            lea rax, [rbp+d32]
+        // 48 89 85 ?? ?? ?? ??            mov [rbp+d32], rax
+        // 89 8D ?? ?? ?? ??               mov [rbp+d32], ecx
+        // C7 85 ?? ?? ?? ?? 14 00 00 00   mov [rbp+d32], 0x14
         Candidate::direct(
             "BatchEquip_P3_BodyScratchInit",
             Pattern::literal(
-                "48 8D 45 ?? 48 89 45 ?? 33 C9 89 4D ?? C7 45 ?? 02 00 00 00 "
-                "48 8D 85 ?? ?? ?? ?? 48 89 85 ?? ?? ?? ?? 89 8D ?? ?? ?? ?? C7 85 ?? ?? ?? ?? 14 00 00 00"
+                "48 8D 45 ?? 48 89 45 ?? 33 C9 89 4D ?? C7 45 ?? 02 00 00 00 48 8D 85 ?? ?? ?? ?? 48 89 85 ?? ?? ?? ?? "
+                "89 8D ?? ?? ?? ?? C7 85 ?? ?? ?? ?? 14 00 00 00"
             ),
             -0x32
         ),
@@ -411,13 +542,19 @@ namespace CDCore::anchors
         // other publish block in the image emits that tail. Every wildcarded instruction keeps a fixed length, so the
         // disp32 of the publish store stays at match+3 and the instruction ends at match+7. require_unique keeps the
         // row honest if a future build duplicates the shape.
+        //
+        // 4? 89 ?? ?? ?? ?? ??   mov [rip+d32], reg
+        // 4? 8D ?? ?? ?? ?? ??   lea reg, [reg+d32]
+        // 48 89 05 ?? ?? ?? ??   mov [rip+d32], rax
+        // 4? 8D ?? ?? ?? ?? ??   lea reg, [reg+d32]
+        // 48 89 05 ?? ?? ?? ??   mov [rip+d32], rax
+        // 0F B6 85 ?? ?? ?? ??   movzx eax, byte [rbp+d32]
+        // 88 05                  mov [rip+d32], al (truncated)
         Candidate::rip_relative(
             "ClientActorManagerGlobal_P1_PublishStore",
             Pattern::literal(
-                "4? 89 ?? ?? ?? ?? ?? 4? 8D ?? ?? ?? ?? ?? "
-                "48 89 05 ?? ?? ?? ?? 4? 8D ?? ?? ?? ?? ?? "
-                "48 89 05 ?? ?? ?? ?? "
-                "0F B6 85 ?? ?? ?? ?? 88 05"
+                "4? 89 ?? ?? ?? ?? ?? 4? 8D ?? ?? ?? ?? ?? 48 89 05 ?? ?? ?? ?? 4? 8D ?? ?? ?? ?? ?? "
+                "48 89 05 ?? ?? ?? ?? 0F B6 85 ?? ?? ?? ?? 88 05"
             ),
             3,
             7
@@ -434,12 +571,20 @@ namespace CDCore::anchors
         // Both halves of the window earn their length. The post-call tail is needed because the leading lea/lea/call
         // shape alone matches many unrelated sites, and the leading loop tail is needed because the
         // lea/lea/call/nop/vpxor block itself occurs TWICE in this function.
+        //
+        // 48 83 C6 10            add rsi, 0x10
+        // 49 83 EE 01            sub r14, 0x1
+        // 75 ??                  jne <rel8>
+        // 48 8D 15 ?? ?? ?? ??   lea rdx, [rip+d32]   <- result offset
+        // 48 8D 4D ??            lea rcx, [rbp-d8]
+        // E8 ?? ?? ?? ??         call <rel32>
+        // 90                     nop
+        // C6 44 24 ?? 00         mov byte [rsp+d8], 0x0
+        // C5 F9 EF C0            vpxor xmm0, xmm0, xmm0
         Candidate::rip_relative(
             "ClientActorManagerGlobal_P2_LeaCallBodyDisp8",
             Pattern::literal(
-                "48 83 C6 10 49 83 EE 01 75 ?? "
-                "| 48 8D 15 ?? ?? ?? ?? 48 8D 4D ?? "
-                "E8 ?? ?? ?? ?? 90 C6 44 24 ?? 00 "
+                "48 83 C6 10 49 83 EE 01 75 ?? | 48 8D 15 ?? ?? ?? ?? 48 8D 4D ?? E8 ?? ?? ?? ?? 90 C6 44 24 ?? 00 "
                 "C5 F9 EF C0"
             ),
             3,

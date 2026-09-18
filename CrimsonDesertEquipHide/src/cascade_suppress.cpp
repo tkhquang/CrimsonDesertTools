@@ -56,6 +56,13 @@ namespace EquipHide
         // wrong entry width.
         const DMK::scan::Candidate EQUIP_SWAP_STRIDE_SITE[] = {
             // P1 - outer loop head through the imul. Widest context, anchored before the null check.
+            //
+            // C7 85 ?? ?? ?? ?? ?? ?? ?? ??   mov [rbp+d32], imm32
+            // 49 8B 19                        mov rbx, [r9]
+            // 48 85 DB                        test rbx, rbx
+            // 74 ??                           je <rel8>
+            // 8B 43 08                        mov eax, [rbx+0x8]
+            // 48 69 F8                        imul rdi, rax, imm32 (truncated)
             DMK::scan::Candidate::direct(
                 "BatchEquipStride_P1_LoopHeadToImul",
                 DMK::scan::Pattern::literal("C7 85 ?? ?? ?? ?? ?? ?? ?? ?? 49 8B 19 48 85 DB 74 ?? 8B 43 08 48 69 F8"),
@@ -63,6 +70,12 @@ namespace EquipHide
             ),
 
             // P2 - null check through the imul. Drops the preceding frame initialization.
+            //
+            // 49 8B 19   mov rbx, [r9]
+            // 48 85 DB   test rbx, rbx
+            // 74 ??      je <rel8>
+            // 8B 43 08   mov eax, [rbx+0x8]
+            // 48 69 F8   imul rdi, rax, imm32 (truncated)
             DMK::scan::Candidate::direct(
                 "BatchEquipStride_P2_NullCheckToImul",
                 DMK::scan::Pattern::literal("49 8B 19 48 85 DB 74 ?? 8B 43 08 48 69 F8"),
@@ -71,6 +84,13 @@ namespace EquipHide
 
             // P3 - imul forward into the branch that follows it. Independent of everything before the imul, so it
             // survives a rewrite of the loop head that defeats P1 and P2.
+            //
+            // 8B 43 08               mov eax, [rbx+0x8]
+            // 48 69 F8 ?? ?? ?? ??   imul rdi, rax, imm32
+            // 48 03 3B               add rdi, [rbx]
+            // 48 8B 1B               mov rbx, [rbx]
+            // EB ??                  jmp <rel8>
+            // 49 8B 49 08            mov rcx, [r9+0x8]
             DMK::scan::Candidate::direct(
                 "BatchEquipStride_P3_ImulToJoin",
                 DMK::scan::Pattern::literal("8B 43 08 48 69 F8 ?? ?? ?? ?? 48 03 3B 48 8B 1B EB ?? 49 8B 49 08"),
@@ -83,6 +103,12 @@ namespace EquipHide
         // Anchor on the movzx, not on the compare.
         const DMK::scan::Candidate EQUIP_SWAP_SLOT_SITE[] = {
             // P1 - inner-loop setup through the movzx. Widest context and unique across the whole process.
+            //
+            // 48 69 C8 ?? ?? ?? ??   imul rcx, rax, imm32
+            // 48 03 CA               add rcx, rdx
+            // 48 3B D1               cmp rdx, rcx
+            // 74 ??                  je <rel8>
+            // 0F B7 83               movzx eax, word [rbx+d32] (truncated)
             DMK::scan::Candidate::direct(
                 "BatchEquipSlot_P1_InnerSetupToMovzx",
                 DMK::scan::Pattern::literal("48 69 C8 ?? ?? ?? ?? 48 03 CA 48 3B D1 74 ?? 0F B7 83"),
@@ -90,6 +116,11 @@ namespace EquipHide
             ),
 
             // P2 - movzx and compare, extended into the entry advance that follows.
+            //
+            // 0F B7 83 ?? ?? ?? ??   movzx eax, word [rbx+d32]
+            // 66 39 82 ?? ?? ?? ??   cmp [rdx+d32], ax
+            // 74 ??                  je <rel8>
+            // 48 81 C2               add rdx, imm32 (truncated)
             DMK::scan::Candidate::direct(
                 "BatchEquipSlot_P2_MovzxCompareAdvance",
                 DMK::scan::Pattern::literal("0F B7 83 ?? ?? ?? ?? 66 39 82 ?? ?? ?? ?? 74 ?? 48 81 C2")
@@ -97,6 +128,9 @@ namespace EquipHide
 
             // P3 - movzx and compare only. The pattern wildcards both displacements, so a shifted slot field still
             // matches.
+            //
+            // 0F B7 83 ?? ?? ?? ??   movzx eax, word [rbx+d32]
+            // 66 39 82 ?? ?? ?? ??   cmp [rdx+d32], ax
             DMK::scan::Candidate::direct(
                 "BatchEquipSlot_P3_MovzxCompare",
                 DMK::scan::Pattern::literal("0F B7 83 ?? ?? ?? ?? 66 39 82 ?? ?? ?? ??")

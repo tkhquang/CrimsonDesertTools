@@ -55,6 +55,13 @@ namespace EquipHide
 
         // P1 - truncated: ends at the `mov [rsi], rax` that stores the vtable. Does NOT cross the trailing `EB 03`
         // jmp, so it survives a Jcc-encoding flip.
+        //
+        // 48 8B 55 ??            mov rdx, [rbp+d8]
+        // 48 89 F1               mov rcx, rsi
+        // E8 ?? ?? ?? ??         call <rel32>
+        // 90                     nop
+        // 48 8D 05 ?? ?? ?? ??   lea rax, [rip+d32]   <- result offset
+        // 48 89 06               mov [rsi], rax
         Candidate::rip_relative(
             "ChildActorVtbl_P1_AllocCtor",
             Pattern::literal("48 8B 55 ?? 48 89 F1 E8 ?? ?? ?? ?? 90 | 48 8D 05 ?? ?? ?? ?? 48 89 06"),
@@ -65,6 +72,14 @@ namespace EquipHide
         // P2 - retains the trailing `EB ?? 4C`. Without the 4C byte of the post-jmp `mov rsi, r13` continuation, the
         // lead-in is structurally shared with other ctor sites and the window is no longer unique. Tied to the 2-byte
         // jmp encoding.
+        //
+        // 48 89 F1               mov rcx, rsi
+        // E8 ?? ?? ?? ??         call <rel32>
+        // 90                     nop
+        // 48 8D 05 ?? ?? ?? ??   lea rax, [rip+d32]   <- result offset
+        // 48 89 06               mov [rsi], rax
+        // EB ??                  jmp <rel8>
+        // 4C                     mov rsi, r13 (truncated)
         Candidate::rip_relative(
             "ChildActorVtbl_P2_CtorStore",
             Pattern::literal("48 89 F1 E8 ?? ?? ?? ?? 90 | 48 8D 05 ?? ?? ?? ?? 48 89 06 EB ?? 4C"),
@@ -76,6 +91,15 @@ namespace EquipHide
         // literal, and it still only matches the 2-byte form (it fails on `0F 84 rel32`). The trailing `?? ?? ?? ??`
         // is the lea's own disp32: the RipRelative tier decode-verifies the instruction at the marker, so the
         // matched suffix has to span the displacement it authorizes.
+        //
+        // 45 31 ED               xor r13d, r13d
+        // 48 85 F6               test rsi, rsi
+        // ?? ??                  je <rel8>
+        // 48 8B 55 ??            mov rdx, [rbp+d8]
+        // 48 89 F1               mov rcx, rsi
+        // E8 ?? ?? ?? ??         call <rel32>
+        // 90                     nop
+        // 48 8D 05 ?? ?? ?? ??   lea rax, [rip+d32]   <- result offset
         Candidate::rip_relative(
             "ChildActorVtbl_P3_WiderCtorStore",
             Pattern::literal("45 31 ED 48 85 F6 ?? ?? 48 8B 55 ?? 48 89 F1 E8 ?? ?? ?? ?? 90 | 48 8D 05 ?? ?? ?? ??"),
@@ -103,6 +127,18 @@ namespace EquipHide
         //
         // The window opens with the empty-map test folded into the modulus read (`cmp dword [rcx],0`) and closes on
         // the r9/r8d/rdx/rcx parking. The parking ORDER is the identifier. The map pointer's own register is not.
+        //
+        // 40 53         push rbx
+        // 56            push rsi
+        // 57            push rdi
+        // 41 54         push r12
+        // 41 55         push r13
+        // 48 83 EC ??   sub rsp, imm8
+        // 83 39 00      cmp dword [rcx], 0x0
+        // 4D 8B E1      mov r12, r9
+        // 41 8B F0      mov esi, r8d
+        // 4C 8B EA      mov r13, rdx
+        // 48 8B F9      mov rdi, rcx
         Candidate::direct(
             "MapInsert_P1_FullPrologue",
             Pattern::literal("40 53 56 57 41 54 41 55 48 83 EC ?? 83 39 00 4D 8B E1 41 8B F0 4C 8B EA 48 8B F9")
@@ -110,6 +146,12 @@ namespace EquipHide
 
         // P2 - argument shuffle only, with no prologue head at all. Independent of the register-save set, which is
         // the part of the prologue that moves most. Walk back 0x0C bytes to the function start.
+        //
+        // 83 39 00   cmp dword [rcx], 0x0
+        // 4D 8B E1   mov r12, r9
+        // 41 8B F0   mov esi, r8d
+        // 4C 8B EA   mov r13, rdx
+        // 48 8B F9   mov rdi, rcx
         Candidate::direct(
             "MapInsert_P2_ArgShuffleBody",
             Pattern::literal("83 39 00 4D 8B E1 41 8B F0 4C 8B EA 48 8B F9"),
@@ -123,6 +165,13 @@ namespace EquipHide
         // is not independent of the entry block, though. The -0x1D walk-back spans that block and the empty-map jcc.
         // An added instruction there, or a jcc widened from rel8 to rel32, still matches the pattern but resolves the
         // row SHORT. Re-measure it whenever the entry block changes.
+        //
+        // 41 8B D0         mov edx, r8d
+        // E8 ?? ?? ?? ??   call <rel32>
+        // 44 8B 17         mov r10d, [rdi]
+        // 4C 89 74 24 ??   mov [rsp+d8], r14
+        // 4C 8D 77 10      lea r14, [rdi+0x10]
+        // 45 85 D2         test r10d, r10d
         Candidate::direct(
             "MapInsert_P3_BucketArrayLea",
             Pattern::literal("41 8B D0 E8 ?? ?? ?? ?? 44 8B 17 4C 89 74 24 ?? 4C 8D 77 10 45 85 D2"),
@@ -176,6 +225,14 @@ namespace EquipHide
         // function allocates no frame, so nothing here moves when the compiler resizes a caller. The row wildcards
         // the branch displacement and the visibility field offset. The exclusion offsets are engine layout and stay
         // literal. The hook lands on the movzx at match + 5.
+        //
+        // 48 89 5C 24 08         mov [rsp+0x8], rbx
+        // 45 0F B6 58 ??         movzx r11d, byte [r8+d8]
+        // 48 8B D9               mov rbx, rcx
+        // 41 80 FB 03            cmp r11b, 0x3
+        // 0F 84 ?? ?? ?? ??      je <rel32>
+        // 48 8B 41 78            mov rax, [rcx+0x78]
+        // 44 8B 91 80 00 00 00   mov r10d, [rcx+0x80]
         Candidate::direct(
             "EquipVisCheck_P1_EntrySpillToExclusionHeader",
             Pattern::literal(
@@ -186,6 +243,14 @@ namespace EquipHide
 
         // P2 - the same window without the prologue spill, so a change to the register the entry saves (or a move to
         // a push) cannot take this row down with P1. The match lands directly on the movzx, walk-back 0.
+        //
+        // 45 0F B6 58 ??         movzx r11d, byte [r8+d8]
+        // 48 8B D9               mov rbx, rcx
+        // 41 80 FB 03            cmp r11b, 0x3
+        // 0F 84 ?? ?? ?? ??      je <rel32>
+        // 48 8B 41 78            mov rax, [rcx+0x78]
+        // 44 8B 91 80 00 00 00   mov r10d, [rcx+0x80]
+        // 49 C1 E2 04            shl r10, 0x4
         Candidate::direct(
             "EquipVisCheck_P2_VisReadToExclusionHeader",
             Pattern::literal(
@@ -198,6 +263,15 @@ namespace EquipHide
         // P2, so a rewrite of the entry block leaves it standing. It is not independent of that block, though. The
         // -0x12 walk-back spans the sentinel compare and its rel32 branch, so a wider or narrower branch resolves the
         // row SHORT. Re-measure whenever the entry block changes. Order it last.
+        //
+        // 48 8B 41 78            mov rax, [rcx+0x78]
+        // 44 8B 91 80 00 00 00   mov r10d, [rcx+0x80]
+        // 49 C1 E2 04            shl r10, 0x4
+        // 4C 03 D0               add r10, rax
+        // 49 3B C2               cmp rax, r10
+        // 74 ??                  je <rel8>
+        // 8B 0A                  mov ecx, [rdx]
+        // 39 08                  cmp [rax], ecx
         Candidate::direct(
             "EquipVisCheck_P3_ExclusionWalk",
             Pattern::literal("48 8B 41 78 44 8B 91 80 00 00 00 49 C1 E2 04 4C 03 D0 49 3B C2 74 ?? 8B 0A 39 08"),
@@ -220,17 +294,36 @@ namespace EquipHide
         // pair appear in other functions in the module. The `mov r15, rdx` that follows is what separates this
         // function from them, so the window has to reach it. The row wildcards the frame size and both spill slots
         // because the compiler assigns them. The match lands on the function start.
+        //
+        // 48 89 5C 24 08      mov [rsp+0x8], rbx
+        // 48 89 6C 24 10      mov [rsp+0x10], rbp
+        // 48 89 74 24 18      mov [rsp+0x18], rsi
+        // 57                  push rdi
+        // 41 56               push r14
+        // 41 57               push r15
+        // 48 83 EC ??         sub rsp, imm8
+        // C5 F8 29 74 24 ??   vmovaps [rsp+d8], xmm6
+        // C5 F8 29 7C 24 ??   vmovaps [rsp+d8], xmm7
+        // 4C 8B FA            mov r15, rdx
         Candidate::direct(
             "PostfixEval_P1_FullPrologue",
             Pattern::literal(
-                "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 41 56 41 57 "
-                "48 83 EC ?? C5 F8 29 74 24 ?? C5 F8 29 7C 24 ?? 4C 8B FA"
+                "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 41 56 41 57 48 83 EC ?? C5 F8 29 74 24 ?? "
+                "C5 F8 29 7C 24 ?? 4C 8B FA"
             )
         ),
 
         // P2 - push set, frame allocation, xmm spills, first body instruction.
         // Drops the three shadow stores, which are the part of the prologue a recompile is most likely to reshape: an
         // earlier build spilled a fourth register here instead of pushing it. Walk back 0x0F to the function start.
+        //
+        // 57                  push rdi
+        // 41 56               push r14
+        // 41 57               push r15
+        // 48 83 EC ??         sub rsp, imm8
+        // C5 F8 29 74 24 ??   vmovaps [rsp+d8], xmm6
+        // C5 F8 29 7C 24 ??   vmovaps [rsp+d8], xmm7
+        // 4C 8B FA            mov r15, rdx
         Candidate::direct(
             "PostfixEval_P2_PushSetToBody",
             Pattern::literal("57 41 56 41 57 48 83 EC ?? C5 F8 29 74 24 ?? C5 F8 29 7C 24 ?? 4C 8B FA"),
@@ -242,6 +335,12 @@ namespace EquipHide
         // the end pointer. Independent of the whole prologue. The 0x10 stride encoded by `shl rdi, 4` is the same
         // stride bald_fix.cpp walks the container with, so this window also documents that contract. Walk back 0x24 to
         // the function start.
+        //
+        // 4C 8B FA      mov r15, rdx
+        // 48 8B 5A ??   mov rbx, [rdx+d8]
+        // 8B 7A ??      mov edi, [rdx+d8]
+        // 48 C1 E7 04   shl rdi, 0x4
+        // 48 03 FB      add rdi, rbx
         Candidate::direct(
             "PostfixEval_P3_ItemVectorHeader",
             Pattern::literal("4C 8B FA 48 8B 5A ?? 8B 7A ?? 48 C1 E7 04 48 03 FB"),
@@ -281,11 +380,19 @@ namespace EquipHide
         // Longer term this target wants a StringXref tier on the function's own profiling label,
         // "createPrefabFromPartPrefab", with XrefReturn::EnclosingFunction. That literal is what actually names this
         // function, and it survives the code motion that keeps invalidating byte rows here.
+        //
+        // 48 83 C2 40            add rdx, 0x40
+        // 48 8B 05 ?? ?? ?? ??   mov rax, [rip+d32]
+        // 48 8B 08               mov rcx, [rax]
+        // 4C 8D 45 ??            lea r8, [rbp-d8]
+        // 48 8B 89 ?? ?? ?? ??   mov rcx, [rcx+d32]
+        // E8 ?? ?? ?? ??         call <rel32>
+        // B8 FD 01 00 00         mov eax, 0x1FD
         Candidate::direct(
             "NpcPfeReturnAddr_P1_RuleEvalCallLandmark",
             Pattern::literal(
-                "48 83 C2 40 48 8B 05 ?? ?? ?? ?? 48 8B 08 4C 8D 45 ?? "
-                "48 8B 89 ?? ?? ?? ?? E8 ?? ?? ?? ?? B8 FD 01 00 00"
+                "48 83 C2 40 48 8B 05 ?? ?? ?? ?? 48 8B 08 4C 8D 45 ?? 48 8B 89 ?? ?? ?? ?? E8 ?? ?? ?? ?? "
+                "B8 FD 01 00 00"
             ),
             0x1E
         ),
