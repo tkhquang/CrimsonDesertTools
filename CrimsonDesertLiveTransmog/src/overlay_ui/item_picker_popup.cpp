@@ -10,6 +10,7 @@
 #include "carrier_defaults.hpp"
 #include "color_override/color_reinit.hpp"
 #include "item_name_table.hpp"
+#include "lang.hpp"
 #include "prefab_wrapper_swap.hpp"
 #include "preset_manager.hpp"
 #include "shared_state.hpp"
@@ -69,7 +70,7 @@ namespace Transmog
             ui.hover_prefab_start_ms = 0;
         }
 
-        ui_text_disabled("Item picker");
+        ui_text_disabled(lang::t("picker.title", "Item picker"));
         ImGui::Separator();
 
         // Filter toggles
@@ -88,67 +89,103 @@ namespace Transmog
         const bool is_armor_slot_picker_header = Transmog::slot_meta(slot_category).part_show_hash_key != nullptr;
         if (!ui.prefab_mode)
         {
-            ImGui::Checkbox("Exact", &ui.exact_filter);
+            ImGui::Checkbox(lang::t("picker.exact", "Exact"), &ui.exact_filter);
             if (is_armor_slot_picker_header)
             {
                 ImGui::SameLine();
-                ImGui::Checkbox("Safe only", &ui.hide_incompatible);
+                ImGui::Checkbox(lang::t("picker.safe_only", "Safe only"), &ui.hide_incompatible);
                 ImGui::SameLine();
-                ImGui::Checkbox("Hide variants", &ui.hide_variants);
+                ImGui::Checkbox(lang::t("picker.hide_variants", "Hide variants"), &ui.hide_variants);
                 ImGui::SameLine();
-                ImGui::Checkbox("Hide cross-body", &ui.hide_body_mismatch);
+                ImGui::Checkbox(lang::t("picker.hide_cross_body", "Hide cross-body"), &ui.hide_body_mismatch);
                 if (ImGui::IsItemHovered())
                     ui_tooltip(
-                        "Hide items whose body type (male/female) "
-                        "does not match the active character. Cross-body items may render with broken meshes."
+                        lang::t(
+                            "picker.hide_cross_body.tip",
+                            "Hide items whose body type (male/female) does not match the active character. "
+                            "Cross-body items may render with broken meshes."
+                        )
                     );
             }
         }
         else
         {
-            ui_text_disabled("Prefabs mode (cross-slot)");
+            ui_text_disabled(lang::t("picker.prefabs_mode", "Prefabs mode (cross-slot)"));
             ImGui::SameLine();
-            ImGui::Checkbox("Exact##prefab_exact", &ui.prefab_exact_filter);
+            ImGui::Checkbox(lang::t("picker.prefab_exact", "Exact##prefab_exact"), &ui.prefab_exact_filter);
             if (ImGui::IsItemHovered())
                 ui_tooltip(
-                    "Limit the list to prefabs whose body-mesh family "
-                    "matches this slot. Untick to browse the full cross-slot catalog."
+                    lang::t(
+                        "picker.prefab_exact.tip",
+                        "Limit the list to prefabs whose body-mesh family matches this slot. "
+                        "Untick to browse the full cross-slot catalog."
+                    )
                 );
             ImGui::SameLine();
-            ImGui::Checkbox("Keep open##prefab_keep_open", &ui.prefab_keep_open_on_pick);
+            ImGui::Checkbox(
+                lang::t("picker.prefab_keep_open", "Keep open##prefab_keep_open"),
+                &ui.prefab_keep_open_on_pick
+            );
             if (ImGui::IsItemHovered())
                 ui_tooltip(
-                    "Keep the picker open after each pick so you can quickly compare prefabs. Untick to close on click."
+                    lang::t(
+                        "picker.prefab_keep_open.tip",
+                        "Keep the picker open after each pick so you can quickly compare prefabs. "
+                        "Untick to close on click."
+                    )
                 );
             // In-picker Apply button so users with Instant Apply off can commit a pick without leaving the popup. ImGui
             // closes a popup on outside clicks AND consumes the click, so the main Apply All below the picker cannot be
             // reached without re-opening. This button fires the same manual_apply() the footer's Apply All uses;
             // staying inside the popup keeps both the click consumption and the popup persistence happy.
             ImGui::SameLine();
-            if (ImGui::SmallButton("Apply##prefab_apply"))
+            if (ImGui::SmallButton(lang::t("picker.prefab_apply", "Apply##prefab_apply")))
             {
                 Transmog::flag_enabled().store(true, std::memory_order_relaxed);
                 Transmog::manual_apply();
             }
             if (ImGui::IsItemHovered())
-                ui_tooltip("Apply all pending changes without closing the picker. Same as the main Apply All button.");
+                ui_tooltip(
+                    lang::t(
+                        "picker.prefab_apply.tip",
+                        "Apply all pending changes without closing the picker. Same as the main Apply All button."
+                    )
+                );
         }
 
-        ImGui::SetNextItemWidth(320.0f);
+        // Content-derived in both overlay modes: a fixed width stops tracking the text once this mod scales its
+        // own tab, and a DPI-linear one runs past 1800px at 4K. 40 'M' is the tuned width, around 72 characters in
+        // a proportional face. Measure before changing it: Segoe UI's 'M' is 14.0px at the 15.6px base, so 46
+        // already lands at 644px. The floor only binds in a MONOSPACE face, where 40 'M' is 40 characters.
+        const float popup_w = (std::max)(ImGui::CalcTextSize("M").x * 40.0f, ui_text_columns(56.0f));
+
+        // Derive the search field from popup_w, never from a constant of its own: ui_px scales a constant by the
+        // live font while popup_w scales by the 'M' advance, so the row would drift and push its trailing controls
+        // outside the popup. Measure the labels actually drawn, translations included, with ImGui's hide-after-`##`
+        // rule so the id is not counted. Prefabs is reserved for even where it is hidden, so the width holds.
+        const ImGuiStyle &picker_style = ImGui::GetStyle();
+        const auto visible_w = [](const char *label) { return ImGui::CalcTextSize(label, nullptr, true).x; };
+        const auto button_w = [&picker_style, &visible_w](const char *label)
+        { return visible_w(label) + picker_style.FramePadding.x * 2.0f; };
+        const float trailing_w = button_w(lang::t("picker.clear_search", "Clear##search")) + button_w("^##nav_up") +
+                                 button_w("v##nav_down") + ImGui::GetFrameHeight() + picker_style.ItemInnerSpacing.x +
+                                 visible_w("Prefabs##picker_prefab_mode") + picker_style.ItemSpacing.x * 4.0f;
+        ImGui::SetNextItemWidth((std::max)(popup_w - trailing_w, ui_text_columns(12.0f)));
         if (ImGui::IsWindowAppearing())
         {
             ImGui::SetKeyboardFocusHere();
             ui.nav_index = -1;
         }
         ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(ImGui::GetStyle().FramePadding.x, 6.0f));
+        const char *search_hint = lang::t("picker.search_hint", "Search by name or id...");
         const bool search_edited =
-            ImGui::InputTextWithHint("##search", "Search by name or id...", ui.search_buf, sizeof(ui.search_buf));
+            ImGui::InputTextWithHint("##search", search_hint, ui.search_buf, sizeof(ui.search_buf));
         ImGui::PopStyleVar();
         if (search_edited)
             ui.nav_index = 0;
 
         ImGui::SameLine();
-        if (ImGui::SmallButton("Clear##search"))
+        if (ImGui::SmallButton(lang::t("picker.clear_search", "Clear##search")))
         {
             ui.search_buf[0] = '\0';
             ui.nav_index = 0;
@@ -186,12 +223,17 @@ namespace Transmog
             if (slot_has_carrier)
             {
                 ImGui::SameLine();
+                // "Prefabs" stays English in every language: it is the term the asset names, the logs and the
+                // community all use, so a translated one would only break the connection to them.
                 ImGui::Checkbox("Prefabs##picker_prefab_mode", &ui.prefab_mode);
                 if (ImGui::IsItemHovered())
                     ui_tooltip(
-                        "Browse all body-mesh prefabs across every "
-                        "slot. The search bar filters across the "
-                        "merged prefab list. Picking applies to the prefab's native slot."
+                        lang::t(
+                            "picker.prefabs_mode.tip",
+                            "Browse all body-mesh prefabs across every slot. "
+                            "The search bar filters across the merged prefab list. "
+                            "Picking applies to the prefab's native slot."
+                        )
                     );
             }
             else if (ui.prefab_mode)
@@ -201,7 +243,10 @@ namespace Transmog
         }
 
         const auto &table = Transmog::ItemNameTable::instance();
-        const auto &entries = table.sorted_entries();
+        // Hold the snapshot for the whole popup. A catalog reload on the worker retires the shared list, and this
+        // reference is what keeps the one being drawn alive until the frame ends.
+        const auto entries_snapshot = table.sorted_entries();
+        const auto &entries = *entries_snapshot;
 
         const float row_h = ImGui::GetTextLineHeightWithSpacing();
         const float line_h = ImGui::GetTextLineHeight();
@@ -209,12 +254,6 @@ namespace Transmog
         const float two_line_h = line_h * 2.0f + 4.0f;
 
         // Fixed-height scrollable region so the popup does not resize per keystroke as the filter narrows.
-        //
-        // Width is content-derived in standalone mode: ~60 'M' glyphs at the current font is enough for the longest
-        // item names without leaving a wide empty band. The previous DPI-linear value scaled past 1800px on 4K screens
-        // and dominated the row. Reshade mode keeps a fixed 560px because its host UI already constrains the parent
-        // window.
-        const float popup_w = s_standalone_mode ? (ImGui::CalcTextSize("M").x * 60.0f) : 560.0f;
         ImGui::BeginChild("##itemlist", ImVec2(popup_w, two_line_h * 12.0f), true);
 
         // Increase vertical spacing between items for easier click/hover targets. Pushed INSIDE BeginChild so the
@@ -227,7 +266,7 @@ namespace Transmog
         if (!ui.prefab_mode)
         {
             const bool selected = (target_item_id == 0);
-            if (ImGui::Selectable("(none - id 0)##picker_none", selected, 0, ImVec2(0, 0)))
+            if (ImGui::Selectable(lang::t("picker.none_item", "(none - id 0)##picker_none"), selected, 0, ImVec2(0, 0)))
             {
                 target_item_id = 0;
                 committed = true;
@@ -342,8 +381,13 @@ namespace Transmog
                     ++filtered_by_unsafe;
                     continue;
                 }
-                if (!name_contains_ci(e.name, ui.search_buf) && !name_contains_ci(e.display_name, ui.search_buf))
+                // search_name is set only for a pre-shaped locale, where display_name holds presentation forms
+                // that no typed query can match. It is empty everywhere else, and an empty needle never matches.
+                if (!name_contains_ci(e.name, ui.search_buf) && !name_contains_ci(e.display_name, ui.search_buf) &&
+                    !name_contains_ci(e.search_name, ui.search_buf))
+                {
                     continue;
+                }
                 s_filtered.push_back(idx);
             }
 
@@ -417,13 +461,13 @@ namespace Transmog
                 // is irrelevant.
                 const bool ambiguous_carrier = is_armor_slot && ambiguous_body && e.has_variant_meta;
                 if (crash_risk)
-                    tag = "non-player - CRASH RISK";
+                    tag = lang::t("picker.badge.crash_risk", "non-player - CRASH RISK");
                 else if (cross_body_carrier)
-                    tag = "carrier - BODY MISMATCH";
+                    tag = lang::t("picker.badge.body_mismatch", "carrier - BODY MISMATCH");
                 else if (ambiguous_carrier)
-                    tag = "carrier - UNCERTAIN BODY";
+                    tag = lang::t("picker.badge.body_unknown", "carrier - UNCERTAIN BODY");
                 else if (uses_carrier)
-                    tag = "carrier";
+                    tag = lang::t("picker.badge.carrier", "carrier");
 
                 const bool is_nav_target = (row == ui.nav_index);
                 const bool highlighted = (target_item_id == e.id) || is_nav_target;
@@ -516,11 +560,15 @@ namespace Transmog
             if (shown == 0)
             {
                 if (ui.exact_filter && filtered_by_category > 0)
-                    ui_text_disabled("no matches in this category - uncheck Exact to widen");
+                    ui_text_disabled(
+                        lang::t("picker.no_matches_exact", "no matches in this category - uncheck Exact to widen")
+                    );
                 else if ((ui.hide_incompatible || ui.hide_variants || ui.hide_body_mismatch) && filtered_by_unsafe > 0)
-                    ui_text_disabled("no matches - uncheck filters to show more items");
+                    ui_text_disabled(
+                        lang::t("picker.no_matches_filters", "no matches - uncheck filters to show more items")
+                    );
                 else
-                    ui_text_disabled("no matches");
+                    ui_text_disabled(lang::t("picker.no_matches", "no matches"));
             }
         }
 
@@ -710,7 +758,10 @@ namespace Transmog
                         const auto pi = static_cast<std::size_t>(s_prefab_flat[static_cast<std::size_t>(row)]);
                         const auto &pe = cat0[pi];
                         const char *nat_name = label_for_prefab(pe.name);
-                        char picker_id[224];
+                        // Sized for a TRANSLATED label. "(unloaded)" is longer in UTF-8 in most languages, and a
+                        // truncation here would cut the trailing `##all_prefab_<n>` id off the label, which
+                        // collapses every row onto one ImGui id.
+                        char picker_id[256];
                         if (pe.is_loaded)
                         {
                             std::snprintf(
@@ -727,7 +778,7 @@ namespace Transmog
                             std::snprintf(
                                 picker_id,
                                 sizeof(picker_id),
-                                "[%s] %s  (unloaded)##all_prefab_%zu",
+                                lang::t("picker.prefab_row_unloaded", "[%s] %s  (unloaded)##all_prefab_%zu"),
                                 nat_name,
                                 pe.name.c_str(),
                                 pi
@@ -799,11 +850,16 @@ namespace Transmog
                 shown = total;
                 if (cataloged_total == 0)
                 {
-                    ui_text_disabled("no prefabs cataloged yet - catalog may still be populating, try Refresh");
+                    ui_text_disabled(
+                        lang::t(
+                            "picker.no_prefabs",
+                            "no prefabs cataloged yet - catalog may still be populating, try Refresh"
+                        )
+                    );
                 }
                 else if (total_shown == 0)
                 {
-                    ui_text_disabled("no matches");
+                    ui_text_disabled(lang::t("picker.no_matches", "no matches"));
                 }
             }
             else
@@ -815,9 +871,15 @@ namespace Transmog
                 const int cur_tgt = pws::selection_tgt_index(slot_category);
                 if (cur_tgt >= 0)
                 {
-                    char clr_label[64];
-                    std::snprintf(clr_label, sizeof(clr_label), "(clear active prefab override)##prefab_clr");
-                    if (ImGui::Selectable(clr_label, false, 0, ImVec2(0, 0)))
+                    // Straight through rather than into a fixed buffer: a translated label is longer than the
+                    // English one and a buffer sized for English would silently truncate it, taking the `##id`
+                    // with it.
+                    if (ImGui::Selectable(
+                            lang::t("picker.clear_prefab_override", "(clear active prefab override)##prefab_clr"),
+                            false,
+                            0,
+                            ImVec2(0, 0)
+                        ))
                     {
                         if (out_prefab_idx)
                             *out_prefab_idx = -2;

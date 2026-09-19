@@ -98,6 +98,7 @@ jobs:
           echo "NEW_VERSION=$new_version" >> $env:GITHUB_ENV
           echo "VERSION_TAG=live-transmog/v$new_version" >> $env:GITHUB_ENV
           echo "ARTIFACT_NAME=CrimsonDesertLiveTransmog_v${new_version}.zip" >> $env:GITHUB_ENV
+          echo "LANGPACK_NAME=CrimsonDesertLiveTransmog_LanguagePack_v${new_version}.zip" >> $env:GITHUB_ENV
         shell: pwsh
 
       - name: Setup MSVC Developer Environment
@@ -151,6 +152,23 @@ jobs:
 
           Compress-Archive -Path "$packageDir\*" -DestinationPath "${{ env.ARTIFACT_NAME }}" -Force
           Write-Output "Created package: ${{ env.ARTIFACT_NAME }}"
+        shell: pwsh
+
+      # build/language-pack/ is the optional download's payload and is tracked, so this needs no network and
+      # cannot fail the release.
+      - name: Package language pack
+        run: |
+          New-Item -ItemType Directory -Path "release-assets" -Force | Out-Null
+          $langDir = "CrimsonDesertLiveTransmog\build\language-pack"
+          $langParts = Get-ChildItem $langDir -File
+
+          if ($langParts.Count -eq 0) {
+            Write-Output "::warning::$langDir is empty; publishing without the language download."
+          } else {
+            Compress-Archive -Path "$langDir\*" -DestinationPath "release-assets\${{ env.LANGPACK_NAME }}" -Force
+            $kb = [math]::Round(($langParts | Measure-Object Length -Sum).Sum / 1KB)
+            Write-Output "Packaged ${{ env.LANGPACK_NAME }} ($($langParts.Count) file(s), $kb KB)"
+          }
         shell: pwsh
 
       # Only commit changes if this is NOT a pre-release
@@ -249,7 +267,9 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          files: ${{ env.ARTIFACT_NAME }}
+          files: |
+            ${{ env.ARTIFACT_NAME }}
+            release-assets/*.zip
           name: CrimsonDesertLiveTransmog v${{ env.NEW_VERSION }}
           tag_name: ${{ env.VERSION_TAG }}
           body_path: ${{ steps.prepare-release.outputs.RELEASE_BODY_PATH }}

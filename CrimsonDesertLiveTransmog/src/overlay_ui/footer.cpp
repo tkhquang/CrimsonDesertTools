@@ -5,6 +5,8 @@
 
 #include "overlay_ui/footer.hpp"
 #include "overlay_ui/helpers.hpp"
+
+#include "lang.hpp"
 #include "prefab_wrapper_swap.hpp"
 #include "preset_manager.hpp"
 #include "shared_state.hpp"
@@ -41,7 +43,9 @@ namespace Transmog
         const bool catalog_loading = pws::has_any_selection() && !pws::is_catalog_populated();
 
         ImGui::BeginDisabled(catalog_loading);
-        if (ImGui::Button(pending ? "Apply All *" : "Apply All", ImVec2(0, 0)))
+        const char *apply_label =
+            pending ? lang::t("footer.apply_all.pending", "Apply All *") : lang::t("footer.apply_all", "Apply All");
+        if (ImGui::Button(apply_label, ImVec2(0, 0)))
         {
             flag_enabled().store(true, std::memory_order_relaxed);
             manual_apply();
@@ -53,12 +57,15 @@ namespace Transmog
         if (catalog_loading)
         {
             ImGui::SameLine();
-            ui_text_colored(ImVec4(0.85f, 0.75f, 0.20f, 1.0f), "(loading body-mesh catalog...)");
+            ui_text_colored(
+                ImVec4(0.85f, 0.75f, 0.20f, 1.0f),
+                lang::t("footer.catalog_loading", "(loading body-mesh catalog...)")
+            );
         }
 
         ImGui::SameLine();
 
-        if (ImGui::Button("Clear All", ImVec2(0, 0)))
+        if (ImGui::Button(lang::t("footer.clear_all", "Clear All"), ImVec2(0, 0)))
         {
             flag_enabled().store(false, std::memory_order_relaxed);
             manual_clear();
@@ -66,7 +73,7 @@ namespace Transmog
 
         ImGui::SameLine();
 
-        if (ImGui::Button("Capture Outfit", ImVec2(0, 0)))
+        if (ImGui::Button(lang::t("footer.capture_outfit", "Capture Outfit"), ImVec2(0, 0)))
         {
             // Capture replaces the current state with the live equipped outfit, so any session-only prefab picks must
             // surrender too - otherwise the cyan label hides the captured gear and a later "(none) prefab" would
@@ -84,7 +91,9 @@ namespace Transmog
             ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.95f, 0.52f, 0.20f, 1.0f));
             ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(1.00f, 0.60f, 0.25f, 1.0f));
         }
-        if (ImGui::Button(pending_save ? "Save *" : "Save", ImVec2(0, 0)))
+        const char *save_label =
+            pending_save ? lang::t("footer.save.pending", "Save *") : lang::t("footer.save", "Save");
+        if (ImGui::Button(save_label, ImVec2(0, 0)))
         {
             pm.replace_current_from_state();
             pm.save();
@@ -93,8 +102,11 @@ namespace Transmog
             ImGui::PopStyleColor(3);
         if (ImGui::IsItemHovered())
             ui_tooltip(
-                pending_save ? "Commit current slot rows into the active preset (unsaved edits pending)."
-                             : "Commit current slot rows into the active preset."
+                pending_save ? lang::t(
+                                   "footer.save.tip_pending",
+                                   "Commit current slot rows into the active preset (unsaved edits pending)."
+                               )
+                             : lang::t("footer.save.tip", "Commit current slot rows into the active preset.")
             );
 
         ImGui::EndDisabled();
@@ -102,29 +114,26 @@ namespace Transmog
         if (!world_ready)
         {
             ImGui::SameLine();
-            ui_text_disabled("(waiting for world load)");
+            ui_text_disabled(lang::t("footer.waiting_world", "(waiting for world load)"));
         }
     }
 
     void draw_status_footer()
     {
-        ImGui::Separator();
-        ui_text_disabled("Status");
-
+        // Report the abnormal case only. Without SlotPopulator nothing can apply at all and every button above
+        // fails silently, which is the one fact the rows themselves do not already show. A healthy session renders
+        // nothing here rather than spending a row per frame to say so.
         if (slot_populator_fn())
-            ui_text_colored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), "SlotPopulator: READY");
-        else
-            ui_text_colored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "SlotPopulator: UNAVAILABLE");
+            return;
 
-        auto &mappings = slot_mappings();
-        int active_count = 0;
-        for (std::size_t i = 0; i < SLOT_COUNT; ++i)
-        {
-            if (mappings[i].active && mappings[i].target_item_id != 0)
-                ++active_count;
-        }
-
-        ui_text("Active slots: %d / %zu", active_count, SLOT_COUNT);
+        ImGui::Separator();
+        ui_text_colored(
+            ImVec4(1.0f, 0.4f, 0.4f, 1.0f),
+            lang::t(
+                "footer.populator_unavailable",
+                "SlotPopulator unavailable - transmog cannot be applied on this game build"
+            )
+        );
     }
 
 } // namespace Transmog

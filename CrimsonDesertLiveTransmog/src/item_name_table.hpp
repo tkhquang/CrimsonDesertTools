@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -198,17 +199,31 @@ namespace Transmog
             std::string name;
             /// Human-readable name from the display_names TSV.
             std::string display_name;
+            /**
+             * @brief Logical-order text for search matching, set only for a pre-shaped locale.
+             *
+             * @details A right-to-left locale stores `display_name` already shaped into presentation forms and
+             *          already reordered, because Dear ImGui performs neither pass. That form can never match what an
+             *          input method produces, so the pack carries the original text separately and the picker matches
+             *          against both. Empty when `display_name` is itself searchable.
+             */
+            std::string search_name;
         };
 
         /**
          * @brief Flat, alphabetically-sorted entry list for UI iteration.
          *
-         * The first access after build() rebuilds it, and it is stable thereafter. Returned by const reference so the
-         * overlay can hold onto it without a copy of the several thousand entries per frame.
+         * @return A shared snapshot. The first access after build() builds it, and later calls return the same one
+         *         until a load_display_names() call retires it.
+         *
+         * @details The return is a `shared_ptr` rather than a reference for one reason: `load_display_names()` can
+         *          run on the deferred catalog worker while the picker iterates this list on the render thread. A
+         *          holder keeps its own snapshot alive, so a retire on another thread cannot free the elements under
+         *          it. Copying the pointer is one refcount bump per frame, not a copy of several thousand entries.
          *
          * @note This const method fills `m_sorted_cache` under `m_mutex`.
          */
-        [[nodiscard]] const std::vector<Entry> &sorted_entries() const;
+        [[nodiscard]] std::shared_ptr<const std::vector<Entry>> sorted_entries() const;
 
         /**
          * @brief Map a character name to its body kind.
@@ -273,16 +288,31 @@ namespace Transmog
         void dump_catalog_tsv() const;
 
         /**
-         * @brief Load human-readable display names from a TSV file.
+         * @brief Rebuild the display-name and wearer-body layers for one locale.
          *
-         * Each line is `internal_name<TAB>display_name`. Keys are lowercased at load time for case-insensitive
-         * matching. Must be called after a successful build(). Invalidates the sorted cache so the next
-         * sorted_entries() picks up display names.
+         * @param locale_tag Archive locale tag such as "zho-cn". An empty view or "eng" loads the English baseline
+         *        alone.
+         * @param tsv_path Path to the shipped English display-names TSV. The two user override files derive their
+         *        names from it. Build it from the wide runtime directory so a non-ASCII install path still resolves.
          *
-         * @param tsv_path Path to the display names TSV file. Build it from the wide runtime
-         *        directory so a non-ASCII install path still resolves.
+         * @details Five layers apply in this order, each keyed by the lowercased item INTERNAL name:
+         *          1. the pack "body" block, the only source of the wearer-body restriction,
+         *          2. the pack "names" block for "eng", the display-name baseline,
+         *          3. the pack "names" block for @p locale_tag, display names only, plus its "search" block when
+         *             the locale is pre-shaped,
+         *          4. `tsv_path` itself, ONLY when the pack supplied no names. It is a COMPLETE English table, so
+         *             applying it over a locale would rewrite every name back to English,
+         *          5. `<stem>.override.tsv` then `<stem>.<tag>.tsv`, the user overrides, which always apply.
+         *
+         *          An override overlays rather than replaces, so a partial file cannot blank the body column for
+         *          the items it omits. With no pack at all, layers 4 and 5 carry the table on their own.
+         *
+         *          When no layer supplies a name, nothing publishes, so a locale switch that finds no source leaves
+         *          the loaded table in place. Call it after a successful build(); calling it again switches locale.
+         *          It retires the sorted cache, which a holder keeps reading, so the deferred catalog worker can
+         *          call it while the picker draws.
          */
-        void load_display_names(const std::filesystem::path &tsv_path);
+        void load_display_names(std::string_view locale_tag, const std::filesystem::path &tsv_path);
 
         /**
          * @brief Look up a display name by internal name.
@@ -323,13 +353,18 @@ namespace Transmog
         // Session-scoped, with no disk persistence.
         std::unordered_map<uint16_t, TransmogSlot> m_observed_slot;
         std::unordered_map<std::string, std::string> m_display_names; // lowercase internal -> display
+        // Lowercase internal -> logical-order search text. Populated only for a pre-shaped locale, where
+        // m_display_names holds presentation forms that no typed query can match. Empty for every other locale.
+        std::unordered_map<std::string, std::string> m_search_names;
         // Wearer-body restriction, and the ONLY source of one. It loads from the optional 3rd column of the
         // display_names TSV, keyed by lowercase internal name. Only single-body-restricted items are present (Male /
         // Female). Absent -> unrestricted (BodyKind::Generic). It drives the per-character picker filter and
         // is_player_compatible. The descriptor rule-classifier token walk carries no usable body class, because a
         // game update re-keyed those tokens. Do not go back to it.
         std::unordered_map<std::string, BodyKind> m_body_by_name;
-        mutable std::vector<Entry> m_sorted_cache;
+        // Null until the first sorted_entries() call builds it, and retired by every load_display_names(). Held by
+        // shared_ptr so a retire cannot free elements a caller is still reading. See sorted_entries().
+        mutable std::shared_ptr<const std::vector<Entry>> m_sorted_cache;
 
         // Stability detector: it tracks the valid count from the previous build() attempt. The catalog is accepted
         // only when two consecutive scans produce the same count. An unchanged count means the game finished the

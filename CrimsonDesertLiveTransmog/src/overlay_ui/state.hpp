@@ -22,6 +22,18 @@
 
 namespace Transmog
 {
+    /**
+     * @brief Font this mod added to the HOST atlas so its own widgets can draw the selected locale, as `ImFont *`.
+     *
+     * @details One font for EVERY locale, not only the scripted ones, so the tab keeps one set of metrics across a
+     *          switch. Null only while none has resolved, or after the host cleared its atlas. The overlay pushes it
+     *          around this mod's content only, which leaves the host's own UI on the host's font. It is a `void *`
+     *          so this header stays free of the ImGui headers.
+     */
+    inline void *s_host_locale_font = nullptr;
+
+    /// Size `s_host_locale_font` was rasterized at. The overlay pushes exactly this, never ImGui's size fallback.
+    inline float s_host_locale_font_size = 0.0f;
 
     /**
      * @brief Window title for the standalone host wrapper.
@@ -65,6 +77,9 @@ namespace Transmog
      * @details The user re-opens the same slot and carries on from the same filter. False clears the box on open.
      */
     inline bool s_keep_search_text = true;
+
+    /// Preset-list height in rows, so it survives a font or UI-scale change. Persisted in presets.json.
+    inline float s_preset_rows = 10.0f;
 
     /**
      * @brief Dye picker region UI state: per-submesh collapse plus the per-layer R/G/B link toggle.

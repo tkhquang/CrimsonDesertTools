@@ -1,6 +1,6 @@
 # Crimson Desert - Live Transmog
 
-**This mod is in BETA** and edge cases may exist. Use at your own risk. Please report any issues you find! Supports **Kliff, Damiane, and Oongka** -- presets are stored per character and the active preset swaps automatically when you switch who you are controlling in-game.
+**This mod is in BETA** and edge cases may exist. Use at your own risk. Please report any issues you find! Supports **Kliff, Damiane, and Oongka**: presets are stored per character and the active preset swaps automatically when you switch who you are controlling in-game.
 
 [![Live Transmog Demo](https://img.youtube.com/vi/B4xX3LkgXhs/maxresdefault.jpg)](https://www.youtube.com/watch?v=B4xX3LkgXhs)
 
@@ -10,7 +10,7 @@
 
 ## Features
 
-- Built-in overlay GUI -- no external tools required (toggle with **Home** key)
+- Built-in overlay GUI, no external tools required (toggle with **Home** key)
 - In-game item browser with search-filterable dropdown, auto-categorized by slot (helm, chest, cloak, gloves, boots, earrings, necklace, rings, lantern, glasses, mask, backpack)
 - Optional body-mesh prefab picker for swapping individual prefab variants onto a slot
 - Preset system: save, load, rename, and cycle through multiple transmog presets per character
@@ -68,6 +68,13 @@ Launch the game. Press **Home** to open the transmog overlay.
 ├── CrimsonDesertLiveTransmog_display_names.tsv (Item display names, REQUIRED)
 ├── CrimsonDesertLiveTransmog_presets.json      (Auto-generated preset file)
 └── ...
+```
+
+From the optional language pack download, in the same folder:
+
+```text
+├── CrimsonDesertLiveTransmog_item_localization.pack      (Item names in 15 languages)
+└── CrimsonDesertLiveTransmog_interface_translations.json (The mod's own interface text)
 ```
 
 ### Using with ReShade
@@ -149,10 +156,10 @@ This assumes OptiScaler is already set up as in the section above (installed as 
 3. Use the search box to filter by name
 4. Select an item - changes stay **pending** until you click **Apply All**
 5. Click **Apply All** to commit all slot changes at once
-6. Use **Append** in the Presets section to create a fresh preset with the five armor slots (Helm/Chest/Cloak/Gloves/Boots) ticked and set to (none) -- a hide-armor starting point you can fill in from the pickers. Other slots stay unticked so working items like the lantern aren't accidentally hidden
+6. Use **Append** in the Presets section to create a fresh preset with the five armor slots (Helm/Chest/Cloak/Gloves/Boots) ticked and set to (none), a hide-armor starting point you can fill in from the pickers. Other slots stay unticked so working items like the lantern aren't accidentally hidden
 7. Use **Copy** to clone the active preset's saved state into a new slot. Unsaved picker edits are discarded so you start from a clean baseline you can tweak without touching the source
 8. Use **Save as New** to bottle up the current pending state (unsaved picker edits, dye, color overrides) as a brand-new preset. The active preset's saved rows stay untouched, which is the safe path when you started altering an existing preset and want to keep the new look as a separate entry
-9. **Save** commits unsaved picker edits back into the active preset. The button turns orange with a `*` marker and a `[UNSAVED -- click Save]` banner appears in the header whenever your edits differ from the stored preset
+9. **Save** commits unsaved picker edits back into the active preset. The button turns orange with a `*` marker and a `[UNSAVED - click Save]` banner appears in the header whenever your edits differ from the stored preset
 10. Use **Prev** / **Next** to cycle through saved presets
 11. Press **Home** again to close the overlay
 
@@ -182,6 +189,56 @@ cd_phw_m0001_00_samuel_ub_00_0001
 ```
 
 Note the extra `_00_` in the second name. If there are noisy matches, narrow the search with `_samuel_ub_00_0001`.
+
+## Translations
+
+Two settings at the top of the Transmog tab, because they are two different questions:
+
+- **Item Names** - the language of the item names in the picker, from the game's own localization tables, in all 15 languages it ships with.
+- **Interface** - the language of the mod's own text, which exists only where someone has translated it. Defaults to **Auto**, meaning it follows Item Names, so the usual case is still a single choice.
+
+Both come from the optional **language pack** download. Unzip it beside the `.asi`, in the same folder as the INI:
+
+- `CrimsonDesertLiveTransmog_item_localization.pack` - item names in all 15 languages. Also the source of the picker's male/female filter.
+- `CrimsonDesertLiveTransmog_interface_translations.json` - the mod's own interface text.
+
+Without the pack a default install is English only and the Interface dropdown stays hidden.
+
+Non-Latin scripts need a font that covers them. The mod loads one itself, in both the standalone overlay and the ReShade tab, so this normally needs nothing from you. If no font on the PC covers the script, the tab says so and you can point `FontPath` in the INI at one.
+
+Currently shipped: Simplified Chinese.
+
+### Renaming individual items
+
+Two optional files override single rows without touching the rest. Both take `<internal name><TAB><display name>[<TAB>Male|Female]`, one row per line, and both leave every item they omit alone:
+
+- `CrimsonDesertLiveTransmog_display_names.override.tsv` applies in every language.
+- `CrimsonDesertLiveTransmog_display_names.<tag>.tsv` applies only when that language is selected, for example `..._display_names.zho-cn.tsv`.
+
+Neither exists by default. Create the one you want beside the shipped `_display_names.tsv`. Keep edits in these files rather than in the shipped table, which every update replaces.
+
+### Contributing a translation
+
+All interface text lives in one file, [`build/language-pack/CrimsonDesertLiveTransmog_interface_translations.json`](build/language-pack/CrimsonDesertLiveTransmog_interface_translations.json). Fill in `text` and open a PR. `en` and `where` are there to translate against; the mod reads neither.
+
+```json
+"footer.apply_all": {
+  "en": "Apply All",
+  "where": "Bottom button row - button",
+  "text": "全部应用"
+}
+```
+
+- An empty `text` shows the English, so a partial translation is fine.
+- Keep every `%s`, `%d`, `%.2f` in the same order as the English. An entry whose placeholders do not match is rejected and shows the English.
+- Keep the `\n` line breaks roughly where they are. They control how tooltips wrap.
+- No `##` in your text. Button ids are attached by the mod.
+- `.tip` keys are tooltips. `.one` / `.many` are singular and plural.
+- Technical terms stay English: `prefab`, `token`, INI key names, `SlotPopulator`.
+
+For a new language, copy a block under `locales`, change its tag and `endonym`, blank every `text`, and translate. The tag must be one the language pack uses (`jpn`, `kor`, `rus`, `ger`, and so on).
+
+A new user-visible string in the mod is written as `lang::t("area.widget", "English text")`; add its entry to this file at the same time.
 
 ## Configuration
 
@@ -214,7 +271,7 @@ PrevHotkey =
 ; a custom color for each visible material region on a transmogged
 ; item, including outfits the in-game dye merchant normally refuses.
 ;
-; HIGHLY EXPERIMENTAL -- disabled by default. Toggle changes take
+; HIGHLY EXPERIMENTAL, disabled by default. Toggle changes take
 ; effect on the next game launch.
 ColorOverride = false
 
@@ -248,8 +305,8 @@ See the full list at the [Supported Input Names](https://github.com/tkhquang/Det
 - **[Experimental] Dye support shipped as a rough POC/MVP**, please bear with the UX for now. Note that not every item is dyeable; applying a color to a non-dyeable slot will produce no visual change.
 - **Helmets: visibility override and voice muffle** - while LT is active, the in-game helmet visibility setting is overridden (workaround: set the Helm slot in the LT picker to "(none)" to hide the helmet). Closed-face helmets also muffle your protagonist's voice; enable the experimental **Unmuffle Helm Voice** option (`UnmuffleHelmVoice = true`) to remove it, NPC voices keep their vanilla muffle. Changes take effect on the next game launch.
 - **Some NPC armor** seems to have combined with the cloak and other slots. If you apply it and it disappears right afterwards, try setting the cloak slot and other involved slots to none, save, then reapply the armor again.
-- **NPC armor variants and damaged variants render via carrier** -- items tagged `(carrier)` in the picker use an automatic carrier swap + character-class bypass to render. Most work; a few may still produce empty slots depending on the item's internal skeleton bindings.
-- **Non-humanoid items crash** -- horse tack, pet armor, and wagon gear crash the mesh binder. The "Safe only" filter hides these by default.
+- **NPC armor variants and damaged variants render via carrier**: items tagged `(carrier)` in the picker use an automatic carrier swap + character-class bypass to render. Most work; a few may still produce empty slots depending on the item's internal skeleton bindings.
+- **Non-humanoid items crash**: horse tack, pet armor, and wagon gear crash the mesh binder. The "Safe only" filter hides these by default.
 - **Wrong-slot or non-equipment items will crash** - selecting a chest piece for the helm slot, or non-armor items (dog armor, recipes, etc.) crashes the game. Safety filters prevent this by default. Do not disable them unless you know what you are doing.
 - **Special-effect armor may have visual quirks** - armor with particle or emissive (glow) effects (e.g. Marni Laser Helm) may not render those effects correctly. Hair may clip through some helmets. I haven't been able to make these work yet.
 - **Armor may render white / untextured right after loading** - occasionally a transmogged piece (most often the helm) shows up as a plain white, untextured mesh when your preset is auto-applied during world or character load. The item's material has not finished streaming in at the moment the transmog is applied. _Workaround:_ once you are fully in-game, re-apply the transmog - open the overlay (**Home**) and click **Apply All** again, or toggle the affected slot off and back on. Re-applying reloads the material and it renders correctly.

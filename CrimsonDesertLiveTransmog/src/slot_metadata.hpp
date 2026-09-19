@@ -39,6 +39,10 @@ namespace Transmog
         // patch that renumbers this column reports itself instead of silently routing applies into the wrong slot.
         std::int16_t game_tag{};
         const char *display_name{nullptr}; // "Helm", "Chest", ... (UI / log labels)
+        // Translation key for display_name, "slot.helm" and so on. The English above stays the fallback and the
+        // log/identity spelling; this only names the row for the translations file, so a slot's translation
+        // survives a rename of its display_name.
+        const char *lang_key{nullptr};
         // part_show_suppress IndexedStringA hash key (CD_*). nullptr when the slot does NOT participate in
         // part_show_suppress. Only the 5 armor slots have CD_* hashes. Accessory and weapon slots use different
         // suppression mechanisms or none at all.
@@ -68,43 +72,43 @@ namespace Transmog
 
     inline constexpr SlotMetadata SLOT_METADATA[SLOT_COUNT] = {
         // clang-format off
-        // slot              game_tag  display_name       part_show_hash_key   enabled
+        // slot              game_tag  display_name     lang_key             part_show_hash_key   enabled
         // - 5 armor slots: the original transmog targets, driven by part_show_suppress plus the wrapper swap.
-        { TransmogSlot::Helm,          0x03, "Helm",          "CD_Helm"      , true  },
-        { TransmogSlot::Chest,         0x04, "Chest",         "CD_Upperbody" , true  },
-        { TransmogSlot::Cloak,         0x10, "Cloak",         "CD_Cloak"     , true  },
-        { TransmogSlot::Gloves,        0x05, "Gloves",        "CD_Hand"      , true  },
-        { TransmogSlot::Boots,         0x06, "Boots",         "CD_Foot"      , true  },
+        { TransmogSlot::Helm,          0x03, "Helm",          "slot.helm",       "CD_Helm"      , true  },
+        { TransmogSlot::Chest,         0x04, "Chest",         "slot.chest",      "CD_Upperbody" , true  },
+        { TransmogSlot::Cloak,         0x10, "Cloak",         "slot.cloak",      "CD_Cloak"     , true  },
+        { TransmogSlot::Gloves,        0x05, "Gloves",        "slot.gloves",     "CD_Hand"      , true  },
+        { TransmogSlot::Boots,         0x06, "Boots",         "slot.boots",      "CD_Foot"      , true  },
         // - Paired accessory slots. Both halves of a pair share one item TYPE, so an equip that lets the engine
         //    derive its destination can only ever reach the first half. They are enabled because the apply path names
         //    the destination explicitly for them - see slot_needs_explicit_destination below.
-        { TransmogSlot::Earring1,      0x07, "Earring1",      nullptr        , true  },
-        { TransmogSlot::Earring2,      0x08, "Earring2",      nullptr        , true  },
+        { TransmogSlot::Earring1,      0x07, "Earring1",      "slot.earring1",   nullptr        , true  },
+        { TransmogSlot::Earring2,      0x08, "Earring2",      "slot.earring2",   nullptr        , true  },
         // - Necklace: single-prefab single-tag, treated like an armor slot.
-        { TransmogSlot::Necklace,      0x09, "Necklace",      nullptr        , true  },
-        { TransmogSlot::Ring1,         0x0A, "Ring1",         nullptr        , true  },
-        { TransmogSlot::Ring2,         0x0B, "Ring2",         nullptr        , true  },
-        { TransmogSlot::Lantern,       0x0F, "Lantern",       nullptr        , true  },
-        { TransmogSlot::Glasses,       0x11, "Glasses",       nullptr        , true  },
-        { TransmogSlot::Mask,          0x12, "Mask",          nullptr        , true  },
-        { TransmogSlot::Backpack,      0x13, "Backpack",      nullptr        , true  },
+        { TransmogSlot::Necklace,      0x09, "Necklace",      "slot.necklace",   nullptr        , true  },
+        { TransmogSlot::Ring1,         0x0A, "Ring1",         "slot.ring1",      nullptr        , true  },
+        { TransmogSlot::Ring2,         0x0B, "Ring2",         "slot.ring2",      nullptr        , true  },
+        { TransmogSlot::Lantern,       0x0F, "Lantern",       "slot.lantern",    nullptr        , true  },
+        { TransmogSlot::Glasses,       0x11, "Glasses",       "slot.glasses",    nullptr        , true  },
+        { TransmogSlot::Mask,          0x12, "Mask",          "slot.mask",       nullptr        , true  },
+        { TransmogSlot::Backpack,      0x13, "Backpack",      "slot.backpack",   nullptr        , true  },
         // Bracelet stays disabled: it is a multi-prefab, non-armor slot the current pipeline does not handle.
-        { TransmogSlot::Bracelet,      0x14, "Bracelet",      nullptr        , false },
+        { TransmogSlot::Bracelet,      0x14, "Bracelet",      "slot.bracelet",   nullptr        , false },
         // Weapon family slots below stay disabled: every weapon slot emits multiple prefabs per item (mesh,
         // scabbard, FX and binds), and MainHand/OffHand share tag space when dual-wielding. Re-enabling them needs a
         // weapon-side swap pipeline plus sub-index disambiguation in SlotPopulator.
-        { TransmogSlot::MainHand,      0x00, "MainHand",      nullptr        , false },
-        { TransmogSlot::OffHand,       0x01, "OffHand",       nullptr        , false },
-        { TransmogSlot::Ranged,        0x02, "Ranged",        nullptr        , false },
-        { TransmogSlot::SubWeapon,     0x0C, "SubWeapon",     nullptr        , false },
+        { TransmogSlot::MainHand,      0x00, "MainHand",      "slot.mainhand",   nullptr        , false },
+        { TransmogSlot::OffHand,       0x01, "OffHand",       "slot.offhand",    nullptr        , false },
+        { TransmogSlot::Ranged,        0x02, "Ranged",        "slot.ranged",     nullptr        , false },
+        { TransmogSlot::SubWeapon,     0x0C, "SubWeapon",     "slot.subweapon",  nullptr        , false },
         // display_name is trimmed to "TwoHand" so it fits the overlay's slot column. It is what `slot_name()` and
         // `game_slot_name()` both return for this slot.
-        { TransmogSlot::TwoHandWeapon, 0x0D, "TwoHand",       nullptr        , false },
+        { TransmogSlot::TwoHandWeapon, 0x0D, "TwoHand",       "slot.twohand",    nullptr        , false },
         // Tool stays disabled: the gathering-tool mesh family has not been identified. OffHand2 and Ranged2 are the
         // engine's overflow parking slots for a weapon whose primary slot is taken.
-        { TransmogSlot::Tool,          0x0E, "Tool",          nullptr        , false },
-        { TransmogSlot::OffHand2,      0x17, "OffHand2",      nullptr        , false },
-        { TransmogSlot::Ranged2,       0x18, "Ranged2",       nullptr        , false },
+        { TransmogSlot::Tool,          0x0E, "Tool",          "slot.tool",       nullptr        , false },
+        { TransmogSlot::OffHand2,      0x17, "OffHand2",      "slot.offhand2",   nullptr        , false },
+        { TransmogSlot::Ranged2,       0x18, "Ranged2",       "slot.ranged2",    nullptr        , false },
         // Tag 0x15 "OongkaRocket" intentionally omitted - see TransmogSlot enum comments in shared_state.hpp.
         // clang-format on
     };

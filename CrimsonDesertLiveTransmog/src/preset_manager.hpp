@@ -8,7 +8,9 @@
 #include <cstdint>
 #include <filesystem>
 #include <map>
+#include <mutex>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace Transmog
@@ -179,6 +181,83 @@ namespace Transmog
          * @return true when the write completed.
          */
         bool save(const std::filesystem::path &path) const;
+
+        /**
+         * @brief Display-name locale tag the user selected, such as "zho-cn".
+         * @return The stored tag, or "eng" when presets.json carried none.
+         */
+        [[nodiscard]] std::string display_name_locale() const;
+
+        /**
+         * @brief Store the display-name locale and write presets.json.
+         * @param tag Archive locale tag. An empty tag resets the preference to "eng".
+         * @return true when the write completed.
+         * @details The caller owns the reload. This stores the preference only, through @ref save_settings.
+         */
+        bool set_display_name_locale(std::string_view tag);
+
+        /**
+         * @brief Interface-language tag the user selected.
+         * @return The stored tag, or "auto" when presets.json carried none.
+         * @details "auto" means the interface follows the display-name locale. It is separate from that locale
+         *          because item names exist in all 15 of the game's languages while the interface exists only in
+         *          the ones someone has translated, so the two choices are not the same choice.
+         */
+        [[nodiscard]] std::string interface_locale() const;
+
+        /**
+         * @brief Store the interface language and write presets.json.
+         * @param tag Archive locale tag, or "auto" to follow the display-name locale.
+         * @return true when the write completed.
+         * @details The caller owns the reload. This stores the preference only, through @ref save_settings.
+         */
+        bool set_interface_locale(std::string_view tag);
+
+        /**
+         * @brief Overlay preferences that belong to the user rather than to any character.
+         */
+        struct UiPrefs
+        {
+            /// Range the UI-scale control offers, and the range a stored value is clamped to on load.
+            static constexpr float UI_SCALE_MIN = 0.5f;
+            static constexpr float UI_SCALE_MAX = 2.0f;
+            /// Range the preset-list resize handle offers, in rows.
+            static constexpr float PRESET_ROWS_MIN = 3.0f;
+            static constexpr float PRESET_ROWS_MAX = 40.0f;
+
+            /// Extra overlay scale on top of the automatic one. 1.0 leaves it alone.
+            float ui_scale = 1.0f;
+            /// Apply an edit the moment it is made, with no explicit Apply All.
+            bool instant_apply = false;
+            /// Keep the picker's search text when a slot popup reopens.
+            bool keep_search_text = true;
+            /**
+             * @brief Height of the preset list, in ROWS rather than pixels.
+             * @details Rows survive a font or UI-scale change; a pixel height would leave the panel the wrong size
+             *          the next time either moved.
+             */
+            float preset_rows = 10.0f;
+        };
+
+        /// Overlay preferences as loaded from presets.json.
+        [[nodiscard]] UiPrefs ui_prefs() const noexcept;
+
+        /**
+         * @brief Store overlay preferences and write presets.json.
+         * @return true when the write completed.
+         */
+        bool set_ui_prefs(const UiPrefs &prefs);
+
+        /**
+         * @brief Rewrite the `settings` block of presets.json and nothing else.
+         * @return true when the write completed.
+         *
+         * @details A preference write must NOT go through @ref save. That path captures the live swatch table into
+         *          the active preset, clears the dye-dirty flag and re-baselines the snapshot, so ticking a checkbox
+         *          would commit the user's unsaved dye edits and drop the UNSAVED badge. This merges the block into
+         *          the file as it stands and leaves every other key, and all live preset state, untouched.
+         */
+        bool save_settings() const;
 
         // Character management
         //
@@ -404,6 +483,21 @@ namespace Transmog
         std::string m_editing_character = "Kliff";
         bool m_editing_pinned = false;
         std::filesystem::path m_file_path;
+
+        // Global user preferences. They sit beside `characters` in presets.json rather than inside it, so a character
+        // rename or removal cannot take them along.
+        //
+        // These three are the only members reachable from two threads: the deferred catalog worker reads the
+        // display-name locale while the overlay writes it. `m_settings_mutex` guards all three, is the innermost
+        // lock this class takes, and is never held across a file write or a callback.
+        mutable std::mutex m_settings_mutex;
+        std::string m_display_name_locale = "eng";
+        std::string m_interface_locale = "auto";
+        UiPrefs m_ui_prefs{};
+        // Serialized JSON object holding every top-level key this build does not know. save() rebuilds the root from
+        // scratch, so without this stash an older build writing over a newer build's file would strip preferences it
+        // never read. Empty when the file carried no unknown key.
+        std::string m_foreign_root_keys;
     };
 
     /**

@@ -52,6 +52,22 @@ namespace Transmog
     /// Requests stop and joins the persistent apply worker.
     void stop_apply_worker();
 
+    /**
+     * @brief Runs one clear pass on the game thread and blocks until it has finished.
+     * @return true when a frame claimed and ran the pass.
+     *
+     * @details The same body a preset switch runs, executed synchronously. Shutdown uses it to retract this mod's
+     *          visuals through the ordinary path instead of a teardown of its own, so there is one apply path to
+     *          keep correct rather than two.
+     *
+     * @warning Call it BEFORE `shutdown_requested()` is raised. The worker and the frame hook both stop accepting
+     *          work once that flag is set, and the pass would never run.
+     * @note Unlike the worker's own dispatch, a pass no frame claims is NOT retried inline here. Running the apply
+     *       off the game thread reopens the claim-erase race (see game_thread.hpp), which is not a trade worth
+     *       making during shutdown.
+     */
+    [[nodiscard]] bool run_clear_blocking() noexcept;
+
     // Load-detection thread
 
     /// Starts the load-detection thread that watches for world reloads and character swaps.

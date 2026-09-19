@@ -13,6 +13,12 @@
 
 namespace Transmog
 {
+    /**
+     * @brief Forget every font this mod added to the host atlas.
+     * @details Call it once the host has cleared its atlas. Every cached pointer is dangling from that moment, and
+     *          pushing one hangs the game.
+     */
+    void invalidate_host_font_cache();
 
     class PresetManager;
 

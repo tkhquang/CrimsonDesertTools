@@ -1,5 +1,6 @@
 #include "item_name_table.hpp"
 #include "aob_resolver.hpp"
+#include "language_pack.hpp"
 #include "shared_state.hpp"
 #include "transmog_map.hpp"
 
@@ -8,10 +9,12 @@
 #include <Windows.h>
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <mutex>
 #include <string>
 #include <string_view>
@@ -24,6 +27,27 @@ namespace Transmog
     static constexpr uint32_t MAX_CATALOG_SIZE = 0x20000;
 
     static constexpr std::size_t MAX_NAME_LEN = 96;
+
+    /**
+     * @brief ASCII-only case fold for one byte.
+     * @details `[B-37]` requires a locale-independent fold on a resolution path. Catalog internal names carry
+     *          non-ASCII bytes, notably the Unicode Roman numerals, and `std::tolower` is locale dependent above 0x7F.
+     *          A CRT locale change would fold those bytes differently in two layers and split one item across two
+     *          keys, which reads as a missing display name rather than as a fold bug.
+     */
+    static constexpr char ascii_lower(char c) noexcept
+    {
+        return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c;
+    }
+
+    /// Builds the lowercased internal-name key that every display-name and wearer-body map uses.
+    [[nodiscard]] static std::string fold_key(std::string_view name)
+    {
+        std::string key{name};
+        for (auto &c : key)
+            c = ascii_lower(c);
+        return key;
+    }
 
     // Variant-metadata detection (see item_name_table.hpp::has_variant_meta). Clean base items have `*(desc+<offset>)
     // == <sentinel>`, where <sentinel> is a shared empty-object pointer - an IRefCounted vtable in the exe's .data
@@ -1133,7 +1157,7 @@ namespace Transmog
             m_name_to_id = std::move(name_to_id);
             m_variant_flag = std::move(variant_flag);
             m_slot_by_id = std::move(slot_map);
-            m_sorted_cache.clear(); // will be rebuilt lazily on next access
+            m_sorted_cache.reset(); // rebuilt lazily on the next sorted_entries()
         }
 
         const auto t1 = std::chrono::steady_clock::now();
@@ -1183,9 +1207,7 @@ namespace Transmog
         auto nit = m_id_to_name.find(item_id);
         if (nit == m_id_to_name.end())
             return true; // unknown -> prefer to surface
-        std::string key = nit->second;
-        for (auto &c : key)
-            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        const std::string key = fold_key(nit->second);
         auto bit = m_body_by_name.find(key);
         return bit == m_body_by_name.end() || bit->second != BodyKind::Female;
     }
@@ -1198,9 +1220,7 @@ namespace Transmog
         auto nit = m_id_to_name.find(item_id);
         if (nit == m_id_to_name.end())
             return BodyKind::Generic;
-        std::string key = nit->second;
-        for (auto &c : key)
-            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        const std::string key = fold_key(nit->second);
         auto bit = m_body_by_name.find(key);
         return bit != m_body_by_name.end() ? bit->second : BodyKind::Generic;
     }
@@ -1253,13 +1273,18 @@ namespace Transmog
         return BodyKind::Generic;
     }
 
-    const std::vector<ItemNameTable::Entry> &ItemNameTable::sorted_entries() const
+    std::shared_ptr<const std::vector<ItemNameTable::Entry>> ItemNameTable::sorted_entries() const
     {
         std::lock_guard<std::mutex> lk(m_mutex);
-        if (!m_sorted_cache.empty() || m_id_to_name.empty())
+        if (m_sorted_cache != nullptr)
             return m_sorted_cache;
+        if (m_id_to_name.empty())
+            return std::make_shared<const std::vector<Entry>>();
 
-        m_sorted_cache.reserve(m_id_to_name.size());
+        // Build into a local, then publish. Nothing observes a half-sorted list, and the published vector is never
+        // mutated again, which is what lets a holder keep reading it after a retire.
+        std::vector<Entry> built;
+        built.reserve(m_id_to_name.size());
         for (const auto &[id, name] : m_id_to_name)
         {
             auto vit = m_variant_flag.find(id);
@@ -1267,9 +1292,7 @@ namespace Transmog
 
             // Lowercased internal name keys both the display-name and the wearer-body maps (both loaded from the
             // display_names TSV).
-            std::string lower_name = name;
-            for (auto &c : lower_name)
-                c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            const std::string lower_name = fold_key(name);
 
             // Wearer-body classification comes from the equip-eligibility column of the display_names TSV
             // (m_body_by_name). Only single-body-restricted items are listed. Anything wearable by both bodies (or
@@ -1283,13 +1306,16 @@ namespace Transmog
             auto dit = m_display_names.find(lower_name);
             std::string disp_name = (dit != m_display_names.end()) ? dit->second : std::string();
 
+            auto sit = m_search_names.find(lower_name);
+            std::string search_name = (sit != m_search_names.end()) ? sit->second : std::string();
+
             // The item's group membership is authoritative. Anything with no mapped group (pet and mount gear, quest
             // items, consumables) is absent from the map and collapses to Count, hiding it as non-equipment. There is
             // no name-parsing fallback: the groups ARE the engine's classification.
             auto slit = m_slot_by_id.find(id);
             const TransmogSlot slot = (slit != m_slot_by_id.end()) ? slit->second : TransmogSlot::Count;
 
-            m_sorted_cache.push_back({
+            built.push_back({
                 id,
                 slot,
                 has_variant,
@@ -1297,12 +1323,13 @@ namespace Transmog
                 kind,
                 name,
                 std::move(disp_name),
+                std::move(search_name),
             });
         }
 
         std::sort(
-            m_sorted_cache.begin(),
-            m_sorted_cache.end(),
+            built.begin(),
+            built.end(),
             [](const Entry &a, const Entry &b)
             {
                 // Sort by display name when available, else by internal name. Case-insensitive so "Kliff" and
@@ -1321,6 +1348,7 @@ namespace Transmog
             }
         );
 
+        m_sorted_cache = std::make_shared<const std::vector<Entry>>(std::move(built));
         return m_sorted_cache;
     }
 
@@ -1346,10 +1374,10 @@ namespace Transmog
             return;
         }
 
-        const auto &entries = sorted_entries();
+        const auto entries = sorted_entries();
 
         out << "ItemID\tSlot\tVariant\tPlayerSafe\tName\n";
-        for (const auto &e : entries)
+        for (const auto &e : *entries)
         {
             const char *slot_str = "Other";
             if (e.category != TransmogSlot::Count)
@@ -1360,74 +1388,272 @@ namespace Transmog
                 << e.name << '\n';
         }
 
-        logger.info("[nametable] dumped {} entries to CrimsonDesertLiveTransmog_items.tsv", entries.size());
+        logger.info("[nametable] dumped {} entries to CrimsonDesertLiveTransmog_items.tsv", entries->size());
     }
 
-    void ItemNameTable::load_display_names(const std::filesystem::path &tsv_path)
+    // Trim ASCII whitespace and any line terminator from both ends of one field. A TSV written with trailing padding
+    // would otherwise produce a key that never matches or a body column that reads as unrestricted.
+    static std::string_view trim_field(std::string_view field) noexcept
+    {
+        constexpr auto is_space = [](char c) noexcept { return c == ' ' || c == '\t' || c == '\r' || c == '\n'; };
+        while (!field.empty() && is_space(field.front()))
+            field.remove_prefix(1);
+        while (!field.empty() && is_space(field.back()))
+            field.remove_suffix(1);
+        return field;
+    }
+
+    /**
+     * @brief Split one row on tabs into at most three trimmed fields.
+     * @return The number of fields the row carries.
+     */
+    static std::size_t split_row(std::string_view line, std::array<std::string_view, 3> &fields) noexcept
+    {
+        std::size_t count = 0;
+        std::size_t pos = 0;
+        while (count < fields.size())
+        {
+            const auto tab = line.find('\t', pos);
+            const auto end = (tab == std::string_view::npos) ? line.size() : tab;
+            fields[count++] = trim_field(line.substr(pos, end - pos));
+            if (tab == std::string_view::npos)
+                break;
+            pos = tab + 1;
+        }
+        return count;
+    }
+
+    /// Invoke @p fn once per non-empty newline-delimited row of @p payload.
+    template <class Fn> static void for_each_row(std::string_view payload, Fn &&fn)
+    {
+        std::size_t pos = 0;
+        while (pos < payload.size())
+        {
+            const auto newline = payload.find('\n', pos);
+            const auto end = (newline == std::string_view::npos) ? payload.size() : newline;
+            if (const auto line = payload.substr(pos, end - pos); !line.empty())
+                fn(line);
+            if (newline == std::string_view::npos)
+                break;
+            pos = newline + 1;
+        }
+    }
+
+    /**
+     * @brief Ingest `internal_name<TAB>display_name` rows, replacing any key the payload names.
+     * @return The number of rows applied.
+     */
+    static std::size_t apply_name_rows(std::string_view payload, std::unordered_map<std::string, std::string> &names)
+    {
+        std::size_t applied = 0;
+        for_each_row(
+            payload,
+            [&](std::string_view line)
+            {
+                std::array<std::string_view, 3> fields{};
+                if (split_row(line, fields) < 2 || fields[0].empty() || fields[1].empty())
+                    return;
+                names[fold_key(fields[0])] = std::string{fields[1]};
+                ++applied;
+            }
+        );
+        return applied;
+    }
+
+    /**
+     * @brief Ingest `internal_name<TAB>Male|Female` rows into the wearer-body map.
+     * @return The number of rows applied.
+     */
+    static std::size_t
+    apply_body_rows(std::string_view payload, std::unordered_map<std::string, ItemNameTable::BodyKind> &body)
+    {
+        std::size_t applied = 0;
+        for_each_row(
+            payload,
+            [&](std::string_view line)
+            {
+                std::array<std::string_view, 3> fields{};
+                if (split_row(line, fields) < 2 || fields[0].empty())
+                    return;
+                if (fields[1] == "Male")
+                    body[fold_key(fields[0])] = ItemNameTable::BodyKind::Male;
+                else if (fields[1] == "Female")
+                    body[fold_key(fields[0])] = ItemNameTable::BodyKind::Female;
+                else
+                    return;
+                ++applied;
+            }
+        );
+        return applied;
+    }
+
+    /**
+     * @brief Ingest the user override TSV over both maps.
+     * @return The number of rows that changed a display name or a body value.
+     *
+     * @details Columns are `<internal name> \t <display name> [\t Male|Female]`. Each field is optional past the key:
+     *          an empty display name leaves the published name intact, and an absent third column leaves the published
+     *          body intact. The overlay never erases a row the file omits.
+     */
+    static std::size_t apply_override_rows(
+        std::string_view payload,
+        std::unordered_map<std::string, std::string> &names,
+        std::unordered_map<std::string, ItemNameTable::BodyKind> &body
+    )
+    {
+        std::size_t applied = 0;
+        for_each_row(
+            payload,
+            [&](std::string_view line)
+            {
+                std::array<std::string_view, 3> fields{};
+                const auto count = split_row(line, fields);
+                if (count < 2 || fields[0].empty())
+                    return;
+
+                const std::string key = fold_key(fields[0]);
+                bool changed = false;
+                if (!fields[1].empty())
+                {
+                    names[key] = std::string{fields[1]};
+                    changed = true;
+                }
+                if (count > 2 && fields[2] == "Male")
+                {
+                    body[key] = ItemNameTable::BodyKind::Male;
+                    changed = true;
+                }
+                else if (count > 2 && fields[2] == "Female")
+                {
+                    body[key] = ItemNameTable::BodyKind::Female;
+                    changed = true;
+                }
+                if (changed)
+                    ++applied;
+            }
+        );
+        return applied;
+    }
+
+    void ItemNameTable::load_display_names(std::string_view locale_tag, const std::filesystem::path &tsv_path)
     {
         auto &logger = DMK::log();
 
-        std::ifstream file{tsv_path};
-        if (!file.is_open())
+        std::unordered_map<std::string, std::string> names;
+        std::unordered_map<std::string, std::string> search_names;
+        std::unordered_map<std::string, BodyKind> body_by_name;
+        names.reserve(7000);
+
+        const auto &pack = LanguagePack::instance();
+        const bool pack_ready = pack.ready();
+        bool pack_supplied_names = false;
+        std::size_t localized = 0;
+        if (pack_ready)
         {
-            logger.warning("[nametable] display names file not found: '{}'", to_utf8(tsv_path));
+            // Layer 1. The pack is the only source of the wearer-body restriction, and the block is locale
+            // independent, so it loads once regardless of the selected locale.
+            if (const auto block = pack.read_block("body", ""); block.has_value())
+                apply_body_rows(*block, body_by_name);
+
+            // Layer 2. English is always the baseline, so a locale that omits an item still shows a readable name.
+            if (const auto block = pack.read_block("names", "eng"); block.has_value())
+                (void)apply_name_rows(*block, names);
+
+            // Layer 3. Display names only. It must not touch the body map.
+            if (!locale_tag.empty() && locale_tag != "eng")
+            {
+                if (const auto block = pack.read_block("names", locale_tag); block.has_value())
+                    localized = apply_name_rows(*block, names);
+                else
+                    logger.warning("[nametable] locale '{}' unavailable; display names stay English", locale_tag);
+
+                // A "search" block marks its locale as pre-shaped: the names above are presentation forms in visual
+                // order, which no typed query can match. The original logical text keeps the picker searchable.
+                if (const auto block = pack.read_block("search", locale_tag); block.has_value())
+                    (void)apply_name_rows(*block, search_names);
+            }
+
+            // Any block that produced a row counts, not the English one alone. A pack that carries a locale and no
+            // English baseline must not then have every localized name overwritten by the English TSV below.
+            pack_supplied_names = !names.empty();
+        }
+
+        // Layer 4. The shipped TSV is a COMPLETE English table, so it is a fallback, never an override. Applying it
+        // over a locale would rewrite every name back to English and silently undo the locale choice. It loads only
+        // when the pack supplied no names at all, which is the pack-absent install.
+        bool fallback_used = false;
+        if (!pack_supplied_names)
+        {
+            if (std::ifstream file{tsv_path, std::ios::binary}; file.is_open())
+            {
+                fallback_used = true;
+                const std::string content{std::istreambuf_iterator<char>{file}, std::istreambuf_iterator<char>{}};
+                apply_override_rows(content, names, body_by_name);
+            }
+        }
+
+        // Layer 5. The user override, always applied last. It lives beside the shipped TSV under a distinct name
+        // so a user edit is never confused with the shipped table:
+        //   <stem>.override.tsv    applies to every locale
+        //   <stem>.<tag>.tsv       applies to one locale only
+        std::size_t overrides = 0;
+        const auto apply_override_file = [&](const std::filesystem::path &path)
+        {
+            if (std::ifstream file{path, std::ios::binary}; file.is_open())
+            {
+                const std::string content{std::istreambuf_iterator<char>{file}, std::istreambuf_iterator<char>{}};
+                overrides += apply_override_rows(content, names, body_by_name);
+            }
+        };
+        {
+            // Concatenate onto the path itself. Rebuilding it from stem().string() would round-trip a non-ASCII
+            // install path through the ANSI codepage, which is the bug this module avoids everywhere else. The
+            // suffixes below are ASCII, so only the directory part carries a non-ASCII risk and it never converts.
+            std::filesystem::path base = tsv_path;
+            base.replace_extension();
+
+            std::filesystem::path shared = base;
+            shared += ".override.tsv";
+            apply_override_file(shared);
+
+            if (!locale_tag.empty())
+            {
+                std::filesystem::path per_locale = base;
+                per_locale += ".";
+                per_locale += locale_tag;
+                per_locale += ".tsv";
+                apply_override_file(per_locale);
+            }
+        }
+
+        if (!pack_supplied_names && !fallback_used)
+        {
+            // Publishing here would wipe a previously loaded table on a locale switch that found neither source.
+            logger.warning("[nametable] no language pack and no display names file at '{}'", to_utf8(tsv_path));
             return;
         }
 
-        std::unordered_map<std::string, std::string> names;
-        std::unordered_map<std::string, BodyKind> body_by_name;
-        names.reserve(6100);
-        std::string line;
-        while (std::getline(file, line))
-        {
-            if (line.empty())
-                continue;
-
-            const auto t1 = line.find('\t');
-            if (t1 == std::string::npos || t1 == 0)
-                continue;
-
-            // string::trim strips the line terminator and any stray padding from every field, so a TSV written with a
-            // trailing space cannot produce a key that never matches or a body column that reads as unrestricted.
-            std::string key = DMK::string::trim(std::string_view{line}.substr(0, t1));
-            for (auto &c : key)
-                c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-
-            // Columns: <internal name> \t <display name> [\t <wearer body: "Male"|"Female">]. The optional 3rd column
-            // carries the equip-eligibility body restriction (the body-table generator, kept out of tree, fills it
-            // from the packed gamedata) and is only present for single-body-restricted items, so an older 2-column TSV
-            // still loads. An absent body means "unrestricted / shown on every character".
-            std::string display, body;
-            const auto t2 = line.find('\t', t1 + 1);
-            if (t2 == std::string::npos)
-                display = DMK::string::trim(std::string_view{line}.substr(t1 + 1));
-            else
-            {
-                display = DMK::string::trim(std::string_view{line}.substr(t1 + 1, t2 - (t1 + 1)));
-                body = DMK::string::trim(std::string_view{line}.substr(t2 + 1));
-            }
-            if (body == "Male")
-                body_by_name.emplace(key, BodyKind::Male);
-            else if (body == "Female")
-                body_by_name.emplace(key, BodyKind::Female);
-            if (!display.empty())
-                names.emplace(std::move(key), std::move(display));
-        }
-
+        const std::size_t name_count = names.size();
+        const std::size_t body_count = body_by_name.size();
         {
             std::lock_guard<std::mutex> lk(m_mutex);
             m_display_names = std::move(names);
+            m_search_names = std::move(search_names);
             m_body_by_name = std::move(body_by_name);
-            // Callers must invoke load_display_names() before any sorted_entries() access (i.e. before
-            // dump_catalog_tsv) so the cache is still empty here - no re-sort needed.
-            m_sorted_cache.clear();
+            // Retire rather than mutate. A picker iterating the previous snapshot on the render thread holds its
+            // own reference to it, so the reset here cannot free elements under it, and the next sorted_entries()
+            // builds a fresh one carrying the new names.
+            m_sorted_cache.reset();
         }
 
         logger.info(
-            "[nametable] loaded {} display names ({} body-restricted) from '{}'",
-            m_display_names.size(),
-            m_body_by_name.size(),
-            to_utf8(tsv_path)
+            "[nametable] {} display names ({} body-restricted), locale '{}' supplied {}, overrides {}, fallback {}",
+            name_count,
+            body_count,
+            locale_tag.empty() ? std::string_view{"eng"} : locale_tag,
+            localized,
+            overrides,
+            fallback_used
         );
     }
 
@@ -1438,7 +1664,7 @@ namespace Transmog
         char buf[256];
         const auto len = (std::min)(internal_name.size(), sizeof(buf) - 1);
         for (std::size_t i = 0; i < len; ++i)
-            buf[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(internal_name[i])));
+            buf[i] = ascii_lower(internal_name[i]);
         buf[len] = '\0';
         const std::string key{buf, len};
 
