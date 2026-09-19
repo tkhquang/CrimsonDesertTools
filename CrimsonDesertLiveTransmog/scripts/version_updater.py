@@ -34,9 +34,9 @@ def get_current_version():
     version_h = VERSION_HEADER.read_text(encoding="utf-8")
 
     # Extract version components using defines
-    major_match = re.search(r'#define\s+VERSION_MAJOR\s+(\d+)', version_h)
-    minor_match = re.search(r'#define\s+VERSION_MINOR\s+(\d+)', version_h)
-    patch_match = re.search(r'#define\s+VERSION_PATCH\s+(\d+)', version_h)
+    major_match = re.search(r'#define\s+(?:\w+_)?VERSION_MAJOR\s+(\d+)', version_h)
+    minor_match = re.search(r'#define\s+(?:\w+_)?VERSION_MINOR\s+(\d+)', version_h)
+    patch_match = re.search(r'#define\s+(?:\w+_)?VERSION_PATCH\s+(\d+)', version_h)
 
     if not (major_match and minor_match and patch_match):
         print("Error: Could not extract version information from version.hpp")
@@ -76,18 +76,18 @@ def bump_version(part):
 
     # Update the defines
     version_h = re.sub(
-        r'#define\s+VERSION_MAJOR\s+\d+',
-        f'#define VERSION_MAJOR {major}',
+        r'(#define\s+(?:\w+_)?VERSION_MAJOR\s+)\d+',
+        lambda m: f'{m.group(1)}{major}',
         version_h
     )
     version_h = re.sub(
-        r'#define\s+VERSION_MINOR\s+\d+',
-        f'#define VERSION_MINOR {minor}',
+        r'(#define\s+(?:\w+_)?VERSION_MINOR\s+)\d+',
+        lambda m: f'{m.group(1)}{minor}',
         version_h
     )
     version_h = re.sub(
-        r'#define\s+VERSION_PATCH\s+\d+',
-        f'#define VERSION_PATCH {patch}',
+        r'(#define\s+(?:\w+_)?VERSION_PATCH\s+)\d+',
+        lambda m: f'{m.group(1)}{patch}',
         version_h
     )
 
