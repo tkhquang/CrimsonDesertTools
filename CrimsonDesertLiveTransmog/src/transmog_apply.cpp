@@ -1019,6 +1019,8 @@ namespace Transmog
             // Phase B set real_damaged when it tore down the real item for this slot. The fake is applied now, so
             // clear the flag and keep apply_all_transmog from seeing stale damage state on later cycles.
             real_damaged()[slot_idx] = false;
+            // LT dresses the slot again, so no rebuilt real part remains to track.
+            restored_real_ids()[slot_idx] = 0;
         }
         else
         {
@@ -1043,6 +1045,8 @@ namespace Transmog
                     );
                     color_override::setter_substitute::set_active_slot(static_cast<int>(slot_idx));
                     apply_transmog(a1, real_id);
+                    // See the untick-restore block in apply_all_transmog: the rebuilt part needs LT to retract it.
+                    restored_real_ids()[slot_idx] = real_id;
                 }
             }
             else if (reinit_active)
@@ -1644,6 +1648,8 @@ namespace Transmog
             dye_record_inject::clear_slot_dye_state();
             last_ids[i] = m.target_item_id;
             last_applied_carrier_ids()[i] = (use_carrier && carrier_id != 0) ? carrier_id : 0;
+            // LT dresses the slot again and Phase B took the real part down, so no rebuilt real part remains.
+            restored_real_ids()[i] = 0;
             ++our_written_count;
         }
 
@@ -1679,6 +1685,9 @@ namespace Transmog
                     color_override::setter_substitute::set_active_slot(static_cast<int>(i));
                     apply_transmog(a1, real_id);
                     dye_record_inject::clear_slot_dye_state();
+                    // The part on screen is now one LT rebuilt, and the engine's own unequip does not remove it.
+                    // Record it so the load-detect tick can have it retracted once the item leaves the slot.
+                    restored_real_ids()[i] = real_id;
                     ++our_written_count;
                 }
                 else if (real_damaged()[i])
@@ -1705,6 +1714,7 @@ namespace Transmog
                                 TEAR_DOWN_SLOTS[k].game_tag
                             );
                         }
+                        restored_real_ids()[i] = 0;
                         break;
                     }
                 }
@@ -1716,6 +1726,9 @@ namespace Transmog
                 last_applied_carrier_ids()[i] = 0;
         }
 
+                            // Same as the cleanup pass: the sweep is what takes a realized part off once its item is
+                            // gone, so its wrappers are parked for it.
+                            prefab_wrapper_swap::park_slot_target_for_sweep(old_real);
         // Cleanup pass: tear down stale scene-graph meshes left by a prior restore through SlotPopulator. This handles
         // the case where apply_single_slot restored the real item and created a scene-graph entry, and the user then
         // unequipped it in the game inventory. The untick-restore block above does not catch that case, because
@@ -1729,6 +1742,25 @@ namespace Transmog
                 continue;
             if (mappings[idx].active)
                 continue;
+
+            // A part LT rebuilt for a released slot outlives the item: the engine's unequip removes its own part and
+            // not this one, and an item-to-item swap leaves it under the new part. Take it down as soon as the auth
+            // table no longer shows the item it was built for, whatever replaced it.
+            const auto restored = restored_real_ids()[idx];
+            if (restored != 0)
+            {
+                if (real_item_id[k] == restored)
+                    continue;
+                logger.info(
+                    "[dispatch] slot={} released - real item {:#06x} left the slot, tearing down the part LT rebuilt",
+                    slot_name(td.slot),
+                    restored
+                );
+                real_part_tear_down::tear_down_by_item_id(reinterpret_cast<void *>(a1), restored, td.game_tag);
+                restored_real_ids()[idx] = 0;
+                continue;
+            }
+
             if (real_item_id[k] != 0)
                 continue;
             // last_applied_real_ids is TransmogSlot-indexed - look up by `idx` (the slot enum), not the iteration
@@ -1742,6 +1774,12 @@ namespace Transmog
                 old_real
             );
             real_part_tear_down::tear_down_by_item_id(reinterpret_cast<void *>(a1), old_real, td.game_tag);
+                // The item is gone from the auth table, so the hash-keyed scene detach has nothing to match, and the
+                // engine's own unequip erased only its claims: the part LT rebuilt stays realized and re-registers its
+                // records on the next assembly. The post-apply sweep is what removes it. It finds those records on
+                // the body by prefab name and detaches them through the natural pipeline, so the item's wrappers are
+                // parked for it here and the sweep runs at the end of this pass.
+                prefab_wrapper_swap::park_slot_target_for_sweep(restored);
         }
 
         // Count was NOT zeroed - unchanged slots' entries are still live with their original subCount. Log the final
@@ -1759,6 +1797,8 @@ namespace Transmog
         std::uint32_t target_mask = 0;
         std::uint32_t active_mask = 0;
         for (std::size_t i = 0; i < SLOT_COUNT; ++i)
+            // Same as the recorded case above: the sweep is what takes a realized part off once its item is gone.
+            prefab_wrapper_swap::park_slot_target_for_sweep(old_real);
         {
             if (last_ids[i] != 0)
                 target_mask |= (std::uint32_t{1} << i);
@@ -1993,6 +2033,8 @@ namespace Transmog
 
                     logger.debug("Transmog RESTORE: real item {:#06x} for slot {}", item_id, game_slot_name(game_slot));
                     apply_transmog(a1, item_id);
+                    // A Clear rebuilds every real part through SlotPopulator, so each one needs the retraction record.
+                    restored_real_ids()[static_cast<std::size_t>(*tm_slot)] = item_id;
 
                     dye_record_inject::clear_slot_dye_state();
                 }

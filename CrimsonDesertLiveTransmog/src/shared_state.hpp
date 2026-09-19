@@ -163,9 +163,10 @@ namespace Transmog
     /**
      * @brief Per-character tracking of the last-applied transmog snapshot.
      * @param idx 1-based protagonist index: 1 Kliff, 2 Damiane, 3 Oongka. An out-of-range idx is a no-op.
-     * @details The four globals (last_applied_ids, real_damaged, last_applied_real_ids, last_applied_carrier_ids)
-     *          describe ONE body's installed state at a time. With multi-character auto-apply and the "Apply To
-     *          Selected" feature, the worker applies to any of the three protagonists between hook events, so a
+     * @details The five globals (last_applied_ids, real_damaged, last_applied_real_ids, last_applied_carrier_ids and
+     *          restored_real_ids) describe ONE body's installed state at a time. With multi-character auto-apply and
+     *          the "Apply To Selected" feature, the worker applies to any of the three protagonists between hook
+     *          events, so a
      *          single global snapshot conflates state across bodies. Phase A teardown of Damiane's fakes then uses
      *          Kliff's `last_ids` as its truth source.
      *
@@ -315,6 +316,16 @@ namespace Transmog
      *          scene-graph identity.
      */
     std::array<std::uint16_t, SLOT_COUNT> &last_applied_carrier_ids();
+
+    /**
+     * @brief Real item LT rebuilt through SlotPopulator in a slot it has released, indexed by TransmogSlot.
+     * @details Zero when the slot carries no LT-made real part. A restore rebuilds the real item's part after Phase B
+     *          tore the engine's own part down, and the engine's unequip path removes only its own part, so the rebuilt
+     *          one outlives the item. The load-detect tick compares this record against the live auth table and
+     *          schedules an apply once the item has left the slot, and the apply tears the part down. Cleared when LT
+     *          dresses the slot again or tears the part down.
+     */
+    std::array<std::uint16_t, SLOT_COUNT> &restored_real_ids();
 
     /**
      * @brief Per-slot one-shot "force apply" flag.

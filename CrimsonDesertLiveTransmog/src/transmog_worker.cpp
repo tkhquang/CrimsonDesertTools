@@ -12,6 +12,7 @@
 #include "slot_metadata.hpp"
 #include "transmog.hpp"
 #include "transmog_apply.hpp"
+#include "transmog_map.hpp"
 
 #include <cdcore/controlled_char.hpp>
 
@@ -453,6 +454,7 @@ namespace Transmog
         real_damaged().fill(false);
         last_applied_real_ids().fill(0);
         last_applied_carrier_ids().fill(0);
+        restored_real_ids().fill(0);
         return true;
     }
 
@@ -1636,6 +1638,9 @@ namespace Transmog
                             schedule_transmog_ms(200);
                         pm.save();
                     }
+                            // The previous body keeps its restored parts; its bucket, captured at its last
+                            // apply, keeps their record.
+                            restored_real_ids().fill(0);
                 }
             }
 
@@ -1647,6 +1652,34 @@ namespace Transmog
                 // Resolve identity WITHOUT invalidating any CDCore cache. The focus-broadcast resolver stamps Tier-0 on
                 // every engine focus event, so a stale read here is self-correcting within one tick. Calling
                 // an inline invalidate_controlled_character() forces an Unknown window on saves whose first broadcast
+            // Retract a real part LT rebuilt in a released slot once the game has taken that item off. Nothing else
+            // observes an unequip: LT hooks no equip event, and a released slot gives the apply worker no other reason
+            // to run. The check reads the auth table only for slots that carry a restored part, and it runs whether or
+            // not the mod is enabled, because the part is LT's own residue either way. The record is written by the
+            // apply on the game thread and read here without a lock: a 16-bit load cannot tear, so a stale read costs
+            // one tick and nothing else.
+            if (plausible_engine_ptr(comp) && real_part_tear_down::is_ready())
+            {
+                bool residue_left = false;
+                for (std::size_t i = 0; i < SLOT_COUNT && !residue_left; ++i)
+                {
+                    const auto restored = restored_real_ids()[i];
+                    if (restored == 0)
+                        continue;
+                    const auto game_tag = game_slot_from_transmog(static_cast<TransmogSlot>(i));
+                    const auto live = real_part_tear_down::get_real_item_id(
+                        reinterpret_cast<void *>(comp),
+                        static_cast<std::uint16_t>(game_tag)
+                    );
+                    residue_left = live != restored;
+                }
+                if (residue_left)
+                {
+                    logger.debug("Load detect: a restored real item left its slot, scheduling its retraction");
+                    schedule_transmog_ms(200);
+                }
+            }
+
                 // has not arrived yet (Prologue / post-cutscene resume), gating the auto-apply indefinitely.
                 const std::string live_char = current_controlled_character_name();
 
@@ -1694,6 +1727,7 @@ namespace Transmog
                     continue;
 
                 // Retry through the debounce worker. The game's visual state is not ready immediately after load detect
+                    restored_real_ids().fill(0);
                 // - the first attempt often faults because the PartDef array and scene graph are still being
                 // populated. The loop retries with exponential backoff up to ~90s total and exits once the apply lands
                 // (no SEH fault).

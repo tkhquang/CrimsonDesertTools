@@ -46,9 +46,10 @@ namespace Transmog
         std::atomic<bool> s_dye_dirty{false};
         std::atomic<std::size_t> s_pending_slot_index{SLOT_COUNT};
         std::array<std::uint16_t, SLOT_COUNT> s_last_applied_carrier_ids{};
+        std::array<std::uint16_t, SLOT_COUNT> s_restored_real_ids{};
         std::array<bool, SLOT_COUNT> s_force_apply_pending{};
 
-        // Per-character buffered snapshots of the four applied-state arrays above. Indexed by (idx-1) where idx is
+        // Per-character buffered snapshots of the five applied-state arrays above. Indexed by (idx-1) where idx is
         // the 1-based CDCore protagonist index (1=Kliff, 2=Damiane, 3=Oongka). The worker hydrates the globals from
         // the relevant slot before each apply and writes the post-apply globals back, so Phase A teardown always sees
         // a per-body truth source.
@@ -56,6 +57,7 @@ namespace Transmog
         std::array<std::array<bool, SLOT_COUNT>, BODY_OWNER_CAP> s_real_damaged_per_char{};
         std::array<std::array<std::uint16_t, SLOT_COUNT>, BODY_OWNER_CAP> s_last_applied_real_ids_per_char{};
         std::array<std::array<std::uint16_t, SLOT_COUNT>, BODY_OWNER_CAP> s_last_applied_carrier_ids_per_char{};
+        std::array<std::array<std::uint16_t, SLOT_COUNT>, BODY_OWNER_CAP> s_restored_real_ids_per_char{};
 
         /// Maps a 1-based protagonist index to its per-character bucket, or nothing when the index names no bucket.
         std::optional<std::size_t> bucket_for_char(std::uint32_t idx) noexcept
@@ -168,6 +170,10 @@ namespace Transmog
     {
         return s_last_applied_carrier_ids;
     }
+    std::array<std::uint16_t, SLOT_COUNT> &restored_real_ids()
+    {
+        return s_restored_real_ids;
+    }
     std::array<bool, SLOT_COUNT> &force_apply_pending()
     {
         return s_force_apply_pending;
@@ -195,6 +201,7 @@ namespace Transmog
         s_real_damaged = s_real_damaged_per_char[bucket];
         s_last_applied_real_ids = s_last_applied_real_ids_per_char[bucket];
         s_last_applied_carrier_ids = s_last_applied_carrier_ids_per_char[bucket];
+        s_restored_real_ids = s_restored_real_ids_per_char[bucket];
     }
 
     void capture_applied_state_for_char(std::uint32_t idx) noexcept
@@ -207,6 +214,7 @@ namespace Transmog
         s_real_damaged_per_char[bucket] = s_real_damaged;
         s_last_applied_real_ids_per_char[bucket] = s_last_applied_real_ids;
         s_last_applied_carrier_ids_per_char[bucket] = s_last_applied_carrier_ids;
+        s_restored_real_ids_per_char[bucket] = s_restored_real_ids;
     }
 
     void reset_applied_state_for_char(std::uint32_t idx) noexcept
@@ -219,6 +227,7 @@ namespace Transmog
         s_real_damaged_per_char[bucket].fill(false);
         s_last_applied_real_ids_per_char[bucket].fill(0);
         s_last_applied_carrier_ids_per_char[bucket].fill(0);
+        s_restored_real_ids_per_char[bucket].fill(0);
         // Also wipe the live globals. apply_all_transmog reads these directly (last_applied_ids / real_damaged /
         // last_applied_real_ids / last_applied_carrier_ids), so a stale global drives the no-change early-out even
         // after the bucket is cleared. rehydrate_applied_state_for_char normally overwrites the globals from the
@@ -227,6 +236,7 @@ namespace Transmog
         s_real_damaged.fill(false);
         s_last_applied_real_ids.fill(0);
         s_last_applied_carrier_ids.fill(0);
+        s_restored_real_ids.fill(0);
     }
 
     // Protagonist body-ownership table
