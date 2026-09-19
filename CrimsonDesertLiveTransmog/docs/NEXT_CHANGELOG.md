@@ -1,4 +1,5 @@
-## Fixes for unequipping gear and helm voice
+## [Title for next release]
 
-- Gear you take off now disappears properly, including when Enabled is unticked
-- Unmuffle Helm Voice works again after a game update stopped it having any effect
+- New feature
+- Bug fix
+- Improvement
