@@ -79,6 +79,17 @@ namespace Transmog
     constexpr std::ptrdiff_t COMP_SLOT_CACHE_COUNT_OFFSET = 0x200;
     constexpr std::ptrdiff_t COMP_SLOT_CACHE_CAP_OFFSET = 0x204;
 
+    // Geometry of one dispatch-cache entry. SlotPopulator appends these at the base pointer above: the slot's native
+    // id, the queued blob array, then the blob count. The count is append-only and the engine never resets it, so
+    // every pass that releases a slot must zero it by hand or the blob keeps reaching VEC.
+    constexpr std::ptrdiff_t COMP_SLOT_CACHE_ENTRY_STRIDE = 24;
+    constexpr std::ptrdiff_t COMP_SLOT_CACHE_ENTRY_SUB_COUNT_OFFSET = 0x10;
+
+    // Width of the slot-tag bitmasks the dispatch sweep builds. Every engine slot tag fits below this, so one dword
+    // indexes them all. A tag at or above it is skipped rather than folded in, because a wrapped bit would name the
+    // wrong slot.
+    constexpr std::uint16_t DISPATCH_TAG_BIT_CAP = 32;
+
     // Auth-table geometry (container pointer, entry stride, field offsets) lives in auth_table.hpp - one copy for the
     // whole mod, because the whole struct moves as a unit on patch day.
 
@@ -88,6 +99,86 @@ namespace Transmog
     using TearDownSlot = SlotMetadata;
     static constexpr auto &TEAR_DOWN_SLOTS = SLOT_METADATA;
     static constexpr std::size_t TEAR_DOWN_COUNT = SLOT_COUNT;
+
+    /**
+     * @brief Zeroes the blob count of every dispatch-cache entry whose slot holds no equipped item.
+     * @param a1 Equip-slot component.
+     * @return Number of entries silenced.
+     * @details SlotPopulator appends blobs and never lowers the count, so an entry outlives the item that queued it.
+     *          VEC keeps dispatching that blob, and the part it names returns to the body a moment after the engine's
+     *          own unequip removes its record. Both the apply and the clear can leave such an entry behind, so both
+     *          call this after their work lands.
+     *
+     *          The auth table is the key, not the set of slots the calling pass touched. An entry whose slot holds
+     *          nothing has nothing legitimate to dispatch, whichever pass queued it, and a pass that keys on its own
+     *          slots misses an entry stranded by an earlier one. Equipped slots keep their entries, so live gear does
+     *          not flicker.
+     * @param protected_tags Bitmask of engine slot tags to leave untouched, built with @ref DISPATCH_TAG_BIT_CAP.
+     *        A carrier that dresses an EMPTY slot creates no auth-table entry, so the auth key alone reads that slot
+     *        as empty and would silence the transmog the caller just installed. Every caller that leaves LT driving a
+     *        slot must name it here. A caller that releases every slot passes zero.
+     * @note Holds its own structured-exception frame. Every access is a raw engine dereference, and the caller owns
+     *       any logging, because formatting cannot share a frame with `__try`.
+     */
+    static std::uint32_t silence_dispatch_for_empty_slots(__int64 a1, std::uint32_t protected_tags) noexcept
+    {
+        std::uint32_t silenced = 0;
+        __try
+        {
+            const auto cache_base = *reinterpret_cast<volatile uintptr_t *>(a1 + COMP_SLOT_CACHE_BASE_PTR_OFFSET);
+            const auto desc = *reinterpret_cast<uintptr_t *>(a1 + auth_table::CONTAINER_PTR_OFFSET);
+            if (!plausible_engine_ptr(static_cast<__int64>(cache_base)) ||
+                !plausible_engine_ptr(static_cast<__int64>(desc)))
+            {
+                return 0;
+            }
+            const auto entry_array = *reinterpret_cast<uintptr_t *>(desc + auth_table::CONTAINER_ARRAY_BASE_OFFSET);
+            const auto entry_count = *reinterpret_cast<uint32_t *>(desc + auth_table::CONTAINER_COUNT_OFFSET);
+            if (!plausible_engine_ptr(static_cast<__int64>(entry_array)))
+                return 0;
+
+            // Collect the equipped tags into a bitmask first. A per-entry rescan of the auth table would make this
+            // quadratic, and a corrupt entry count would then stall the caller rather than fault into the handler
+            // below.
+            std::uint32_t keep_tags = protected_tags;
+            for (uint32_t i = 0; i < entry_count; ++i)
+            {
+                const auto tag = *reinterpret_cast<int16_t *>(
+                    entry_array + i * auth_table::ENTRY_STRIDE + auth_table::ENTRY_SLOT_TAG_OFFSET
+                );
+                if (tag >= 0 && tag < static_cast<int16_t>(DISPATCH_TAG_BIT_CAP))
+                    keep_tags |= (std::uint32_t{1} << tag);
+            }
+
+            // Clamp to the capacity. The count can exceed what the block holds after a restore reallocated the array,
+            // and the walk would then run off the end.
+            const auto cache_count = *reinterpret_cast<volatile uint32_t *>(a1 + COMP_SLOT_CACHE_COUNT_OFFSET);
+            const auto cache_cap = *reinterpret_cast<volatile uint32_t *>(a1 + COMP_SLOT_CACHE_CAP_OFFSET);
+            const auto sweep_count = (cache_count < cache_cap) ? cache_count : cache_cap;
+            for (uint32_t e = 0; e < sweep_count; ++e)
+            {
+                const auto entry = cache_base + COMP_SLOT_CACHE_ENTRY_STRIDE * std::uintptr_t{e};
+                auto &sub_count =
+                    *reinterpret_cast<volatile uint32_t *>(entry + COMP_SLOT_CACHE_ENTRY_SUB_COUNT_OFFSET);
+                if (sub_count == 0)
+                    continue;
+                const auto slot_id = *reinterpret_cast<volatile uint16_t *>(entry);
+                // A tag the mask cannot represent is never proven empty, so leave it dispatching.
+                if (slot_id >= DISPATCH_TAG_BIT_CAP)
+                    continue;
+                if ((keep_tags & (std::uint32_t{1} << slot_id)) == 0)
+                {
+                    sub_count = 0;
+                    ++silenced;
+                }
+            }
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return silenced;
+        }
+        return silenced;
+    }
 
     // Walk the auth-table for the entry whose +0xC8 slot_tag matches `game_tag`, snapshot its dye-record vector, and
     // publish through dye_record_inject so the next apply_transmog -> SlotPopulator -> DyeCopier round-trip emits
@@ -878,10 +969,10 @@ namespace Transmog
             {
                 for (uint32_t e = 0; e < count; ++e)
                 {
-                    const auto entry = base + 24ULL * e;
+                    const auto entry = base + COMP_SLOT_CACHE_ENTRY_STRIDE * std::uintptr_t{e};
                     const auto slot_id = *reinterpret_cast<volatile uint16_t *>(entry);
                     if (slot_id == game_tag)
-                        *reinterpret_cast<volatile uint32_t *>(entry + 0x10) = 0;
+                        *reinterpret_cast<volatile uint32_t *>(entry + COMP_SLOT_CACHE_ENTRY_SUB_COUNT_OFFSET) = 0;
                 }
             }
         }
@@ -1290,7 +1381,27 @@ namespace Transmog
                 }
             }
 
-            if (!preset_changed && !real_changed && !has_active_none)
+            // The cleanup pass at the end of this function is the only retraction path, and the load-detect tick
+            // schedules an apply for exactly this condition, so the early-out must let those runs through. See
+            // restored_real_ids for why the test reads a level and not a `real_changed` edge.
+            //
+            // is_ready() gates the scan because live_real_ids stays zero-filled until the tear-down subsystem
+            // resolves. An unreadable auth table must not read as "every recorded part lost its item".
+            bool has_restored_residue = false;
+            if (real_part_tear_down::is_ready())
+            {
+                for (std::size_t i = 0; i < SLOT_COUNT; ++i)
+                {
+                    const auto restored = restored_real_ids()[i];
+                    if (restored != 0 && live_real_ids[i] != restored)
+                    {
+                        has_restored_residue = true;
+                        break;
+                    }
+                }
+            }
+
+            if (!preset_changed && !real_changed && !has_active_none && !has_restored_residue)
             {
                 char prev_buf[256];
                 char real_buf[256];
@@ -1408,13 +1519,13 @@ namespace Transmog
             {
                 for (uint32_t e = 0; e < count; ++e)
                 {
-                    const auto entry = base + 24ULL * e;
+                    const auto entry = base + COMP_SLOT_CACHE_ENTRY_STRIDE * std::uintptr_t{e};
                     const auto slot_id = *reinterpret_cast<volatile uint16_t *>(entry);
                     for (std::size_t t = 0; t < clear_tag_count; ++t)
                     {
                         if (slot_id == clear_tags[t])
                         {
-                            *reinterpret_cast<volatile uint32_t *>(entry + 0x10) = 0;
+                            *reinterpret_cast<volatile uint32_t *>(entry + COMP_SLOT_CACHE_ENTRY_SUB_COUNT_OFFSET) = 0;
                             break;
                         }
                     }
@@ -1752,23 +1863,32 @@ namespace Transmog
         // unequipped it in the game inventory. The untick-restore block above does not catch that case, because
         // apply_single_slot already cleared prev_ids and real_damaged. The signature detected here is slot_needs_work +
         // unticked + real=0 + an old real in last_applied_real_ids, which is not overwritten yet.
+        //
+        // real_item_id stays zero-filled until the tear-down subsystem resolves, so the retraction branch below reads
+        // its record only once that holds. Without the gate every recorded part reads as orphaned.
+        const bool tear_down_ready = real_part_tear_down::is_ready();
         for (std::size_t k = 0; k < TEAR_DOWN_COUNT; ++k)
         {
             const auto &td = TEAR_DOWN_SLOTS[k];
             const auto idx = static_cast<std::size_t>(td.slot);
-            if (!slot_needs_work[idx])
-                continue;
-            if (mappings[idx].active)
-                continue;
 
-            // A part LT rebuilt for a released slot outlives the item: the engine's unequip removes its own part and
-            // not this one, and an item-to-item swap leaves it under the new part. Take it down as soon as the auth
-            // table no longer shows the item it was built for, whatever replaced it.
-            const auto restored = restored_real_ids()[idx];
-            if (restored != 0)
+            // Retract a part LT rebuilt for a released slot. The engine's unequip removes only its own part, and an
+            // item-to-item swap leaves the rebuilt one under the new part, so the trigger is the auth table no longer
+            // naming the item it was built for, whatever replaced it.
+            //
+            // This branch runs ahead of the slot_needs_work and `active` gates below, which both test edges. See
+            // restored_real_ids. Every path out of the branch clears the record, which stops the load-detect tick
+            // from re-scheduling.
+            const auto restored = tear_down_ready ? restored_real_ids()[idx] : std::uint16_t{0};
+            if (restored != 0 && real_item_id[k] != restored)
             {
-                if (real_item_id[k] == restored)
+                if (mappings[idx].active)
+                {
+                    // LT dresses this slot itself now, so Phase B already took the rebuilt part down along with the
+                    // real one. Drop the record without a second tear-down.
+                    restored_real_ids()[idx] = 0;
                     continue;
+                }
                 logger.info(
                     "[dispatch] slot={} released - real item {:#06x} left the slot, tearing down the part LT rebuilt",
                     slot_name(td.slot),
@@ -1784,6 +1904,14 @@ namespace Transmog
                 restored_real_ids()[idx] = 0;
                 continue;
             }
+
+            if (!slot_needs_work[idx])
+                continue;
+            if (mappings[idx].active)
+                continue;
+            // The rebuilt part still matches the live item, so it is legitimately on screen.
+            if (restored != 0)
+                continue;
 
             if (real_item_id[k] != 0)
                 continue;
@@ -1812,6 +1940,26 @@ namespace Transmog
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
         }
+
+        // An unequip reaches this function and never reaches the clear, so the apply owns the sweep for a slot the
+        // player empties. The cache clear near the top of this function keys on slot_needs_work, which cannot see an
+        // entry a previous pass stranded on a slot this one does not touch.
+        //
+        // Every slot LT still drives is protected. A carrier equipped onto an EMPTY slot leaves no auth-table entry,
+        // so the sweep would otherwise read that slot as empty and silence the transmog installed moments earlier.
+        // With LT disabled the mapping copy is inert and last_ids is clear, so the mask is empty and the sweep covers
+        // every slot. See silence_dispatch_for_empty_slots.
+        std::uint32_t lt_driven_tags = 0;
+        for (std::size_t i = 0; i < SLOT_COUNT; ++i)
+        {
+            if (!mappings[i].active && last_ids[i] == 0)
+                continue;
+            const auto tag = static_cast<std::uint16_t>(SLOT_METADATA[i].game_tag);
+            if (tag < DISPATCH_TAG_BIT_CAP)
+                lt_driven_tags |= (std::uint32_t{1} << tag);
+        }
+        if (const auto silenced = silence_dispatch_for_empty_slots(a1, lt_driven_tags); silenced != 0)
+            logger.debug("[dispatch] silenced {} stale dispatch entry(s) on now-empty slots", silenced);
 
         // target_mask: slots with a fake mesh to render. active_mask: slots the user explicitly controls.
         std::uint32_t target_mask = 0;
@@ -2067,6 +2215,11 @@ namespace Transmog
         {
             logger.warning("Transmog clear exception during restore");
         }
+
+        // Restoring the count above hands back every entry the zeroed count hid, including the ones this clear just
+        // orphaned. A clear releases every slot, so nothing is protected. See silence_dispatch_for_empty_slots.
+        if (const auto silenced = silence_dispatch_for_empty_slots(a1, 0); silenced != 0)
+            logger.debug("[clear] silenced {} stale dispatch entry(s) on now-empty slots", silenced);
 
         part_show_suppress::clear_all_suppressed();
 

@@ -3325,6 +3325,18 @@ namespace Transmog::prefab_wrapper_swap
         if (!list_data || cnt == 0)
             return trampoline(a1, a2, a3);
 
+        // LT disabled substitutes nothing, whatever the map still holds. A deactivate retains the swap map, and this
+        // hook gates on s_maps_retained rather than s_active so the cross-character orphan cleanup survives. The
+        // retained entries still key on the real gear's own wrappers. An ungated hook therefore rewrites the engine's
+        // own unequip list to an LT target that is not attached. The engine drops claims for that target and the real
+        // mesh stays on the body.
+        //
+        // LT's own tear-down is the exception. It drives this same detach primitive with the target attached, so the
+        // substitution is required, including inside the clear that Enabled=off runs after flag_enabled goes false.
+        // in_transmog() cannot mark that window because it covers SlotPopulator and PartSlotRefresh only.
+        if (!Transmog::flag_enabled().load(std::memory_order_relaxed) && !Transmog::in_engine_tear_down())
+            return trampoline(a1, a2, a3);
+
         // Resolve which character's bucket this teardown/install path applies to. s_active_char_idx is set by
         // PresetManager::apply_to_state BEFORE the engine drives any wrapper traversal, so by the time the hook fires
         // it already points at the body being assembled or torn down. With no active character bound we pass through

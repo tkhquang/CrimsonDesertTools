@@ -38,6 +38,8 @@ namespace Transmog
         InitSwapEntryFn s_init_swap_entry = nullptr;
 
         std::atomic<bool> s_in_transmog{false};
+        // Thread-local rather than atomic. See the in_engine_tear_down doc-block in shared_state.hpp.
+        thread_local bool s_in_engine_tear_down{false};
         std::atomic<__int64> s_player_a_1{0};
         std::atomic<uintptr_t> s_world_system_ptr{0};
         std::array<bool, SLOT_COUNT> s_real_damaged{};
@@ -142,6 +144,17 @@ namespace Transmog
     {
         return s_in_transmog;
     }
+
+    bool in_engine_tear_down() noexcept
+    {
+        return s_in_engine_tear_down;
+    }
+
+    void set_in_engine_tear_down(bool active) noexcept
+    {
+        s_in_engine_tear_down = active;
+    }
+
     std::atomic<__int64> &player_a1()
     {
         return s_player_a_1;
