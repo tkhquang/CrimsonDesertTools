@@ -638,6 +638,24 @@ namespace Transmog
         apply_transmog_core(a1, targetId);
     }
 
+    /**
+     * @brief Re-equips a slot's real item through SlotPopulator under the paired-slot destination rules of an apply.
+     * @details A plain populate lets the engine derive the slot from the item, and both halves of a pair derive to
+     *          the first half, so a restore of two earrings or two rings builds one socket twice and leaves the other
+     *          empty. The second half is named explicitly when its part record is live and derived with the first
+     *          half excluded otherwise, exactly as apply_transmog_with_carrier places a carrier.
+     */
+    static void restore_real_item(__int64 a1, std::uint16_t real_id, TransmogSlot slot)
+    {
+        apply_transmog_core(
+            a1,
+            real_id,
+            slot_needs_explicit_destination(slot) ? static_cast<std::uint16_t>(game_slot_from_transmog(slot))
+                                                  : NO_GAME_TAG,
+            paired_first_half_tag(slot)
+        );
+    }
+
     // - Default carrier set (per character)
     // Each entry must be a valid item for THAT character in the given slot - something the engine's equip class-gate
     // accepts. Kliff and Oongka share Kliff_PlateArmor_* because the engine treats their equip class the same. Damiane
@@ -1044,7 +1062,7 @@ namespace Transmog
                         real_id
                     );
                     color_override::setter_substitute::set_active_slot(static_cast<int>(slot_idx));
-                    apply_transmog(a1, real_id);
+                    restore_real_item(a1, real_id, static_cast<TransmogSlot>(slot_idx));
                     // See the untick-restore block in apply_all_transmog: the rebuilt part needs LT to retract it.
                     restored_real_ids()[slot_idx] = real_id;
                 }
@@ -1683,7 +1701,7 @@ namespace Transmog
                     if (!publish_entry_dye_for_gameslot(a1, game_tag))
                         dye_record_inject::clear_slot_dye_state();
                     color_override::setter_substitute::set_active_slot(static_cast<int>(i));
-                    apply_transmog(a1, real_id);
+                    restore_real_item(a1, real_id, static_cast<TransmogSlot>(i));
                     dye_record_inject::clear_slot_dye_state();
                     // The part on screen is now one LT rebuilt, and the engine's own unequip does not remove it.
                     // Record it so the load-detect tick can have it retracted once the item leaves the slot.
@@ -1708,6 +1726,9 @@ namespace Transmog
                                 slot_name(static_cast<TransmogSlot>(i)),
                                 old_real
                             );
+                            // Same as the cleanup pass: the sweep is what takes a realized part off once its item is
+                            // gone, so its wrappers are parked for it.
+                            prefab_wrapper_swap::park_slot_target_for_sweep(old_real);
                             real_part_tear_down::tear_down_by_item_id(
                                 reinterpret_cast<void *>(a1),
                                 old_real,
@@ -1726,9 +1747,6 @@ namespace Transmog
                 last_applied_carrier_ids()[i] = 0;
         }
 
-                            // Same as the cleanup pass: the sweep is what takes a realized part off once its item is
-                            // gone, so its wrappers are parked for it.
-                            prefab_wrapper_swap::park_slot_target_for_sweep(old_real);
         // Cleanup pass: tear down stale scene-graph meshes left by a prior restore through SlotPopulator. This handles
         // the case where apply_single_slot restored the real item and created a scene-graph entry, and the user then
         // unequipped it in the game inventory. The untick-restore block above does not catch that case, because
@@ -1756,6 +1774,12 @@ namespace Transmog
                     slot_name(td.slot),
                     restored
                 );
+                // The item is gone from the auth table, so the hash-keyed scene detach has nothing to match, and the
+                // engine's own unequip erased only its claims: the part LT rebuilt stays realized and re-registers its
+                // records on the next assembly. The post-apply sweep is what removes it. It finds those records on
+                // the body by prefab name and detaches them through the natural pipeline, so the item's wrappers are
+                // parked for it here and the sweep runs at the end of this pass.
+                prefab_wrapper_swap::park_slot_target_for_sweep(restored);
                 real_part_tear_down::tear_down_by_item_id(reinterpret_cast<void *>(a1), restored, td.game_tag);
                 restored_real_ids()[idx] = 0;
                 continue;
@@ -1773,13 +1797,9 @@ namespace Transmog
                 slot_name(td.slot),
                 old_real
             );
+            // Same as the recorded case above: the sweep is what takes a realized part off once its item is gone.
+            prefab_wrapper_swap::park_slot_target_for_sweep(old_real);
             real_part_tear_down::tear_down_by_item_id(reinterpret_cast<void *>(a1), old_real, td.game_tag);
-                // The item is gone from the auth table, so the hash-keyed scene detach has nothing to match, and the
-                // engine's own unequip erased only its claims: the part LT rebuilt stays realized and re-registers its
-                // records on the next assembly. The post-apply sweep is what removes it. It finds those records on
-                // the body by prefab name and detaches them through the natural pipeline, so the item's wrappers are
-                // parked for it here and the sweep runs at the end of this pass.
-                prefab_wrapper_swap::park_slot_target_for_sweep(restored);
         }
 
         // Count was NOT zeroed - unchanged slots' entries are still live with their original subCount. Log the final
@@ -1797,8 +1817,6 @@ namespace Transmog
         std::uint32_t target_mask = 0;
         std::uint32_t active_mask = 0;
         for (std::size_t i = 0; i < SLOT_COUNT; ++i)
-            // Same as the recorded case above: the sweep is what takes a realized part off once its item is gone.
-            prefab_wrapper_swap::park_slot_target_for_sweep(old_real);
         {
             if (last_ids[i] != 0)
                 target_mask |= (std::uint32_t{1} << i);
@@ -2032,7 +2050,7 @@ namespace Transmog
                     }
 
                     logger.debug("Transmog RESTORE: real item {:#06x} for slot {}", item_id, game_slot_name(game_slot));
-                    apply_transmog(a1, item_id);
+                    restore_real_item(a1, item_id, *tm_slot);
                     // A Clear rebuilds every real part through SlotPopulator, so each one needs the retraction record.
                     restored_real_ids()[static_cast<std::size_t>(*tm_slot)] = item_id;
 
