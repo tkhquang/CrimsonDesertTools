@@ -16,9 +16,9 @@
  * inside the frame, in an order its own scheduler fixes. An equip or a tear-down issued from any other thread runs
  * the same engine code and performs the same erases, but now they overlap the main thread's walks. The erase nulls
  * an owner slot that is still inside the count, a walker on the main thread loads the slot and dereferences it
- * (`+0x28`, `+0x38`, `+0x88`, no null check), and the process faults. The window is a few microseconds per erase,
- * the walkers are many, and only one walker shape carries a guard (claim_walk_guard.hpp), so the crash is rare,
- * timing-dependent, and reproduces most easily on a preset switch that tears several parts down in one burst.
+ * (`+0x28`, `+0x38`, `+0x88`, no null check), and the process faults. The window is a few microseconds per erase
+ * and the walkers are many, so the crash is rare, timing-dependent, and reproduces most easily on a preset switch
+ * that tears several parts down in one burst.
  *
  * The apply worker exists for debouncing, not for parallelism. This module keeps the worker and moves only the
  * EXECUTION of the apply onto the main thread: the worker posts the apply body as a job and blocks until the frame

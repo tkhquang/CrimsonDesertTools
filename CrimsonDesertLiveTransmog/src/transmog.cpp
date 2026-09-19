@@ -1016,11 +1016,6 @@ namespace Transmog
         // calls (SlotPopulator, SafeTearDown, the prefab-swap unlink) at the top of the frame, where no claim-vector
         // walk is in flight. Armed before the apply worker starts so its first job finds the hook. install() logs its
         // own failure; without the hook the worker runs the apply inline and warns once. See game_thread.hpp.
-        //
-        // claim_walk_guard is deliberately NOT armed. It makes two of the engine's claim-vector walks tolerate the
-        // null-owner window an erase opens, which only matters while LT erases off the main thread. With the apply on
-        // the game thread that window is closed at the source for every walker, and the guard would add a full-context
-        // mid-hook per claim entry per walk for cover on the inline fallback path alone.
         (void)game_thread::install(s_hooks);
 
         // init() logs its own failure. Without the swap the mod applies carriers but never redirects their meshes.

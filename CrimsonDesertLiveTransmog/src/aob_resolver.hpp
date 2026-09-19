@@ -1124,55 +1124,6 @@ namespace Transmog
     };
 
     /**
-     * @brief Claim-walk deref site - the shape claim_walk_guard patches. NOT a resolution ladder.
-     *
-     * Deliberately outside the ladders: a ladder requires a UNIQUE match, and this pattern is expected to hit MORE
-     * THAN ONE site (two, at time of writing). Feeding a knowingly non-unique signature through a ladder means
-     * weakening require_unique, which is the invariant that catches a drifted signature on patch day. The guard
-     * sweeps for every occurrence with scan::scan instead. The pattern lives here anyway so the whole engine-address
-     * inventory stays in one file.
-     *
-     *   mov  rax, [rbx+8]        48 8B 43 08     entry's owning pointer (claim vector, `node+0x58`)
-     *   mov  rcx, [rax+28h]      48 8B 48 28     faults when the owner is null
-     *   test rcx, rcx            48 85 C9
-     *   jz   <next entry>        74 ??           rel8 to the loop-continue label
-     *
-     * The signature stops BEFORE that `jz`, per the short-Jcc rule in aob-signatures.md section 9: a compiler is free
-     * to emit the branch as `0F 84 rel32` instead, which changes the opcode byte and retires the row. The three
-     * instructions that remain are already exactly as selective (verified: same two sites with and without the
-     * branch). The guard still needs the branch, so it VALIDATES the opcode at @ref CLAIM_WALK_JZ_OFFSET at install
-     * time and skips any site that does not carry it - which turns an encoding change into a logged skip instead of
-     * a silent no-match.
-     *
-     * The claim erase nulls owner slots while they are still inside the count and only decrements the count once its
-     * shift finishes, so a walk overlapping an erase reads a null owner here. Nothing locks: the engine is safe only
-     * because its own erases and walks run on the main thread in an order its scheduler fixes. LT runs its erases
-     * there too, through game_thread, and the guard covers the inline fallback. See claim_walk_guard.hpp for the guard
-     * and the reasoning.
-     *
-     * Patch day: the guard logs the site count it found and warns when it is not the expected two. The list carries
-     * only the RBX-based encoding. A walker allocated to another register needs its site branch-checked by hand
-     * before it joins the list.
-     */
-
-    // 48 8B 43 08   mov rax, [rbx+0x8]
-    // 48 8B 48 28   mov rcx, [rax+0x28]
-    // 48 85 C9      test rcx, rcx
-    inline constexpr Pattern CLAIM_WALK_SITE_PATTERN = Pattern::literal("48 8B 43 08 48 8B 48 28 48 85 C9");
-
-    /**
-     * @brief Number of sites @ref CLAIM_WALK_SITE_PATTERN occupies.
-     * @details A mismatch means the walk survey needs redoing.
-     */
-    inline constexpr std::size_t CLAIM_WALK_EXPECTED_SITES = 2;
-
-    /// Offset from the match to `mov rcx,[rax+28h]`, the instruction the guard precedes.
-    inline constexpr std::size_t CLAIM_WALK_DEREF_OFFSET = 4;
-
-    /// Offset from the match to the loop-continue `jz rel8`, whose target the guard decodes.
-    inline constexpr std::size_t CLAIM_WALK_JZ_OFFSET = 11;
-
-    /**
      * @brief FrameUpdate - the per-frame update step of the game's main loop.
      *
      * The main-loop body calls it once per frame on the main thread, ahead of that frame's scene-graph work (the
