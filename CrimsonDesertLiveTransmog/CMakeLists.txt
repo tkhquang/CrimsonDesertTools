@@ -87,6 +87,9 @@ set(COMMON_SOURCES
     src/shared_state.cpp
     src/indexed_string_table.cpp
     src/item_name_table.cpp
+    src/lang.cpp
+    src/language_pack.cpp
+    src/overlay_font.cpp
     src/itemmesh_dumper.cpp
     src/transmog_map.cpp
     src/input_handler.cpp
@@ -312,6 +315,16 @@ endif()
             "${CMAKE_CURRENT_SOURCE_DIR}/build/template/CrimsonDesertLiveTransmog_display_names.tsv"
             "${GAME_BIN_DIR}/CrimsonDesertLiveTransmog_display_names.tsv"
         COMMENT "Deploying display_names.tsv (item names + wearer-body column)"
+    )
+
+    # Interface translations. NOT under build/template, because that whole directory goes into the release zip and
+    # this file ships with the optional language pack instead - the mod carries its English inline and reads
+    # correctly with no translations file at all. Deployed here only so a dev build can exercise a locale.
+    add_custom_command(TARGET transmog_logic POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/build/language-pack/CrimsonDesertLiveTransmog_interface_translations.json"
+            "${GAME_BIN_DIR}/CrimsonDesertLiveTransmog_interface_translations.json"
+        COMMENT "Deploying interface_translations.json (interface strings per locale)"
     )
 
     target_compile_options(transmog_logic PRIVATE /W4 /Zi)

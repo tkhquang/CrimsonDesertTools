@@ -88,6 +88,7 @@ namespace Transmog
                 // Load display names before dump so the sorted cache built by the dump already contains them.
                 {
                     ItemNameTable::instance().load_display_names(
+                        PresetManager::instance().display_name_locale(),
                         std::filesystem::path{DMK::filesystem::get_runtime_directory()} / DISPLAY_NAMES_FILE
                     );
                 }
@@ -1151,6 +1152,17 @@ namespace Transmog
             run_debounced_apply();
             return;
         }
+    }
+
+    bool run_clear_blocking() noexcept
+    {
+        clear_pending().store(true, std::memory_order_release);
+        const auto rc = game_thread::run_blocking(&run_debounced_apply_job, nullptr, GAME_THREAD_CLAIM_TIMEOUT_MS);
+        if (rc == game_thread::RunResult::Ran)
+            return true;
+        // Leave the flag set on a miss. Nothing consumes it after shutdown, and clearing it here would hide from a
+        // later reader that the clear was requested and never ran.
+        return false;
     }
 
     // Persistent debounce worker. Sleeps on a condition variable until schedule_transmog bumps the deadline, then waits

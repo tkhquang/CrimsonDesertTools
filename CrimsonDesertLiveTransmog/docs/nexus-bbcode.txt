@@ -80,8 +80,12 @@ Launch the game. Press [b]Home[/b] to open the transmog overlay and start browsi
 ├── CrimsonDesertLiveTransmog.asi                    (This mod)
 ├── CrimsonDesertLiveTransmog.ini                    (Configuration)
 ├── CrimsonDesertLiveTransmog_display_names.tsv      (Item display names, REQUIRED)
-├── CrimsonDesertLiveTransmog_presets.json          (Auto-generated preset file)
+├── CrimsonDesertLiveTransmog_presets.json           (Auto-generated preset file)
 └── ...[/code]
+From the optional language pack download, in the same folder:
+[code]
+├── CrimsonDesertLiveTransmog_item_localization.pack      (Item names in 15 languages)
+└── CrimsonDesertLiveTransmog_interface_translations.json (The mod's own interface text)[/code]
 [size=4]Using with ReShade[/size]
 [spoiler]
 If [url=https://reshade.me/]ReShade[/url] is installed, the mod automatically registers as a ReShade addon. Open the ReShade menu ([b]Home[/b] key) and find the [b]Transmog[/b] tab. No extra setup is needed.
@@ -152,10 +156,10 @@ This assumes OptiScaler is already set up as in the section above (installed as 
 [*]Use the search box to filter by name -items are auto-categorized to the correct slot[/*]
 [*]Select an item -changes stay [b]pending[/b] until you click [b]Apply All[/b][/*]
 [*]Click [b]Apply All[/b] to commit all slot changes at once[/*]
-[*]Use [b]Append[/b] in the Presets section to create a fresh preset with the five armor slots (Helm/Chest/Cloak/Gloves/Boots) ticked and set to (none) -- a hide-armor starting point you can fill in from the pickers. Other slots stay unticked so working items like the lantern aren't accidentally hidden[/*]
+[*]Use [b]Append[/b] in the Presets section to create a fresh preset with the five armor slots (Helm/Chest/Cloak/Gloves/Boots) ticked and set to (none), a hide-armor starting point you can fill in from the pickers. Other slots stay unticked so working items like the lantern aren't accidentally hidden[/*]
 [*]Use [b]Copy[/b] to clone the active preset's saved state into a new slot. Unsaved picker edits are discarded so you start from a clean baseline you can tweak without touching the source[/*]
 [*]Use [b]Save as New[/b] to bottle up the current pending state (unsaved picker edits, dye, color overrides) as a brand-new preset. The active preset's saved rows stay untouched, which is the safe path when you started altering an existing preset and want to keep the new look as a separate entry[/*]
-[*][b]Save[/b] commits unsaved picker edits back into the active preset. The button turns orange with a [b]*[/b] marker and a [b][UNSAVED -- click Save][/b] banner appears in the header whenever your edits differ from the stored preset[/*]
+[*][b]Save[/b] commits unsaved picker edits back into the active preset. The button turns orange with a [b]*[/b] marker and a [b][UNSAVED - click Save][/b] banner appears in the header whenever your edits differ from the stored preset[/*]
 [*]Use [b]Prev[/b] / [b]Next[/b] to cycle through saved presets[/*]
 [*]Press [b]Home[/b] again to close the overlay[/*]
 [/list]
@@ -185,6 +189,34 @@ Input [b]_samuel_ub_[/b] into the GUI search box mentioned above. It should retu
 
 Note the different [b]_00_[/b] here, so you can narrow the search further with [b]_samuel_ub_00_0001[/b] if there are noisy matches.
 I will try to improve the catalog and the UX in the GUI later, but for now use that as a workaround.
+
+[line]
+
+[size=5]Languages[/size]
+
+Two settings at the top of the Transmog tab, because they are two different questions:
+[list]
+[*][b]Item Names[/b] - the language of the item names in the picker, from the game's own localization tables, in all 15 languages it ships with[/*]
+[*][b]Interface[/b] - the language of the mod's own text, which exists only where someone has translated it. Defaults to [b]Auto[/b], meaning it follows Item Names, so the usual case is still a single choice[/*]
+[/list]
+Both come from the optional [b]language pack[/b] download. Unzip it beside the [b].asi[/b], in the same folder as the INI:
+[list]
+[*][b]CrimsonDesertLiveTransmog_item_localization.pack[/b] - item names in all 15 languages, and the source of the picker's male/female filter[/*]
+[*][b]CrimsonDesertLiveTransmog_interface_translations.json[/b] - the mod's own interface text[/*]
+[/list]
+Without the pack a default install is English only and the Interface dropdown stays hidden.
+
+Non-Latin scripts need a font that covers them. The mod loads one itself, in both the standalone overlay and the ReShade tab, so this normally needs nothing from you. If no font on the PC covers the script, the tab says so and you can point [b]FontPath[/b] in the INI at one.
+
+Currently shipped: [b]Simplified Chinese[/b].
+
+Want to rename individual items? Two optional files override single rows and leave every item they omit alone. Create either one beside the shipped [b]_display_names.tsv[/b], with [b]<internal name><TAB><display name>[/b] per line:
+[list]
+[*][b]CrimsonDesertLiveTransmog_display_names.override.tsv[/b] applies in every language[/*]
+[*][b]CrimsonDesertLiveTransmog_display_names.<tag>.tsv[/b] applies only to that language, for example [b]..._display_names.zho-cn.tsv[/b][/*]
+[/list]
+
+Want your language in there? The interface text is one JSON file. See [url=https://github.com/tkhquang/CrimsonDesertTools/blob/main/CrimsonDesertLiveTransmog/README.md#contributing-a-translation]Contributing a translation[/url] on GitHub.
 
 [line]
 
@@ -219,7 +251,7 @@ PrevHotkey =
 ; a custom color for each visible material region on a transmogged
 ; item, including outfits the in-game dye merchant normally refuses.
 ;
-; HIGHLY EXPERIMENTAL -- disabled by default. Toggle changes take
+; HIGHLY EXPERIMENTAL, disabled by default. Toggle changes take
 ; effect on the next game launch.
 ColorOverride = false
 

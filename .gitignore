@@ -4,7 +4,9 @@
 # Build artifacts
 CrimsonDesert*/build/*
 CrimsonDesert*/build_*/*
+# Release payloads: build/template ships in the main zip, build/language-pack in the optional one.
 !CrimsonDesert*/build/template
+!CrimsonDesert*/build/language-pack
 
 # Keep marker files
 !/**/.gitkeep

@@ -643,7 +643,47 @@ namespace Transmog
             if (root.contains("characters") && root["characters"].is_object())
             {
                 for (auto &[name, cj] : root["characters"].items())
+                {
+                    // Skip a nameless entry a previous run persisted. It cannot be selected or applied, and
+                    // loading it would put an empty row in the character dropdown.
+                    if (name.empty())
+                        continue;
                     m_characters[name] = character_from_json(cj);
+                }
+            }
+
+            // Global preferences. An absent block keeps the constructed defaults, so a file written before the block
+            // existed loads unchanged.
+            if (root.contains("settings") && root["settings"].is_object())
+            {
+                const auto &settings = root["settings"];
+                std::lock_guard<std::mutex> lk(m_settings_mutex);
+                m_display_name_locale = settings.value("displayNameLocale", std::string{"eng"});
+                m_interface_locale = settings.value("interfaceLocale", std::string{"auto"});
+                if (m_interface_locale.empty())
+                    m_interface_locale = "auto";
+                if (m_display_name_locale.empty())
+                    m_display_name_locale = "eng";
+                // A corrupt or hand-edited value must not make the overlay unusable, so clamp each one to the range
+                // its own control offers.
+                m_ui_prefs.ui_scale =
+                    std::clamp(settings.value("uiScale", 1.0f), UiPrefs::UI_SCALE_MIN, UiPrefs::UI_SCALE_MAX);
+                m_ui_prefs.instant_apply = settings.value("instantApply", false);
+                m_ui_prefs.keep_search_text = settings.value("keepSearchText", true);
+                m_ui_prefs.preset_rows =
+                    std::clamp(settings.value("presetRows", 10.0f), UiPrefs::PRESET_ROWS_MIN, UiPrefs::PRESET_ROWS_MAX);
+            }
+
+            // Stash every top-level key this build does not know, so save() can write it back. Without it an older
+            // build would silently strip a newer build's preferences from a shared file.
+            {
+                json foreign = json::object();
+                for (const auto &[key, value] : root.items())
+                {
+                    if (key != "version" && key != "characters" && key != "settings" && key != "activeCharacter")
+                        foreign[key] = value;
+                }
+                m_foreign_root_keys = foreign.empty() ? std::string{} : foreign.dump();
             }
 
             // Ensure known characters exist even if not in the file.
@@ -700,6 +740,106 @@ namespace Transmog
         return save(m_file_path);
     }
 
+    std::string PresetManager::display_name_locale() const
+    {
+        std::lock_guard<std::mutex> lk(m_settings_mutex);
+        return m_display_name_locale;
+    }
+
+    PresetManager::UiPrefs PresetManager::ui_prefs() const noexcept
+    {
+        std::lock_guard<std::mutex> lk(m_settings_mutex);
+        return m_ui_prefs;
+    }
+
+    bool PresetManager::set_ui_prefs(const UiPrefs &prefs)
+    {
+        {
+            std::lock_guard<std::mutex> lk(m_settings_mutex);
+            m_ui_prefs = prefs;
+        }
+        return save_settings();
+    }
+
+    bool PresetManager::set_display_name_locale(std::string_view tag)
+    {
+        {
+            std::lock_guard<std::mutex> lk(m_settings_mutex);
+            m_display_name_locale = tag.empty() ? std::string{"eng"} : std::string{tag};
+        }
+        return save_settings();
+    }
+
+    std::string PresetManager::interface_locale() const
+    {
+        std::lock_guard<std::mutex> lk(m_settings_mutex);
+        return m_interface_locale;
+    }
+
+    bool PresetManager::set_interface_locale(std::string_view tag)
+    {
+        {
+            std::lock_guard<std::mutex> lk(m_settings_mutex);
+            m_interface_locale = tag.empty() ? std::string{"auto"} : std::string{tag};
+        }
+        return save_settings();
+    }
+
+    /// Builds the `settings` block, so the full save and the settings-only save cannot drift apart.
+    [[nodiscard]] static json settings_block(
+        std::string_view display_name_locale,
+        std::string_view interface_locale,
+        const PresetManager::UiPrefs &prefs
+    )
+    {
+        json settings = json::object();
+        settings["displayNameLocale"] = display_name_locale;
+        settings["interfaceLocale"] = interface_locale;
+        settings["uiScale"] = prefs.ui_scale;
+        settings["instantApply"] = prefs.instant_apply;
+        settings["keepSearchText"] = prefs.keep_search_text;
+        settings["presetRows"] = prefs.preset_rows;
+        return settings;
+    }
+
+    bool PresetManager::save_settings() const
+    {
+        auto &logger = DMK::log();
+        if (m_file_path.empty())
+            return false;
+
+        // Start from the file as it stands, so a preference write preserves characters, version and any key a newer
+        // build wrote. A file that exists but cannot be read or parsed is left ALONE: rebuilding the root from a
+        // preference write would drop every character it holds, and a preference is not worth that. Only an absent
+        // file is created from scratch, and the next full save() fills it out.
+        json root = json::object();
+        std::error_code ec;
+        if (std::filesystem::exists(m_file_path, ec))
+        {
+            std::ifstream file(m_file_path);
+            json parsed = file.is_open() ? json::parse(file, nullptr, false) : json{};
+            if (!parsed.is_object())
+            {
+                logger.warning(
+                    "Settings not written: '{}' is unreadable and would lose its presets",
+                    to_utf8(m_file_path)
+                );
+                return false;
+            }
+            root = std::move(parsed);
+        }
+        root["settings"] = settings_block(display_name_locale(), interface_locale(), ui_prefs());
+
+        std::ofstream out(m_file_path);
+        if (!out.is_open())
+        {
+            logger.warning("Failed to write settings to '{}'", to_utf8(m_file_path));
+            return false;
+        }
+        out << root.dump(2);
+        return true;
+    }
+
     bool PresetManager::save(const std::filesystem::path &path) const
     {
         auto &logger = DMK::log();
@@ -733,9 +873,33 @@ namespace Transmog
 
         json chars = json::object();
         for (const auto &[name, cp] : m_characters)
+        {
+            // Never write a nameless character. Dropping it here keeps the entry out of the file and heals a
+            // file that already carries one. See the matching guards in load, character_names and
+            // ensure_character.
+            if (name.empty())
+                continue;
             chars[name] = character_to_json(cp);
+        }
 
         root["characters"] = chars;
+
+        root["settings"] = settings_block(display_name_locale(), interface_locale(), ui_prefs());
+
+        // Replay the keys a newer build wrote. The stash holds only keys this build does not know, and the
+        // contains() guard repeats that check against the root just built, so a replay can never overwrite a value
+        // this save produced.
+        if (!m_foreign_root_keys.empty())
+        {
+            if (const json foreign = json::parse(m_foreign_root_keys, nullptr, false); foreign.is_object())
+            {
+                for (const auto &[key, value] : foreign.items())
+                {
+                    if (!root.contains(key))
+                        root[key] = value;
+                }
+            }
+        }
 
         std::ofstream file(path);
         if (!file.is_open())
@@ -763,7 +927,12 @@ namespace Transmog
         std::vector<std::string> names;
         names.reserve(m_characters.size());
         for (const auto &entry : m_characters)
+        {
+            // The dropdown is built straight from this, so a nameless entry would draw as a blank row.
+            if (entry.first.empty())
+                continue;
             names.push_back(entry.first);
+        }
         return names;
     }
 
@@ -1564,6 +1733,9 @@ namespace Transmog
 
     CharacterPresets &PresetManager::ensure_character(const std::string &name)
     {
+        // A nameless entry is possible: the save-load wipe path clears the controlled character before the next
+        // one is detected, and a write can land in that window. It cannot be selected, applied or loaded, so
+        // load(), save() and character_names() all drop it rather than let it reach the file or the dropdown.
         return m_characters[name]; // Default-constructs if absent.
     }
 

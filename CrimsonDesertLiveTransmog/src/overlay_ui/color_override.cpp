@@ -24,6 +24,7 @@
 
 #include "dye_record_inject.hpp"
 #include "item_name_table.hpp"
+#include "lang.hpp"
 #include "preset_manager.hpp"
 #include "prefab_wrapper_swap.hpp"
 #include "shared_state.hpp"
@@ -80,7 +81,7 @@ namespace Transmog
         //                 toggled, then pre-fills
         //                 user RGB and lets them edit
         ImGui::BeginDisabled(!detected_ready);
-        if (ImGui::Checkbox("Dye##dye_on", &dye_slot.slot_enabled))
+        if (ImGui::Checkbox(lang::t("color.master_toggle", "Dye##dye_on"), &dye_slot.slot_enabled))
         {
             // The Dye master toggle gates the substitution path (dye_override.cpp: !slot_enabled -> return false,
             // engine default writes through). To make the toggle visually take effect we need the engine to actually
@@ -99,8 +100,13 @@ namespace Transmog
         {
             ImGui::BeginTooltip();
             ImGui::TextUnformatted(
-                "No apply yet - swatches unknown.\n"
-                "Run Re-init to capture the slot's dye\nswatches before toggling the master Dye\nswitch."
+                lang::t(
+                    "color.no_apply_yet.tip",
+                    "No apply yet - swatches unknown.\n"
+                    "Run Re-init to capture the slot's dye\n"
+                    "swatches before toggling the master Dye\n"
+                    "switch."
+                )
             );
             ImGui::EndTooltip();
         }
@@ -114,23 +120,29 @@ namespace Transmog
         {
             ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.0f);
             ImGui::BeginDisabled(true);
-            ImGui::SmallButton("Re-init...##sw_reinit_busy");
+            ImGui::SmallButton(lang::t("color.reinit_busy", "Re-init...##sw_reinit_busy"));
             ImGui::EndDisabled();
             ImGui::PopStyleVar();
         }
         else
         {
             ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.0f);
-            const bool reinit_clicked = ImGui::SmallButton("Re-init##sw_reinit");
+            const bool reinit_clicked = ImGui::SmallButton(lang::t("color.reinit", "Re-init##sw_reinit"));
             ImGui::PopStyleVar();
             if (ImGui::IsItemHovered())
             {
                 ImGui::BeginTooltip();
                 ImGui::TextUnformatted(
-                    "Single clear + apply (~1.5s) to capture\n"
-                    "the slot's swatches. Use when the list\n"
-                    "looks empty or stale.\n\n"
-                    "Replaces the manual 'untick / retick'\nloop - you can leave this slot alone\nwhile it runs."
+                    lang::t(
+                        "color.reinit.tip",
+                        "Single clear + apply (~1.5s) to capture\n"
+                        "the slot's swatches. Use when the list\n"
+                        "looks empty or stale.\n"
+                        "\n"
+                        "Replaces the manual 'untick / retick'\n"
+                        "loop - you can leave this slot alone\n"
+                        "while it runs."
+                    )
                 );
                 ImGui::EndTooltip();
             }
@@ -144,18 +156,24 @@ namespace Transmog
             // exactly the state where Re-init would otherwise stall.
             ImGui::SameLine(0.0f, 6.0f);
             ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.0f);
-            const bool top_reset_clicked = ImGui::SmallButton("Reset slot##sw_reset_top");
+            const bool top_reset_clicked =
+                ImGui::SmallButton(lang::t("color.reset_slot_top", "Reset slot##sw_reset_top"));
             ImGui::PopStyleVar();
             if (ImGui::IsItemHovered())
             {
                 ImGui::BeginTooltip();
                 ImGui::TextUnformatted(
-                    "Wipe ALL captured swatches for THIS slot,\n"
-                    "clear the post-reinit lock + frozen-hidden\n"
-                    "rows, then trigger a fresh apply.\n\n"
-                    "Use when the slot is stuck with stale rows\n"
-                    "(e.g. JSON-restored entries that no longer\n"
-                    "match the current item) and Re-init cannot\nmake progress."
+                    lang::t(
+                        "color.reset_slot_top.tip",
+                        "Wipe ALL captured swatches for THIS slot,\n"
+                        "clear the post-reinit lock + frozen-hidden\n"
+                        "rows, then trigger a fresh apply.\n"
+                        "\n"
+                        "Use when the slot is stuck with stale rows\n"
+                        "(e.g. JSON-restored entries that no longer\n"
+                        "match the current item) and Re-init cannot\n"
+                        "make progress."
+                    )
                 );
                 ImGui::EndTooltip();
             }
@@ -723,7 +741,7 @@ namespace Transmog
                 // Slot-level "Recolor all" + auto-clusters
                 // Single picker drives every visible swatch in the slot. Lets users do "make this whole helm red"
                 // without touching individual rows.
-                ImGui::TextUnformatted("Recolor all:");
+                ImGui::TextUnformatted(lang::t("color.recolor_all", "Recolor all:"));
                 ImGui::SameLine(0.0f, 6.0f);
                 recolor_batch("slot_all", slot_all_indices);
 
@@ -732,20 +750,25 @@ namespace Transmog
                 // Wipes the swatch table, clears freeze
                 // + carrier state, then triggers a fresh apply
                 // for this slot. User picks for this slot are lost; cross-slot pollution is gone.
-                ImGui::SameLine(0.0f, 12.0f);
+                ImGui::SameLine(0.0f, ui_px(12.0f));
                 ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.0f);
-                const bool reset_clicked = ImGui::SmallButton("Reset slot##sw_reset");
+                const bool reset_clicked = ImGui::SmallButton(lang::t("color.reset_slot", "Reset slot##sw_reset"));
                 ImGui::PopStyleVar();
                 if (ImGui::IsItemHovered())
                 {
                     ImGui::BeginTooltip();
                     ImGui::TextUnformatted(
-                        "Wipe ALL captured swatches for THIS slot.\n"
-                        "Use when cross-slot bleed has misattributed\n"
-                        "rows from another transmog item (common with\n"
-                        "Kairos and other shared-material sets).\n\n"
-                        "Triggers a fresh apply on this slot, which\n"
-                        "re-captures cleanly. Loses any colors you have\npicked for this slot."
+                        lang::t(
+                            "color.reset_slot.tip",
+                            "Wipe ALL captured swatches for THIS slot.\n"
+                            "Use when cross-slot bleed has misattributed\n"
+                            "rows from another transmog item (common with\n"
+                            "Kairos and other shared-material sets).\n"
+                            "\n"
+                            "Triggers a fresh apply on this slot, which\n"
+                            "re-captures cleanly. Loses any colors you have\n"
+                            "picked for this slot."
+                        )
                     );
                     ImGui::EndTooltip();
                 }
@@ -767,19 +790,24 @@ namespace Transmog
                 // which wipes the captured list entirely.
                 ImGui::SameLine(0.0f, 6.0f);
                 ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.0f);
-                const bool revert_clicked = ImGui::SmallButton("Revert to default##sw_revert");
+                const bool revert_clicked = ImGui::SmallButton(lang::t("color.revert", "Revert to default##sw_revert"));
                 ImGui::PopStyleVar();
                 if (ImGui::IsItemHovered())
                 {
                     ImGui::BeginTooltip();
                     ImGui::TextUnformatted(
-                        "Revert ALL user overrides on THIS slot\n"
-                        "back to engine defaults. Keeps the\n"
-                        "captured swatch list intact (no Re-init\n"
-                        "needed afterwards).\n\n"
-                        "Use to compare your dye picks against\n"
-                        "the original asset colors, or to undo\n"
-                        "a slot's color edits without losing\nthe captured row structure."
+                        lang::t(
+                            "color.revert.tip",
+                            "Revert ALL user overrides on THIS slot\n"
+                            "back to engine defaults. Keeps the\n"
+                            "captured swatch list intact (no Re-init\n"
+                            "needed afterwards).\n"
+                            "\n"
+                            "Use to compare your dye picks against\n"
+                            "the original asset colors, or to undo\n"
+                            "a slot's color edits without losing\n"
+                            "the captured row structure."
+                        )
                     );
                     ImGui::EndTooltip();
                 }
@@ -812,7 +840,7 @@ namespace Transmog
                 // merchant-like flat list, one picker per UNIQUE def color (cluster of >=1 member). Tick to reveal
                 // per-region per-token trees with full shader-property granularity.
                 bool advanced_view = Transmog::color_override::dye_advanced_view_get();
-                if (ImGui::Checkbox("Advanced view##dye_adv", &advanced_view))
+                if (ImGui::Checkbox(lang::t("color.advanced_view", "Advanced view##dye_adv"), &advanced_view))
                 {
                     Transmog::color_override::dye_advanced_view_set(advanced_view);
                 }
@@ -820,13 +848,19 @@ namespace Transmog
                 {
                     ImGui::BeginTooltip();
                     ImGui::TextUnformatted(
-                        "Show per-region per-token trees with full\n"
-                        "shader-property granularity beneath the\n"
-                        "merchant-like flat picker list.\n\n"
-                        "Default off - most users get the same UX\n"
-                        "as the merchant dye UI: one picker per\n"
-                        "distinct asset-default color. Tick this\n"
-                        "only if you need to dye individual tokens\n(e.g. tint vs. mask vs. detail layers\nseparately)."
+                        lang::t(
+                            "color.advanced_view.tip",
+                            "Show per-region per-token trees with full\n"
+                            "shader-property granularity beneath the\n"
+                            "merchant-like flat picker list.\n"
+                            "\n"
+                            "Default off - most users get the same UX\n"
+                            "as the merchant dye UI: one picker per\n"
+                            "distinct asset-default color. Tick this\n"
+                            "only if you need to dye individual tokens\n"
+                            "(e.g. tint vs. mask vs. detail layers\n"
+                            "separately)."
+                        )
                     );
                     ImGui::EndTooltip();
                 }
@@ -837,14 +871,21 @@ namespace Transmog
                 {
                     auto &ui_slot = s_slot_ui[slot];
                     ImGui::SameLine();
-                    ImGui::Checkbox("Modified only##dye_mod", &ui_slot.show_only_modified);
+                    ImGui::Checkbox(
+                        lang::t("color.modified_only", "Modified only##dye_mod"),
+                        &ui_slot.show_only_modified
+                    );
                     if (ImGui::IsItemHovered())
                     {
                         ImGui::BeginTooltip();
                         ImGui::TextUnformatted(
-                            "Hide rows / regions whose color is\n"
-                            "still at the captured engine default.\n"
-                            "Untick to see every swatch this slot\nexposed during apply."
+                            lang::t(
+                                "color.modified_only.tip",
+                                "Hide rows / regions whose color is\n"
+                                "still at the captured engine default.\n"
+                                "Untick to see every swatch this slot\n"
+                                "exposed during apply."
+                            )
                         );
                         ImGui::EndTooltip();
                     }
@@ -1155,7 +1196,12 @@ namespace Transmog
                             }
                             else
                             {
-                                std::snprintf(header_buf, sizeof(header_buf), "[Unnamed]  (tpl 0x%04X)", rv.tpl);
+                                std::snprintf(
+                                    header_buf,
+                                    sizeof(header_buf),
+                                    lang::t("color.unnamed_region", "[Unnamed]  (tpl 0x%04X)"),
+                                    rv.tpl
+                                );
                             }
                         }
                         const bool open = ImGui::TreeNodeEx(header_buf, flags);
@@ -1272,16 +1318,18 @@ namespace Transmog
                                     bool &linked = rstate.link_rgb[L];
                                     ImGui::PushID(L * 31 + 7);
                                     ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.0f);
-                                    ImGui::Checkbox("link##lnk", &linked);
+                                    ImGui::Checkbox(lang::t("color.link_channels", "link##lnk"), &linked);
                                     ImGui::PopStyleVar();
                                     if (ImGui::IsItemHovered())
                                     {
                                         ImGui::BeginTooltip();
                                         ImGui::TextUnformatted(
-                                            "When ON: pick one color, all "
-                                            "present R/G/B channel-suffix\n"
-                                            "Properties get it (merchant "
-                                            "behavior).\nUntick to edit each channel independently."
+                                            lang::t(
+                                                "color.link_channels.tip",
+                                                "When ON: pick one color, all present R/G/B channel-suffix\n"
+                                                "Properties get it (merchant behavior).\n"
+                                                "Untick to edit each channel independently."
+                                            )
                                         );
                                         ImGui::EndTooltip();
                                     }

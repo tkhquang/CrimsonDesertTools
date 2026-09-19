@@ -1,0 +1,3 @@
+# The generated language pack is binary. core.autocrlf is on for this repo, so pin it rather than
+# rely on git's NUL-byte heuristic: one eol filter pass would corrupt every compressed block in it.
+*.pack binary

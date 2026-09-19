@@ -24,6 +24,30 @@ namespace Transmog
 {
 
     /**
+     * @brief Scales a design-time pixel measurement to the live font size.
+     * @param design_px The value as authored against a 13px font, ImGui's own reference size.
+     * @return The equivalent measurement at the current font size.
+     *
+     * @details Padding and spacing scale through ImGuiStyle, but an explicit pixel constant passed to SameLine,
+     *          SetNextItemWidth or Indent does not. Left raw, a 24px gap dwarfs a 0.5x font and crowds a 2x one.
+     *          Route every such constant through this so the layout tracks the font.
+     */
+    [[nodiscard]] float ui_px(float design_px) noexcept;
+
+    /**
+     * @brief Width of @p columns characters of ordinary text in the live font.
+     *
+     * @details A width written as a multiple of `CalcTextSize("M")` silently assumes a PROPORTIONAL face,
+     *          where 'M' is the widest glyph and roughly 1.8x the average advance. In a monospace face - and
+     *          ImGui's built-in ProggyClean, which is what the tab falls back to when this mod pushes no font
+     *          of its own, is monospace - 'M' is an ordinary advance, so "26.5 M" means 26.5 characters
+     *          instead of the ~48 it was tuned for, and labels clip.
+     *
+     *          This measures a mixed sample and divides, so it means the same thing in either kind of face.
+     */
+    [[nodiscard]] float ui_text_columns(float columns);
+
+    /**
      * @brief Formats one line of overlay text.
      * @param fmt printf-style format string.
      * @details Forwards to ImGui's TextV, so the format step stays inside the upstream non-C-variadic implementation.

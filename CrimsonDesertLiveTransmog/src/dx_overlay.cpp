@@ -1,4 +1,5 @@
 #include "dx_overlay.hpp"
+#include "overlay_font.hpp"
 #include "overlay.hpp"
 #include "shared_state.hpp"
 #include "transmog.hpp"
@@ -450,11 +451,13 @@ namespace Transmog
         // 14px base reads better than ImGui's default at 1080p; dpi_scale lifts it linearly for 1440p / 4K.
         // ScaleAllSizes is then driven by the font/13px ratio so padding, frame heights, and column widths stay
         // proportional to the glyph size.
-        ImFontConfig font_cfg;
-        font_cfg.SizePixels = 14.0f * dpi_scale;
-        io.Fonts->AddFontDefault(&font_cfg);
+        const float font_size = 14.0f * dpi_scale;
+        // A real system font replaces the built-in bitmap font, which stops at U+00FF and draws every non-Latin item
+        // name as '?'. The DirectX 11 backend reports ImGuiBackendFlags_RendererHasTextures, so glyphs rasterize on
+        // demand and no precomputed range is needed.
+        overlay_font::install_base_font(font_size);
         io.FontGlobalScale = 1.0f;
-        ImGui::GetStyle().ScaleAllSizes(font_cfg.SizePixels / 13.0f);
+        ImGui::GetStyle().ScaleAllSizes(font_size / 13.0f);
 
         ImGui_ImplWin32_Init(s_overlay_hwnd);
         ImGui_ImplDX11_Init(s_device, s_context);

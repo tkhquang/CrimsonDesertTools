@@ -17,7 +17,9 @@
 // Public entry points (`draw_overlay`, `init_reshade_overlay`, `shutdown_reshade_overlay`, `is_reshade_overlay_active`)
 // sit at the bottom of the file outside the anonymous namespace.
 
+#include "lang.hpp"
 #include "overlay.hpp"
+#include "overlay_font.hpp"
 #include "overlay_ui/color_override.hpp"
 #include "overlay_ui/dye_popup.hpp"
 #include "overlay_ui/footer.hpp"
@@ -73,11 +75,53 @@ namespace Transmog
         {
             using namespace Transmog;
 
-            // Standalone-only: apply the user's scale override to the font. Stacks on top of the init-time auto-DPI
-            // scale from dx_overlay.cpp. Title bar catches up next frame (drawn in the preceding Begin call); content
-            // reflects it immediately.
-            if (s_standalone_mode)
-                ImGui::GetIO().FontGlobalScale = s_ui_scale;
+            // Draw this mod's content with the font built for the selected locale, scoped to this mod's widgets
+            // so the host's UI keeps its own. Validate BEFORE the push: the host clears its atlas on any font,
+            // language or resolution change, ImFontAtlas::Clear deletes every font in it, and pushing a freed
+            // pointer hangs the game. The combo revalidates too, but it runs inside the scope this push opens.
+            if (s_host_locale_font != nullptr)
+            {
+                overlay_font::ForeignAtlas host;
+                host.atlas = ImGui::GetIO().Fonts;
+                if (!overlay_font::host_font_is_live(host, s_host_locale_font))
+                    invalidate_host_font_cache();
+            }
+
+            struct LocaleFontScope
+            {
+                bool pushed;
+                // Full copy of the host style, restored on exit. ScaleAllSizes is cumulative, so scaling in place
+                // without a restore would shrink or grow the overlay a little more on every frame.
+                ImGuiStyle style_backup;
+                bool style_scaled;
+
+                explicit LocaleFontScope(void *font) noexcept
+                    : pushed(font != nullptr), style_backup(ImGui::GetStyle()),
+                      style_scaled(s_ui_scale > 0.0f && s_ui_scale != 1.0f)
+                {
+                    // Scale padding and spacing with the font. Without it a 0.5x font sits in full-size rows and a
+                    // 2.0x font is cramped, because these sizes are independent of the font size.
+                    if (style_scaled)
+                        overlay_font::scale_style_sizes(&ImGui::GetStyle(), s_ui_scale);
+                    if (!pushed)
+                        return;
+                    // Resolve the size explicitly rather than passing 0. Passing 0 defers to Style.FontSizeBase,
+                    // which the host rewrites every frame and leaves at 0 when its config is unset. ImGui then
+                    // falls back per font, and its 20px default does not match the host font's 13px, which
+                    // resizes the tab on every locale switch. The scale multiplies the pushed size rather than
+                    // FontGlobalScale, so it moves this mod's tab without touching the host's own UI.
+                    ImGui::PushFont(static_cast<ImFont *>(font), s_host_locale_font_size * s_ui_scale);
+                }
+                ~LocaleFontScope()
+                {
+                    if (pushed)
+                        ImGui::PopFont();
+                    if (style_scaled)
+                        ImGui::GetStyle() = style_backup;
+                }
+                LocaleFontScope(const LocaleFontScope &) = delete;
+                LocaleFontScope &operator=(const LocaleFontScope &) = delete;
+            } const locale_font_scope{s_host_locale_font};
 
             // Drive every slot's reinit state machine forward. Cheap when every slot is Idle (just atomic loads).
             Transmog::color_override::reinit::tick();
@@ -101,16 +145,16 @@ namespace Transmog
 
             // Per-slot controls
 
-            if (ImGui::CollapsingHeader("Slot Details", ImGuiTreeNodeFlags_DefaultOpen))
+            if (ImGui::CollapsingHeader(lang::t("slots.header", "Slot Details"), ImGuiTreeNodeFlags_DefaultOpen))
             {
                 auto &mappings = slot_mappings();
                 const auto &table = ItemNameTable::instance();
                 const bool table_ready = table.ready();
 
                 if (!table_ready)
-                    ui_text_disabled("Item catalog not ready - hex entry only.");
+                    ui_text_disabled(lang::t("slots.catalog_not_ready", "Item catalog not ready - hex entry only."));
 
-                ui_text_disabled("Toggle which slots the next Apply All will touch.");
+                ui_text_disabled(lang::t("slots.toggle_hint", "Toggle which slots the next Apply All will touch."));
 
                 {
                     // "All" tracks ENABLED slots only - disabled slots (multi-prefab non-armor, duplicate-tag; see
@@ -127,7 +171,7 @@ namespace Transmog
                             break;
                         }
                     }
-                    if (ImGui::Checkbox("All", &all_active))
+                    if (ImGui::Checkbox(lang::t("slots.all", "All"), &all_active))
                     {
                         for (std::size_t i = 0; i < SLOT_COUNT; ++i)
                         {
@@ -144,7 +188,7 @@ namespace Transmog
                     if (!s_auto_apply)
                     {
                         ImGui::SameLine();
-                        ui_text_disabled("(pending - Apply All to commit)");
+                        ui_text_disabled(lang::t("slots.pending_note", "(pending - Apply All to commit)"));
                     }
                 }
 
@@ -158,7 +202,12 @@ namespace Transmog
 
                     auto &m = mappings[i];
                     auto &ui = s_slot_ui[i];
-                    const char *slot_label = slot_name(static_cast<TransmogSlot>(i));
+                    // Two names on purpose. slot_label is the English identifier and is what the log lines
+                    // below print, so a support log reads the same in every locale. slot_label_ui is what the user
+                    // sees. The ImGui id is already scoped by the PushID below, so translating the text is safe.
+                    const auto &slot_row = slot_meta(static_cast<TransmogSlot>(i));
+                    const char *slot_label = slot_row.display_name;
+                    const char *slot_label_ui = lang::t(slot_row.lang_key, slot_label);
 
                     // Lazy sync: when the pws module has a target selection for this slot but the UI label is empty,
                     // derive the label from the catalog. Covers boot-time auto-apply (preset's stored prefab_name
@@ -182,7 +231,7 @@ namespace Transmog
 
                     ImGui::PushID(static_cast<int>(i) + 100);
 
-                    if (ImGui::Checkbox(slot_label, &m.active))
+                    if (ImGui::Checkbox(slot_label_ui, &m.active))
                     {
                         // Toggling active alone may not change the staged id - e.g. an active-none slot (active=true,
                         // targetId=0) unticked back to inactive both yield staged=0, so has_pending_changes misses
@@ -199,13 +248,11 @@ namespace Transmog
                     }
 
                     // Slot-label column width: pick the longest slot name ("TwoHandWeapon" plus a trailing pad) and
-                    // measure it with the live font. Content-derived rather than DPI-linear so the column stays tight
-                    // at 4K instead of opening a 500px gap. Reshade mode keeps a fixed 170px because its host UI
-                    // applies its own scaling.
+                    // measure it with the live font. Content-derived in BOTH overlay modes, because this mod scales
+                    // its own tab under ReShade as well, and a fixed width there leaves a wide gap at a small scale
+                    // and clips labels at a large one.
                     const float slot_col_w =
-                        s_standalone_mode
-                            ? (ImGui::CalcTextSize("TwoHandWeapon  ").x + ImGui::GetStyle().FramePadding.x * 2.0f)
-                            : 170.0f;
+                        ImGui::CalcTextSize("TwoHandWeapon  ").x + ImGui::GetStyle().FramePadding.x * 2.0f;
                     ImGui::SameLine(slot_col_w);
 
                     // Picker button
@@ -251,14 +298,14 @@ namespace Transmog
                                 m.target_item_id
                             );
 
-                        // Picker button width: ~32 glyphs at the live font plus padding, so the width is content
-                        // derived and stays tight at 4K. ImGui's button text rendering truncates a display name that
-                        // exceeds it.
-                        const float bw =
-                            s_standalone_mode
-                                ? (ImGui::CalcTextSize("M").x * 32.0f + ImGui::GetStyle().FramePadding.x * 2.0f)
-                                : 380.0f;
-                        ImGui::SetNextItemWidth(bw);
+                        // Content-derived so it stays tight at 4K. ImGui truncates a name that exceeds it.
+                        //
+                        // 26.5 'M' is the tuned width, around 48 characters in a proportional face. Measure before
+                        // changing it: Segoe UI's 'M' is 14.0px at the 15.6px base, so a guessed multiplier lands
+                        // wide. The column floor only binds in a MONOSPACE face, where 'M' is an ordinary advance
+                        // and 26.5 of them hold too few characters for these names.
+                        const float bw = (std::max)(ImGui::CalcTextSize("M").x * 26.5f, ui_text_columns(30.0f)) +
+                                         ImGui::GetStyle().FramePadding.x * 2.0f;
                         ImGui::PushStyleVar(ImGuiStyleVar_ButtonTextAlign, ImVec2(0.02f, 0.5f));
                         // Tint the button cyan when a body-mesh prefab is picked so the override is visually distinct
                         // from an ordinary carrier slot.
@@ -488,15 +535,19 @@ namespace Transmog
                     if (prefab_active && ImGui::IsItemHovered())
                     {
                         ui_tooltip(
-                            "Auto-borrowed carrier id (Kairos plate). The "
-                            "body-mesh prefab is the visual override; this "
-                            "hex is just the engine plumbing. Clear the "
-                            "prefab via the picker's '(none) prefab' to edit the carrier directly."
+                            lang::t(
+                                "slots.carrier_id.tip",
+                                "Auto-borrowed carrier id (Kairos plate). The body-mesh prefab is the visual override; "
+                                "this hex is just the engine plumbing. "
+                                "Clear the prefab via the picker's '(none) prefab' to edit the carrier directly."
+                            )
                         );
                     }
 
                     // Quick-clear button.
                     ImGui::SameLine();
+                    // Left untranslated on purpose: a one-glyph icon button sized to its label, which any
+                    // word-length translation would widen on every slot row.
                     if (ImGui::SmallButton("X##clr") && m.target_item_id != 0)
                     {
                         m.target_item_id = 0;
@@ -538,68 +589,74 @@ namespace Transmog
                             {
                                 const bool is_two_hand = tslot_marker == TransmogSlot::TwoHandWeapon;
                                 ui_tooltip(
-                                    is_two_hand ? "EXPERIMENTAL.\n"
-                                                  "\n"
-                                                  "Heads-up: in this game, tools (pickaxe,\n"
-                                                  "mallet, etc.) share the same engine slot\n"
-                                                  "as 2H weapons. Setting a transmog here\n"
-                                                  "may also affect the tool you have\n"
-                                                  "equipped. Investigation ongoing.\n"
-                                                  "\n"
-                                                  "Best practice: pick a transmog from the\n"
-                                                  "SAME weapon family you have equipped.\n"
-                                                  "Sword on a sword, spear on a spear, 1H\n"
-                                                  "on a 1H, 2H on a 2H - always renders\n"
-                                                  "correctly, drawn or sheathed.\n"
-                                                  "\n"
-                                                  "Why the limit exists:\n"
-                                                  "Each weapon prefab carries its own\n"
-                                                  "bone-binding and attachment-socket data\n"
-                                                  "(which bone it parents to, which socket\n"
-                                                  "transform it uses, hand offsets, sheath\n"
-                                                  "pose). The engine looks those bindings\n"
-                                                  "up from the REAL equipped item's class -\n"
-                                                  "not from this transmog target - so a\n"
-                                                  "mismatched-class swap lands in the wrong\n"
-                                                  "socket and goes invisible.\n"
-                                                  "\n"
-                                                  "Examples:\n"
-                                                  " - 2H prefab while a 1H is equipped:\n"
-                                                  "   mesh shows on the back; the real 1H\n"
-                                                  "   goes invisible when drawn.\n"
-                                                  " - Spear/hammer prefab while a sword is\n"
-                                                  "   equipped: invisible when drawn\n"
-                                                  "   (sheathed on back still renders).\n"
-                                                  " - Same family (sword<->sword, etc.):\n"
-                                                  "   renders correctly in every pose."
-                                                : "EXPERIMENTAL.\n"
-                                                  "\n"
-                                                  "Best practice: pick a transmog from the\n"
-                                                  "SAME weapon family you have equipped.\n"
-                                                  "Sword on a sword, spear on a spear, 1H\n"
-                                                  "on a 1H, 2H on a 2H - always renders\n"
-                                                  "correctly, drawn or sheathed.\n"
-                                                  "\n"
-                                                  "Why the limit exists:\n"
-                                                  "Each weapon prefab carries its own\n"
-                                                  "bone-binding and attachment-socket data\n"
-                                                  "(which bone it parents to, which socket\n"
-                                                  "transform it uses, hand offsets, sheath\n"
-                                                  "pose). The engine looks those bindings\n"
-                                                  "up from the REAL equipped item's class -\n"
-                                                  "not from this transmog target - so a\n"
-                                                  "mismatched-class swap lands in the wrong\n"
-                                                  "socket and goes invisible.\n"
-                                                  "\n"
-                                                  "Examples:\n"
-                                                  " - 2H prefab while a 1H is equipped:\n"
-                                                  "   mesh shows on the back; the real 1H\n"
-                                                  "   goes invisible when drawn.\n"
-                                                  " - Spear/hammer prefab while a sword is\n"
-                                                  "   equipped: invisible when drawn\n"
-                                                  "   (sheathed on back still renders).\n"
-                                                  " - Same family (sword<->sword, etc.):\n"
-                                                  "   renders correctly in every pose."
+                                    is_two_hand ? lang::t(
+                                                      "slots.weapon_experimental_tools.tip",
+                                                      "EXPERIMENTAL.\n"
+                                                      "\n"
+                                                      "Heads-up: in this game, tools (pickaxe,\n"
+                                                      "mallet, etc.) share the same engine slot\n"
+                                                      "as 2H weapons. Setting a transmog here\n"
+                                                      "may also affect the tool you have\n"
+                                                      "equipped. Investigation ongoing.\n"
+                                                      "\n"
+                                                      "Best practice: pick a transmog from the\n"
+                                                      "SAME weapon family you have equipped.\n"
+                                                      "Sword on a sword, spear on a spear, 1H\n"
+                                                      "on a 1H, 2H on a 2H - always renders\n"
+                                                      "correctly, drawn or sheathed.\n"
+                                                      "\n"
+                                                      "Why the limit exists:\n"
+                                                      "Each weapon prefab carries its own\n"
+                                                      "bone-binding and attachment-socket data\n"
+                                                      "(which bone it parents to, which socket\n"
+                                                      "transform it uses, hand offsets, sheath\n"
+                                                      "pose). The engine looks those bindings\n"
+                                                      "up from the REAL equipped item's class -\n"
+                                                      "not from this transmog target - so a\n"
+                                                      "mismatched-class swap lands in the wrong\n"
+                                                      "socket and goes invisible.\n"
+                                                      "\n"
+                                                      "Examples:\n"
+                                                      " - 2H prefab while a 1H is equipped:\n"
+                                                      "   mesh shows on the back; the real 1H\n"
+                                                      "   goes invisible when drawn.\n"
+                                                      " - Spear/hammer prefab while a sword is\n"
+                                                      "   equipped: invisible when drawn\n"
+                                                      "   (sheathed on back still renders).\n"
+                                                      " - Same family (sword<->sword, etc.):\n"
+                                                      "   renders correctly in every pose."
+                                                  )
+                                                : lang::t(
+                                                      "slots.weapon_experimental.tip",
+                                                      "EXPERIMENTAL.\n"
+                                                      "\n"
+                                                      "Best practice: pick a transmog from the\n"
+                                                      "SAME weapon family you have equipped.\n"
+                                                      "Sword on a sword, spear on a spear, 1H\n"
+                                                      "on a 1H, 2H on a 2H - always renders\n"
+                                                      "correctly, drawn or sheathed.\n"
+                                                      "\n"
+                                                      "Why the limit exists:\n"
+                                                      "Each weapon prefab carries its own\n"
+                                                      "bone-binding and attachment-socket data\n"
+                                                      "(which bone it parents to, which socket\n"
+                                                      "transform it uses, hand offsets, sheath\n"
+                                                      "pose). The engine looks those bindings\n"
+                                                      "up from the REAL equipped item's class -\n"
+                                                      "not from this transmog target - so a\n"
+                                                      "mismatched-class swap lands in the wrong\n"
+                                                      "socket and goes invisible.\n"
+                                                      "\n"
+                                                      "Examples:\n"
+                                                      " - 2H prefab while a 1H is equipped:\n"
+                                                      "   mesh shows on the back; the real 1H\n"
+                                                      "   goes invisible when drawn.\n"
+                                                      " - Spear/hammer prefab while a sword is\n"
+                                                      "   equipped: invisible when drawn\n"
+                                                      "   (sheathed on back still renders).\n"
+                                                      " - Same family (sword<->sword, etc.):\n"
+                                                      "   renders correctly in every pose."
+                                                  )
                                 );
                             }
                         }
@@ -618,15 +675,19 @@ namespace Transmog
                             if (ImGui::IsItemHovered())
                             {
                                 ui_tooltip(
-                                    "Heads-up: Lantern set to (none) does\n"
-                                    "MORE than hide the mesh - the engine\n"
-                                    "removes the light source too. Your\n"
-                                    "character will emit NO light, even at\n"
-                                    "night or in dungeons.\n"
-                                    "\n"
-                                    "If you wanted to hide the lantern\n"
-                                    "visually but keep the light, pick a\n"
-                                    "different lantern prefab here instead\nof clearing the slot."
+                                    lang::t(
+                                        "slots.lantern_warning.tip",
+                                        "Heads-up: Lantern set to (none) does\n"
+                                        "MORE than hide the mesh - the engine\n"
+                                        "removes the light source too. Your\n"
+                                        "character will emit NO light, even at\n"
+                                        "night or in dungeons.\n"
+                                        "\n"
+                                        "If you wanted to hide the lantern\n"
+                                        "visually but keep the light, pick a\n"
+                                        "different lantern prefab here instead\n"
+                                        "of clearing the slot."
+                                    )
                                 );
                             }
                         }
@@ -662,7 +723,9 @@ namespace Transmog
     {
         // Auto-fit window so 4K screens do not crop content on first open.
         ImGui::SetNextWindowSize(ImVec2(0.0f, 0.0f), ImGuiCond_FirstUseEver);
-        if (!ImGui::Begin(WINDOW_TITLE))
+        // The `###TransmogMain` suffix carries the window identity, so a locale switch retitles the window
+        // without resetting its position, size or docking.
+        if (!ImGui::Begin(lang::t("window.title", WINDOW_TITLE)))
         {
             ImGui::End();
             return;

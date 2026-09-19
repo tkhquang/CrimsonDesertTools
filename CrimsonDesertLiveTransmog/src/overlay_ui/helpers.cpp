@@ -27,6 +27,36 @@
 
 namespace Transmog
 {
+    /**
+     * @brief Width a tooltip wraps at, in characters.
+     * @details Wide enough that the hand-broken tooltips keep their authored line breaks, since their longest
+     *          line is shorter than this, and narrow enough that an unbroken paragraph stays readable instead
+     *          of running to the screen edge.
+     */
+    inline constexpr float TOOLTIP_WRAP_COLUMNS = 72.0f;
+
+    /// ImGui's own reference font size, and the size every design-time pixel constant here was authored against.
+    inline constexpr float DESIGN_FONT_SIZE_PX = 13.0f;
+
+    float ui_px(float design_px) noexcept
+    {
+        const float size = ImGui::GetFontSize();
+        return size > 0.0f ? design_px * (size / DESIGN_FONT_SIZE_PX) : design_px;
+    }
+
+    float ui_text_columns(float columns)
+    {
+        // A mix of upper case, lower case, digits and a space, so the mean advance reflects real label text
+        // rather than one unrepresentative glyph. In a monospace face every character contributes the same
+        // width, which is exactly what makes the result comparable across both kinds of font.
+        static constexpr char SAMPLE[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ abcdefghijklmnopqrstuvwxyz 0123456789";
+        static constexpr float SAMPLE_LEN = static_cast<float>(sizeof(SAMPLE) - 1);
+
+        // Measured per call rather than cached: the font and its size both change under this code (locale
+        // switch, UI scale, host atlas rebuild), and a cache keyed on all of that costs more than the measure.
+        const float average = ImGui::CalcTextSize(SAMPLE).x / SAMPLE_LEN;
+        return average > 0.0f ? average * columns : columns;
+    }
 
     void ui_text(const char *fmt, ...)
     {
@@ -55,7 +85,13 @@ namespace Transmog
     void ui_tooltip(const char *text)
     {
         ImGui::BeginTooltip();
+        // A tooltip sizes itself to its longest line, so one without hard breaks in it runs off the screen edge
+        // and the tail is clipped. Wrapping is the only fix that holds for every string: a translation can be
+        // much longer or shorter than the English, so hard breaks authored against the English cannot be
+        // trusted to suit it. Lines that already carry breaks are unaffected, being shorter than the wrap.
+        ImGui::PushTextWrapPos(ui_text_columns(TOOLTIP_WRAP_COLUMNS));
         ImGui::TextUnformatted(text);
+        ImGui::PopTextWrapPos();
         ImGui::EndTooltip();
     }
 

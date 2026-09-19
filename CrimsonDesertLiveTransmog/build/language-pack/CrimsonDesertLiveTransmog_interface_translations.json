@@ -1,0 +1,853 @@
+{
+  "formatVersion": 2,
+  "_howToTranslate": [
+    "Interface text for Live Transmog, one entry per string.",
+    "",
+    "    \"footer.apply_all\": {",
+    "      \"en\":    \"Apply All\",                   <- the original English",
+    "      \"where\": \"Bottom button row - button\",  <- where it appears on screen",
+    "      \"text\":  \"\"                             <- the translation goes here",
+    "    }",
+    "",
+    "Fill in \"text\". \"en\" and \"where\" are there to translate against; the mod reads neither, and",
+    "a key the mod does not use is ignored.",
+    "",
+    "To add a language, copy a whole block under \"locales\", change its tag and \"endonym\" (the",
+    "language's name in itself, such as Deutsch), blank every \"text\", and translate. The tag must be",
+    "one the language pack uses: eng, kor, jpn, rus, tur, spa-es, spa-mx, fre, ger, ita, pol,",
+    "por-br, zho-tw, zho-cn, ara.",
+    "",
+    "Rules:",
+    "  - An empty \"text\" shows the English, so a partial translation is fine.",
+    "  - Keep every %s, %d, %u, %.2f and so on, in the same order as the English. An entry whose",
+    "    placeholders do not match is rejected and shows the English.",
+    "  - Keep the \n line breaks roughly where they are. They control how tooltips wrap.",
+    "  - Do not put ## in the text. Button ids are attached by the mod.",
+    "  - A key ending in .tip is a hover tooltip. Keys ending .one and .many are singular and plural.",
+    "  - Technical terms stay as they are: prefab, token, SlotPopulator, INI key names.",
+    "",
+    "To contribute one: https://github.com/tkhquang/CrimsonDesertTools/blob/main/CrimsonDesertLiveTransmog/README.md#contributing-a-translation"
+  ],
+  "locales": {
+    "zho-cn": {
+      "endonym": "简体中文",
+      "strings": {
+        "body.auto": {
+          "en": "Auto",
+          "where": "Top of the Transmog tab",
+          "text": "自动"
+        },
+        "body.both": {
+          "en": "Both",
+          "where": "Top of the Transmog tab",
+          "text": "不限"
+        },
+        "body.female": {
+          "en": "Female",
+          "where": "Top of the Transmog tab",
+          "text": "女性"
+        },
+        "body.male": {
+          "en": "Male",
+          "where": "Top of the Transmog tab",
+          "text": "男性"
+        },
+        "character.apply_to_selected": {
+          "en": "Apply To Selected",
+          "where": "Top of the Transmog tab - checkbox",
+          "text": "应用到所选角色"
+        },
+        "character.apply_to_selected.tip": {
+          "en": "When ticked, picking another character in the dropdown (and subsequent picker / slot edits while pinned) applies the preset to THAT character's body, if they are loaded. Engine equip events still render the controlled character's transmog as normal. Untick to restore the legacy cross-body behavior where the controlled body wears the selected character's preset items.",
+          "where": "Top of the Transmog tab",
+          "text": "勾选后，在下拉框中选择其他角色，以及固定期间的槽位编辑，都会尽量应用到该角色的身体上（需要该角色已加载）。引擎的装备事件仍会照常渲染受控角色的幻化。取消勾选则恢复旧的跨身体行为。"
+        },
+        "character.body_kind": {
+          "en": "Body",
+          "where": "Top of the Transmog tab - dropdown",
+          "text": "体型"
+        },
+        "character.body_kind.tip": {
+          "en": "Override the body type used for picker filtering. Use if you run a body-swap mod that changes this character's skeleton (e.g. Kliff -> Female).",
+          "where": "Top of the Transmog tab",
+          "text": "覆盖选择器筛选所用的体型。如果你安装了会改变角色骨架的换体模组（例如把 Kliff 换成女性），可以在这里手动指定。"
+        },
+        "character.picker": {
+          "en": "Character",
+          "where": "Top of the Transmog tab - label",
+          "text": "角色"
+        },
+        "character.picker.tip": {
+          "en": "Pick a different character to edit their preset while controlling someone else. The controlled body will wear the picked character's preset items (cross-body apply - partial coverage expected).",
+          "where": "Top of the Transmog tab",
+          "text": "在控制当前角色的同时，选择另一个角色来编辑他的预设。受控身体会穿上所选角色的预设物品（跨身体应用，通常只有部分生效）。"
+        },
+        "character.pinned.tip": {
+          "en": "Editing pinned: this character's preset is loaded into the slot rows, but the body on screen is whoever you control in-game. Cross-body apply - some items (gender-specific, weapons) may not render. Pick the controlled character to unpin.",
+          "where": "Top of the Transmog tab",
+          "text": "编辑已固定：所选角色的预设已载入槽位行，但画面上的身体仍是你在游戏中控制的角色。跨身体应用时，部分物品（性别限定、武器等）可能不会渲染。选回受控角色即可取消固定。"
+        },
+        "character.unpin": {
+          "en": "Unpin",
+          "where": "Top of the Transmog tab - button",
+          "text": "取消固定"
+        },
+        "character.unpin.tip": {
+          "en": "Drop the editing pin and follow the controlled character again.",
+          "where": "Top of the Transmog tab - tooltip",
+          "text": "取消编辑固定，重新跟随当前受控角色。"
+        },
+        "color.advanced_view": {
+          "en": "Advanced view",
+          "where": "Color Override tab - checkbox",
+          "text": "高级视图"
+        },
+        "color.advanced_view.tip": {
+          "en": "Show per-region per-token trees with full\nshader-property granularity beneath the\nmerchant-like flat picker list.\n\nDefault off - most users get the same UX\nas the merchant dye UI: one picker per\ndistinct asset-default color. Tick this\nonly if you need to dye individual tokens\n(e.g. tint vs. mask vs. detail layers\nseparately).",
+          "where": "Color Override tab",
+          "text": "在商人式扁平列表下方，按区域与 token 展开\n树状视图，提供完整的着色器属性粒度。\n\n默认关闭：多数用户只需与商人染色界面相同\n的方式，即每种资源默认色对应一个选择器。\n只有需要单独给 tint、mask、detail 等图层染色\n时才勾选。"
+        },
+        "color.link_channels": {
+          "en": "link",
+          "where": "Color Override tab - checkbox",
+          "text": "联动"
+        },
+        "color.link_channels.tip": {
+          "en": "When ON: pick one color, all present R/G/B channel-suffix\nProperties get it (merchant behavior).\nUntick to edit each channel independently.",
+          "where": "Color Override tab",
+          "text": "开启时：选定一个颜色，所有带 R/G/B 通道后缀的\n属性都会同步应用（与商人染色一致）。\n关闭后可逐个通道独立编辑。"
+        },
+        "color.master_toggle": {
+          "en": "Dye",
+          "where": "Color Override tab - checkbox",
+          "text": "染色"
+        },
+        "color.modified_only": {
+          "en": "Modified only",
+          "where": "Color Override tab - checkbox",
+          "text": "仅修改项"
+        },
+        "color.modified_only.tip": {
+          "en": "Hide rows / regions whose color is\nstill at the captured engine default.\nUntick to see every swatch this slot\nexposed during apply.",
+          "where": "Color Override tab",
+          "text": "隐藏颜色仍停留在捕获时引擎默认值的行与区域。\n取消勾选可查看该槽位在应用时暴露出的全部色板。"
+        },
+        "color.no_apply_yet.tip": {
+          "en": "No apply yet - swatches unknown.\nRun Re-init to capture the slot's dye\nswatches before toggling the master Dye\nswitch.",
+          "where": "Color Override tab",
+          "text": "尚未应用：色板未知。\n请先运行“重新初始化”捕获该槽位的染色\n色板，再切换主染色开关。"
+        },
+        "color.recolor_all": {
+          "en": "Recolor all:",
+          "where": "Color Override tab",
+          "text": "全部重新着色："
+        },
+        "color.reinit": {
+          "en": "Re-init",
+          "where": "Color Override tab - button",
+          "text": "重新初始化"
+        },
+        "color.reinit.tip": {
+          "en": "Single clear + apply (~1.5s) to capture\nthe slot's swatches. Use when the list\nlooks empty or stale.\n\nReplaces the manual 'untick / retick'\nloop - you can leave this slot alone\nwhile it runs.",
+          "where": "Color Override tab",
+          "text": "执行一次“清除 + 应用”（约 1.5 秒）以捕获\n该槽位的色板。列表为空或已过期时使用。\n\n可以代替手动的“取消勾选 / 重新勾选”流程，\n运行期间无需操作该槽位。"
+        },
+        "color.reinit_busy": {
+          "en": "Re-init...",
+          "where": "Color Override tab - button",
+          "text": "重新初始化中..."
+        },
+        "color.reset_slot": {
+          "en": "Reset slot",
+          "where": "Color Override tab - button",
+          "text": "重置槽位"
+        },
+        "color.reset_slot.tip": {
+          "en": "Wipe ALL captured swatches for THIS slot.\nUse when cross-slot bleed has misattributed\nrows from another transmog item (common with\nKairos and other shared-material sets).\n\nTriggers a fresh apply on this slot, which\nre-captures cleanly. Loses any colors you have\npicked for this slot.",
+          "where": "Color Override tab",
+          "text": "清除本槽位已捕获的全部色板。\n当跨槽位串色把其他幻化物品的行错误归到这里\n时使用（Kairos 等共用材质的套装较常见）。\n\n它会在该槽位触发一次新的应用并重新干净地\n捕获，但你为该槽位选定过的颜色会丢失。"
+        },
+        "color.reset_slot_top": {
+          "en": "Reset slot",
+          "where": "Color Override tab - button",
+          "text": "重置槽位"
+        },
+        "color.reset_slot_top.tip": {
+          "en": "Wipe ALL captured swatches for THIS slot,\nclear the post-reinit lock + frozen-hidden\nrows, then trigger a fresh apply.\n\nUse when the slot is stuck with stale rows\n(e.g. JSON-restored entries that no longer\nmatch the current item) and Re-init cannot\nmake progress.",
+          "where": "Color Override tab",
+          "text": "清除本槽位已捕获的全部色板，解除重新初始化\n后的锁定与冻结隐藏行，然后触发一次新的应用。\n\n当槽位卡在过期的行上（例如从 JSON 恢复、但\n已不匹配当前物品的条目），而重新初始化又无\n法推进时使用。"
+        },
+        "color.revert": {
+          "en": "Revert to default",
+          "where": "Color Override tab - button",
+          "text": "恢复默认"
+        },
+        "color.revert.tip": {
+          "en": "Revert ALL user overrides on THIS slot\nback to engine defaults. Keeps the\ncaptured swatch list intact (no Re-init\nneeded afterwards).\n\nUse to compare your dye picks against\nthe original asset colors, or to undo\na slot's color edits without losing\nthe captured row structure.",
+          "where": "Color Override tab",
+          "text": "把本槽位的全部用户覆盖恢复为引擎默认值，\n并保留已捕获的色板列表（之后无需重新初始化）。\n\n可用来对比你的染色选择与资源原始颜色，或在\n不丢失已捕获行结构的前提下撤销槽位颜色编辑。"
+        },
+        "color.tab": {
+          "en": "Color Override",
+          "where": "Dye popup - tab",
+          "text": "颜色覆盖"
+        },
+        "color.unnamed_region": {
+          "en": "[Unnamed]  (tpl 0x%04X)",
+          "where": "Color Override tab",
+          "text": "[未命名]  (tpl 0x%04X)"
+        },
+        "common.ok": {
+          "en": "OK",
+          "where": "Top of the Transmog tab - button",
+          "text": "确定"
+        },
+        "dye.active_mods.many": {
+          "en": "%d active mods",
+          "where": "Dye popup",
+          "text": "%d 个生效的染槽"
+        },
+        "dye.active_mods.one": {
+          "en": "%d active mod",
+          "where": "Dye popup",
+          "text": "%d 个生效的染槽"
+        },
+        "dye.active_overrides.many": {
+          "en": "%d active overrides",
+          "where": "Dye popup",
+          "text": "%d 个生效的颜色覆盖"
+        },
+        "dye.active_overrides.one": {
+          "en": "%d active override",
+          "where": "Dye popup",
+          "text": "%d 个生效的颜色覆盖"
+        },
+        "dye.button": {
+          "en": "Dye",
+          "where": "Dye popup - button",
+          "text": "染料"
+        },
+        "dye.clear_all_mods": {
+          "en": "Clear all mods",
+          "where": "Dye popup - button",
+          "text": "清除全部染槽"
+        },
+        "dye.clear_mod": {
+          "en": "Clear this mod",
+          "where": "Dye popup - button",
+          "text": "清除此染槽"
+        },
+        "dye.close": {
+          "en": "Close",
+          "where": "Dye popup - button",
+          "text": "关闭"
+        },
+        "dye.hues": {
+          "en": "Hues:",
+          "where": "Dye popup - text",
+          "text": "色相："
+        },
+        "dye.material_template": {
+          "en": "Material template:",
+          "where": "Dye popup - text",
+          "text": "材质模板："
+        },
+        "dye.mirror_mod0": {
+          "en": "Mirror Mod 0 to all",
+          "where": "Dye popup - button",
+          "text": "将 0 号染槽镜像到全部"
+        },
+        "dye.mod_row": {
+          "en": "%s Mod %2zu",
+          "where": "Dye popup",
+          "text": "%s 染槽 %2zu"
+        },
+        "dye.mods_range.tip": {
+          "en": "Tip: items typically use mods (dye slots) 1-12; rest no-ops.\nThis mod cannot tell which item is dyeable or has many slots.",
+          "where": "Dye popup",
+          "text": "提示：物品通常只使用 1-12 号染槽，其余无效。\n本模组无法判断某件物品能否染色，也无法得知它有多少个染槽。"
+        },
+        "dye.neutrals": {
+          "en": "Neutrals:",
+          "where": "Dye popup - text",
+          "text": "中性色："
+        },
+        "dye.pick_group_first": {
+          "en": "(pick a group above)",
+          "where": "Dye popup - dimmed text",
+          "text": "（请先在上方选择颜色组）"
+        },
+        "dye.raw_u16": {
+          "en": "Raw u16:",
+          "where": "Dye popup - text",
+          "text": "原始 u16："
+        },
+        "dye.recommit.tip": {
+          "en": "Re-tick this slot once so color\noverrides commit. Use if a color\nedit did not take.",
+          "where": "Dye popup - tooltip",
+          "text": "重新勾选一次该槽位，让颜色覆盖提交。\n颜色编辑没有生效时可以试试这个。"
+        },
+        "dye.repair_percent": {
+          "en": "Repair %",
+          "where": "Dye popup",
+          "text": "修复度 %"
+        },
+        "dye.sparse": {
+          "en": "Sparse",
+          "where": "Dye popup - checkbox",
+          "text": "稀疏"
+        },
+        "dye.sparse.tip": {
+          "en": "Sparse (default, matches the merchant dye UI):\nemit only the channels you set; engine paints\nthe rest with its own defaults.\n\nTurn off for cross-class fake transmog where\nevery channel needs your color to suppress\nthe carrier's default palette.",
+          "where": "Dye popup",
+          "text": "稀疏（默认，与商人染色界面一致）：\n只发送你设置过的通道，其余交给引擎用自己的\n默认值填充。\n\n跨类别伪幻化时请关闭：那种情况下每个通道都\n需要你的颜色，才能压过载体的默认调色板。"
+        },
+        "dye.swatch_default": {
+          "en": "(default)",
+          "where": "Dye popup - dimmed text",
+          "text": "（默认）"
+        },
+        "dye.swatch_rgb": {
+          "en": "RGB=(%u,%u,%u) rep=%d%%",
+          "where": "Dye popup - text",
+          "text": "RGB=(%u,%u,%u) 修复=%d%%"
+        },
+        "dye.sync_from_live": {
+          "en": "Sync from live",
+          "where": "Dye popup - button",
+          "text": "从游戏当前状态同步"
+        },
+        "dye.sync_from_live.tip": {
+          "en": "Re-read this slot's dye from the engine's\ncurrent auth table and overwrite the\npreset's saved channels. Use after you\napply dye at an in-game dye station and\nwant those bytes saved into this preset\nwithout re-running Capture Outfit.\n\nNo-op if the slot has no live auth-table\nentry (nothing equipped) or no dye records.",
+          "where": "Dye popup",
+          "text": "从引擎当前的授权表重新读取该槽位的染色，\n并覆盖预设中已保存的通道。适用于你在游戏\n内的染色台染色之后，想把这些数据存进本预\n设，又不想重新运行“捕获当前装备”的情况。\n\n如果槽位没有实时授权表条目（未装备任何物\n品）或没有染色记录，则不会有任何动作。"
+        },
+        "dye.tab": {
+          "en": "Dye",
+          "where": "Dye popup - tab",
+          "text": "染料"
+        },
+        "dye.template_blend": {
+          "en": "Template %u (blend %.2f)\n",
+          "where": "Dye popup",
+          "text": "模板 %u（混合 %.2f）\n"
+        },
+        "dye.template_default": {
+          "en": "Default",
+          "where": "Dye popup - button",
+          "text": "默认"
+        },
+        "dye.template_default.tip": {
+          "en": "0xFFFF - engine picks the natural variant for this channel.",
+          "where": "Dye popup - tooltip",
+          "text": "0xFFFF：由引擎为该通道选择自然变体。"
+        },
+        "dye.template_out_of_range": {
+          "en": "Template %u (out of range)",
+          "where": "Dye popup",
+          "text": "模板 %u（超出范围）"
+        },
+        "font.missing": {
+          "en": "This language needs a font this PC does not have.",
+          "where": "Top of the Transmog tab - status text",
+          "text": "该语言需要本机尚未安装的字体。"
+        },
+        "font.set_fontpath": {
+          "en": "Set FontPath in CrimsonDesertLiveTransmog.ini.",
+          "where": "Top of the Transmog tab - dimmed text",
+          "text": "请在 CrimsonDesertLiveTransmog.ini 中设置 FontPath。"
+        },
+        "footer.apply_all": {
+          "en": "Apply All",
+          "where": "Bottom button row",
+          "text": "全部应用"
+        },
+        "footer.apply_all.pending": {
+          "en": "Apply All *",
+          "where": "Bottom button row",
+          "text": "全部应用 *"
+        },
+        "footer.capture_outfit": {
+          "en": "Capture Outfit",
+          "where": "Bottom button row - button",
+          "text": "捕获当前装备"
+        },
+        "footer.catalog_loading": {
+          "en": "(loading body-mesh catalog...)",
+          "where": "Bottom button row",
+          "text": "（正在加载身体网格目录...）"
+        },
+        "footer.clear_all": {
+          "en": "Clear All",
+          "where": "Bottom button row - button",
+          "text": "全部清除"
+        },
+        "footer.populator_unavailable": {
+          "en": "SlotPopulator unavailable - transmog cannot be applied on this game build",
+          "where": "Bottom button row",
+          "text": "SlotPopulator 不可用：该游戏版本无法应用幻化"
+        },
+        "footer.save": {
+          "en": "Save",
+          "where": "Bottom button row",
+          "text": "保存"
+        },
+        "footer.save.pending": {
+          "en": "Save *",
+          "where": "Bottom button row",
+          "text": "保存 *"
+        },
+        "footer.save.tip": {
+          "en": "Commit current slot rows into the active preset.",
+          "where": "Bottom button row",
+          "text": "把当前槽位行提交到当前预设。"
+        },
+        "footer.save.tip_pending": {
+          "en": "Commit current slot rows into the active preset (unsaved edits pending).",
+          "where": "Bottom button row",
+          "text": "把当前槽位行提交到当前预设（存在未保存的编辑）。"
+        },
+        "footer.waiting_world": {
+          "en": "(waiting for world load)",
+          "where": "Bottom button row - dimmed text",
+          "text": "（等待世界加载）"
+        },
+        "header.interface": {
+          "en": "Interface:",
+          "where": "Top of the Transmog tab - label",
+          "text": "界面语言："
+        },
+        "header.interface.auto": {
+          "en": "Auto",
+          "where": "Top of the Transmog tab - dropdown",
+          "text": "自动"
+        },
+        "header.interface.tip": {
+          "en": "Language for this mod's own text. Auto follows the item name language above.",
+          "where": "Top of the Transmog tab - tooltip",
+          "text": "本模组自身文本所用的语言。“自动”表示跟随上方的物品名称语言。"
+        },
+        "header.item_names": {
+          "en": "Item Names:",
+          "where": "Top of the Transmog tab - text",
+          "text": "物品名称："
+        },
+        "header.item_names.tip": {
+          "en": "Language for item names in the picker.\nNames come from the game's own localization tables.",
+          "where": "Top of the Transmog tab",
+          "text": "选择器中物品名称所用的语言。\n名称取自游戏自带的本地化表。"
+        },
+        "header.pending_badge": {
+          "en": "  [PENDING - click Apply All]",
+          "where": "Top of the Transmog tab",
+          "text": "  [待应用，点击“全部应用”]"
+        },
+        "header.ui_scale": {
+          "en": "UI Scale:",
+          "where": "Top of the Transmog tab - text",
+          "text": "界面缩放："
+        },
+        "header.ui_scale.tip": {
+          "en": "Overlay scale for this mod's tab only. Ctrl+click to type a value.\nStacks on the automatic resolution scale.\nGlyphs may blur at higher values.\n\nFont in use: ",
+          "where": "Top of the Transmog tab - label",
+          "text": "仅影响本模组标签页的覆盖层缩放。按住 Ctrl 点击可直接输入数值。\n会叠加在自动分辨率缩放之上。\n倍率越高，字形可能越模糊。\n\n当前字体："
+        },
+        "header.unsaved_badge": {
+          "en": "  [UNSAVED - click Save]",
+          "where": "Top of the Transmog tab",
+          "text": "  [未保存，点击“保存”]"
+        },
+        "picker.badge.body_mismatch": {
+          "en": "carrier - BODY MISMATCH",
+          "where": "Item picker popup - label",
+          "text": "载体·体型不匹配"
+        },
+        "picker.badge.body_unknown": {
+          "en": "carrier - UNCERTAIN BODY",
+          "where": "Item picker popup - label",
+          "text": "载体·体型未知"
+        },
+        "picker.badge.carrier": {
+          "en": "carrier",
+          "where": "Item picker popup - label",
+          "text": "载体"
+        },
+        "picker.badge.crash_risk": {
+          "en": "non-player - CRASH RISK",
+          "where": "Item picker popup - label",
+          "text": "非玩家·崩溃风险"
+        },
+        "picker.clear_prefab_override": {
+          "en": "(clear active prefab override)",
+          "where": "Item picker popup - list row",
+          "text": "（清除当前 prefab 覆盖）"
+        },
+        "picker.clear_search": {
+          "en": "Clear",
+          "where": "Item picker popup",
+          "text": "清空"
+        },
+        "picker.exact": {
+          "en": "Exact",
+          "where": "Item picker popup - checkbox",
+          "text": "精确"
+        },
+        "picker.hide_cross_body": {
+          "en": "Hide cross-body",
+          "where": "Item picker popup - checkbox",
+          "text": "隐藏跨体型"
+        },
+        "picker.hide_cross_body.tip": {
+          "en": "Hide items whose body type (male/female) does not match the active character. Cross-body items may render with broken meshes.",
+          "where": "Item picker popup",
+          "text": "隐藏体型（男性/女性）与当前角色不匹配的物品。跨体型物品可能渲染出破损的网格。"
+        },
+        "picker.hide_variants": {
+          "en": "Hide variants",
+          "where": "Item picker popup - checkbox",
+          "text": "隐藏变体"
+        },
+        "picker.no_matches": {
+          "en": "no matches",
+          "where": "Item picker popup - dimmed text",
+          "text": "没有匹配项"
+        },
+        "picker.no_matches_exact": {
+          "en": "no matches in this category - uncheck Exact to widen",
+          "where": "Item picker popup - dimmed text",
+          "text": "当前分类没有匹配项，取消“精确”可扩大范围"
+        },
+        "picker.no_matches_filters": {
+          "en": "no matches - uncheck filters to show more items",
+          "where": "Item picker popup - dimmed text",
+          "text": "没有匹配项，取消部分筛选可显示更多物品"
+        },
+        "picker.no_prefabs": {
+          "en": "no prefabs cataloged yet - catalog may still be populating, try Refresh",
+          "where": "Item picker popup - dimmed text",
+          "text": "尚未收录 prefab，目录可能仍在生成，请尝试刷新"
+        },
+        "picker.none_item": {
+          "en": "(none - id 0)",
+          "where": "Item picker popup - list row",
+          "text": "（无，id 0）"
+        },
+        "picker.prefab_apply": {
+          "en": "Apply",
+          "where": "Item picker popup - button",
+          "text": "应用"
+        },
+        "picker.prefab_apply.tip": {
+          "en": "Apply all pending changes without closing the picker. Same as the main Apply All button.",
+          "where": "Item picker popup - tooltip",
+          "text": "不关闭选择器，直接应用所有待处理的改动，效果与主界面的“全部应用”相同。"
+        },
+        "picker.prefab_exact": {
+          "en": "Exact",
+          "where": "Item picker popup - checkbox",
+          "text": "精确"
+        },
+        "picker.prefab_exact.tip": {
+          "en": "Limit the list to prefabs whose body-mesh family matches this slot. Untick to browse the full cross-slot catalog.",
+          "where": "Item picker popup",
+          "text": "仅显示身体网格系列与当前槽位匹配的 prefab。取消勾选可浏览完整的跨槽位目录。"
+        },
+        "picker.prefab_keep_open": {
+          "en": "Keep open",
+          "where": "Item picker popup - checkbox",
+          "text": "保持打开"
+        },
+        "picker.prefab_keep_open.tip": {
+          "en": "Keep the picker open after each pick so you can quickly compare prefabs. Untick to close on click.",
+          "where": "Item picker popup",
+          "text": "每次选定后保持选择器打开，方便快速比较 prefab。取消勾选则点击后自动关闭。"
+        },
+        "picker.prefab_row_unloaded": {
+          "en": "[%s] %s  (unloaded)",
+          "where": "Item picker popup",
+          "text": "[%s] %s  （未加载）"
+        },
+        "picker.prefabs_mode": {
+          "en": "Prefabs mode (cross-slot)",
+          "where": "Item picker popup - dimmed text",
+          "text": "Prefab 模式（跨槽位）"
+        },
+        "picker.prefabs_mode.tip": {
+          "en": "Browse all body-mesh prefabs across every slot. The search bar filters across the merged prefab list. Picking applies to the prefab's native slot.",
+          "where": "Item picker popup",
+          "text": "浏览所有槽位的身体网格 prefab。搜索框会在合并后的 prefab 列表中筛选。选定后会应用到该 prefab 原生所属的槽位。"
+        },
+        "picker.safe_only": {
+          "en": "Safe only",
+          "where": "Item picker popup - checkbox",
+          "text": "仅安全项"
+        },
+        "picker.search_hint": {
+          "en": "Search by name or id...",
+          "where": "Item picker popup - label",
+          "text": "按名称或 ID 搜索..."
+        },
+        "picker.title": {
+          "en": "Item picker",
+          "where": "Item picker popup - dimmed text",
+          "text": "物品选择器"
+        },
+        "presets.active_count": {
+          "en": "Active: %d / %d",
+          "where": "Top of the Transmog tab - text",
+          "text": "当前：%d / %d"
+        },
+        "presets.append": {
+          "en": "Append",
+          "where": "Top of the Transmog tab - button",
+          "text": "新增"
+        },
+        "presets.append.tip": {
+          "en": "Append a new preset with Helm/Chest/Cloak/Gloves/Boots ticked + none (hides those five armor pieces). Other slots stay unticked so items like the lantern still work. Then apply it.",
+          "where": "Top of the Transmog tab",
+          "text": "新增一个预设：头盔/胸甲/披风/手套/靴子会被勾选并设为“无”，用于隐藏这五件护甲。其他槽位保持未勾选，以免影响提灯等物品。创建后记得应用。"
+        },
+        "presets.copy": {
+          "en": "Copy",
+          "where": "Top of the Transmog tab - button",
+          "text": "复制"
+        },
+        "presets.copy.tip": {
+          "en": "Clone the active preset's saved state into a new preset (pending edits are discarded). Use to start altering a clean copy without touching the source.",
+          "where": "Top of the Transmog tab",
+          "text": "把当前预设已保存的状态克隆为一个新预设（待处理的编辑会被丢弃）。适合在不改动原预设的前提下，基于干净副本做修改。"
+        },
+        "presets.empty": {
+          "en": "No presets - use Append to create one",
+          "where": "Top of the Transmog tab - dimmed text",
+          "text": "暂无预设，点击“新增”创建一个"
+        },
+        "presets.header": {
+          "en": "Presets",
+          "where": "Top of the Transmog tab - section header",
+          "text": "预设"
+        },
+        "presets.next": {
+          "en": "Next",
+          "where": "Top of the Transmog tab - button",
+          "text": "下一个"
+        },
+        "presets.prev": {
+          "en": "Prev",
+          "where": "Top of the Transmog tab - button",
+          "text": "上一个"
+        },
+        "presets.remove": {
+          "en": "Remove",
+          "where": "Top of the Transmog tab - button",
+          "text": "删除"
+        },
+        "presets.save_as_new": {
+          "en": "Save as New",
+          "where": "Top of the Transmog tab - button",
+          "text": "另存为新预设"
+        },
+        "presets.save_as_new.tip": {
+          "en": "Save the current pending state (including unsaved picks) as a new preset. The active preset's saved rows are left unchanged.",
+          "where": "Top of the Transmog tab",
+          "text": "把当前待应用的状态（包括尚未保存的选择）另存为新预设，当前预设已保存的内容不受影响。"
+        },
+        "slot.backpack": {
+          "en": "Backpack",
+          "where": "Slot names, down the left of the slot list",
+          "text": "背包"
+        },
+        "slot.boots": {
+          "en": "Boots",
+          "where": "Slot names, down the left of the slot list",
+          "text": "靴子"
+        },
+        "slot.bracelet": {
+          "en": "Bracelet",
+          "where": "Slot names, down the left of the slot list",
+          "text": "手镯"
+        },
+        "slot.chest": {
+          "en": "Chest",
+          "where": "Slot names, down the left of the slot list",
+          "text": "胸甲"
+        },
+        "slot.cloak": {
+          "en": "Cloak",
+          "where": "Slot names, down the left of the slot list",
+          "text": "披风"
+        },
+        "slot.earring1": {
+          "en": "Earring1",
+          "where": "Slot names, down the left of the slot list",
+          "text": "耳环1"
+        },
+        "slot.earring2": {
+          "en": "Earring2",
+          "where": "Slot names, down the left of the slot list",
+          "text": "耳环2"
+        },
+        "slot.glasses": {
+          "en": "Glasses",
+          "where": "Slot names, down the left of the slot list",
+          "text": "眼镜"
+        },
+        "slot.gloves": {
+          "en": "Gloves",
+          "where": "Slot names, down the left of the slot list",
+          "text": "手套"
+        },
+        "slot.helm": {
+          "en": "Helm",
+          "where": "Slot names, down the left of the slot list",
+          "text": "头盔"
+        },
+        "slot.lantern": {
+          "en": "Lantern",
+          "where": "Slot names, down the left of the slot list",
+          "text": "提灯"
+        },
+        "slot.mainhand": {
+          "en": "MainHand",
+          "where": "Slot names, down the left of the slot list",
+          "text": "主手"
+        },
+        "slot.mask": {
+          "en": "Mask",
+          "where": "Slot names, down the left of the slot list",
+          "text": "面具"
+        },
+        "slot.necklace": {
+          "en": "Necklace",
+          "where": "Slot names, down the left of the slot list",
+          "text": "项链"
+        },
+        "slot.offhand": {
+          "en": "OffHand",
+          "where": "Slot names, down the left of the slot list",
+          "text": "副手"
+        },
+        "slot.offhand2": {
+          "en": "OffHand2",
+          "where": "Slot names, down the left of the slot list",
+          "text": "副手2"
+        },
+        "slot.ranged": {
+          "en": "Ranged",
+          "where": "Slot names, down the left of the slot list",
+          "text": "远程"
+        },
+        "slot.ranged2": {
+          "en": "Ranged2",
+          "where": "Slot names, down the left of the slot list",
+          "text": "远程2"
+        },
+        "slot.ring1": {
+          "en": "Ring1",
+          "where": "Slot names, down the left of the slot list",
+          "text": "戒指1"
+        },
+        "slot.ring2": {
+          "en": "Ring2",
+          "where": "Slot names, down the left of the slot list",
+          "text": "戒指2"
+        },
+        "slot.subweapon": {
+          "en": "SubWeapon",
+          "where": "Slot names, down the left of the slot list",
+          "text": "副武器"
+        },
+        "slot.tool": {
+          "en": "Tool",
+          "where": "Slot names, down the left of the slot list",
+          "text": "工具"
+        },
+        "slot.twohand": {
+          "en": "TwoHand",
+          "where": "Slot names, down the left of the slot list",
+          "text": "双手"
+        },
+        "slots.all": {
+          "en": "All",
+          "where": "Main window - checkbox",
+          "text": "全部"
+        },
+        "slots.carrier_id.tip": {
+          "en": "Auto-borrowed carrier id (Kairos plate). The body-mesh prefab is the visual override; this hex is just the engine plumbing. Clear the prefab via the picker's '(none) prefab' to edit the carrier directly.",
+          "where": "Main window",
+          "text": "自动借用的载体 ID（Kairos 板甲）。实际外观由身体网格 prefab 覆盖；这里的十六进制值只是引擎管线需要的载体。若要直接编辑载体，请先在选择器里用“（无）prefab”清除 prefab。"
+        },
+        "slots.catalog_not_ready": {
+          "en": "Item catalog not ready - hex entry only.",
+          "where": "Main window - dimmed text",
+          "text": "物品目录尚未就绪，只能输入十六进制 ID。"
+        },
+        "slots.header": {
+          "en": "Slot Details",
+          "where": "Main window - section header",
+          "text": "槽位详情"
+        },
+        "slots.lantern_warning.tip": {
+          "en": "Heads-up: Lantern set to (none) does\nMORE than hide the mesh - the engine\nremoves the light source too. Your\ncharacter will emit NO light, even at\nnight or in dungeons.\n\nIf you wanted to hide the lantern\nvisually but keep the light, pick a\ndifferent lantern prefab here instead\nof clearing the slot.",
+          "where": "Main window",
+          "text": "注意：把提灯设为（无）不只是隐藏网格，\n引擎会连光源一起移除。你的角色将不再\n发光，夜晚和地城里也一样。\n\n如果你只想在视觉上隐藏提灯但保留光照，\n请在这里改选另一个提灯 prefab，而不要\n清空该槽位。"
+        },
+        "slots.pending_note": {
+          "en": "(pending - Apply All to commit)",
+          "where": "Main window - dimmed text",
+          "text": "（待应用，请点击“全部应用”提交）"
+        },
+        "slots.toggle_hint": {
+          "en": "Toggle which slots the next Apply All will touch.",
+          "where": "Main window - dimmed text",
+          "text": "勾选下次“全部应用”要处理的槽位。"
+        },
+        "slots.weapon_experimental.tip": {
+          "en": "EXPERIMENTAL.\n\nBest practice: pick a transmog from the\nSAME weapon family you have equipped.\nSword on a sword, spear on a spear, 1H\non a 1H, 2H on a 2H - always renders\ncorrectly, drawn or sheathed.\n\nWhy the limit exists:\nEach weapon prefab carries its own\nbone-binding and attachment-socket data\n(which bone it parents to, which socket\ntransform it uses, hand offsets, sheath\npose). The engine looks those bindings\nup from the REAL equipped item's class -\nnot from this transmog target - so a\nmismatched-class swap lands in the wrong\nsocket and goes invisible.\n\nExamples:\n - 2H prefab while a 1H is equipped:\n   mesh shows on the back; the real 1H\n   goes invisible when drawn.\n - Spear/hammer prefab while a sword is\n   equipped: invisible when drawn\n   (sheathed on back still renders).\n - Same family (sword<->sword, etc.):\n   renders correctly in every pose.",
+          "where": "Main window",
+          "text": "实验性功能。\n\n建议：只在你已装备的同类武器中挑选幻化。\n剑换剑、枪换枪、单手换单手、双手换双手，\n无论拔出还是收起都能正确显示。\n\n为什么会有这个限制：\n每个武器 prefab 都自带骨骼绑定与挂点数据\n（挂在哪根骨骼、使用哪个挂点变换、手部\n偏移、收鞘姿态）。引擎是按你真正装备的\n那件武器的类别去查这些绑定的，而不是按\n幻化目标，所以跨类别替换会落到错误的挂\n点上并变得不可见。\n\n示例：\n - 装备单手时选用双手 prefab：\n   网格显示在背后，拔出时真正的单手武器\n   反而不可见。\n - 装备剑时选用枪/锤 prefab：\n   拔出时不可见（收在背后仍会显示）。\n - 同类互换（剑换剑等）：\n   各姿态都能正确显示。"
+        },
+        "slots.weapon_experimental_tools.tip": {
+          "en": "EXPERIMENTAL.\n\nHeads-up: in this game, tools (pickaxe,\nmallet, etc.) share the same engine slot\nas 2H weapons. Setting a transmog here\nmay also affect the tool you have\nequipped. Investigation ongoing.\n\nBest practice: pick a transmog from the\nSAME weapon family you have equipped.\nSword on a sword, spear on a spear, 1H\non a 1H, 2H on a 2H - always renders\ncorrectly, drawn or sheathed.\n\nWhy the limit exists:\nEach weapon prefab carries its own\nbone-binding and attachment-socket data\n(which bone it parents to, which socket\ntransform it uses, hand offsets, sheath\npose). The engine looks those bindings\nup from the REAL equipped item's class -\nnot from this transmog target - so a\nmismatched-class swap lands in the wrong\nsocket and goes invisible.\n\nExamples:\n - 2H prefab while a 1H is equipped:\n   mesh shows on the back; the real 1H\n   goes invisible when drawn.\n - Spear/hammer prefab while a sword is\n   equipped: invisible when drawn\n   (sheathed on back still renders).\n - Same family (sword<->sword, etc.):\n   renders correctly in every pose.",
+          "where": "Main window",
+          "text": "实验性功能。\n\n注意：本作中的工具（镐、锤等）与双手武器\n共用同一个引擎槽位。在这里设置幻化可能\n也会影响你装备的工具。仍在调查中。\n\n建议：只在你已装备的同类武器中挑选幻化。\n剑换剑、枪换枪、单手换单手、双手换双手，\n无论拔出还是收起都能正确显示。\n\n为什么会有这个限制：\n每个武器 prefab 都自带骨骼绑定与挂点数据\n（挂在哪根骨骼、使用哪个挂点变换、手部\n偏移、收鞘姿态）。引擎是按你真正装备的\n那件武器的类别去查这些绑定的，而不是按\n幻化目标，所以跨类别替换会落到错误的挂\n点上并变得不可见。\n\n示例：\n - 装备单手时选用双手 prefab：\n   网格显示在背后，拔出时真正的单手武器\n   反而不可见。\n - 装备剑时选用枪/锤 prefab：\n   拔出时不可见（收在背后仍会显示）。\n - 同类互换（剑换剑等）：\n   各姿态都能正确显示。"
+        },
+        "toggles.enabled": {
+          "en": "Enabled",
+          "where": "Top of the Transmog tab - checkbox",
+          "text": "启用"
+        },
+        "toggles.instant_apply": {
+          "en": "Instant Apply",
+          "where": "Top of the Transmog tab - checkbox",
+          "text": "即时应用"
+        },
+        "toggles.instant_apply.prefab_note": {
+          "en": "Prefab picker (Prefabs checkbox inside the popup) does not honor Instant Apply. Click a prefab row to commit it. Hover-preview works on items only.",
+          "where": "Top of the Transmog tab",
+          "text": "prefab 选择器（弹窗内的 Prefabs 选项）不支持即时应用。需要点击 prefab 行才会提交；悬停预览目前仅对物品列表生效。"
+        },
+        "toggles.instant_apply.tip": {
+          "en": "Apply changes immediately on hover, pick, toggle, and clear - no Apply All needed",
+          "where": "Top of the Transmog tab - tooltip",
+          "text": "悬停、选定、切换和清除时立即应用改动，无需再点“全部应用”"
+        },
+        "toggles.keep_search": {
+          "en": "Keep Search Text",
+          "where": "Top of the Transmog tab - checkbox",
+          "text": "保留搜索文本"
+        },
+        "toggles.keep_search.tip": {
+          "en": "Preserve the search field when re-opening a slot picker",
+          "where": "Top of the Transmog tab - tooltip",
+          "text": "重新打开槽位选择器时保留搜索框中的内容。"
+        },
+        "window.title": {
+          "en": "Transmog",
+          "where": "Main window",
+          "text": "幻化"
+        }
+      }
+    }
+  }
+}

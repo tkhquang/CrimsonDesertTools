@@ -16,6 +16,9 @@
 #include "input_handler.hpp"
 #include "item_name_table.hpp"
 #include "itemmesh_dumper.hpp"
+#include "lang.hpp"
+#include "language_pack.hpp"
+#include "overlay_font.hpp"
 #include "part_show_suppress.hpp"
 #include "preset_manager.hpp"
 #include "real_part_tear_down.hpp"
@@ -100,6 +103,16 @@ namespace Transmog
             "Force Standalone Overlay",
             [](bool val) { set_force_standalone(val); },
             false
+        );
+
+        // Base font for this mod's overlay in BOTH modes, standalone and the ReShade tab. Empty picks the first
+        // present of segoeui, arial, tahoma, micross. Set it when a system carries none of those, or to force a
+        // specific face.
+        general.bind_string(
+            "FontPath",
+            "Font Path",
+            [](std::string_view val) { overlay_font::set_font_path_override(std::string{val}); },
+            ""
         );
 
         // Protagonist codename overrides for CDCore's appearance-config classifier. Each codename is a substring
@@ -800,6 +813,17 @@ namespace Transmog
             // worker, and no downstream caller must care whether the pointer landed first.
             item_to_slot_resolve_fn() = reinterpret_cast<ItemToSlotResolveFn>(addrs.sub_translator);
 
+            // Open the pack BEFORE the build, and outside its result branch. The build defers whenever the iteminfo
+            // global lands late, and the deferred worker publishes display names without ever returning here, so an
+            // open nested in the synchronous branch never runs on those machines. The pack needs only the runtime
+            // directory, so it has no reason to wait on the catalog.
+            const std::filesystem::path runtime_dir{DMK::filesystem::get_runtime_directory()};
+            if (const auto opened = LanguagePack::instance().open(runtime_dir / ITEM_LOCALIZATION_FILE);
+                !opened.has_value())
+            {
+                logger.warning("[langpack] {}", opened.error().message());
+            }
+
             using BR = ItemNameTable::BuildResult;
             const auto result = ItemNameTable::instance().build(addrs.sub_translator);
             if (result == BR::Ok)
@@ -808,9 +832,8 @@ namespace Transmog
                 // Load display names BEFORE dump_catalog_tsv, so the sorted cache that the dump builds lazily already
                 // contains display names. A second rebuild stalls the overlay render thread.
                 {
-                    ItemNameTable::instance().load_display_names(
-                        std::filesystem::path{DMK::filesystem::get_runtime_directory()} / DISPLAY_NAMES_FILE
-                    );
+                    // Presets carry the locale preference and load further down, so publish English here.
+                    ItemNameTable::instance().load_display_names("eng", runtime_dir / DISPLAY_NAMES_FILE);
                 }
                 if (flag_dump_item_catalog().load(std::memory_order_relaxed))
                     ItemNameTable::instance().dump_catalog_tsv();
@@ -873,11 +896,18 @@ namespace Transmog
         // Load presets
 
         {
-            const std::filesystem::path presets_path =
-                std::filesystem::path{DMK::filesystem::get_runtime_directory()} / PRESETS_FILE;
+            const std::filesystem::path runtime_dir{DMK::filesystem::get_runtime_directory()};
 
             auto &pm = PresetManager::instance();
-            pm.load(presets_path);
+            pm.load(runtime_dir / PRESETS_FILE);
+            // Interface strings, once the stored preferences exist to resolve. Independent of the item-name
+            // table: the interface is translated by hand and exists only in the languages someone has done.
+            lang::load_for(runtime_dir / INTERFACE_TRANSLATIONS_FILE, pm.interface_locale(), pm.display_name_locale());
+            // Re-apply only when the stored preference differs from the English baseline published above.
+            if (const std::string locale = pm.display_name_locale(); locale != "eng")
+            {
+                ItemNameTable::instance().load_display_names(locale, runtime_dir / DISPLAY_NAMES_FILE);
+            }
             pm.apply_to_state();
         }
 
@@ -1148,6 +1178,16 @@ namespace Transmog
 
         // Disable the INI watcher up front so an in-flight save event cannot fire setters during the state tear-down.
         DMK::config::disable_auto_reload();
+
+        // Retract this mod's visuals through the ORDINARY clear path, the one a preset switch uses, and block until
+        // the game thread has run it. It must happen here, before the flag below: the worker and the frame hook both
+        // stop accepting work once shutdown_requested is set. Shutdown therefore has no retraction path of its own.
+        // The sweep further down covers the case where no frame claims this pass, and finds nothing to do when one
+        // did.
+        if (!run_clear_blocking())
+        {
+            DMK::log().warning("Shutdown clear did not run; falling back to the stale-visual sweep");
+        }
 
         shutdown_requested().store(true, std::memory_order_release);
 

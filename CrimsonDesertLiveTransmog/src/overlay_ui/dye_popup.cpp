@@ -21,6 +21,7 @@
 
 #include "dye_record_inject.hpp"
 #include "item_name_table.hpp"
+#include "lang.hpp"
 #include "preset_manager.hpp"
 #include "prefab_wrapper_swap.hpp"
 #include "shared_state.hpp"
@@ -103,7 +104,7 @@ namespace Transmog
         // Dye button: always plain "Dye" with no background color override - keeps text legible regardless of dye
         // state. Active state is signalled by a small color-swatch chip rendered next to the button. Auto-sized so the
         // label fits at any font scale.
-        const bool dye_btn = ImGui::Button("Dye##dye_btn", ImVec2(0, 0));
+        const bool dye_btn = ImGui::Button(lang::t("dye.button", "Dye##dye_btn"), ImVec2(0, 0));
 
         // Constant row geometry: every slot reserves space for the dye chip + CO chip + reload icon even when inactive.
         // Without this, switching from a preset with dye/CO active to one without makes the standalone window
@@ -125,8 +126,17 @@ namespace Transmog
             ImGui::PopStyleColor(3);
             if (ImGui::IsItemHovered())
             {
-                char tip[48];
-                std::snprintf(tip, sizeof(tip), "%d active mod%s", active_ch_count, active_ch_count == 1 ? "" : "s");
+                // Sized for a TRANSLATED string, which runs longer than the English in most languages.
+                char tip[128];
+                // Two whole formats rather than an English "%s" plural suffix: a language without plural
+                // inflection has nowhere to put that suffix, and would render a stray "s".
+                std::snprintf(
+                    tip,
+                    sizeof(tip),
+                    active_ch_count == 1 ? lang::t("dye.active_mods.one", "%d active mod")
+                                         : lang::t("dye.active_mods.many", "%d active mods"),
+                    active_ch_count
+                );
                 ui_tooltip(tip);
             }
         }
@@ -168,8 +178,14 @@ namespace Transmog
             }
             if (hovered)
             {
-                char tip[64];
-                std::snprintf(tip, sizeof(tip), "%d active override%s", override_count, override_count == 1 ? "" : "s");
+                char tip[128];
+                std::snprintf(
+                    tip,
+                    sizeof(tip),
+                    override_count == 1 ? lang::t("dye.active_overrides.one", "%d active override")
+                                        : lang::t("dye.active_overrides.many", "%d active overrides"),
+                    override_count
+                );
                 ui_tooltip(tip);
             }
 
@@ -213,7 +229,14 @@ namespace Transmog
                 rl_dl->AddTriangleFilled(p_tip, p_in, p_out, col);
             }
             if (reload_hovered)
-                ui_tooltip("Re-tick this slot once so color\noverrides commit. Use if a color\nedit did not take.");
+                ui_tooltip(
+                    lang::t(
+                        "dye.recommit.tip",
+                        "Re-tick this slot once so color\n"
+                        "overrides commit. Use if a color\n"
+                        "edit did not take."
+                    )
+                );
             if (reload_clicked && !Transmog::color_override::reinit::any_slot_reinit_active())
             {
                 Transmog::flag_enabled().store(true, std::memory_order_relaxed);
@@ -353,7 +376,7 @@ namespace Transmog
                 {
                     const std::uint32_t max_idx = grp->shade_count;
 
-                    ui_text("Neutrals:");
+                    ui_text(lang::t("dye.neutrals", "Neutrals:"));
                     for (std::uint32_t s = 0; s < 9 && s < max_idx; ++s)
                     {
                         const std::uint32_t bgra = grp->shades[s].bgra;
@@ -391,7 +414,7 @@ namespace Transmog
                         }
                     }
 
-                    ui_text("Hues:");
+                    ui_text(lang::t("dye.hues", "Hues:"));
                     int col = 0;
                     for (std::uint32_t s = 9; s < max_idx; ++s)
                     {
@@ -436,7 +459,7 @@ namespace Transmog
             }
             else
             {
-                ui_text_disabled("(pick a group above)");
+                ui_text_disabled(lang::t("dye.pick_group_first", "(pick a group above)"));
             }
 
             // Repair slider (offset +11 of dye record). The engine stores wear as a 0..127 byte; 0 means pristine, 127
@@ -444,8 +467,8 @@ namespace Transmog
             // conventional reading. 0xFF is the legacy "no override" sentinel and is treated as 100% on read for old
             // presets.
             int repair_pct = (ch.repair_byte == 0xFF) ? 100 : 100 - ((ch.repair_byte * 100 + 63) / 127);
-            ImGui::SetNextItemWidth(200.0f);
-            if (ImGui::SliderInt("Repair %", &repair_pct, 0, 100))
+            ImGui::SetNextItemWidth(ui_px(200.0f));
+            if (ImGui::SliderInt(lang::t("dye.repair_percent", "Repair %"), &repair_pct, 0, 100))
             {
                 if (repair_pct >= 100)
                     ch.repair_byte = 0;
@@ -463,7 +486,7 @@ namespace Transmog
             // The engine resolves each channel's cat_code per-item and pulls the variant from the template. So template
             // 5 picks DIFFERENT textures for cat_001/002/003 simultaneously, not "variant 5 of one category."
             namespace mpt = Transmog::material_palette_table;
-            ui_text("Material template:");
+            ui_text(lang::t("dye.material_template", "Material template:"));
             // Width sized to the widest two-digit label so the "10" button is not cut off; all rows align at the same
             // width regardless of single- vs two-digit.
             const float mat_btn_w = ImGui::CalcTextSize("10").x + ImGui::GetStyle().FramePadding.x * 2.0f + 8.0f;
@@ -489,7 +512,13 @@ namespace Transmog
                     if (t)
                     {
                         char tip[512];
-                        int n = std::snprintf(tip, sizeof(tip), "Template %u (blend %.2f)\n", t->idx, t->blend);
+                        int n = std::snprintf(
+                            tip,
+                            sizeof(tip),
+                            lang::t("dye.template_blend", "Template %u (blend %.2f)\n"),
+                            t->idx,
+                            t->blend
+                        );
                         for (std::size_t s = 0; s < t->slot_count && n < (int)sizeof(tip) - 1; ++s)
                         {
                             const auto &slot = t->slots[s];
@@ -518,7 +547,12 @@ namespace Transmog
                     else
                     {
                         char tip[64];
-                        std::snprintf(tip, sizeof(tip), "Template %u (out of range)", v);
+                        std::snprintf(
+                            tip,
+                            sizeof(tip),
+                            lang::t("dye.template_out_of_range", "Template %u (out of range)"),
+                            v
+                        );
                         ui_tooltip(tip);
                     }
                 }
@@ -530,7 +564,7 @@ namespace Transmog
                     ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.3f, 0.6f, 0.9f, 1.0f));
                 // Auto-sized so the label always fits regardless of overlay font scale; prior fixed widths truncated
                 // the text on chunky bitmap fonts.
-                if (ImGui::Button("Default##mFFFF", ImVec2(0, 0)))
+                if (ImGui::Button(lang::t("dye.template_default", "Default##mFFFF"), ImVec2(0, 0)))
                 {
                     ch.material_id = 0xFFFF;
                     reapply_now();
@@ -538,14 +572,19 @@ namespace Transmog
                 if (selected)
                     ImGui::PopStyleColor();
                 if (ImGui::IsItemHovered())
-                    ui_tooltip("0xFFFF - engine picks the natural variant for this channel.");
+                    ui_tooltip(
+                        lang::t(
+                            "dye.template_default.tip",
+                            "0xFFFF - engine picks the natural variant for this channel."
+                        )
+                    );
             }
             // Render the label on the left so the trailing ImGui auto-label does not clip on the popup's right edge in
             // the standalone overlay.
             int raw_mat = static_cast<int>(ch.material_id);
-            ui_text("Raw u16:");
+            ui_text(lang::t("dye.raw_u16", "Raw u16:"));
             ImGui::SameLine();
-            ImGui::SetNextItemWidth(140.0f);
+            ImGui::SetNextItemWidth(ui_px(140.0f));
             if (ImGui::InputInt(
                     "##matRaw",
                     &raw_mat,
@@ -562,7 +601,7 @@ namespace Transmog
                 reapply_now();
             }
 
-            if (ImGui::Button("Clear this mod", ImVec2(0, 0)))
+            if (ImGui::Button(lang::t("dye.clear_mod", "Clear this mod"), ImVec2(0, 0)))
             {
                 ch = ChannelDye{};
                 reapply_now();
@@ -591,10 +630,10 @@ namespace Transmog
                 // consuming so subsequent tab clicks behave normally.
                 ImGuiTabItemFlags dye_tab_flags = s_dye_popup_jump_to_dye[slot] ? ImGuiTabItemFlags_SetSelected : 0;
                 s_dye_popup_jump_to_dye[slot] = false;
-                if (ImGui::BeginTabItem("Dye", nullptr, dye_tab_flags))
+                if (ImGui::BeginTabItem(lang::t("dye.tab", "Dye"), nullptr, dye_tab_flags))
                 {
                     // Top action bar
-                    if (ImGui::Button("Mirror Mod 0 to all", ImVec2(0, 0)))
+                    if (ImGui::Button(lang::t("dye.mirror_mod0", "Mirror Mod 0 to all"), ImVec2(0, 0)))
                     {
                         if (slot_dye)
                         {
@@ -605,7 +644,7 @@ namespace Transmog
                         }
                     }
                     ImGui::SameLine();
-                    if (ImGui::Button("Clear all mods", ImVec2(0, 0)))
+                    if (ImGui::Button(lang::t("dye.clear_all_mods", "Clear all mods"), ImVec2(0, 0)))
                     {
                         if (slot_dye)
                             *slot_dye = SlotDyeChannels{};
@@ -617,23 +656,28 @@ namespace Transmog
                     // channels on this slot only. The real-item restore path already auto-mirrors on
                     // picker -> real transitions; this button covers
                     // the case where the slot stays bound to a fake but the underlying real item's dye changed in-game.
-                    if (ImGui::Button("Sync from live##dye_sync", ImVec2(0, 0)))
+                    if (ImGui::Button(lang::t("dye.sync_from_live", "Sync from live##dye_sync"), ImVec2(0, 0)))
                     {
                         if (Transmog::sync_live_dye_for_slot(slot))
                             reapply_now();
                     }
                     if (ImGui::IsItemHovered())
                         ui_tooltip(
-                            "Re-read this slot's dye from the engine's\n"
-                            "current auth table and overwrite the\n"
-                            "preset's saved channels. Use after you\n"
-                            "apply dye at an in-game dye station and\n"
-                            "want those bytes saved into this preset\n"
-                            "without re-running Capture Outfit.\n"
-                            "\nNo-op if the slot has no live auth-table\nentry (nothing equipped) or no dye records."
+                            lang::t(
+                                "dye.sync_from_live.tip",
+                                "Re-read this slot's dye from the engine's\n"
+                                "current auth table and overwrite the\n"
+                                "preset's saved channels. Use after you\n"
+                                "apply dye at an in-game dye station and\n"
+                                "want those bytes saved into this preset\n"
+                                "without re-running Capture Outfit.\n"
+                                "\n"
+                                "No-op if the slot has no live auth-table\n"
+                                "entry (nothing equipped) or no dye records."
+                            )
                         );
                     ImGui::SameLine();
-                    if (ImGui::Button("Close", ImVec2(0, 0)))
+                    if (ImGui::Button(lang::t("dye.close", "Close"), ImVec2(0, 0)))
                         ImGui::CloseCurrentPopup();
 
                     // Per-slot dye-inject mode toggle. See PresetSlot::dye_sparse in preset_manager.hpp for the full
@@ -642,7 +686,7 @@ namespace Transmog
                     if (edit_preset != nullptr && slot < edit_preset->slots.size())
                     {
                         bool sparse = edit_preset->slots[slot].dye_sparse;
-                        if (ImGui::Checkbox("Sparse##dye_sparse", &sparse))
+                        if (ImGui::Checkbox(lang::t("dye.sparse", "Sparse##dye_sparse"), &sparse))
                         {
                             edit_preset->slots[slot].dye_sparse = sparse;
                             dye_dirty().store(true, std::memory_order_release);
@@ -650,18 +694,25 @@ namespace Transmog
                         }
                         if (ImGui::IsItemHovered())
                             ui_tooltip(
-                                "Sparse (default, matches the merchant dye UI):\n"
-                                "emit only the channels you set; engine paints\n"
-                                "the rest with its own defaults.\n"
-                                "\n"
-                                "Turn off for cross-class fake transmog where\n"
-                                "every channel needs your color to suppress\nthe carrier's default palette."
+                                lang::t(
+                                    "dye.sparse.tip",
+                                    "Sparse (default, matches the merchant dye UI):\n"
+                                    "emit only the channels you set; engine paints\n"
+                                    "the rest with its own defaults.\n"
+                                    "\n"
+                                    "Turn off for cross-class fake transmog where\n"
+                                    "every channel needs your color to suppress\n"
+                                    "the carrier's default palette."
+                                )
                             );
                     }
 
                     ui_text_disabled(
-                        "Tip: items typically use mods (dye slots) 1-12; "
-                        "rest no-ops.\nThis mod cannot tell which item is dyeable or has many slots."
+                        lang::t(
+                            "dye.mods_range.tip",
+                            "Tip: items typically use mods (dye slots) 1-12; rest no-ops.\n"
+                            "This mod cannot tell which item is dyeable or has many slots."
+                        )
                     );
                     ImGui::Separator();
 
@@ -678,7 +729,13 @@ namespace Transmog
                             // single-digit rows shrink and break the column.
                             const bool expanded = s_expanded_mod[slot] == static_cast<int>(k);
                             char hdr[24];
-                            std::snprintf(hdr, sizeof(hdr), "%s Mod %2zu", expanded ? "v" : ">", k);
+                            std::snprintf(
+                                hdr,
+                                sizeof(hdr),
+                                lang::t("dye.mod_row", "%s Mod %2zu"),
+                                expanded ? "v" : ">",
+                                k
+                            );
                             const float row_btn_w =
                                 ImGui::CalcTextSize("v Mod 15").x + ImGui::GetStyle().FramePadding.x * 2.0f + 8.0f;
                             if (ImGui::Button(hdr, ImVec2(row_btn_w, 0.0f)))
@@ -708,19 +765,25 @@ namespace Transmog
                             {
                                 int repair_pct =
                                     (ch.repair_byte == 0xFF) ? 100 : 100 - ((ch.repair_byte * 100 + 63) / 127);
-                                ui_text("RGB=(%u,%u,%u) rep=%d%%", ch.r, ch.g, ch.b, repair_pct);
+                                ui_text(
+                                    lang::t("dye.swatch_rgb", "RGB=(%u,%u,%u) rep=%d%%"),
+                                    ch.r,
+                                    ch.g,
+                                    ch.b,
+                                    repair_pct
+                                );
                             }
                             else
                             {
-                                ui_text_disabled("(default)");
+                                ui_text_disabled(lang::t("dye.swatch_default", "(default)"));
                             }
 
                             // Inline expanded body.
                             if (expanded)
                             {
-                                ImGui::Indent(20.0f);
+                                ImGui::Indent(ui_px(20.0f));
                                 draw_channel_picker(k, ch);
-                                ImGui::Unindent(20.0f);
+                                ImGui::Unindent(ui_px(20.0f));
                                 ImGui::Separator();
                             }
 
@@ -741,7 +804,7 @@ namespace Transmog
                 ImGuiTabItemFlags co_tab_flags = s_dye_popup_jump_to_color[slot] ? ImGuiTabItemFlags_SetSelected : 0;
                 s_dye_popup_jump_to_color[slot] = false;
                 if (Transmog::flag_color_override().load(std::memory_order_acquire) &&
-                    ImGui::BeginTabItem("Color Override", nullptr, co_tab_flags))
+                    ImGui::BeginTabItem(lang::t("color.tab", "Color Override"), nullptr, co_tab_flags))
                 {
                     draw_color_override_tab_body(slot, detected, detected_ready, ui, dye_slot);
                     ImGui::EndTabItem();
