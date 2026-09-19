@@ -6,7 +6,7 @@
 // Bump these three values to release a new version. Nothing else in this file needs an edit.
 #define TRANSMOG_VERSION_MAJOR 0
 #define TRANSMOG_VERSION_MINOR 16
-#define TRANSMOG_VERSION_PATCH 0
+#define TRANSMOG_VERSION_PATCH 1
 
 // Stringification helpers. Nothing below this line carries a version value.
 #define TRANSMOG_VERSION_STRINGIFY_IMPL(x) #x

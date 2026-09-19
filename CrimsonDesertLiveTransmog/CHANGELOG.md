@@ -2,6 +2,11 @@
 
 All notable changes to the CrimsonDesertLiveTransmog mod will be documented in this file.
 
+## [0.16.1] - Fixes for unequipping gear and helm voice
+
+- Gear you take off now disappears properly, including when Enabled is unticked
+- Unmuffle Helm Voice works again after a game update stopped it having any effect
+
 ## [0.16.0] - Languages, overlay and fixes
 
 - Item names now available in all 15 of the game's languages, and the mod's own text in Simplified Chinese, from two dropdowns at the top of the Transmog tab
@@ -325,6 +330,7 @@ All notable changes to the CrimsonDesertLiveTransmog mod will be documented in t
 - Modular code split: `transmog_apply` (apply/clear logic), `transmog_hooks` (VEC/BatchEquip callbacks), `transmog_worker` (debounce/load-detect/nametable threads), `shared_state` (cross-TU atomics)
 - Docs clarify ReShade is required for GUI; without it, users edit JSON manually via Capture hotkey
 
+[0.16.1]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.16.1
 [0.16.0]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.16.0
 [0.15.1]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.15.1
 [0.15.0]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/live-transmog/v0.15.0
