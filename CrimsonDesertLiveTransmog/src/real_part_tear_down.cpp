@@ -695,6 +695,8 @@ namespace Transmog::real_part_tear_down
 
         std::uint32_t hash = 0;
         std::int64_t rc = 0;
+        // Declared outside the __try so the handler can restore it. See in_engine_tear_down.
+        bool latch_was_raised = false;
 
         // The two engine calls keep their own SEH frame. Every read around them is guarded on its own.
         __try
@@ -729,10 +731,16 @@ namespace Transmog::real_part_tear_down
             log_safe_tear_down_state(a1, hash, game_slot_tag, "tear_down");
             // Log the engine's return rather than a constant. A tear-down that matched nothing and one that
             // detached a part both come back normally, so the return is the only thing that tells them apart.
+            //
+            // See in_engine_tear_down and the matching call in tear_down_by_item_id.
+            latch_was_raised = in_engine_tear_down();
+            set_in_engine_tear_down(true);
             rc = safe_fn(static_cast<std::int64_t>(a1), hash, static_cast<std::int16_t>(game_slot_tag));
+            set_in_engine_tear_down(latch_was_raised);
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
+            set_in_engine_tear_down(latch_was_raised);
             logger.trace("[dispatch] tear_down slot={:#06x} SEH caught fault", game_slot_tag);
             return false;
         }
@@ -786,6 +794,8 @@ namespace Transmog::real_part_tear_down
         std::uint32_t hash = 0;
         std::int64_t engine_rc = 0;
         bool result = false;
+        // Declared outside the __try so the handler can restore it. See in_engine_tear_down.
+        bool latch_was_raised = false;
 
         // The two engine calls keep their own SEH frame. Every read around them is guarded on its own.
         __try
@@ -818,11 +828,19 @@ namespace Transmog::real_part_tear_down
             log_safe_tear_down_state(a1, hash, game_slot_tag, "tear_down_fake");
             // Kept for the summary line below. A tear-down that matched nothing and one that detached a part both
             // return normally, so the engine's return is the only thing that tells them apart.
+            //
+            // The latch marks this detach as LT's own, so the prefab-swap natural-pipeline hook still substitutes
+            // while LT is disabled. See in_engine_tear_down. Both exits restore the prior value rather than clearing
+            // it, so a nested tear-down cannot disarm the hook for the call still running under it.
+            latch_was_raised = in_engine_tear_down();
+            set_in_engine_tear_down(true);
             engine_rc = safe_fn(static_cast<std::int64_t>(a1), hash, static_cast<std::int16_t>(game_slot_tag));
+            set_in_engine_tear_down(latch_was_raised);
             result = true;
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
+            set_in_engine_tear_down(latch_was_raised);
             logger.trace("[dispatch] tear_down_fake slot={:#06x} SEH caught fault", game_slot_tag);
             return false;
         }

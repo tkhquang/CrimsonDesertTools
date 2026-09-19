@@ -277,6 +277,26 @@ namespace Transmog
      */
     std::atomic<bool> &in_transmog();
 
+    /**
+     * @brief Reports whether the calling thread sits inside LT's own engine part tear-down call.
+     * @details The prefab-swap natural-pipeline hook must substitute nothing while LT is disabled, or the engine's own
+     *          unequip reaches a target that is not attached and the real mesh stays on the body. LT's own tear-down
+     *          is the exception, because there the target is what hangs on the body. `in_transmog()` cannot mark that
+     *          window, since it covers SlotPopulator and PartSlotRefresh only.
+     * @return True while the latch is raised for this thread.
+     * @note    The latch is thread-local rather than atomic. The hook fires synchronously on the same thread inside
+     *          the engine call, so a thread-local latch cannot arm the hook for an equip on another thread.
+     */
+    [[nodiscard]] bool in_engine_tear_down() noexcept;
+
+    /**
+     * @brief Raises or drops the tear-down latch for the calling thread.
+     * @param active True to raise the latch, false to drop it.
+     * @details Every raise must pair with a drop on both the normal and the structured-exception path. See
+     *          @ref in_engine_tear_down.
+     */
+    void set_in_engine_tear_down(bool active) noexcept;
+
     /// Last known player a1, resolved lazily and stored by the load-detect thread on each poll.
     std::atomic<__int64> &player_a1();
 
@@ -318,12 +338,16 @@ namespace Transmog
     std::array<std::uint16_t, SLOT_COUNT> &last_applied_carrier_ids();
 
     /**
-     * @brief Real item LT rebuilt through SlotPopulator in a slot it has released, indexed by TransmogSlot.
+     * @brief Real item LT rebuilt through SlotPopulator in a slot it released, indexed by TransmogSlot.
      * @details Zero when the slot carries no LT-made real part. A restore rebuilds the real item's part after Phase B
      *          tore the engine's own part down, and the engine's unequip path removes only its own part, so the rebuilt
      *          one outlives the item. The load-detect tick compares this record against the live auth table and
-     *          schedules an apply once the item has left the slot, and the apply tears the part down. Cleared when LT
-     *          dresses the slot again or tears the part down.
+     *          schedules an apply, and the apply tears the part down. Cleared when LT dresses the slot again or tears
+     *          the part down.
+     * @note    Every reader must treat this record as a level, never as an edge on live-vs-last_applied_real_ids.
+     *          clear_all_transmog zeroes last_applied_real_ids before it writes these records, so an item removed
+     *          before the next apply reads zero against zero and raises no edge. An edge-gated reader then skips the
+     *          part forever while the load-detect tick re-schedules an apply every tick.
      */
     std::array<std::uint16_t, SLOT_COUNT> &restored_real_ids();
 
