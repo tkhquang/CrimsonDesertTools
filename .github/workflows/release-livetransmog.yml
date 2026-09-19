@@ -90,9 +90,9 @@ jobs:
 
           # Extract the new version from version.hpp
           $version_h = Get-Content CrimsonDesertLiveTransmog\src\version.hpp -Raw
-          $major = [regex]::Match($version_h, '#define\s+VERSION_MAJOR\s+(\d+)').Groups[1].Value
-          $minor = [regex]::Match($version_h, '#define\s+VERSION_MINOR\s+(\d+)').Groups[1].Value
-          $patch = [regex]::Match($version_h, '#define\s+VERSION_PATCH\s+(\d+)').Groups[1].Value
+          $major = [regex]::Match($version_h, '#define\s+(?:\w+_)?VERSION_MAJOR\s+(\d+)').Groups[1].Value
+          $minor = [regex]::Match($version_h, '#define\s+(?:\w+_)?VERSION_MINOR\s+(\d+)').Groups[1].Value
+          $patch = [regex]::Match($version_h, '#define\s+(?:\w+_)?VERSION_PATCH\s+(\d+)').Groups[1].Value
           $new_version = "$major.$minor.$patch"
 
           echo "NEW_VERSION=$new_version" >> $env:GITHUB_ENV
