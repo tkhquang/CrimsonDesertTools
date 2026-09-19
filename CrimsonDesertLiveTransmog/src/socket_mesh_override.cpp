@@ -412,25 +412,33 @@ namespace Transmog::socket_mesh_override
 
                 // Rewrite the mesh wrapper on every descriptor appended for this socket. The engine resolved it from
                 // the REAL item. A pointer to LT's target makes the transmog mesh the one the engine attaches, so the
-                // real mesh is never built and there is nothing to flash or tear down afterwards.
+                // real mesh is never built and there is nothing to flash or tear down afterwards. The target is chosen
+                // per descriptor: a paired slot's second half comes through here with the other side's mesh, and the
+                // slot's one primary target would put two same-side meshes on the body, of which the engine keeps one.
                 unsigned rewritten = 0;
+                std::uintptr_t last_written = 0;
                 for (std::uint32_t i = count_before; i < count_after; ++i)
                 {
                     const auto entry = static_cast<std::uintptr_t>(data) + i * DESCRIPTOR_STRIDE;
                     const auto cur =
                         DMK::memory::read<std::uint64_t>(DMK::Address{entry + DESCRIPTOR_WRAPPER_OFFSET}).value_or(0);
-                    if (cur < MIN_PLAUSIBLE_PTR || cur == target)
+                    if (cur < MIN_PLAUSIBLE_PTR)
+                        continue;
+                    const auto want =
+                        prefab_wrapper_swap::target_wrapper_for_socket(slot_idx, static_cast<std::uintptr_t>(cur));
+                    if (want < MIN_PLAUSIBLE_PTR || cur == want)
                         continue;
                     // Reference AFTER the write lands. A reference taken first leaks one count per failed write, and
                     // a wrapper over-referenced this way is never released for the rest of the process.
                     if (DMK::memory::write_in_place<std::uint64_t>(
                             DMK::Address{entry + DESCRIPTOR_WRAPPER_OFFSET},
-                            static_cast<std::uint64_t>(target)
+                            static_cast<std::uint64_t>(want)
                         )
                             .has_value())
                     {
-                        addref_wrapper(target);
+                        addref_wrapper(want);
                         ++rewritten;
+                        last_written = want;
                     }
                 }
 
@@ -443,7 +451,7 @@ namespace Transmog::socket_mesh_override
                         slot_name(static_cast<TransmogSlot>(slot_idx)),
                         slot_tag,
                         rewritten,
-                        target,
+                        last_written,
                         n
                     );
                 }

@@ -125,6 +125,22 @@ namespace Transmog::prefab_wrapper_swap
     [[nodiscard]] std::uintptr_t target_wrapper_for_slot(std::size_t slot_idx) noexcept;
 
     /**
+     * @brief Target wrapper for the descriptor the engine is building on @p slot_idx, chosen for the mesh it
+     *        replaces.
+     * @param slot_idx Slot the socket belongs to.
+     * @param source_wrapper Wrapper the engine resolved for the descriptor: the real or carrier mesh.
+     * @return The slot's primary target, or its opposite-side counterpart when @p source_wrapper names the other
+     *         side. 0 when the slot has no target.
+     * @details The slot decides the item and the descriptor decides only the side. A paired slot's second half emits
+     *          the other side's descriptor, and @ref target_wrapper_for_slot answers one side for both halves, which
+     *          puts two same-side meshes on one body, of which the engine keeps one. The swap map is not consulted:
+     *          keyed by source mesh, it would move a target along with a carrier the engine re-seated on the other
+     *          socket, and the pair would swap sides.
+     */
+    [[nodiscard]] std::uintptr_t
+    target_wrapper_for_socket(std::size_t slot_idx, std::uintptr_t source_wrapper) noexcept;
+
+    /**
      * @brief Discard uncommitted prefab picks so a save-load starts from the preset alone.
      *
      * @details Call before PresetManager::apply_to_state, which re-mirrors the preset's own picks. Clears the TARGET

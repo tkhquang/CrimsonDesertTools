@@ -250,6 +250,11 @@ namespace Transmog::prefab_wrapper_swap
     // alongside the swap map from the same plans, so the two cannot disagree.
     static std::uintptr_t s_slot_target_wrapper_per_char[3][Transmog::SLOT_COUNT]{};
 
+    // The primary target's opposite-side mesh per slot, 0 when the item ships one side only. A paired slot's second
+    // half emits the other side's descriptor, and the override must answer with THAT mesh, or both halves wear one
+    // side's mesh and the engine keeps one of them.
+    static std::uintptr_t s_slot_side_target_wrapper_per_char[3][Transmog::SLOT_COUNT]{};
+
     // Direct fakes: slots where the equipped item IS the target, so no substitution happens and nothing lands in
     // s_target_wrappers_per_char. Kept in their OWN set because apply_selections_to_swap_map rebuilds the target set
     // from swap plans alone, which wipes these on the next apply - including the clearing apply, which is exactly when
@@ -1023,30 +1028,51 @@ namespace Transmog::prefab_wrapper_swap
     }
 
     /**
-     * @brief The `_l` / `_r` tail of a prefab name, or empty when it has none.
+     * @brief The `_l` / `_r` side token of a prefab name, or empty when it has none.
      *
-     * The suffix belongs to the SOCKET, not the item: one item's mesh is placed two ways, and the descriptor only
+     * The token belongs to the SOCKET, not the item: one item's mesh is placed two ways, and the descriptor only
      * ever names one side. A binding built from the descriptor name alone therefore misses the half the engine
-     * installs under the other suffix.
+     * installs under the other token. The token is the tail of the name, or sits ahead of a trailing `_indexNN`
+     * variant (`..._ring_0006_r_index01`). The returned view points into @p name, so a caller can replace it in
+     * place.
      */
     static std::string_view side_suffix_of(std::string_view name) noexcept
     {
-        if (name.size() < 2)
+        if (name.size() >= 2)
+        {
+            const auto tail = name.substr(name.size() - 2);
+            if (tail == "_l" || tail == "_r")
+                return tail;
+        }
+        const auto index_at = name.rfind("_index");
+        if (index_at == std::string_view::npos || index_at < 2)
             return {};
-        const auto tail = name.substr(name.size() - 2);
-        if (tail == "_l" || tail == "_r")
-            return tail;
+        auto rest = name.substr(index_at + 6);
+        std::size_t digits = 0;
+        while (digits < rest.size() && rest[digits] >= '0' && rest[digits] <= '9')
+            ++digits;
+        if (digits == 0)
+            return {};
+        rest.remove_prefix(digits);
+        if (!(rest.empty() || rest == "_c" || rest == "_d" || rest == "_dd"))
+            return {};
+        const auto side = name.substr(index_at - 2, 2);
+        if (side == "_l" || side == "_r")
+            return side;
         return {};
     }
 
-    /// `name` with its side suffix replaced by `side`. Empty when `name` carries no side suffix.
+    /**
+     * @brief @p name with its side token replaced by @p side.
+     * @return The rewritten name, or empty when @p name carries no side token.
+     */
     static std::string with_side_suffix(std::string_view name, std::string_view side) noexcept
     {
         const auto cur = side_suffix_of(name);
         if (cur.empty() || side.empty())
             return {};
-        std::string out{name.substr(0, name.size() - cur.size())};
-        out.append(side);
+        std::string out{name};
+        out.replace(static_cast<std::size_t>(cur.data() - name.data()), cur.size(), side);
         return out;
     }
 
@@ -2346,6 +2372,8 @@ namespace Transmog::prefab_wrapper_swap
             s_target_wrappers_per_char[ci].clear();
             for (auto &w : s_slot_target_wrapper_per_char[ci])
                 w = 0;
+            for (auto &w : s_slot_side_target_wrapper_per_char[ci])
+                w = 0;
             for (std::size_t i = 0; i < slot_n; ++i)
             {
                 auto &p = plans[i];
@@ -2378,7 +2406,10 @@ namespace Transmog::prefab_wrapper_swap
                 }
                 s_target_wrappers_per_char[ci].insert(p.tgt_wrapper);
                 if (i < Transmog::SLOT_COUNT)
+                {
                     s_slot_target_wrapper_per_char[ci][i] = p.tgt_wrapper;
+                    s_slot_side_target_wrapper_per_char[ci][i] = p.side_tgt_wrapper;
+                }
                 ++resolved;
                 logger.debug(
                     "[prefab-swap]   char[{}] slot[{}] RESOLVED \"{}\" ({} src name(s)) -> \"{}\" (0x{:X})",
@@ -4267,6 +4298,45 @@ namespace Transmog::prefab_wrapper_swap
             return 0;
         std::scoped_lock lk(s_map_mtx);
         return s_slot_target_wrapper_per_char[active_idx - 1][slot_idx];
+    }
+
+    std::uintptr_t target_wrapper_for_socket(std::size_t slot_idx, std::uintptr_t source_wrapper) noexcept
+    {
+        if (slot_idx >= Transmog::SLOT_COUNT)
+            return 0;
+
+        // Never serve a table that belongs to a different world or character - see ensure_target_table_current.
+        ensure_target_table_current();
+
+        const auto active_idx = s_active_char_idx.load(std::memory_order_acquire);
+        if (active_idx < 1 || active_idx > 3)
+            return 0;
+        const auto ci = static_cast<std::size_t>(active_idx - 1);
+
+        // wrapper_inline_name is a guarded memory read and takes no lock, so both names can be read under the map lock.
+        const std::string src_name = DMK::memory::is_plausible_ptr(DMK::Address{source_wrapper})
+                                         ? wrapper_inline_name(source_wrapper)
+                                         : std::string{};
+
+        std::scoped_lock lk(s_map_mtx);
+        const auto primary = s_slot_target_wrapper_per_char[ci][slot_idx];
+        if (primary == 0 || src_name.empty())
+            return primary;
+
+        // The SLOT decides the item and the source mesh decides only the side. The swap map is deliberately not
+        // consulted here: it is keyed by source mesh, and a paired slot's carriers are the real items, which the
+        // engine re-seats between the two sockets on its own equips. A map answer would move each target with its
+        // carrier and the pair would swap ears. Pinned to the socket, Earring1 stays on its ear whatever sits under it.
+        const auto side = s_slot_side_target_wrapper_per_char[ci][slot_idx];
+        if (side != 0)
+        {
+            const auto src_side = side_suffix_of(src_name);
+            const std::string primary_name = wrapper_inline_name(primary);
+            const auto tgt_side = side_suffix_of(primary_name);
+            if (!src_side.empty() && !tgt_side.empty() && src_side != tgt_side)
+                return side;
+        }
+        return primary;
     }
 
     void resync_to_preset() noexcept
