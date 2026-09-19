@@ -1,5 +1,3 @@
-## [Title for next release]
+## Helmet voice unmuffle fixed
 
-- New feature
-- Bug fix
-- Improvement
+- Unmuffle Helm Voice works again after a game update stopped it having any effect
