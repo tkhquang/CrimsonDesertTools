@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <cstring>
 #include <mutex>
+#include <string>
 #include <string_view>
 #include <unordered_map>
 
@@ -47,24 +48,24 @@ namespace Transmog::helm_audio_filter
         // Bound lazily on the first registrar invocation (see ensure_skill_tag_resolver). Atomic because arbitrary
         // equip threads publish and read it. Release/acquire gives a standards-clean happens-before, independent of
         // which thread won the bind.
-        std::atomic<SkillTagResolverFn> g_skillTagResolver{nullptr};
+        std::atomic<SkillTagResolverFn> g_skill_tag_resolver{nullptr};
         // The value stored in the first qword of every `pa::GameAudioEffectBuffData` instance: i.e. the address of
         // vfunc[0]. We compare buff_instance[0] against this value to determine class membership without RTTI walks.
         // Resolved at init via AOB on the vtable header (RTTI metadata ptr + first few vfuncs).
-        std::uintptr_t g_gameAudioEffectVtable = 0;
+        std::uintptr_t g_game_audio_effect_vtable = 0;
 
         // Engine player static - root of the chain that reaches the currently-controlled protagonist's Server CCOIA.
         // Used as a Kliff identity fallback during the save-load init race window, where Kliff's CharacterAssets struct
         // is not wired up yet but he IS the controlled actor at that moment (Kliff is always the first-spawned
         // protagonist).
-        std::uintptr_t g_playerStatic = 0;
+        std::uintptr_t g_player_static = 0;
 
-        std::atomic<bool> g_initDone{false};
+        std::atomic<bool> g_init_done{false};
 
         // Forward declaration. The definition sits at the bottom, next to the other scan logic.
         [[nodiscard]] std::uintptr_t resolve_skill_tag_resolver();
 
-        // Binds g_skillTagResolver lazily on the first audio-classifier call. The bind is terminal.
+        // Binds g_skill_tag_resolver lazily on the first audio-classifier call. The bind is terminal.
         //
         // There is exactly one resolution path, and it must stay that way. The engine emits about a hundred
         // near-identical u16-tag resolvers, one per pa::*InfoManager. They are byte-identical for more than forty
@@ -87,7 +88,7 @@ namespace Transmog::helm_audio_filter
         // afterwards, and it guarantees a single winner if two equip threads resolve at the same time.
         void ensure_skill_tag_resolver() noexcept
         {
-            if (g_skillTagResolver.load(std::memory_order_acquire) != nullptr)
+            if (g_skill_tag_resolver.load(std::memory_order_acquire) != nullptr)
                 return; // already bound, terminal
             try
             {
@@ -96,7 +97,7 @@ namespace Transmog::helm_audio_filter
                     return; // nothing resolved this call, retry on the next
 
                 SkillTagResolverFn expected = nullptr;
-                if (g_skillTagResolver.compare_exchange_strong(
+                if (g_skill_tag_resolver.compare_exchange_strong(
                         expected,
                         reinterpret_cast<SkillTagResolverFn>(addr),
                         std::memory_order_release,
@@ -154,8 +155,8 @@ namespace Transmog::helm_audio_filter
         // also covers the save-load init race: Kliff's first muffle events arrive before the engine populates his
         // CharacterAssets struct, so the chain returns empty and the gate falls through. Later events for the same host
         // succeed once the struct is wired, and stay cached afterwards.
-        std::mutex g_hostCacheMutex;
-        std::unordered_map<std::uintptr_t, CDCore::ControlledCharacter> g_hostCache;
+        std::mutex g_host_cache_mutex;
+        std::unordered_map<std::uintptr_t, CDCore::ControlledCharacter> g_host_cache;
 
         // Per-entry std::string layout (MSVC SSO):
         //   +0x00 -> ptr (heap buffer when len>=16, else points into the entry's inline buffer at +0x10)
@@ -174,27 +175,94 @@ namespace Transmog::helm_audio_filter
         // tag pointer (`a3`) is a heap-allocated 8-byte record from the engine's iteminfo / skillinfo metadata. In
         // theory it stays live for the duration of the call, but the SEH guard keeps the feature alive on torn reads.
 
-        // Structural identification of an audio-classifier registration call (a7 == 0 AND a3 in the
-        // {u16 tag, u16 0, u16 lvl, u16 0} 8-byte-stride buffer layout the equip dispatcher uses). This cleanly
-        // separates the audio-classifier code path from the other callers of the registrar (combat passives, teardown
-        // nulls, vehicle skills, etc.) regardless of skill class.
-        bool is_audio_classifier_call(std::uint16_t *a3, std::int32_t a4, char a7) noexcept
+        // Which comparison ended a call's bid to be an audio-classifier registration. `ForeignCaller` covers most of
+        // the traffic and means only that another subsystem drove the shared registrar. Every other value means the
+        // call arrived from the equip dispatcher and its `a3` record failed the format check.
+        enum class ClassifierReject : std::uint8_t
+        {
+            None,
+            ForeignCaller,
+            NullRecord,
+            RecordUnreadable,
+            ImplausibleRegistry,
+            LevelMismatch,
+        };
+
+        // The `a3` record in the engine layout: `{ u32 skill_key, u32 level }`.
+        //
+        // The low half of `skill_key` is the catalog index. The resolver reads `movzx reg, word [a3]` and bound-checks
+        // that half against the SkillInfoManager entry count. The high half belongs to the key but takes no part in
+        // the lookup, so the engine never constrains it and the catalog can carry any value there. Report that half
+        // for diagnosis, and never gate on it: it is content, not structure.
+        struct ClassifierProbe
+        {
+            std::uint32_t skill_key = 0;
+            std::uint32_t level = 0;
+
+            [[nodiscard]] constexpr std::uint16_t tag() const noexcept
+            {
+                return static_cast<std::uint16_t>(skill_key & 0xFFFFu);
+            }
+
+            [[nodiscard]] constexpr std::uint16_t key_hi() const noexcept
+            {
+                return static_cast<std::uint16_t>(skill_key >> 16);
+            }
+        };
+
+        [[nodiscard]] constexpr std::string_view classifier_reject_name(ClassifierReject reject) noexcept
+        {
+            switch (reject)
+            {
+            case ClassifierReject::None:
+                return "none";
+            case ClassifierReject::ForeignCaller:
+                return "foreign-caller";
+            case ClassifierReject::NullRecord:
+                return "null-record";
+            case ClassifierReject::RecordUnreadable:
+                return "record-unreadable";
+            case ClassifierReject::ImplausibleRegistry:
+                return "implausible-registry";
+            case ClassifierReject::LevelMismatch:
+                return "level-mismatch";
+            }
+            return "unknown";
+        }
+
+        // Structural identification of an audio-classifier registration call: a7 == 0, and the record's own level
+        // field matches the level in `a4`. That pair separates the audio-classifier code path from the registrar's
+        // other callers (combat passives, teardown nulls, vehicle skills) regardless of skill class. Both facts belong
+        // to the call itself, so neither depends on the caller's private buffer contents.
+        //
+        // The high half of `skill_key` stays out of the check. The engine indexes by the low half alone, which leaves
+        // the high half as catalog content that a content patch can re-key with no layout change. A check on it then
+        // rejects every dispatcher call while the hook stays installed and every anchor still resolves, and no log
+        // line marks the loss. Verify `a7` against the registrar cross-references on patch day. Do not derive a new
+        // check from field contents.
+        //
+        // The return value names the comparison that ended the call. `probe` carries the record, so a rejection
+        // reports the values it compared.
+        ClassifierReject classify_call(std::uint16_t *a3, std::int32_t a4, char a7, ClassifierProbe &probe) noexcept
         {
             if (a7 != 0)
-                return false;
+                return ClassifierReject::ForeignCaller;
             if (a3 == nullptr)
-                return false;
+                return ClassifierReject::NullRecord;
             const auto a3_addr = reinterpret_cast<std::uintptr_t>(a3);
-            const auto lvl_echo = DMK::memory::read<std::uint16_t>(DMK::Address{a3_addr + 4});
-            if (!lvl_echo)
-                return false;
-            const auto pad_hi = DMK::memory::read<std::uint16_t>(DMK::Address{a3_addr + 2});
-            if (!pad_hi || *pad_hi != 0u)
-                return false;
-            const auto pad_lo = DMK::memory::read<std::uint16_t>(DMK::Address{a3_addr + 6});
-            if (!pad_lo || *pad_lo != 0u)
-                return false;
-            return *lvl_echo == static_cast<std::uint16_t>(a4);
+            const auto skill_key = DMK::memory::read<std::uint32_t>(DMK::Address{a3_addr});
+            if (!skill_key)
+                return ClassifierReject::RecordUnreadable;
+            const auto level = DMK::memory::read<std::uint32_t>(DMK::Address{a3_addr + 4});
+            if (!level)
+                return ClassifierReject::RecordUnreadable;
+
+            probe.skill_key = *skill_key;
+            probe.level = *level;
+
+            if (*level != static_cast<std::uint32_t>(a4))
+                return ClassifierReject::LevelMismatch;
+            return ClassifierReject::None;
         }
 
         // Chain walk that resolves the u16 tag at `*a3` to its skill record, walks to the first per-level entry, reads
@@ -206,21 +274,24 @@ namespace Transmog::helm_audio_filter
         //   inner_arr    = *(level_table + 0x00)              // first inner ptr
         //   first_entry  = *(inner_arr + 0x00)                // level 1 entry #1
         //   vtable       = *(first_entry + 0x00)              // class vtable
-        //   return vtable == g_gameAudioEffectVtable
+        //   return vtable == g_game_audio_effect_vtable
         //
-        // Tag mapping in the live skillinfo catalog: only 0x64B (skill 91000, "PlateHelm_Audio") and 0x64C (skill
-        // 91001, "PlateHelm_Audio_OpenableHelm") resolve to records whose per-level entry is
+        // Muffle set in the live skillinfo catalog: the records whose per-level entry is
         // `pa::GameAudioEffectBuffData` (the class with description "투구 착용 시 먹먹한 소리" / Muffled sound when
-        // wearing helmet). Other tags in the same neighborhood (0x647 / 0x64A / 0x650) resolve to
-        // `pa::VoidPassiveBuffData` (item stat) or `pa::ImmuneBuffData` (sound-attack immunity) and pass through.
-        // Iteminfo dump cross-check: the muffle set is the helms that equip skill 91000 or 91001. The chain walk
-        // identifies them all without hardcoded tag tokens.
+        // wearing helmet). Those are skills 91000 ("PlateHelm_Audio") and 91001 ("PlateHelm_Audio_OpenableHelm").
+        // Neighbouring tags resolve to `pa::VoidPassiveBuffData` (item stat) or `pa::ImmuneBuffData` (sound-attack
+        // immunity) and pass through.
+        //
+        // This comment records no catalog index on purpose. A content patch re-keys the catalog and moves every
+        // index while the skill ids stay put, so an index in source rots at the next patch and reads as fact. The
+        // walk identifies the set from the engine class alone, which absorbs an index shift with no code change.
+        // Iteminfo dump cross-check: the muffle helms are those that equip skill 91000 or 91001.
         bool is_audio_muffle_class(std::uint16_t *a3) noexcept
         {
             // Bind the resolver on first use. The bind retries while unbound. Until a bind holds, pass through.
             ensure_skill_tag_resolver();
-            const auto resolver = g_skillTagResolver.load(std::memory_order_acquire);
-            if (resolver == nullptr || g_gameAudioEffectVtable == 0 || a3 == nullptr)
+            const auto resolver = g_skill_tag_resolver.load(std::memory_order_acquire);
+            if (resolver == nullptr || g_game_audio_effect_vtable == 0 || a3 == nullptr)
                 return false;
 
             // The resolver is engine code. In theory it is faultless, given the tag pointer's heap origin, but a torn
@@ -248,7 +319,7 @@ namespace Transmog::helm_audio_filter
                 DMK::memory::walk(DMK::Address{static_cast<std::uintptr_t>(record)}, record_to_vtable);
             const auto vtable =
                 vtable_slot ? DMK::memory::read<std::uintptr_t>(*vtable_slot).value_or(0) : std::uintptr_t{0};
-            return vtable == g_gameAudioEffectVtable;
+            return vtable == g_game_audio_effect_vtable;
         }
 
         // ASCII copy with length cap. Walks the std::string entry's backing buffer in a single SEH-guarded bulk read.
@@ -372,24 +443,135 @@ namespace Transmog::helm_audio_filter
             return matched;
         }
 
-        // Walk the engine player-static chain to the currently-controlled protagonist's pa::ServerChildOnlyInGameActor.
-        // The whole walk runs under one fault guard via memory::walk. Returns 0 on fault or pre-world.
+        /// Offset from the player-static root container to pa::NwVirtualAsyncSession.
+        constexpr std::ptrdiff_t OFF_ROOT_TO_SESSION = 0x18;
+        /// Offset from pa::ServerUserActor to the controlled pa::ServerChildOnlyInGameActor.
+        constexpr std::ptrdiff_t OFF_USER_ACTOR_TO_HOST = 0xD0;
+
+        // Offset from pa::NwVirtualAsyncSession to pa::ServerUserActor, with runtime self-heal. The seed is only the
+        // last verified location. heal_server_user_actor re-resolves it against the live session object by RTTI, so a
+        // session re-layout self-corrects.
         //
-        //   *(g_playerStatic) -> root container
-        //   *(root + 0x18)    -> pa::NwVirtualAsyncSession
-        //   *(nwSes + 0xA0)   -> pa::ServerUserActor
-        //   *(srvUA + 0xD0)   -> controlled host
+        // A stale offset here disables the Kliff fallback with no log evidence, because a fallback that never fires
+        // and a fallback that is never needed both stay silent. The drift Warning below supplies that evidence.
+        constexpr std::ptrdiff_t OFF_SERVER_USER_ACTOR_NOMINAL = 0x90;
+        constexpr std::string_view SERVER_USER_ACTOR_MANGLED = ".?AVServerUserActor@pa@@";
+
+        // Fallback search radius per side when the shared knob is unset. Matches the CDCore seed, so both self-heals
+        // sweep the same distance. A wider sweep raises the odds that a nearer same-typed decoy slot wins silently,
+        // which is the documented failure mode of a single-landmark heal.
+        constexpr int HEAL_WINDOW_DEFAULT = 0x200;
+
+        std::atomic<std::ptrdiff_t> g_off_server_user_actor{OFF_SERVER_USER_ACTOR_NOMINAL};
+        std::atomic<bool> g_server_user_actor_healed{false};
+        std::atomic<int> g_server_user_actor_heal_attempts{0};
+
+        // Re-resolves session -> pa::ServerUserActor from the live object. Shares the `[Advanced] SelfHealWindow`
+        // knob with CDCore's actor-chain heal, so there is one search-radius setting for the whole mod.
+        //
+        // No retry cap: before a save is loaded the session object does not exist, so NoMatch is the expected steady
+        // state on the main menu and must not exhaust a budget that a real world-entry then needs. The nominal seed
+        // carries the meantime and the walk's own plausibility gate rejects a garbage dereference, so an unhealed
+        // state can never mis-walk.
+        void heal_server_user_actor(std::uintptr_t session_base) noexcept
+        {
+            if (g_server_user_actor_healed.load(std::memory_order_acquire))
+                return;
+
+            const int configured = CDCore::heal_window_setting().load(std::memory_order_relaxed);
+            const auto requested = static_cast<std::size_t>(configured > 0 ? configured : HEAL_WINDOW_DEFAULT);
+            const auto window = requested > DMK::rtti::MAX_HEAL_WINDOW ? DMK::rtti::MAX_HEAL_WINDOW : requested;
+
+            // PointerToObject is the exact slot shape: the session holds a qword pointer to a single-COL
+            // pa::ServerUserActor, so no multiple-inheritance secondary base can win the match.
+            const DMK::rtti::Landmark lm{
+                .base = DMK::Address{session_base},
+                .nominal_offset = OFF_SERVER_USER_ACTOR_NOMINAL,
+                .window = window,
+                .expected_mangled = std::string{SERVER_USER_ACTOR_MANGLED},
+                .indirection = DMK::rtti::Indirection::PointerToObject,
+            };
+
+            const auto hit = DMK::rtti::heal_landmark(lm);
+            if (!hit.has_value())
+            {
+                // Keep the nominal seed and retry on the next walk. Report on a geometric schedule at DEBUG so a real
+                // patch-day drift stays diagnosable without flooding the per-walk path or alarming on the main menu.
+                const int n = g_server_user_actor_heal_attempts.fetch_add(1, std::memory_order_acq_rel) + 1;
+                if ((n & (n - 1)) == 0)
+                    (void)DMK::log().try_log(
+                        DMK::LogLevel::Debug,
+                        "[helm-audio] session->ServerUserActor unresolved after {} walk(s) ({}), using nominal {:#x}",
+                        n,
+                        hit.error().message(),
+                        OFF_SERVER_USER_ACTOR_NOMINAL
+                    );
+                return;
+            }
+
+            const std::ptrdiff_t healed = hit->healed_offset;
+            const std::ptrdiff_t drift = healed - OFF_SERVER_USER_ACTOR_NOMINAL;
+            // A walk that observes the latch must also observe the healed offset, so both stores release.
+            g_off_server_user_actor.store(healed, std::memory_order_release);
+            g_server_user_actor_healed.store(true, std::memory_order_release);
+            if (drift != 0)
+                (void)DMK::log().try_log(
+                    DMK::LogLevel::Warning,
+                    "[helm-audio] session->ServerUserActor DRIFTED: {:#x} nominal {:#x} drift {} - self-healed",
+                    healed,
+                    OFF_SERVER_USER_ACTOR_NOMINAL,
+                    drift
+                );
+            else
+                (void)DMK::log().try_log(
+                    DMK::LogLevel::Info,
+                    "[helm-audio] session->ServerUserActor self-heal OK: {:#x} (matches nominal)",
+                    healed
+                );
+        }
+
+        // Walk the engine player-static chain to the currently-controlled protagonist's pa::ServerChildOnlyInGameActor.
+        // Every dereference runs under DMK's fault guard. Returns 0 on fault or pre-world.
+        //
+        //   *(g_player_static)                        -> root container
+        //   *(root + OFF_ROOT_TO_SESSION)             -> pa::NwVirtualAsyncSession
+        //   *(session + g_off_server_user_actor)      -> pa::ServerUserActor
+        //   *(user_actor + OFF_USER_ACTOR_TO_HOST)    -> controlled host
+        //
+        // The walk splits at the session so the RTTI heal above re-resolves the session link on its own evidence. A
+        // stale offset yields an implausible pointer, which the screen below rejects, so an unhealed state returns 0
+        // rather than a wrong host.
         std::uintptr_t resolve_controlled_host() noexcept
         {
-            if (g_playerStatic == 0)
+            if (g_player_static == 0)
                 return 0;
 
-            // The leading 0 step dereferences g_playerStatic to the root container. Then +0x18 -> +0xA0 walk to
-            // the controlled host, and the terminal +0xD0 is the slot the read below dereferences. Each intermediate
-            // link is screened against its step's min_valid floor. A fault or an implausible link returns 0.
-            static constexpr DMK::memory::ChainStep player_static_to_host[] = {{0x0}, {0x18}, {0xA0}, {0xD0}};
-            const auto host_slot = DMK::memory::walk(DMK::Address{g_playerStatic}, player_static_to_host);
-            const auto host = host_slot ? DMK::memory::read<std::uintptr_t>(*host_slot).value_or(0) : std::uintptr_t{0};
+            // The leading 0 step dereferences g_player_static to the root container, and OFF_ROOT_TO_SESSION then
+            // reaches the session. Each intermediate link is screened against its step's min_valid floor.
+            static constexpr DMK::memory::ChainStep player_static_to_session[] = {{0x0}, {OFF_ROOT_TO_SESSION}};
+            const auto session_slot = DMK::memory::walk(DMK::Address{g_player_static}, player_static_to_session);
+            const auto session =
+                session_slot ? DMK::memory::read<std::uintptr_t>(*session_slot).value_or(0) : std::uintptr_t{0};
+            if (!DMK::memory::is_plausible_ptr(DMK::Address{session}))
+                return 0;
+
+            heal_server_user_actor(session);
+
+            const auto user_actor =
+                DMK::memory::read<std::uintptr_t>(
+                    DMK::Address{session + static_cast<std::uintptr_t>(g_off_server_user_actor.load(
+                                               std::memory_order_acquire
+                                           ))}
+                )
+                    .value_or(0);
+            if (!DMK::memory::is_plausible_ptr(DMK::Address{user_actor}))
+                return 0;
+
+            const auto host =
+                DMK::memory::read<std::uintptr_t>(
+                    DMK::Address{user_actor + static_cast<std::uintptr_t>(OFF_USER_ACTOR_TO_HOST)}
+                )
+                    .value_or(0);
             if (!DMK::memory::is_plausible_ptr(DMK::Address{host}))
                 return 0;
             return host;
@@ -415,16 +597,16 @@ namespace Transmog::helm_audio_filter
             if (!DMK::memory::is_plausible_ptr(DMK::Address{host}))
                 return CDCore::ControlledCharacter::Unknown;
             {
-                std::lock_guard<std::mutex> lk(g_hostCacheMutex);
-                const auto it = g_hostCache.find(host);
-                if (it != g_hostCache.end())
+                std::lock_guard<std::mutex> lk(g_host_cache_mutex);
+                const auto it = g_host_cache.find(host);
+                if (it != g_host_cache.end())
                     return it->second;
             }
             const auto ch = classify_host_by_assets(host, out_matched_asset, out_cap);
             if (ch != CDCore::ControlledCharacter::Unknown)
             {
-                std::lock_guard<std::mutex> lk(g_hostCacheMutex);
-                g_hostCache.emplace(host, ch);
+                std::lock_guard<std::mutex> lk(g_host_cache_mutex);
+                g_host_cache.emplace(host, ch);
                 return ch;
             }
             // The asset scan returned Unknown. Kliff init-race fallback: if the static chain reaches a host and that
@@ -440,8 +622,8 @@ namespace Transmog::helm_audio_filter
                     std::memcpy(out_matched_asset, marker.data(), wl);
                     out_matched_asset[wl] = '\0';
                 }
-                std::lock_guard<std::mutex> lk(g_hostCacheMutex);
-                g_hostCache.emplace(host, fb);
+                std::lock_guard<std::mutex> lk(g_host_cache_mutex);
+                g_host_cache.emplace(host, fb);
                 return fb;
             }
             return CDCore::ControlledCharacter::Unknown;
@@ -461,8 +643,8 @@ namespace Transmog::helm_audio_filter
         // Item-stat / sound-attack-immunity / generic combat passives all pass through.
         //
         // Log policy: SUPPRESS at INFO, so an audible behavior change is always present in the user log for triage.
-        // The non-muffle and non-protagonist audio-classifier branches log at TRACE, so a user who flips
-        // `log_level = trace` can see why a tag did or did not suppress.
+        // The shape-mismatch, non-muffle and non-protagonist branches all log at TRACE, so a user who flips
+        // `log_level = trace` can see why a tag did or did not suppress. A foreign caller is the only silent path.
         std::int32_t *__fastcall detour(
             std::int64_t a1,
             std::int32_t *a2,
@@ -479,12 +661,35 @@ namespace Transmog::helm_audio_filter
         ) noexcept
         {
             // Fast reject: only the audio-classifier code path can ever trigger SUPPRESS. Every other call falls
-            // through to the trampoline immediately. The is_audio_classifier check is cheap (4 SEH-wrapped u16 reads),
-            // so it sits at the entry rather than after the protagonist walk, which keeps the unhooked-call cost
+            // through to the trampoline immediately. The classify_call check is cheap (4 SEH-wrapped u16 reads), so
+            // it sits at the entry rather than after the protagonist walk, which keeps the unhooked-call cost
             // minimal.
-            if (a3 == nullptr || !DMK::memory::is_plausible_ptr(DMK::Address{static_cast<std::uintptr_t>(a1)}) ||
-                !is_audio_classifier_call(a3, a4, a7))
+            //
+            // Rejections report at TRACE with one exception: `ForeignCaller` is the overwhelming majority of the
+            // traffic through this shared registrar and carries no diagnostic value, so it stays silent to keep a
+            // trace-level log readable. Every other rejection means the equip dispatcher DID reach this hook and the
+            // record failed the shape match - the one failure mode that disables the filter outright while leaving
+            // the hook installed and every anchor resolving clean. That state is otherwise indistinguishable in the
+            // log from a session where no helm was ever worn, so it must not be silent.
+            ClassifierProbe probe{};
+            auto reject = classify_call(a3, a4, a7, probe);
+            if (reject == ClassifierReject::None &&
+                !DMK::memory::is_plausible_ptr(DMK::Address{static_cast<std::uintptr_t>(a1)}))
+                reject = ClassifierReject::ImplausibleRegistry;
+
+            if (reject != ClassifierReject::None)
             {
+                if (reject != ClassifierReject::ForeignCaller)
+                    (void)DMK::log().try_log(
+                        DMK::LogLevel::Trace,
+                        "[helm-audio] not-classifier reason={} tag=0x{:X} key_hi=0x{:X} level={} a4={} a7={}",
+                        classifier_reject_name(reject),
+                        probe.tag(),
+                        probe.key_hi(),
+                        probe.level,
+                        a4,
+                        static_cast<int>(a7)
+                    );
                 return g_trampoline(a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12);
             }
 
@@ -665,7 +870,7 @@ namespace Transmog::helm_audio_filter
 
     bool init(DMK::hook::HookStack &hooks)
     {
-        if (g_initDone.load(std::memory_order_acquire))
+        if (g_init_done.load(std::memory_order_acquire))
             return true;
 
         auto &log = DMK::log();
@@ -688,7 +893,7 @@ namespace Transmog::helm_audio_filter
         // is_audio_muffle_class pass through, so it never blocks hook installation. See ensure_skill_tag_resolver.
 
         // Resolve the pa::GameAudioEffectBuffData vtable. Each instance of that class stores its vtable base in its
-        // first qword, so the filter compares buff_instance[0] against g_gameAudioEffectVtable to identify muffle-class
+        // first qword, so the filter compares buff_instance[0] against g_game_audio_effect_vtable to identify muffle-class
         // entries. The candidate cascade leads with a ResolveMode::RttiVtable tier (resolve by the patch-stable mangled
         // name, which self-heals across the vtable relocations that move the byte ctor-LEA anchors), then falls back to
         // those byte anchors. Both yield the same vtable base.
@@ -700,14 +905,14 @@ namespace Transmog::helm_audio_filter
             );
             return false;
         }
-        g_gameAudioEffectVtable = vtable_addr;
+        g_game_audio_effect_vtable = vtable_addr;
 
         // Engine player static - needed by the Kliff init-race fallback. On AOB failure we still install the hook. The
         // fallback then does not fire (the asset-string scan still works for Damiane/Oongka, and for Kliff once his
         // assets wire up).
         const auto player_static = anchor_address(AnchorId::PlayerStatic);
         if (player_static != 0)
-            g_playerStatic = player_static;
+            g_player_static = player_static;
         else
             log.warning(
                 "[helm-audio] player-static AOB resolve failed; "
@@ -741,10 +946,10 @@ namespace Transmog::helm_audio_filter
             "(audio-vtable=0x{:X}, player-static=0x{:X}); skill-tag resolver bound on first use",
             target,
             vtable_addr,
-            g_playerStatic
+            g_player_static
         );
 
-        g_initDone.store(true, std::memory_order_release);
+        g_init_done.store(true, std::memory_order_release);
         return true;
     }
 

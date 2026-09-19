@@ -13,7 +13,7 @@
  *       |
  *       v
  *   per-skill iteminfo audio-classifier vector  // 8-byte stride
- *                                               // {u16 tag, u16 0, u16 lvl, u16 0}
+ *                                               // { u32 skill_key, u32 level }
  *       |
  *       v
  *   per-tag passive-skill registrar             // THIS HOOK target. Per iteration it writes a 224-byte
@@ -25,9 +25,13 @@
  * Structural identification of the audio-classifier call path:
  *   - `a7` (7th positional arg, single byte) is 0 for every audio-classifier registration. It is non-zero for every
  *     other caller of the registrar. Verify that against the registrar's cross-references on patch day.
- *   - `a3` (the tag pointer) points into an 8-byte vector entry `{ u16 tag, u16 0, u16 lvl, u16 0 }` ONLY for
- *     audio-classifier calls. Other passive paths use different `a3` layouts. The `(u16)*(a3+4) == (u16)a4` equality
- *     is a deterministic format-check that admits only the audio-classifier code path.
+ *   - `a3` points into an 8-byte vector entry `{ u32 skill_key, u32 level }`. Other passive paths use different `a3`
+ *     layouts. The `*(u32*)(a3 + 4) == (u32)a4` equality is the format-check: the record's own level field agrees
+ *     with the level the registrar was handed.
+ *   - The high half of `skill_key` is NOT part of that check. The engine indexes by the low half alone
+ *     (`movzx reg, word [a3]`, bound-checked against the SkillInfoManager entry count) and leaves the rest to the
+ *     catalog, so its value is content and moves with a content patch. A check on it rejects every dispatcher call
+ *     while the hook stays installed and every anchor still resolves, which leaves no log line to mark the loss.
  *
  * Muffle-class identification (chain walk via engine RTTI):
  *
@@ -41,15 +45,16 @@
  * qualifies for suppression. Other classes (`pa::VoidPassiveBuffData`, `pa::ImmuneBuffData`, etc.) pass through.
  *
  * Evidence basis:
- *   - Tag 0x64B (skill 91000, internal name `"PlateHelm_Audio"`) resolves to `pa::GameAudioEffectBuffData` with Korean
+ *   - Skill 91000 (internal name `"PlateHelm_Audio"`) resolves to `pa::GameAudioEffectBuffData` with Korean
  *     description `"투구 착용 시 먹먹한 소리"` (Muffled sound when wearing helmet).
- *   - Tag 0x64C (skill 91001, `"PlateHelm_Audio_OpenableHelm"`, visor-closed variant) resolves to the same class with
- *     the same description.
- *   - Other tags in the same iteminfo vector (0x647 / 0x650) resolve to non-audio classes (item stat / sound-attack
- *     immunity) and must remain pass-through, so helm-derived stats and sound-attack resistance survive the filter.
+ *   - Skill 91001 (`"PlateHelm_Audio_OpenableHelm"`, visor-closed variant) resolves to the same class with the same
+ *     description.
+ *   - Other tags in the same iteminfo vector resolve to non-audio classes (item stat / sound-attack immunity) and
+ *     must remain pass-through, so helm-derived stats and sound-attack resistance survive the filter.
  *   - The muffle helms are the helms whose iteminfo equips skill 91000 or 91001. To re-derive that set, cross-check an
- *     iteminfo dump for those two skill ids. The chain walk identifies the set from the engine class alone, so a
- *     content patch that adds new tags backed by the same class needs no code change.
+ *     iteminfo dump for those two skill ids. Catalog INDICES are omitted on purpose: a content re-key moves every
+ *     index while the skill ids stay put, and the chain walk identifies the set from the engine class alone, so
+ *     neither an index shift nor a new tag backed by the same class needs a code change.
  *   - Footstep / armor-clank audio uses unrelated character-config fields (`_footStepSoundEvent` etc.) and never
  *     reaches this registrar. Those systems carry no collateral risk.
  *
