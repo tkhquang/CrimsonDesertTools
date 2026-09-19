@@ -24,10 +24,12 @@
 #include "../equip_hide.hpp"
 #include "../version.hpp"
 
+#include "loader_log.hpp"
 #include "protocol.h"
 
 #include <DetourModKit/async_logger_config.hpp>
 #include <DetourModKit/diagnostics.hpp>
+#include <DetourModKit/filesystem.hpp>
 #include <DetourModKit/logger.hpp>
 #include <DetourModKit/session.hpp>
 
@@ -48,48 +50,27 @@ namespace
     bool s_hook_restore_failed = false;
 
     /**
-     * @brief Returns the LOADER's log sink, a dedicated logger that outlives every generation.
-     * @details A relative file name resolves against this module's own directory, which is where the loader keeps its
-     *          log. The sink appends, so it joins the loader's records instead of replacing them. A function-local
-     *          static outlives ~Session and closes at static teardown, one generation at a time.
-     */
-    DMK::Logger &loader_log_sink()
-    {
-        // The timestamp format matches the loader's own "[HH:MM:SS.mmm]" stamp, so the two writers sort together in
-        // the shared file. A generation line carries an extra "[INFO   ] ::" column that the loader's own raw appends
-        // do not, which is how a reader tells the two apart.
-        static DMK::Logger sink{
-            EquipHide::MOD_NAME,
-            std::string{EquipHide::MOD_NAME} + "_Loader.log",
-            "%H:%M:%S",
-            DMK::LogOpenMode::Append,
-            DMK::LogSourceStampMode::never()
-        };
-        return sink;
-    }
-
-    /**
      * @brief Appends one line to the LOADER's log, which outlives every generation.
-     * @details The unload verdict is computed after ~Session, so DMK::log() is gone by then. A line sent only to
-     *          OutputDebugStringA hides from anyone without a debugger attached, which is exactly how a refusal loop
-     *          goes unexplained.
+     * @details The unload verdict is computed after ~Session, so DMK::log() is gone by then. The line takes the
+     *          loader log's own format (CrimsonDesertCore/dev/loader_log.hpp), so it sorts in with the loader's
+     *          records. A line sent only to OutputDebugStringA hides from anyone without a debugger attached,
+     *          which is exactly how a refusal loop goes unexplained.
+     * @note get_runtime_directory() allocates, and catch(...) handlers call this with an exception already in
+     *       flight, so the path build runs inside try/catch to hold the noexcept boundary.
      */
     void append_loader_log(const char *line) noexcept
     {
+        std::wstring log_path;
         try
         {
-            auto &sink = loader_log_sink();
-            (void)sink.log_noexcept(DMK::LogLevel::Info, line);
-
-            // The sink buffers everything below Warning, and the loader appends to the same file from its own module.
-            // Flush each record so the two writers stay in order.
-            sink.flush();
+            log_path = CDCore::dev::loader_log_path(DMK::filesystem::get_runtime_directory(), EquipHide::MOD_NAME);
         }
         catch (...)
         {
-            // A sink that fails to open leaves the debugger channel below as the only report.
+            CDCore::dev::echo_to_debugger(line);
+            return;
         }
-        OutputDebugStringA(line);
+        CDCore::dev::append_line(log_path.c_str(), line);
     }
 } // namespace
 

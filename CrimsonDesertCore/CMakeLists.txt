@@ -41,7 +41,7 @@ set(CDCORE_DEV_LOADER_SRC
     CACHE INTERNAL "Path to CrimsonDesertCore shared dev loader source")
 set(CDCORE_DEV_INCLUDE_DIR
     "${CMAKE_CURRENT_SOURCE_DIR}/dev"
-    CACHE INTERNAL "Path to the CrimsonDesertCore dev protocol header")
+    CACHE INTERNAL "Path to the CrimsonDesertCore dev headers (protocol.h, loader_log.hpp)")
 
 add_library(CrimsonDesertCore::core ALIAS CrimsonDesertCore)
 

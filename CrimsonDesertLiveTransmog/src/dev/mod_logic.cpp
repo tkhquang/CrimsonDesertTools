@@ -25,6 +25,7 @@
 #include "../transmog.hpp"
 #include "../version.hpp"
 
+#include "loader_log.hpp"
 #include "protocol.h"
 
 #include <DetourModKit/async_logger_config.hpp>
@@ -37,7 +38,6 @@
 
 #include <cstddef>
 #include <cstdio>
-#include <cstring>
 #include <optional>
 #include <string>
 #include <utility>
@@ -52,63 +52,26 @@ namespace
 
     /**
      * @brief Appends one line to the LOADER's log, which outlives every generation.
-     * @details The unload verdict is computed after ~Session, so DMK::log() is gone by then. A line sent only to
-     *          OutputDebugStringA stays hidden from anyone without a debugger attached, which is exactly how a
-     *          refusal loop goes unexplained.
+     * @details The unload verdict is computed after ~Session, so DMK::log() is gone by then. The line takes the
+     *          loader log's own format (CrimsonDesertCore/dev/loader_log.hpp), so it sorts in with the loader's
+     *          records. A line sent only to OutputDebugStringA hides from anyone without a debugger attached,
+     *          which is exactly how a refusal loop goes unexplained.
      * @note get_runtime_directory() allocates, and catch(...) handlers call this with an exception already in
-     *       flight, so the whole path build runs inside try/catch to hold the noexcept boundary.
+     *       flight, so the path build runs inside try/catch to hold the noexcept boundary.
      */
     void append_loader_log(const char *line) noexcept
     {
         std::wstring log_path;
         try
         {
-            log_path = DMK::filesystem::get_runtime_directory();
-            if (log_path.empty() || (log_path.back() != L'\\' && log_path.back() != L'/'))
-                log_path.push_back(L'\\');
-            // MOD_NAME is ASCII, so a widening copy keeps one spelling of the mod name in the project.
-            for (const char *ch = Transmog::MOD_NAME; *ch != '\0'; ++ch)
-                log_path.push_back(static_cast<wchar_t>(static_cast<unsigned char>(*ch)));
-            log_path += L"_Loader.log";
+            log_path = CDCore::dev::loader_log_path(DMK::filesystem::get_runtime_directory(), Transmog::MOD_NAME);
         }
         catch (...)
         {
-            OutputDebugStringA(line);
+            CDCore::dev::echo_to_debugger(line);
             return;
         }
-
-        const HANDLE file = CreateFileW(
-            log_path.c_str(),
-            FILE_APPEND_DATA,
-            FILE_SHARE_READ | FILE_SHARE_WRITE,
-            nullptr,
-            OPEN_ALWAYS,
-            FILE_ATTRIBUTE_NORMAL,
-            nullptr
-        );
-        if (file != INVALID_HANDLE_VALUE)
-        {
-            SYSTEMTIME now{};
-            GetLocalTime(&now);
-            char stamped[640];
-            const int len = std::snprintf(
-                stamped,
-                sizeof(stamped),
-                "[%02u:%02u:%02u.%03u] %s\n",
-                now.wHour,
-                now.wMinute,
-                now.wSecond,
-                now.wMilliseconds,
-                line
-            );
-            if (len > 0)
-            {
-                DWORD wrote = 0;
-                (void)WriteFile(file, stamped, static_cast<DWORD>(len), &wrote, nullptr);
-            }
-            CloseHandle(file);
-        }
-        OutputDebugStringA(line);
+        CDCore::dev::append_line(log_path.c_str(), line);
     }
 } // namespace
 

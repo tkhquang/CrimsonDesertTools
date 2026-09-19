@@ -26,6 +26,7 @@
  *            CDCORE_LOADER_PROCESS_NAME  : the only process this loader runs in, e.g. "CrimsonDesert.exe"
  */
 
+#include "loader_log.hpp"
 #include "protocol.h"
 
 #include <DetourModKit/abi/wheel_host.h>
@@ -134,51 +135,19 @@ namespace
     void log_msg(const char *msg) noexcept
     {
         char line[768];
-        const int len = std::snprintf(line, sizeof(line), "%s%s\n", s_log_prefix.c_str(), msg);
-        if (len <= 0)
+        if (std::snprintf(line, sizeof(line), "%s%s", s_log_prefix.c_str(), msg) <= 0)
         {
             return;
         }
-        OutputDebugStringA(line);
 
         // The loader keeps its OWN log. The mod's log belongs to a Session that dies with each generation, and the
         // loader's most important lines are emitted while no Session exists at all.
         if (s_log_path[0] == '\0')
         {
+            CDCore::dev::echo_to_debugger(line);
             return;
         }
-        const HANDLE file = CreateFileA(
-            s_log_path,
-            FILE_APPEND_DATA,
-            FILE_SHARE_READ | FILE_SHARE_WRITE,
-            nullptr,
-            OPEN_ALWAYS,
-            FILE_ATTRIBUTE_NORMAL,
-            nullptr
-        );
-        if (file == INVALID_HANDLE_VALUE)
-        {
-            return;
-        }
-        SYSTEMTIME now{};
-        GetLocalTime(&now);
-        char stamped[832];
-        const int stamped_len = std::snprintf(
-            stamped,
-            sizeof(stamped),
-            "[%02u:%02u:%02u.%03u] %s",
-            now.wHour,
-            now.wMinute,
-            now.wSecond,
-            now.wMilliseconds,
-            line
-        );
-        if (stamped_len > 0)
-        {
-            DWORD written = 0;
-            (void)WriteFile(file, stamped, static_cast<DWORD>(stamped_len), &written, nullptr);
-        }
-        CloseHandle(file);
+        CDCore::dev::append_line(s_log_path, line);
     }
 
     /// Formats one line into a fixed stack buffer and forwards it to log_msg.
@@ -599,7 +568,7 @@ namespace
         s_logic_pdb_name = std::string{MOD_NAME} + ".logic.pdb";
         s_generation_prefix = std::string{MOD_NAME} + ".gen";
 
-        const std::string loader_log = s_loader_dir + MOD_NAME + "_Loader.log";
+        const std::string loader_log = s_loader_dir + MOD_NAME + CDCore::dev::LOADER_LOG_SUFFIX;
         std::snprintf(s_log_path, sizeof(s_log_path), "%s", loader_log.c_str());
         (void)DeleteFileA(s_log_path); // one log per game run, holding every generation
 
