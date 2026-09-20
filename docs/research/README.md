@@ -1,39 +1,49 @@
-# CrimsonDesertTools -- Reverse-Engineering Knowledge Base
+# CrimsonDesertTools - Reverse-Engineering Knowledge Base
 
-Project knowledge base for mod runtime internals. Each entry is a long-lived reference document anchored to a specific binary version; entries are updated (not replaced) when the game binary shifts.
+Long-lived reference for the engine internals the mods in this repository depend on. Each entry states a mechanism or the memory geometry behind it. An entry is updated in place when the game binary shifts.
 
-- Game binary: `BlackDesertCrimson.exe`
-- Current verified version: **Crimson Desert v1.05.01** (FileVersion `1.0.0.1070`)
+- Game binary: `CrimsonDesert.exe`
+- Current verified version: **Crimson Desert 2.03.00** (FileVersion `1.0.0.2944`)
 - Image base: `0x140000000`
+
+## Scope
+
+These entries describe the **engine** side: the chains a mod walks, the structs it reads and the seams it hooks. They answer "what does the game do here". They do not describe the mod's own code.
+
+A contract that a header already states belongs in that header. An entry here points at it rather than restates it.
 
 ## CrimsonDesertLiveTransmog
 
 | Document | Role |
 |----------|------|
-| [live-transmog-architecture.md](live-transmog-architecture.md) | Runtime pipeline: hook points, apply state machine, memory write surface, event-driven transitions. Cross-references `CrimsonDesertLiveTransmog/src/` files. |
-| [live-transmog-source-of-truth.md](live-transmog-source-of-truth.md) | Byte-level reference: WS chain offsets, carrier descriptor layout, hook RVAs, `charClassBypass` site. Section 1.3 covers the `CDCore::current_controlled_character()` resolver shared with EquipHide. Cross-references the AOB cascade audit in section 9 of the same doc. |
-| [live-transmog-prefab-wrapper-swap.md](live-transmog-prefab-wrapper-swap.md) | Body-mesh pointer-swap feature: catalog enumeration, two-hook substitution mechanism (`sub_140352AA0` primary swap and `sub_142711DF0` natural-pipeline patch), preset persistence, and slot-tag taxonomy. |
+| [live-transmog-architecture.md](live-transmog-architecture.md) | Runtime pipeline: the carrier-plus-substitution mechanism, the game-thread execution model, one apply pass, the write surface. |
+| [live-transmog-source-of-truth.md](live-transmog-source-of-truth.md) | Memory geometry: chain walks to a body, equip-slot component offsets, prefab wrapper layout, slot tags, anchor roles. |
+| [live-transmog-prefab-wrapper-swap.md](live-transmog-prefab-wrapper-swap.md) | The substitution layer: the five hooks, the hash-keyed swap map, the per-character ledger, the catalog, weapon handling. |
 
 ## CrimsonDesert (combat / HUD)
 
 | Document | Role |
 |----------|------|
-| [combat-state-research.md](combat-state-research.md) | Self-contained reference for the combat-state oracle on the HUD CSS swap method. Two-candidate AOB pair, hook contract, and the rejected `g_battleStateByte` oscillator hypothesis. |
+| [combat-state-research.md](combat-state-research.md) | Combat-state oracle on the HUD class-swap method. Anchored to an earlier build and not consumed by any shipped mod. |
 
 ## CrimsonDesertEquipHide
 
-Research artifacts for the EquipHide mod will land in this same directory once lifted into the shared knowledge base format. Naming convention:
+EquipHide has no entry here yet.
 
-```
-equip-hide-architecture.md       -- runtime pipeline
-equip-hide-source-of-truth.md    -- byte-level anchors
-equip-hide-<topic>.md            -- topic-scoped deep dives
+Naming convention when an entry does land here:
+
+```text
+equip-hide-architecture.md       - runtime pipeline
+equip-hide-source-of-truth.md    - memory geometry
+equip-hide-<topic>.md            - topic-scoped deep dive
 ```
 
 ## Conventions
 
-- Entries list semantic role first, then concrete offsets / bytes / AOBs.
-- Every absolute address is paired with an RVA (`CrimsonDesert.exe + 0x...`) so it survives re-basing.
-- Cross-reference source files by path (`module/src/file.cpp`) with optional line-range hints.
-- No em-dashes; use `--` or restructure.
-- When a doc references a hardcoded RVA that has since been replaced by an AOB cascade, point at the cascade table in [live-transmog-source-of-truth.md §9](live-transmog-source-of-truth.md#9-aob-cascade-audit-2026-05-08) rather than duplicating the bytes here.
+- State the semantic role first. State the concrete offset second.
+- **Write no absolute address.** Every code address the mods use resolves at startup from a byte signature. A pinned address rots on the next patch and misleads the next reader. Name the anchor role instead.
+- A runtime data offset cannot be scanned. Write it down, and name the live instruction that states it, so the next reader can re-derive the value.
+- State each invariant once, at the declaration that owns it. Point to it everywhere else.
+- Record no change history, no migration narrative and no audit trail. Git holds that.
+- Cross-reference source by path, for example `module/src/file.cpp`, with an optional line hint.
+- Use a single `-` in place of an em dash or an en dash. Do not use the superseded double-hyphen pair.
