@@ -1,5 +1,5 @@
 CRIMSON DESERT - EQUIP HIDE
-Version 0.9.1
+Version 0.10.0
 
 REQUIREMENTS:
 - Crimson Desert (Steam version)

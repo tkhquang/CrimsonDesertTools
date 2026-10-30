@@ -5,8 +5,8 @@
 
 // Bump these three values to release a new version. Nothing else in this file needs an edit.
 #define EH_VERSION_MAJOR 0
-#define EH_VERSION_MINOR 9
-#define EH_VERSION_PATCH 1
+#define EH_VERSION_MINOR 10
+#define EH_VERSION_PATCH 0
 
 // Stringification helpers. Nothing below this line carries a version value.
 #define EH_VERSION_STRINGIFY_IMPL(x) #x
