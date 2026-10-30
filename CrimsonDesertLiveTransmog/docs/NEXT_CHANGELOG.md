@@ -1,5 +1,6 @@
-## [Title for next release]
+## Crimson Desert 2.04.00 support
 
-- New feature
-- Bug fix
-- Improvement
+- Updated the mod to work with Crimson Desert version 2.04.00
+- Fixed real gear showing together with the transmog after switching presets
+- Added the new DLC items to the catalog and the language pack
+- Made the mod more tolerant of future game updates

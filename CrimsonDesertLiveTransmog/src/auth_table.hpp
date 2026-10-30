@@ -19,7 +19,7 @@ namespace Transmog::auth_table
      *     array_base + index * ENTRY_STRIDE       -> entry
      *
      * The engine states the walk itself, with the component in the base register:
-     *     mov rax,[<comp>+0x90] ; mov rdx,[rax+08] ; mov eax,[rax+10]
+     *     mov rax,[<comp>+0xA0] ; mov rbx,[rax+08] ; mov eax,[rax+10]
      * and the entry search loop states the stride and the tag offset literally:
      *     imul rcx,rax,0xD0 ; cmp [rdx+0xC8],r8w ; add rdx,0xD0
      *
@@ -35,7 +35,7 @@ namespace Transmog::auth_table
      * @note The item id sits at +0x08.
      * @note Slot tag VALUES are stable (see slot_metadata.hpp). Only their POSITION within the entry shifts.
      */
-    inline constexpr std::ptrdiff_t CONTAINER_PTR_OFFSET = 0x90;
+    inline constexpr std::ptrdiff_t CONTAINER_PTR_OFFSET = 0xA0;
     inline constexpr std::ptrdiff_t CONTAINER_ARRAY_BASE_OFFSET = 0x08;
     inline constexpr std::ptrdiff_t CONTAINER_COUNT_OFFSET = 0x10;
 

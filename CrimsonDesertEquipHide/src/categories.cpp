@@ -8,9 +8,11 @@
 #include <array>
 #include <cstdint>
 #include <format>
+#include <functional>
 #include <mutex>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <vector>
 
 namespace EquipHide
@@ -243,10 +245,65 @@ namespace EquipHide
         return (idx < CHAR_IDX_COUNT) ? names[idx] : std::string_view{};
     }
 
+    namespace
+    {
+        // Heterogeneous lookup, so the IndexedStringA scan can probe with a view and no allocation per entry.
+        struct NameHash
+        {
+            using is_transparent = void;
+            std::size_t operator()(std::string_view s) const noexcept { return std::hash<std::string_view>{}(s); }
+        };
+        using NameSet = std::unordered_set<std::string, NameHash, std::equal_to<>>;
+
+        // Tokens every INI Parts value has named, kept for the life of the process: a token an override drops still
+        // costs nothing to resolve, and dropping it would need a rebuild of the set on every reload.
+        std::mutex s_ini_part_names_mutex;
+        NameSet s_ini_part_names;
+
+        const NameSet &builtin_part_names()
+        {
+            static const NameSet names = []
+            {
+                NameSet set;
+                for (const auto &p : ALL_PARTS)
+                    set.emplace(p.name);
+                return set;
+            }();
+            return names;
+        }
+
+        /** @brief Record every part-name token of an INI Parts value. Raw `0x` ids are skipped. */
+        void remember_part_names(std::string_view parts_str)
+        {
+            std::lock_guard<std::mutex> lock(s_ini_part_names_mutex);
+            std::size_t pos = 0;
+            while (pos < parts_str.size())
+            {
+                auto end = parts_str.find(',', pos);
+                if (end == std::string_view::npos)
+                    end = parts_str.size();
+                const std::string token = DMK::string::trim(parts_str.substr(pos, end - pos));
+                pos = end + 1;
+                if (token.empty() || token.starts_with("0x") || token.starts_with("0X"))
+                    continue;
+                s_ini_part_names.insert(token);
+            }
+        }
+    } // namespace
+
+    bool is_known_part_name(std::string_view prefixed_name)
+    {
+        if (builtin_part_names().contains(prefixed_name))
+            return true;
+        std::lock_guard<std::mutex> lock(s_ini_part_names_mutex);
+        return s_ini_part_names.contains(prefixed_name);
+    }
+
     void set_per_char_parts(Category cat, std::size_t char_idx, std::string parts_str)
     {
         if (char_idx >= CHAR_IDX_COUNT)
             return;
+        remember_part_names(parts_str);
         s_category_parts_per_char[static_cast<std::size_t>(cat)][char_idx] = std::move(parts_str);
     }
 
@@ -483,6 +540,7 @@ namespace EquipHide
 
     void register_parts(Category cat, const std::string &parts_str, bool store_base)
     {
+        remember_part_names(parts_str);
         if (store_base)
             s_category_parts[static_cast<std::size_t>(cat)] = parts_str;
 

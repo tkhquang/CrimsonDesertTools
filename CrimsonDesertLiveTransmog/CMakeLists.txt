@@ -164,7 +164,10 @@ target_link_libraries(overlay_ui_obj PRIVATE
     CrimsonDesertCore::core
     nlohmann_json::nlohmann_json
 )
-target_compile_options(overlay_ui_obj PRIVATE /W4)
+# /Zc:inline drops the out-of-line copy of every SDK thunk that was inlined at all of its call sites. Without it each
+# TU emits those copies as pick-any COMDATs, and imgui_lib's no-duplicates definitions of the same names then fail the
+# link with LNK2005 as soon as anything pulls imgui.obj in (the standalone populator always does).
+target_compile_options(overlay_ui_obj PRIVATE /W4 /Zc:inline)
 
 # Game output directory for dev builds.
 set(GAME_BIN_DIR "D:/Games/SteamLibrary/steamapps/common/Crimson Desert/bin64/plugins")

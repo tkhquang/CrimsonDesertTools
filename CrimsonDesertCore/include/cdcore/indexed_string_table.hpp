@@ -50,6 +50,17 @@ namespace CDCore
 
         /// Label used in log lines. Change it to tell per-mod scans apart in the shared log stream.
         std::string_view log_label = "IndexedStringA scan";
+
+        /**
+         * @brief Optional filter for entries interned WITHOUT the prefix.
+         * @details The engine can intern a slot part name without the `CD_` prefix (`MainWeapon_Sword_R` for
+         *          `CD_MainWeapon_Sword_R`), while the callers' part lists, INI files and presets use the prefixed
+         *          spelling. When set, an entry that lacks the prefix is offered to this predicate under its PREFIXED
+         *          spelling and, if accepted, reported under that key. An entry interned with the prefix always wins
+         *          over an aliased one. Left null, the scan matches the prefix only.
+         * @note Called from the scanning thread for every unprefixed entry, so it must be cheap and thread-safe.
+         */
+        bool (*accept_unprefixed)(std::string_view prefixed_name) = nullptr;
     };
 
     /**

@@ -15,11 +15,11 @@ namespace Transmog
     struct ResolvedAddresses
     {
         uintptr_t slot_populator = 0;
-        uintptr_t map_lookup = 0;            // IndexedStringA::lookup - resolves CD_* slot hashes at runtime
-        uintptr_t sub_translator = 0;        // Anchor for the iteminfo item-name table scan
-        uintptr_t safe_tear_down = 0;        // Scene-graph tear-down real_part_tear_down drives
-        uintptr_t indexed_string_lookup = 0; // IndexedStringA short to hash. ItemNameTable resolves it through a chain
-                                             // walk, because 50+ template siblings prevent a direct AOB
+        uintptr_t map_lookup = 0;     // IndexedStringA::lookup - resolves CD_* slot hashes at runtime
+        uintptr_t sub_translator = 0; // Anchor for the iteminfo item-name table scan
+        uintptr_t safe_tear_down = 0; // Scene-graph tear-down real_part_tear_down drives
+        uintptr_t item_accessor = 0;  // ItemAccessor, iteminfo id to descriptor. ItemNameTable resolves it
+                                      // through a chain walk, because 50+ template siblings prevent a direct AOB
     };
 
     ResolvedAddresses &resolved_addrs();

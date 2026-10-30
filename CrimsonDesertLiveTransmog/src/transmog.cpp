@@ -855,10 +855,10 @@ namespace Transmog
                 logger.warning("[nametable] address chain resolution failed - item-name table disabled this session");
             }
 
-            addrs.indexed_string_lookup = ItemNameTable::instance().indexed_string_lookup_addr();
-            if (addrs.indexed_string_lookup)
+            addrs.item_accessor = ItemNameTable::instance().item_accessor_addr();
+            if (addrs.item_accessor)
             {
-                logger.info("IndexedStringLookup cached at 0x{:X} (via chain walk)", addrs.indexed_string_lookup);
+                logger.info("ItemAccessor cached at 0x{:X} (via chain walk)", addrs.item_accessor);
             }
         }
         else
@@ -876,7 +876,8 @@ namespace Transmog
             logger.warning("SafeTearDown AOB scan failed - real_part_tear_down will be disabled this session");
         }
 
-        // InitSwapEntry: zero-init helper for the 0x80-byte swap entry passed to SlotPopulator.
+        // InitSwapEntry: zero-init helper for the swap entry passed to SlotPopulator (see apply_transmog_core for the
+        // buffer size it needs).
         {
             // The registry's code_site validator already applied the prologue-plausibility screen, so a site
             // that failed it arrives here as 0.

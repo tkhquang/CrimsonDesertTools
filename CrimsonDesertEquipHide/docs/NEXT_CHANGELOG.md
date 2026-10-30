@@ -1,3 +1,4 @@
-## Update resilience
+## Crimson Desert 2.04.00 support
 
-- Made the mod's game-code detection more tolerant of game updates
+- Updated the mod to work with Crimson Desert version 2.04.00
+- Made the mod more tolerant of future game updates

@@ -109,6 +109,14 @@ namespace EquipHide
     [[nodiscard]] std::vector<std::string>
     get_unresolved_parts(const std::unordered_map<std::string, uint32_t> &resolved);
 
+    /**
+     * @brief Whether a prefixed part name is one the mod can be asked to resolve: a built-in part, or a token any INI
+     *        Parts value has registered.
+     * @details The IndexedStringA scan asks this for every entry the engine interned without the `CD_` prefix, so the
+     *          prefixed spellings in the built-in table and the INI keep resolving. Thread-safe.
+     */
+    [[nodiscard]] bool is_known_part_name(std::string_view prefixed_name);
+
     // Part classification
 
     /**

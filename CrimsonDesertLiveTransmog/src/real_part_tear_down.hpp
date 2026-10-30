@@ -8,7 +8,7 @@ namespace Transmog::real_part_tear_down
     /**
      * @brief Publish the pre-resolved helper addresses this module calls into.
      * @details Reads them from ResolvedAddresses. Call it once during init, AFTER the SafeTearDown anchor resolves
-     *          and AFTER ItemNameTable::build() has cached its chain walk, which yields indexed_string_lookup. On a
+     *          and AFTER ItemNameTable::build() has cached its chain walk, which yields item_accessor. On a
      *          resolution or sanity-check failure the caller treats the feature as disabled.
      * @return true when both helpers are published and is_ready() turns true.
      */
@@ -17,7 +17,7 @@ namespace Transmog::real_part_tear_down
     /**
      * @brief Remove the real part the engine currently shows in one slot.
      * @details Walks the authoritative equip table at *(a1+CONTAINER_PTR_OFFSET), locates the entry whose slot_tag
-     *          matches @p game_slot_tag (helm = 0x0003), extracts its item descriptor hash through IndexedStringA, then
+     *          matches @p game_slot_tag (helm = 0x0003), resolves the entry's item key through ItemAccessor, then
      *          calls the AOB-resolved SafeTearDown engine helper. It does NOT touch the auth table.
      * @param a1 ClientEquipSlotActorComponent pointer.
      * @param game_slot_tag Engine slot tag to tear down.
@@ -32,18 +32,18 @@ namespace Transmog::real_part_tear_down
      * @brief Same scene-graph tear-down as @ref tear_down_real_part, keyed by an explicit item id.
      * @details Bypasses the auth-table walk. It removes a previously applied fake transmog mesh whose item_id LT
      *          tracked in last_ids but which never appeared in the auth table. The pipeline is
-     *          item_id -> IndexedStringLookup -> DWORD hash -> SafeTearDown(a1, hash, slot_tag).
+     *          item_id -> ItemAccessor -> descriptor -> u32 item key -> SafeTearDown(a1, key, slot_tag).
      * @param a1 ClientEquipSlotActorComponent pointer.
      * @param item_id Item id whose mesh comes off.
      * @param game_slot_tag Engine slot tag to tear down.
-     * @return true when the engine helper ran; false on any failure, a hash lookup miss included.
+     * @return true when the engine helper ran; false on any failure, an unresolved item key included.
      */
     bool tear_down_by_item_id(void *a1, std::uint16_t item_id, std::uint16_t game_slot_tag) noexcept;
 
     /**
      * @brief Read the real item currently equipped in one slot.
      * @details Walks the authoritative equip table at *(a1+CONTAINER_PTR_OFFSET) and returns the raw item word, not
-     *          the hash-transformed value. Callers compare it against the fake transmog item_id and skip a tear-down
+     *          the item key. Callers compare it against the fake transmog item_id and skip a tear-down
      *          that would strip layer-2 effects such as particles and hair-hide.
      * @param a1 ClientEquipSlotActorComponent pointer.
      * @param game_slot_tag Engine slot tag to read.

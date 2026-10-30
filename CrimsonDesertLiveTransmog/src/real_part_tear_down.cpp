@@ -75,16 +75,47 @@ namespace Transmog::real_part_tear_down
         //   so a reader who cross-checks against a disassembler database must match the byte pattern in
         //   safe_tear_down(), never a name.
         //
-        // IndexedStringLookup - short->hash lookup. It takes the address of a uint16_t slot id. It returns a
-        //   pointer whose first DWORD is the descriptor hash used by the rest of the equip pipeline. That hash is
-        //   both SafeTearDown's second argument and the validity gate on the item id: a lookup that yields no
-        //   pointer, or a hash of 0 or 0xFFFFFFFF, means the id names nothing and the tear-down is skipped.
+        // ItemAccessor - the iteminfo id -> descriptor resolver. It takes the item id BY VALUE in edx and never
+        //   reads rcx, the same convention as the rest of the pa::*InfoManager resolver family (see
+        //   SKILL_TAG_RESOLVER_BODY_AOB). An id past the manager's count returns the manager's default descriptor,
+        //   whose item key is 0, so the key check below also rejects an id that names nothing.
 
-        // SafeTearDown's second argument is the resolved 32-bit descriptor hash, never the 16-bit item id. Passing
-        // the id makes the call a silent no-op: it matches no part, detaches nothing, and still returns normally.
-        using SafeTearDownFn = std::int64_t(__fastcall *)(std::int64_t a1, std::uint32_t hash, std::int16_t slot_tag);
+        // SafeTearDown's second argument is the 32-bit item key, never the 16-bit item id. SafeTearDown converts the
+        // key back to an id itself, so any other value makes the call a silent no-op: it matches no part, detaches
+        // nothing, and still returns normally.
+        using SafeTearDownFn =
+            std::int64_t(__fastcall *)(std::int64_t a1, std::uint32_t item_key, std::int16_t slot_tag);
 
-        using IndexedStringLookupFn = void *(__fastcall *)(const std::uint16_t *slot_id_ptr);
+        using ItemAccessorFn = const void *(__fastcall *)(std::int64_t unused, std::uint32_t item_id);
+
+        // Descriptor -> u32 item key. SafeTearDown reads the same field off the descriptor ItemAccessor returns. A
+        // stale offset fails SILENTLY: every tear-down then passes one constant value, detaches nothing and returns
+        // normally, which shows as the same `key=` on every [dispatch] tear_down line.
+        constexpr std::ptrdiff_t DESC_ITEM_KEY_OFFSET = 0x08;
+
+        /**
+         * @brief Resolve an item id to the item key SafeTearDown takes.
+         * @return The key, or 0 when the accessor faults or returns null, or the descriptor holds no key.
+         * @note The accessor is engine code reached from the apply worker, so it runs under its own SEH frame.
+         */
+        std::uint32_t item_key_for(ItemAccessorFn accessor, std::uint16_t item_id) noexcept
+        {
+            const void *desc = nullptr;
+            __try
+            {
+                desc = accessor(0, item_id);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return 0;
+            }
+            if (desc == nullptr)
+                return 0;
+            const auto key_addr =
+                reinterpret_cast<std::uintptr_t>(desc) + static_cast<std::uintptr_t>(DESC_ITEM_KEY_OFFSET);
+            const auto key = DMK::memory::read<std::uint32_t>(DMK::Address{key_addr}).value_or(0);
+            return key == 0xFFFFFFFF ? 0 : key;
+        }
 
         /**
          * @brief Warn when SafeTearDown is about to run against a part list that is already empty.
@@ -97,7 +128,7 @@ namespace Transmog::real_part_tear_down
          */
         void log_safe_tear_down_state(
             std::uintptr_t a1,
-            std::uint32_t hash,
+            std::uint32_t item_key,
             std::uint16_t game_slot_tag,
             const char *site
         ) noexcept
@@ -112,11 +143,11 @@ namespace Transmog::real_part_tear_down
                 // sink failure must not escape into the engine's frame.
                 (void)DMK::log().try_log(
                     DMK::LogLevel::Warning,
-                    "[dispatch] {} slot={:#06x} hash={:#010x} comp={:#x} sub={:#x} listHead=0 - the engine exits "
+                    "[dispatch] {} slot={:#06x} key={:#010x} comp={:#x} sub={:#x} listHead=0 - the engine exits "
                     "without detaching, whatever the arguments say",
                     site,
                     game_slot_tag,
-                    hash,
+                    item_key,
                     comp,
                     sub
                 );
@@ -124,7 +155,7 @@ namespace Transmog::real_part_tear_down
         }
 
         std::atomic<SafeTearDownFn> g_safeTearDown{nullptr};
-        std::atomic<IndexedStringLookupFn> g_indexedStringLookup{nullptr};
+        std::atomic<ItemAccessorFn> s_item_accessor{nullptr};
         std::atomic<bool> g_ready{false};
 
         // One-shot sanity log of the first PartDef entry so a future patch reshaping the struct is immediately visible
@@ -546,62 +577,61 @@ namespace Transmog::real_part_tear_down
 
         const auto &addrs = resolved_addrs();
         const auto safe_addr = addrs.safe_tear_down;
-        const auto lookup_addr = addrs.indexed_string_lookup;
+        const auto accessor_addr = addrs.item_accessor;
 
         if (!safe_addr)
         {
             logger.warning("[dispatch] tear_down: safeTearDown address not resolved (AOB scan failed in init)");
             return false;
         }
-        if (!lookup_addr)
+        if (!accessor_addr)
         {
             logger.warning(
-                "[dispatch] tear_down: indexedStringLookup address not resolved (ItemNameTable chain walk has not "
-                "run yet)"
+                "[dispatch] tear_down: ItemAccessor address not resolved (ItemNameTable chain walk has not run yet)"
             );
             return false;
         }
 
         // safe_tear_down needs no prologue check here. Its anchor row carries the code_site validator with
         // require_validator set, and that validator already calls scan::is_likely_function_prologue, so a rejected
-        // site arrives as 0 and the test above catches it. indexed_string_lookup comes from the ItemNameTable chain
-        // walk rather than from an anchor, so it is the one address that still needs its own proof.
-        std::array<std::byte, 8> lookup_bytes{};
-        if (!DMK::memory::read_into(DMK::Address{lookup_addr}, lookup_bytes))
+        // site arrives as 0 and the test above catches it. item_accessor comes from the ItemNameTable chain walk
+        // rather than from an anchor, so it is the one address that still needs its own proof.
+        std::array<std::byte, 8> accessor_bytes{};
+        if (!DMK::memory::read_into(DMK::Address{accessor_addr}, accessor_bytes))
         {
             logger.warning(
-                "[dispatch] tear_down: cannot read indexedStringLookup@{:#x}",
-                static_cast<std::uint64_t>(lookup_addr)
+                "[dispatch] tear_down: cannot read ItemAccessor@{:#x}",
+                static_cast<std::uint64_t>(accessor_addr)
             );
             return false;
         }
 
-        std::vector<int> lookup_dump;
-        lookup_dump.reserve(lookup_bytes.size());
-        for (const auto b : lookup_bytes)
-            lookup_dump.push_back(static_cast<int>(b));
+        std::vector<int> accessor_dump;
+        accessor_dump.reserve(accessor_bytes.size());
+        for (const auto b : accessor_bytes)
+            accessor_dump.push_back(static_cast<int>(b));
 
         logger.trace(
-            "[dispatch] tear_down bytes: lookup@{:#x}={}",
-            static_cast<std::uint64_t>(lookup_addr),
-            DMK::format::format_int_vector(lookup_dump)
+            "[dispatch] tear_down bytes: accessor@{:#x}={}",
+            static_cast<std::uint64_t>(accessor_addr),
+            DMK::format::format_int_vector(accessor_dump)
         );
 
-        if (!DMK::scan::is_likely_function_prologue(DMK::Address{lookup_addr}))
+        if (!DMK::scan::is_likely_function_prologue(DMK::Address{accessor_addr}))
         {
-            logger.warning("[dispatch] tear_down: indexedStringLookup prologue reject");
+            logger.warning("[dispatch] tear_down: ItemAccessor prologue reject");
             return false;
         }
 
         g_safeTearDown.store(reinterpret_cast<SafeTearDownFn>(safe_addr), std::memory_order_release);
-        g_indexedStringLookup.store(reinterpret_cast<IndexedStringLookupFn>(lookup_addr), std::memory_order_release);
+        s_item_accessor.store(reinterpret_cast<ItemAccessorFn>(accessor_addr), std::memory_order_release);
 
         g_ready.store(true, std::memory_order_release);
 
         logger.trace(
-            "[dispatch] tear_down helpers resolved: safe={:#x} lookup={:#x}",
+            "[dispatch] tear_down helpers resolved: safe={:#x} accessor={:#x}",
             static_cast<std::uint64_t>(safe_addr),
-            static_cast<std::uint64_t>(lookup_addr)
+            static_cast<std::uint64_t>(accessor_addr)
         );
         return true;
     }
@@ -617,8 +647,8 @@ namespace Transmog::real_part_tear_down
             return false;
 
         const auto safe_fn = g_safeTearDown.load(std::memory_order_acquire);
-        const auto lookup_fn = g_indexedStringLookup.load(std::memory_order_acquire);
-        if (!safe_fn || !lookup_fn)
+        const auto accessor_fn = s_item_accessor.load(std::memory_order_acquire);
+        if (!safe_fn || !accessor_fn)
             return false;
 
         const auto a1 = reinterpret_cast<std::uintptr_t>(a1_raw);
@@ -693,49 +723,35 @@ namespace Transmog::real_part_tear_down
             return false;
         }
 
-        std::uint32_t hash = 0;
+        const std::uint32_t item_key = item_key_for(accessor_fn, found.item_id);
+        if (item_key == 0)
+        {
+            logger.trace(
+                "[dispatch] tear_down slot={:#06x} entryFound=true primary={:#06x} key=<unresolved>",
+                game_slot_tag,
+                found.item_id
+            );
+            return false;
+        }
+
+        // Safe scene-graph tear-down. It routes through the engine's scene-detach primitive and does NOT mutate the
+        // authoritative entry array, so the apply dispatcher can call it.
+        log_safe_tear_down_state(a1, item_key, game_slot_tag, "tear_down");
+
         std::int64_t rc = 0;
         // Declared outside the __try so the handler can restore it. See in_engine_tear_down.
         bool latch_was_raised = false;
 
-        // The two engine calls keep their own SEH frame. Every read around them is guarded on its own.
+        // The engine call keeps its own SEH frame. Every read around it is guarded on its own.
         __try
         {
-            // Resolve hash via the engine's interner.
-            std::uint16_t local_word = found.item_id;
-            void *hash_ptr = lookup_fn(&local_word);
-            if (!hash_ptr)
-            {
-                logger.trace(
-                    "[dispatch] tear_down slot={:#06x} entryFound=true primary={:#06x} hash=<lookup_null>",
-                    game_slot_tag,
-                    found.item_id
-                );
-                return false;
-            }
-            hash =
-                DMK::memory::read<std::uint32_t>(DMK::Address{reinterpret_cast<std::uintptr_t>(hash_ptr)}).value_or(0);
-            if (hash == 0 || hash == 0xFFFFFFFF)
-            {
-                logger.trace(
-                    "[dispatch] tear_down slot={:#06x} entryFound=true primary={:#06x} hash={:#010x} <rejected>",
-                    game_slot_tag,
-                    found.item_id,
-                    hash
-                );
-                return false;
-            }
-
-            // Safe scene-graph tear-down. It routes through the engine's scene-detach primitive and does NOT mutate
-            // the authoritative entry array, so the apply dispatcher can call it.
-            log_safe_tear_down_state(a1, hash, game_slot_tag, "tear_down");
             // Log the engine's return rather than a constant. A tear-down that matched nothing and one that
             // detached a part both come back normally, so the return is the only thing that tells them apart.
             //
             // See in_engine_tear_down and the matching call in tear_down_by_item_id.
             latch_was_raised = in_engine_tear_down();
             set_in_engine_tear_down(true);
-            rc = safe_fn(static_cast<std::int64_t>(a1), hash, static_cast<std::int16_t>(game_slot_tag));
+            rc = safe_fn(static_cast<std::int64_t>(a1), item_key, static_cast<std::int16_t>(game_slot_tag));
             set_in_engine_tear_down(latch_was_raised);
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
@@ -746,10 +762,10 @@ namespace Transmog::real_part_tear_down
         }
 
         logger.trace(
-            "[dispatch] tear_down slot={:#06x} entryFound=true primary={:#06x} hash={:#010x} engineRc={:#x}",
+            "[dispatch] tear_down slot={:#06x} entryFound=true primary={:#06x} key={:#010x} engineRc={:#x}",
             game_slot_tag,
             found.item_id,
-            hash,
+            item_key,
             static_cast<std::uint64_t>(rc)
         );
         return true;
@@ -783,49 +799,35 @@ namespace Transmog::real_part_tear_down
             return false;
 
         const auto safe_fn = g_safeTearDown.load(std::memory_order_acquire);
-        const auto lookup_fn = g_indexedStringLookup.load(std::memory_order_acquire);
-        if (!safe_fn || !lookup_fn)
+        const auto accessor_fn = s_item_accessor.load(std::memory_order_acquire);
+        if (!safe_fn || !accessor_fn)
             return false;
 
         const auto a1 = reinterpret_cast<std::uintptr_t>(a1_raw);
         if (!DMK::memory::is_plausible_ptr(DMK::Address{a1}))
             return false;
 
-        std::uint32_t hash = 0;
+        const std::uint32_t item_key = item_key_for(accessor_fn, item_id);
+        if (item_key == 0)
+        {
+            logger.trace(
+                "[dispatch] tear_down_fake slot={:#06x} itemId={:#06x} key=<unresolved>",
+                game_slot_tag,
+                item_id
+            );
+            return false;
+        }
+
+        log_safe_tear_down_state(a1, item_key, game_slot_tag, "tear_down_fake");
+
         std::int64_t engine_rc = 0;
         bool result = false;
         // Declared outside the __try so the handler can restore it. See in_engine_tear_down.
         bool latch_was_raised = false;
 
-        // The two engine calls keep their own SEH frame. Every read around them is guarded on its own.
+        // The engine call keeps its own SEH frame. Every read around it is guarded on its own.
         __try
         {
-            std::uint16_t local_word = item_id;
-            void *hash_ptr = lookup_fn(&local_word);
-            if (!hash_ptr)
-            {
-                logger.trace(
-                    "[dispatch] tear_down_fake slot={:#06x} itemId={:#06x} hash=<lookup_null>",
-                    game_slot_tag,
-                    item_id
-                );
-                return false;
-            }
-
-            hash =
-                DMK::memory::read<std::uint32_t>(DMK::Address{reinterpret_cast<std::uintptr_t>(hash_ptr)}).value_or(0);
-            if (hash == 0 || hash == 0xFFFFFFFF)
-            {
-                logger.trace(
-                    "[dispatch] tear_down_fake slot={:#06x} itemId={:#06x} hash={:#010x} <rejected>",
-                    game_slot_tag,
-                    item_id,
-                    hash
-                );
-                return false;
-            }
-
-            log_safe_tear_down_state(a1, hash, game_slot_tag, "tear_down_fake");
             // Kept for the summary line below. A tear-down that matched nothing and one that detached a part both
             // return normally, so the engine's return is the only thing that tells them apart.
             //
@@ -834,7 +836,7 @@ namespace Transmog::real_part_tear_down
             // it, so a nested tear-down cannot disarm the hook for the call still running under it.
             latch_was_raised = in_engine_tear_down();
             set_in_engine_tear_down(true);
-            engine_rc = safe_fn(static_cast<std::int64_t>(a1), hash, static_cast<std::int16_t>(game_slot_tag));
+            engine_rc = safe_fn(static_cast<std::int64_t>(a1), item_key, static_cast<std::int16_t>(game_slot_tag));
             set_in_engine_tear_down(latch_was_raised);
             result = true;
         }
@@ -846,10 +848,10 @@ namespace Transmog::real_part_tear_down
         }
 
         logger.trace(
-            "[dispatch] tear_down_fake slot={:#06x} itemId={:#06x} hash={:#010x} result={} engineRc={:#x}",
+            "[dispatch] tear_down_fake slot={:#06x} itemId={:#06x} key={:#010x} result={} engineRc={:#x}",
             game_slot_tag,
             item_id,
-            hash,
+            item_key,
             result,
             static_cast<std::uint64_t>(engine_rc)
         );

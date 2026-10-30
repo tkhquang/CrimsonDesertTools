@@ -62,11 +62,16 @@ namespace Transmog::prefab_wrapper_swap
     // on patch day. Do NOT blanket-apply a base-width change to every registry. Sibling registries move their
     // container fields independently, and one can shrink while this one grows.
     // Per-entry layout:
-    //   +0x00 hash, +0x08 vtable (the StringInfo sentinel resolved into s_string_info_vtable),
-    //   +0x18 wrapper-ptr, +0x20 inline name (NUL-terminated)
+    //   +0x00 the StringInfo sentinel (resolved into s_string_info_vtable: the engine's static empty wrapper),
+    //   +0x08 u32 name hash, +0x10 wrapper-ptr
+    // The name lives in the wrapper. A short-name entry embeds its wrapper inside the entry itself, so its characters
+    // land inside the header copy below. A long-name entry points at an external wrapper.
+    //
+    // A stale per-entry layout fails SILENTLY: the sentinel compare rejects every entry and the catalog walk reports
+    // vtable-pass=0. Check that counter first on patch day.
     //
     // Wrapper layout:
-    //   +0x00 string ptr, +0x10 refcount i32,
+    //   +0x00 string ptr, +0x08 u32 length, +0x0C u32 hash (or WRAPPER_HASH_UNSET), +0x10 refcount i32,
     //   +0x14 mode flag, +0x15 tombstone
 
     // Layout / sanity constants (compile-time only, not patchable).
@@ -74,8 +79,9 @@ namespace Transmog::prefab_wrapper_swap
     constexpr std::size_t STRING_INFO_COUNT_OFF = 0x08;
     /// Qword base of the entry-ptr array.
     constexpr std::size_t STRING_INFO_ARRAY_OFF = 0x58;
-    constexpr std::size_t INLINE_NAME_OFF = 0x20;
-    constexpr std::size_t WRAPPER_PTR_OFF = 0x18;
+    constexpr std::size_t ENTRY_SENTINEL_OFF = 0x00;
+    constexpr std::size_t ENTRY_HASH_OFF = 0x08;
+    constexpr std::size_t WRAPPER_PTR_OFF = 0x10;
     constexpr std::size_t EXT_NAME_MAX = 256;
     // Cap on a loader-resolved prefab name. Used by both name-resolution sites in this file.
     constexpr std::size_t LOADER_NAME_CAP = 96;
@@ -197,12 +203,31 @@ namespace Transmog::prefab_wrapper_swap
         return c;
     }
 
-    /// The name hash a live wrapper carries, or 0 when it cannot be read.
+    /// What a wrapper holds in its hash slot when the engine has not stored the hash there.
+    static constexpr std::uint32_t WRAPPER_HASH_UNSET = 0xFFFFFFFFu;
+
+    /**
+     * @brief The name hash of a live wrapper, or 0 when it cannot be read.
+     * @details The wrapper's `+0x0C` slot carries the hash when the engine filled it in. Wrappers the StringInfo
+     *          registry owns can leave it at WRAPPER_HASH_UNSET, with the hash kept on the registry entry instead, so
+     *          an unset slot falls back to hashing the wrapper's own name (`+0x00` char*, `+0x08` u32 length). Both
+     *          routes produce the same value, so the swap map's keys match either way.
+     */
     static std::uint32_t wrapper_name_hash(std::uintptr_t wrapper) noexcept
     {
         if (!DMK::memory::is_plausible_ptr(DMK::Address{wrapper}))
             return 0;
-        return DMK::memory::read<std::uint32_t>(DMK::Address{wrapper + 0x0C}).value_or(0);
+        const auto stored = DMK::memory::read<std::uint32_t>(DMK::Address{wrapper + 0x0C}).value_or(0);
+        if (stored != WRAPPER_HASH_UNSET)
+            return stored;
+        const auto str = DMK::memory::read<std::uintptr_t>(DMK::Address{wrapper}).value_or(0);
+        const auto len = DMK::memory::read<std::uint32_t>(DMK::Address{wrapper + 0x08}).value_or(0);
+        if (!DMK::memory::is_plausible_ptr(DMK::Address{str}) || len == 0 || len > EXT_NAME_MAX)
+            return 0;
+        char name[EXT_NAME_MAX];
+        if (!DMK::memory::read_into(DMK::Address{str}, std::span{reinterpret_cast<std::byte *>(name), len}).has_value())
+            return 0;
+        return prefab_name_hash(std::string_view{name, len});
     }
 
     // One swap binding. `src_name` is kept so a hit can be confirmed against the wrapper's own name - a 32-bit hash
@@ -288,8 +313,12 @@ namespace Transmog::prefab_wrapper_swap
     // Originals are restored on the way out so the caller's refcount-release loop decrements the same wrappers it
     // incremented.
     //
+    // The fourth argument is a bool flag the engine reads (SafeTearDown passes 0, one other unmount path passes 1). The
+    // detour must forward it: a three-argument detour hands the trampoline whatever its own code left in r9.
+    //
     // Resolved via natural_pipeline() in aob_resolver.hpp.
-    using NaturalPipelineFn = std::int64_t(__fastcall *)(std::int64_t a1, std::uint64_t *a2, std::uint64_t *a3);
+    using NaturalPipelineFn =
+        std::int64_t(__fastcall *)(std::int64_t a1, std::uint64_t *a2, std::uint64_t *a3, std::uint8_t a4);
     static NaturalPipelineFn s_orig_natural_pipeline = nullptr;
     static std::atomic<std::uint64_t> s_natpipe_hit_count{0};
     static std::atomic<std::uint64_t> s_natpipe_subst_count{0};
@@ -800,15 +829,15 @@ namespace Transmog::prefab_wrapper_swap
         std::uint32_t vt_matched = 0;
         std::uint32_t pref_matched = 0;
 
-        // Same 128B header copy: covers vtable @ +8, wrapper-ptr @ +0x18, and the inline-name region @ +0x20.
+        // Same 128B header copy: covers the sentinel, the hash, the wrapper-ptr, and an embedded short-name wrapper
+        // with its characters.
         constexpr std::size_t header_bytes = 0x80;
         alignas(8) std::uint8_t header[header_bytes];
 
-        // Path-B fallback decode for long names whose +0x20 holds an external string ptr instead of an inline
-        // NUL-terminated name.
+        // Path-B fallback decode for long names, whose wrapper and characters live outside the header copy.
         auto decode_long_name = [](std::uintptr_t entry, char *buf, std::size_t cap) -> bool
         {
-            // entry -> +0x18 wrapper -> +0x00 string pointer.
+            // entry -> +WRAPPER_PTR_OFF wrapper -> +0x00 string pointer.
             static constexpr std::ptrdiff_t name_chain[] = {
                 static_cast<std::ptrdiff_t>(WRAPPER_PTR_OFF),
                 0,
@@ -847,27 +876,44 @@ namespace Transmog::prefab_wrapper_swap
                      .has_value())
                 continue;
 
-            const std::uintptr_t vtable = *reinterpret_cast<const std::uintptr_t *>(header + 8);
+            const std::uintptr_t vtable = *reinterpret_cast<const std::uintptr_t *>(header + ENTRY_SENTINEL_OFF);
             if (vtable != vtable_sentinel)
                 continue;
             ++vt_matched;
 
+            const std::uintptr_t entry_wrapper = *reinterpret_cast<const std::uintptr_t *>(header + WRAPPER_PTR_OFF);
+            const std::uint32_t entry_hash = *reinterpret_cast<const std::uint32_t *>(header + ENTRY_HASH_OFF);
+
+            // A short name's wrapper is embedded in the entry, and so are its characters: when both the wrapper and
+            // its string pointer land inside the header copy, the name decodes from the copy with no further read
+            // (Path A). Anything else takes the guarded wrapper chain (Path B).
+            const char *inline_src = nullptr;
+            std::size_t inline_max = 0;
+            if (entry_wrapper >= entry_ptr && entry_wrapper + sizeof(std::uintptr_t) <= entry_ptr + header_bytes)
+            {
+                const std::uintptr_t str =
+                    *reinterpret_cast<const std::uintptr_t *>(header + (entry_wrapper - entry_ptr));
+                if (str >= entry_ptr && str < entry_ptr + header_bytes)
+                {
+                    inline_src = reinterpret_cast<const char *>(header + (str - entry_ptr));
+                    inline_max = static_cast<std::size_t>(entry_ptr + header_bytes - str);
+                }
+            }
+
             // Prefix gate (only for inline-name entries - skipped for long-name entries that route through Path B
             // below).
-            const unsigned char first = header[INLINE_NAME_OFF];
-            const bool printable_lead = (first >= 'a' && first <= 'z') || (first >= 'A' && first <= 'Z') ||
-                                        (first >= '0' && first <= '9') || first == '_' || first == '/' || first == '.';
-            if (prefix_len > 0 && printable_lead &&
-                std::memcmp(header + INLINE_NAME_OFF, prefix.data(), prefix_len) != 0)
+            if (prefix_len > 0 && inline_src != nullptr && inline_max >= prefix_len &&
+                std::memcmp(inline_src, prefix.data(), prefix_len) != 0)
                 continue;
             ++pref_matched;
 
             // Decode name from local header (Path A) or fall back to wrapper-chain (Path B) for long external strings.
             buf[0] = 0;
             bool decoded = false;
+            if (inline_src != nullptr)
             {
-                const char *src = reinterpret_cast<const char *>(header + INLINE_NAME_OFF);
-                const std::size_t max_len = header_bytes - INLINE_NAME_OFF;
+                const char *src = inline_src;
+                const std::size_t max_len = inline_max;
                 std::size_t L = 0;
                 while (L < max_len && src[L] != 0)
                     ++L;
@@ -900,9 +946,6 @@ namespace Transmog::prefab_wrapper_swap
                 if (prefix_len > 0 && std::strncmp(buf, prefix.data(), prefix_len) != 0)
                     continue;
             }
-
-            const std::uintptr_t entry_wrapper = *reinterpret_cast<const std::uintptr_t *>(header + WRAPPER_PTR_OFF);
-            const std::uint32_t entry_hash = *reinterpret_cast<const std::uint32_t *>(header);
 
             visitor(entry_ptr, buf, entry_wrapper, entry_hash);
         }
@@ -1113,7 +1156,7 @@ namespace Transmog::prefab_wrapper_swap
     }
 
     // Runtime source-seed for a slot's body-mesh swap. Derives the carrier item's rig mesh name from its item_id at
-    // runtime (variant_meshes_for_item -> desc+0x3E0 variant list), in place of a hardcoded prefab column in
+    // runtime (variant_meshes_for_item -> the descriptor's variant list), in place of a hardcoded prefab column in
     // carrier_defaults. Returns the first rig-shaped mesh - which rig comes first is irrelevant, since the
     // rig-stripped stem is what the sibling registration keys on, and every rig of the item shares that stem. Empty
     // when the carrier item_name is unset/unresolved or the registries are not ready yet, in which case callers fall
@@ -2739,10 +2782,12 @@ namespace Transmog::prefab_wrapper_swap
             return -1;
         __try
         {
+            // The flag is the one SafeTearDown's own call passes, the path this synthesized detach stands in for.
             return s_orig_natural_pipeline(
                 static_cast<std::int64_t>(parent),
                 reinterpret_cast<std::uint64_t *>(a2),
-                reinterpret_cast<std::uint64_t *>(a3)
+                reinterpret_cast<std::uint64_t *>(a3),
+                0
             );
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
@@ -3246,7 +3291,8 @@ namespace Transmog::prefab_wrapper_swap
         return (it == s_unlink_names.end()) ? std::string{} : it->second;
     }
 
-    static std::int64_t __fastcall on_natural_pipeline(std::int64_t a1, std::uint64_t *a2, std::uint64_t *a3)
+    static std::int64_t __fastcall
+    on_natural_pipeline(std::int64_t a1, std::uint64_t *a2, std::uint64_t *a3, std::uint8_t a4)
     {
         const auto trampoline = s_orig_natural_pipeline;
         if (!trampoline)
@@ -3257,7 +3303,7 @@ namespace Transmog::prefab_wrapper_swap
         // now-active character has no swap (s_active==false) - the cross-character orphan path. The empty-list fast
         // path below keeps the cost negligible for the common zero-length unlink calls.
         if (!s_active.load(std::memory_order_acquire) && !s_maps_retained.load(std::memory_order_acquire))
-            return trampoline(a1, a2, a3);
+            return trampoline(a1, a2, a3, a4);
 
         auto &logger = DMK::log();
         const auto hit_seq = s_natpipe_hit_count.fetch_add(1, std::memory_order_relaxed) + 1;
@@ -3323,7 +3369,7 @@ namespace Transmog::prefab_wrapper_swap
         const auto cnt = (list_count < max_entries) ? list_count : max_entries;
 
         if (!list_data || cnt == 0)
-            return trampoline(a1, a2, a3);
+            return trampoline(a1, a2, a3, a4);
 
         // LT disabled substitutes nothing, whatever the map still holds. A deactivate retains the swap map, and this
         // hook gates on s_maps_retained rather than s_active so the cross-character orphan cleanup survives. The
@@ -3335,7 +3381,7 @@ namespace Transmog::prefab_wrapper_swap
         // substitution is required, including inside the clear that Enabled=off runs after flag_enabled goes false.
         // in_transmog() cannot mark that window because it covers SlotPopulator and PartSlotRefresh only.
         if (!Transmog::flag_enabled().load(std::memory_order_relaxed) && !Transmog::in_engine_tear_down())
-            return trampoline(a1, a2, a3);
+            return trampoline(a1, a2, a3, a4);
 
         // Resolve which character's bucket this teardown/install path applies to. s_active_char_idx is set by
         // PresetManager::apply_to_state BEFORE the engine drives any wrapper traversal, so by the time the hook fires
@@ -3343,7 +3389,7 @@ namespace Transmog::prefab_wrapper_swap
         // unchanged.
         const auto active_idx = s_active_char_idx.load(std::memory_order_acquire);
         if (active_idx < 1 || active_idx > 3)
-            return trampoline(a1, a2, a3);
+            return trampoline(a1, a2, a3, a4);
         const auto bucket = static_cast<std::size_t>(active_idx - 1);
 
         // Walk the list under the guarded memory verbs and substitute matching src wrappers. PASSTHROUGH entries
@@ -3499,7 +3545,7 @@ namespace Transmog::prefab_wrapper_swap
         s_natpipe_subst_count.fetch_add(subst_count, std::memory_order_relaxed);
 
         // Run the natural pipeline. Engine walks parent+88 looking for our target wrappers, finds them, unlinks them.
-        const auto result = trampoline(a1, a2, a3);
+        const auto result = trampoline(a1, a2, a3, a4);
 
         // No substitutions -> no restore needed and no log output. Fall through and return without further work.
         if (subst_count == 0)

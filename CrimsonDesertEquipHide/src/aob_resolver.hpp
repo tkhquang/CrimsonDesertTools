@@ -33,22 +33,17 @@ namespace EquipHide
 
     /**
      * @brief ChildActor (pa::ClientChildOnlyInGameActor) vtable.
-     * @details Resolves by RTTI mangled name first (patch-stable, self-healing), with three nearby RIP-relative byte
+     * @details Resolves by RTTI mangled name first (patch-stable, self-healing), with two nearby RIP-relative byte
      *          loads as fallback. Each byte candidate resolves to the `lea rax, [rip+disp32]` that loads the vtable
      *          base. That base is also the primary (COL.offset == 0) vtable that the RTTI backend returns for the
      *          class, so every tier resolves the same pointer.
-     * @note A 4-row ladder resolving the vtable address (data in .rdata, not code).
+     * @note A 3-row ladder resolving the vtable address (data in .rdata, not code).
      */
     inline const Candidate CHILD_ACTOR_VTBL_CANDIDATES[] = {
 
-        // Branch-encoding caveat (aob-signatures.md section 9, the short Jcc rel8 rule): P2 keeps the EB opcode of the
-        // trailing 2-byte jmp-over-fallback that follows the vtable store, and wildcards only its rel8 operand. A row
-        // that wildcards the EB opcode too loses uniqueness, and so does one that widens the slot into a `[2-5]`
-        // bounded gap: a second constructor shares the whole lead-in through the store, so the literal jmp width is
-        // part of P2's selectivity. If a future compiler flips this jmp to the 5-byte E9 rel32 form, P2 stops
-        // matching: the RTTI tier, P1 and P3 pick up the slack. P1 is truncated, so it does not cross the jmp and
-        // stays encoding-independent. P3 carries its preceding jz in a `[2-6]` bounded gap, so it admits the rel8 and
-        // the rel32 form alike.
+        // Branch-encoding caveat (aob-signatures.md, the short Jcc rel8 rule): neither byte row crosses a branch whose
+        // encoding it pins. P1 stops at the vtable store, ahead of the jmp-over-fallback that follows it, and P2
+        // carries its preceding jz in a `[2-6]` bounded gap, so it admits the rel8 and the rel32 form alike.
 
         // Primary - resolve the vtable by its RTTI mangled name. The AllocCtor stores ClientChildOnlyInGameActor's
         // primary vtable into the new object, so the RTTI backend yields the exact pointer the byte tiers below
@@ -57,8 +52,8 @@ namespace EquipHide
         // unique-only and fails closed on an ambiguous name, so the ladder falls through to the byte tiers.
         Candidate::rtti_vtable("ChildActorVtbl_RTTI", ".?AVClientChildOnlyInGameActor@pa@@"),
 
-        // P1 - truncated: ends at the `mov [rsi], rax` that stores the vtable. Does NOT cross the trailing `EB 03`
-        // jmp, so it survives a Jcc-encoding flip.
+        // P1 - truncated: ends at the `mov [rsi], rax` that stores the vtable. It does not cross the trailing `EB 03`
+        // jmp, so it survives a jmp-encoding flip.
         //
         // 48 8B 55 ??            mov rdx, [rbp+d8]
         // 48 89 F1               mov rcx, rsi
@@ -73,25 +68,7 @@ namespace EquipHide
             7
         ),
 
-        // P2 - retains the trailing `EB ?? 4C`. Without the 4C byte of the post-jmp `mov rsi, r13` continuation, the
-        // lead-in is structurally shared with other ctor sites and the window is no longer unique. Tied to the 2-byte
-        // jmp encoding.
-        //
-        // 48 89 F1               mov rcx, rsi
-        // E8 ?? ?? ?? ??         call <rel32>
-        // 90                     nop
-        // 48 8D 05 ?? ?? ?? ??   lea rax, [rip+d32]   <- result offset
-        // 48 89 06               mov [rsi], rax
-        // EB ??                  jmp <rel8>
-        // 4C                     mov rsi, r13 (truncated)
-        Candidate::rip_relative(
-            "ChildActorVtbl_P2_CtorStore",
-            Pattern::literal("48 89 F1 E8 ?? ?? ?? ?? 90 | 48 8D 05 ?? ?? ?? ?? 48 89 06 EB ?? 4C"),
-            3,
-            7
-        ),
-
-        // P3 - the jz ahead of the ctor call sits in a `[2-6]` bounded gap, so the row matches the 2-byte `74 rel8`
+        // P2 - the jz ahead of the ctor call sits in a `[2-6]` bounded gap, so the row matches the 2-byte `74 rel8`
         // and the 6-byte `0F 84 rel32` form alike. The resolver adds the actual gap width at match time, so the `|`
         // marker still lands on the lea. The trailing `?? ?? ?? ??` is the lea's own disp32: the RipRelative tier
         // decode-verifies the instruction at the marker, so the matched suffix has to span the displacement it
@@ -106,7 +83,7 @@ namespace EquipHide
         // 90                     nop
         // 48 8D 05 ?? ?? ?? ??   lea rax, [rip+d32]   <- result offset
         Candidate::rip_relative(
-            "ChildActorVtbl_P3_WiderCtorStore",
+            "ChildActorVtbl_P2_WiderCtorStore",
             Pattern::literal("45 31 ED 48 85 F6 [2-6] 48 8B 55 ?? 48 89 F1 E8 ?? ?? ?? ?? 90 | 48 8D 05 ?? ?? ?? ??"),
             3,
             7
@@ -120,17 +97,20 @@ namespace EquipHide
      * @warning Do NOT anchor a row on the bucket arithmetic alone. This hash map is heavily templated. The
      *          `div modulus / shl 8 / add [map+0x10]` probe matches hundreds of sites in the image, and the
      *          `inc [map+4]` plus `[map+0x18]` write-back pair matches as many. What singles out THIS instantiation
-     *          is its argument shuffle, four arguments parked in a specific order.
+     *          is its argument shuffle, four arguments parked in a specific order, PLUS the width of the key compare.
+     * @warning The argument shuffle alone is not enough. The image carries a twin instantiation with the identical
+     *          prologue and shuffle whose key compare is 16-bit (`movzx ecx,word [rax] / cmp word [rbx+4],cx`). The
+     *          part-hash map compares a full u32 (`mov ecx,[rax] / cmp dword [rbx+4],ecx`), so every row runs on
+     *          into that compare. Calling the u16 twin would insert with a truncated key.
      * @note A 3-tier ladder resolving the function entry.
      */
     inline const Candidate MAP_INSERT_CANDIDATES[] = {
 
-        // P1 - full prologue through the argument shuffle.
-        // The five callee-saved pushes and the shuffle that follows are the most specific window available. The row
-        // wildcards the stack-allocation imm8 because the compiler sizes the frame. No branch sits inside the window,
-        // so the displacement cannot move when a branch encoding changes. The match lands on the function start.
+        // P1 - full prologue through the argument shuffle, then a bounded gap over the empty-map early-out and the
+        // bucket probe, closed by the u32 key compare. The row wildcards the stack-allocation imm8 because the
+        // compiler sizes the frame. The match lands on the function start.
         //
-        // The window opens with the empty-map test folded into the modulus read (`cmp dword [rcx],0`) and closes on
+        // The window opens with the empty-map test folded into the modulus read (`cmp dword [rcx],0`) and runs through
         // the r9/r8d/rdx/rcx parking. The parking ORDER is the identifier. The map pointer's own register is not.
         //
         // 40 53         push rbx
@@ -144,32 +124,44 @@ namespace EquipHide
         // 41 8B F0      mov esi, r8d
         // 4C 8B EA      mov r13, rdx
         // 48 8B F9      mov rdi, rcx
+        // [60-90]       empty-map early-out, bucket probe, entry fetch
+        // 49 8B 45 00   mov rax, [r13]
+        // 8B 08         mov ecx, [rax]          ; u32 key
+        // 39 4B 04      cmp [rbx+0x4], ecx
         Candidate::direct(
             "MapInsert_P1_FullPrologue",
-            Pattern::literal("40 53 56 57 41 54 41 55 48 83 EC ?? 83 39 00 4D 8B E1 41 8B F0 4C 8B EA 48 8B F9")
+            Pattern::literal(
+                "40 53 56 57 41 54 41 55 48 83 EC ?? 83 39 00 4D 8B E1 41 8B F0 4C 8B EA 48 8B F9 [60-90] "
+                "49 8B 45 00 8B 08 39 4B 04"
+            )
         ),
 
-        // P2 - argument shuffle only, with no prologue head at all. Independent of the register-save set, which is
-        // the part of the prologue that moves most. Walk back 0x0C bytes to the function start.
+        // P2 - argument shuffle, with no prologue head at all, then the u32 key compare. Independent of the
+        // register-save set, which is the part of the prologue that moves most. Walk back 0x0C bytes to the function
+        // start.
         //
         // 83 39 00   cmp dword [rcx], 0x0
         // 4D 8B E1   mov r12, r9
         // 41 8B F0   mov esi, r8d
         // 4C 8B EA   mov r13, rdx
         // 48 8B F9   mov rdi, rcx
+        // [60-90]    empty-map early-out, bucket probe, entry fetch, key-pointer load
+        // 8B 08      mov ecx, [rax]          ; u32 key
+        // 39 4B 04   cmp [rbx+0x4], ecx
         Candidate::direct(
             "MapInsert_P2_ArgShuffleBody",
-            Pattern::literal("83 39 00 4D 8B E1 41 8B F0 4C 8B EA 48 8B F9"),
+            Pattern::literal("83 39 00 4D 8B E1 41 8B F0 4C 8B EA 48 8B F9 [60-90] 8B 08 39 4B 04"),
             -0x0C
         ),
 
         // P3 - past the shuffle and past the empty-map early-out, opening on the re-read of the modulus and the
-        // bucket-array lea that the probe loop runs on. The row wildcards the mid-function callee-saved spill slot.
+        // bucket-array lea that the probe loop runs on, then the u32 key compare. The row wildcards the mid-function
+        // callee-saved spill slot.
         //
-        // This row shares no PATTERN bytes with P1 or P2, so a rewrite of those bytes cannot take all three down. It
-        // is not independent of the entry block, though. The -0x1D walk-back spans that block and the empty-map jcc.
-        // An added instruction there, or a jcc widened from rel8 to rel32, still matches the pattern but resolves the
-        // row SHORT. Re-measure it whenever the entry block changes.
+        // This row shares no PATTERN bytes with the argument shuffle, so a rewrite of those bytes cannot take all
+        // three down. It is not independent of the entry block, though. The -0x1D walk-back spans that block and the
+        // empty-map jcc. An added instruction there, or a jcc widened from rel8 to rel32, still matches the pattern
+        // but resolves the row SHORT. Re-measure it whenever the entry block changes.
         //
         // 41 8B D0         mov edx, r8d
         // E8 ?? ?? ?? ??   call <rel32>
@@ -177,9 +169,16 @@ namespace EquipHide
         // 4C 89 74 24 ??   mov [rsp+d8], r14
         // 4C 8D 77 10      lea r14, [rdi+0x10]
         // 45 85 D2         test r10d, r10d
+        // [40-70]          bucket probe and entry fetch
+        // 49 8B 45 00      mov rax, [r13]
+        // 8B 08            mov ecx, [rax]          ; u32 key
+        // 39 4B 04         cmp [rbx+0x4], ecx
         Candidate::direct(
             "MapInsert_P3_BucketArrayLea",
-            Pattern::literal("41 8B D0 E8 ?? ?? ?? ?? 44 8B 17 4C 89 74 24 ?? 4C 8D 77 10 45 85 D2"),
+            Pattern::literal(
+                "41 8B D0 E8 ?? ?? ?? ?? 44 8B 17 4C 89 74 24 ?? 4C 8D 77 10 45 85 D2 [40-70] "
+                "49 8B 45 00 8B 08 39 4B 04"
+            ),
             -0x1D
         ),
     };
@@ -389,14 +388,16 @@ namespace EquipHide
      */
     inline const Candidate NPC_PFE_RETURN_ADDR_CANDIDATES[] = {
 
-        // P1 - the rule-eval call's argument setup, then the call itself. The `|` marker sits on the byte after the
-        // call, which IS the return address, so the landmark offset is part of the matched bytes and cannot go stale
-        // on its own. The setup loads the world singleton from a module global, walks it to a large sub-object
+        // P1 - the rule-eval call's argument setup, then the call itself. The `|` marker trails the call, on the byte
+        // after it, which IS the return address, so the landmark offset is part of the matched bytes and cannot go
+        // stale on its own. The setup loads the world singleton from a module global, walks it to a large sub-object
         // displacement (in the +0x40000 family that LiveTransmog's LoaderRegistry ladder also walks), and passes an
         // outbound `lea r8,[rbp-X]` result slot. The row wildcards the global's RIP displacement, the sub-object
-        // displacement and the outbound frame slot. It keeps the trailing `mov eax,0x1FD` literal because that
-        // profiling-scope id, which the engine emits right after the call, is what makes the window unique
-        // image-wide.
+        // displacement and the outbound frame slot. The `add rdx,0x40` argument adjustment ahead of the global load is
+        // what makes the window unique image-wide.
+        //
+        // Do not extend the row past the call. What follows it is a per-thread flag probe whose slot offset
+        // (`mov eax/ecx, 0x1FD`, then `0x1FE`) is renumbered by the build and that a TLS-init call can precede.
         //
         // 48 83 C2 40            add rdx, 0x40
         // 48 8B 05 ?? ?? ?? ??   mov rax, [rip+d32]
@@ -404,12 +405,11 @@ namespace EquipHide
         // 4C 8D 45 ??            lea r8, [rbp-d8]
         // 48 8B 89 ?? ?? ?? ??   mov rcx, [rcx+d32]
         // E8 ?? ?? ?? ??         call <rel32>
-        // B8 FD 01 00 00         mov eax, 0x1FD   <- result marker, the return address
+        // |                      result marker, the return address
         Candidate::direct(
             "NpcPfeReturnAddr_P1_RuleEvalCallLandmark",
             Pattern::literal(
-                "48 83 C2 40 48 8B 05 ?? ?? ?? ?? 48 8B 08 4C 8D 45 ?? 48 8B 89 ?? ?? ?? ?? E8 ?? ?? ?? ?? | "
-                "B8 FD 01 00 00"
+                "48 83 C2 40 48 8B 05 ?? ?? ?? ?? 48 8B 08 4C 8D 45 ?? 48 8B 89 ?? ?? ?? ?? E8 ?? ?? ?? ?? |"
             )
         ),
     };
@@ -428,10 +428,10 @@ namespace EquipHide
      *        @ref NPC_PFE_CALLER_LABEL.
      * @details Neither row is unique image-wide, so neither may join NPC_PFE_RETURN_ADDR_CANDIDATES. They resolve only
      *          inside the bounds of the enclosing function (derive_npc_pfe_return_addr scopes the scan to the
-     *          function's exception-table extent), where each matches once. Inside that scope the profiling id is not
-     *          needed for uniqueness, so L1 identifies the call by its argument setup alone and L2 by the id alone: a
-     *          renumbered profiling enum takes down L2 and P1 together, a re-registered argument setup takes down L1
-     *          and P1 together, and no single change takes down all three.
+     *          function's exception-table extent), where each matches once. L1 identifies the call by its argument
+     *          setup alone and L2 by the per-thread flag probe the engine emits right after it. A re-registered
+     *          argument setup takes down L1 and P1 together, a reshaped probe takes down only L2, and no single change
+     *          takes down all three.
      * @note Every row places the `|` marker on the byte after the call, the return address itself.
      */
     inline const Candidate NPC_PFE_LANDMARK_LOCAL_CANDIDATES[] = {
@@ -447,11 +447,22 @@ namespace EquipHide
             Pattern::literal("48 8B 08 4C 8D 45 ?? 48 8B 89 ?? ?? ?? ?? E8 ?? ?? ?? ?? |")
         ),
 
-        // L2 - the call followed by the profiling-scope id load.
+        // L2 - the call, the TLS-init call the engine emits ahead of the per-thread flag probe, then the probe's flag
+        // slot offset and its allocation-size argument. The slot offset's low byte is wildcarded because the build
+        // renumbers it.
+        //
+        // The TLS-init call stays literal. A `[0-5]` gap in its place lets the TLS-init `E8` open a second match with
+        // a zero-width gap, so the row would match twice inside the function and fail require_unique.
         //
         // E8 ?? ?? ?? ??         call <rel32>
-        // B8 FD 01 00 00         mov eax, 0x1FD
-        Candidate::direct("NpcPfeLandmark_L2_CallThenScopeId", Pattern::literal("E8 ?? ?? ?? ?? | B8 FD 01 00 00")),
+        // |                      result marker, the return address
+        // E8 ?? ?? ?? ??         call <rel32>   ; TLS init
+        // B8 ?? 01 00 00         mov eax, 0x1FE
+        // BA 10 00 00 00         mov edx, 0x10
+        Candidate::direct(
+            "NpcPfeLandmark_L2_CallThenFlagProbe",
+            Pattern::literal("E8 ?? ?? ?? ?? | E8 ?? ?? ?? ?? B8 ?? 01 00 00 BA 10 00 00 00")
+        ),
     };
 
     /**

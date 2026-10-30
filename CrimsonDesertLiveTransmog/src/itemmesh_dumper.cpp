@@ -46,56 +46,49 @@ namespace Transmog
         constexpr ptrdiff_t OFF_REGISTRY_COUNT = 0x08;
         constexpr ptrdiff_t OFF_REGISTRY_ARRAY = 0x58;
 
-        constexpr ptrdiff_t OFF_NAME = 0x08;
-        constexpr ptrdiff_t OFF_META_SUB = 0x90;
+        constexpr ptrdiff_t OFF_NAME = 0x00;
+        constexpr ptrdiff_t OFF_META_SUB = 0x108;
 
         // The engine stores strings behind a "StringRef" descriptor: {char* ptr @+0x00, u32 len @+0x08}. The
         // characters are always heap-allocated, down to strings only a few characters long, so there is no inline/SSO
         // form to special-case.
         //
         // Two wrapper shapes reference a StringRef:
-        //   - Item NAME wrappers (desc+0x08) ARE a StringRef directly.
-        //   - stringinfo ICON wrappers are a larger object that stores a pointer to their StringRef at +0x18. For an
-        //     inline icon wrapper, that pointer targets the wrapper's own +0x20. For an external one, it targets a
-        //     StringRef elsewhere on the heap. A dereference of +0x18 resolves both forms. A fixed +0x20/+0x28 read
-        //     only handles the inline form and reads garbage on the external one.
-        constexpr ptrdiff_t OFF_WRAP_DESC = 0x18; // icon wrapper -> StringRef*
+        //   - Item NAME wrappers (desc+OFF_NAME) ARE a StringRef directly.
+        //   - stringinfo ICON wrappers are a larger object that stores a pointer to their StringRef at
+        //     OFF_WRAP_DESC. For an inline icon wrapper, that pointer targets a StringRef embedded in the object
+        //     itself. For an external one, it targets a StringRef elsewhere on the heap. A dereference of
+        //     OFF_WRAP_DESC resolves both forms. A fixed read of the embedded copy only handles the inline form and
+        //     reads garbage on the external one. Both offsets move when the engine reorders the object heads (see
+        //     the StringInfo entry layout in prefab_wrapper_swap.cpp).
+        constexpr ptrdiff_t OFF_WRAP_DESC = 0x10; // icon wrapper -> StringRef*
         constexpr ptrdiff_t OFF_REF_PTR = 0x00;   // StringRef: char*
         constexpr ptrdiff_t OFF_REF_LEN = 0x08;   // StringRef: u32 length
 
-        // Item body-mesh chain. An item carries its actual per-rig mesh prefab names here, independent of the icon.
-        // Several rig variants of one item share a single icon - Daeil_Band, Damian_Daeil_Band and OOngka_Daeil_Band
-        // all expose ItemIcon_Prefab_cd_phm_... yet emit cd_phm / cd_phw / cd_pom meshes respectively - so the icon
-        // alone collapses them onto the cd_phm prefab. desc+0x248 holds a rule-list pointer with its count at +0x250.
-        // Each rule's mesh-slot array (u16 stringinfo slots) is at rule+0x00 with its count at rule+0x08.
-        constexpr ptrdiff_t OFF_DESC_RULE_LIST = 0x248;
-        constexpr ptrdiff_t OFF_DESC_RULE_COUNT = 0x250;
-        constexpr ptrdiff_t RULE_STRIDE = 0x38;
-        constexpr ptrdiff_t OFF_RULE_MESH_ARR = 0x00;
-        constexpr ptrdiff_t OFF_RULE_MESH_COUNT = 0x08;
-        constexpr uint32_t RULE_SCAN_CAP = 64; // bound on garbage counts
-
-        // Per-body mesh variant entry list (desc+0x408), the structure the engine's variant resolver walks to render an
-        // item's mesh for the wearer's body. Each 0x58-byte entry names one body variant of the item. The mesh handle
-        // is reached via a pointer at entry+0x10 (deref -> handle whose low 16 bits index stringinfo). This is the
-        // authoritative, per-item, noise-free source of every mesh an item uses across bodies (human male / orc /
-        // female / NPC), which the shared, rig-stripped icon cannot enumerate - e.g. Kliff_Mask binds three rig meshes
-        // here (`cd_phm_` / `cd_pom_` / `cd_phw_`) behind one `cd_phm_` icon. The engine also stores each entry's
-        // wearer body-class token array at entry+0x40 with its count at +0x48. The dump links every entry's mesh
-        // regardless of which body selects it, so it does not need those two.
+        // Per-body mesh variant entry list (desc+OFF_DESC_VARIANT_ENTRIES_NOMINAL), the structure the engine's variant
+        // resolver walks to render an item's mesh for the wearer's body. Each 0x58-byte entry names one body variant of
+        // the item. The mesh handle is reached via a pointer at entry+0x10 (deref -> handle whose low 16 bits index
+        // stringinfo). This is the authoritative, per-item, noise-free source of every mesh an item uses across bodies
+        // (human male / orc / female / NPC), which the shared, rig-stripped icon cannot enumerate - e.g. Kliff_Mask
+        // binds three rig meshes here (`cd_phm_` / `cd_pom_` / `cd_phw_`) behind one `cd_phm_` icon. The engine also
+        // stores each entry's wearer body-class token array at entry+0x40 with its count at +0x48. The dump links every
+        // entry's mesh regardless of which body selects it, so it does not need those two.
         //
-        // The list offset and its count offset move when a patch reshapes the item descriptor, and they move ALONE:
-        // one past reshape pushed them forward while the neighboring rule list and variant-meta pointer stayed put,
-        // so the growth is local and no other field predicts it. The entry stride 0x58 and the per-entry mesh pointer
-        // at +0x10 do stay put across such a reshape.
+        // The list offset and its count offset move when a patch reshapes the item descriptor, and they move
+        // independently of the neighboring fields, so no other field predicts them. The entry stride 0x58 and the
+        // per-entry mesh pointer at +0x10 do stay put across such a reshape.
         //
         // A stale pair fails SILENTLY: the read returns a non-pointer or an absurd count, resolve_variant_meshes
         // returns empty, and every target reports "variant meshes [<none>] absent from this slot's catalog" while the
         // catalog itself looks healthy. That is why `resolve_variant_list_offset` below probes rather than trusting
         // the nominal value.
-        constexpr ptrdiff_t OFF_DESC_VARIANT_ENTRIES_NOMINAL = 0x418;
-        constexpr ptrdiff_t OFF_DESC_VARIANT_PROBE_LOW = 0x380;
-        constexpr ptrdiff_t OFF_DESC_VARIANT_PROBE_HIGH = 0x480;
+        //
+        // Keep the probe window inside one descriptor. The descriptors sit back to back in memory, so a window that
+        // runs past the descriptor size scores the NEIGHBOR's list, which has the same shape and resolves real
+        // meshes - for the wrong item. Measure the stride between consecutive iteminfo entries before widening it.
+        constexpr ptrdiff_t OFF_DESC_VARIANT_ENTRIES_NOMINAL = 0x230;
+        constexpr ptrdiff_t OFF_DESC_VARIANT_PROBE_LOW = 0x180;
+        constexpr ptrdiff_t OFF_DESC_VARIANT_PROBE_HIGH = 0x270;
         constexpr ptrdiff_t OFF_DESC_VARIANT_COUNT_DELTA = 0x08; // count sits immediately after the pointer
         constexpr ptrdiff_t VARIANT_ENTRY_STRIDE = 0x58;
         constexpr ptrdiff_t OFF_ENTRY_MESH = 0x10; // pointer into the variant table -> mesh handle
@@ -635,69 +628,6 @@ namespace Transmog
             return std::string(icon);
         }
 
-        // Strip a 3-character rig prefix (`cd_phm_` / `cd_phw_` / `cd_pom_` / `cd_nhm_` ...) so two rig variants of the
-        // same mesh compare equal. Returns the input unchanged when it is not in the `cd_???_` shape, so model-keyed
-        // prefabs (`cd_m0001_...`) keep their prefix and only collide with an exact twin.
-        std::string_view strip_rig_prefix(std::string_view s) noexcept
-        {
-            if (s.size() >= 7 && s[0] == 'c' && s[1] == 'd' && s[2] == '_' && s[6] == '_')
-                return s.substr(7);
-            return s;
-        }
-
-        // Resolve the item's primary body-mesh prefab from its rule chain. With a non-empty @p icon_stem, it returns
-        // the mesh whose rig-stripped name equals it - the same logical item in its actual wearer rig - which lets a
-        // rig variant link to cd_phw / cd_pom instead of the shared cd_phm icon. A sub-part mesh (e.g.
-        // `..._wire_0001_r`) has a different stem, so the walk drops it. For an ordinary item the matching mesh
-        // equals the icon prefab, so the result is identical and only a genuine rig variant changes.
-        //
-        // When @p icon_stem is empty - the item's icon string is missing or a bare `ItemIcon_` stub, so there is
-        // nothing to match against - fall back to the first asset-prefab mesh the rule chain names. The item still
-        // owns a real mesh there, so this links it to its prefab instead of an orphan row. It returns "" only when
-        // no usable mesh turns up, and the caller then keeps the icon-derived prefab.
-        //
-        // Not noexcept: it builds std::string values, so a bad_alloc must stay propagatable.
-        std::string
-        resolve_rule_body_mesh(uintptr_t desc, uintptr_t string_arr, uint32_t stringCount, std::string_view icon_stem)
-        {
-            if (!desc || !string_arr)
-                return {};
-            bool ok = false;
-            const uintptr_t rule_list = read_qword_safe(desc + OFF_DESC_RULE_LIST, ok);
-            const uint32_t rule_count = read_u32_safe(desc + OFF_DESC_RULE_COUNT, ok);
-            if (!rule_list || rule_count == 0 || rule_count > RULE_SCAN_CAP)
-                return {};
-            std::string first_body_mesh;
-            for (uint32_t r = 0; r < rule_count; ++r)
-            {
-                const uintptr_t rule = rule_list + static_cast<uintptr_t>(r) * RULE_STRIDE;
-                const uintptr_t mesh_arr = read_qword_safe(rule + OFF_RULE_MESH_ARR, ok);
-                const uint32_t mesh_count = read_u32_safe(rule + OFF_RULE_MESH_COUNT, ok);
-                if (!mesh_arr || mesh_count == 0 || mesh_count > RULE_SCAN_CAP)
-                    continue;
-                for (uint32_t m = 0; m < mesh_count; ++m)
-                {
-                    const uint16_t mslot = read_u16_safe(mesh_arr + static_cast<uintptr_t>(m) * 2, ok);
-                    if (!ok || mslot == 0xFFFF || mslot >= stringCount)
-                        continue;
-                    const uintptr_t wrap = read_qword_safe(string_arr + static_cast<uintptr_t>(mslot) * 8, ok);
-                    std::string mesh = to_lower(read_wrapper_string(wrap));
-                    if (mesh.empty())
-                        continue;
-                    if (!icon_stem.empty())
-                    {
-                        if (strip_rig_prefix(mesh) == icon_stem)
-                            return mesh;
-                    }
-                    else if (first_body_mesh.empty() && starts_with_asset_prefix(mesh))
-                    {
-                        first_body_mesh = std::move(mesh);
-                    }
-                }
-            }
-            return first_body_mesh;
-        }
-
         // per-item record collected from iteminfo/stringinfo
 
         // A garbage byte fragment the "cd_"-prefix pool walk picks up: a body-rig prefix (cd_phm_ / cd_pom_ / ... which
@@ -956,21 +886,12 @@ namespace Transmog
         // here rather than let it terminate the process.
         try
         {
-            // Authoritative per-body variant list. Empty for a single-rig item -> fall back to the rule-chain primary
-            // body mesh so the result is non-empty for any item that owns a real mesh.
-            std::vector<std::string> meshes = resolve_variant_meshes(
+            return resolve_variant_meshes(
                 desc,
                 string_arr,
                 stringCount,
                 cached_variant_list_offset(item_arr, itemCount, stringCount)
             );
-            if (meshes.empty())
-            {
-                std::string primary = resolve_rule_body_mesh(desc, string_arr, stringCount, std::string_view{});
-                if (!primary.empty())
-                    meshes.push_back(std::move(primary));
-            }
-            return meshes;
         }
         catch (...)
         {
@@ -1176,9 +1097,6 @@ namespace Transmog
             {
                 icon_prefab = icon_prefab.substr(short_prefix.size());
             }
-            // Prefer the item's actual rig mesh over the icon-derived prefab. The icon is shared across rig variants,
-            // so the rule chain is the only place the real cd_phw / cd_pom mesh appears. For an ordinary item the rule
-            // mesh equals the icon prefab and this is a no-op.
             // The variant entry list is the authoritative source of every mesh the item uses across bodies. Resolve
             // it once and reuse it for the primary-prefab recovery below and for the per-body-variant linkage.
             std::vector<std::string> variant_meshes = resolve_variant_meshes(
@@ -1188,14 +1106,8 @@ namespace Transmog
                 cached_variant_list_offset(item_arr, itemCount, stringCount)
             );
 
-            std::string body_mesh =
-                resolve_rule_body_mesh(desc, string_arr, stringCount, strip_rig_prefix(icon_prefab));
             std::string resolved_prefab;
-            if (!body_mesh.empty())
-            {
-                resolved_prefab = std::move(body_mesh);
-            }
-            else if (is_prefab_icon)
+            if (is_prefab_icon)
             {
                 resolved_prefab = std::string(icon_prefab); // the `_Prefab_` icon already names the real mesh
             }
@@ -1203,12 +1115,12 @@ namespace Transmog
             {
                 // The icon is not a mesh, so the stripped icon_prefab is a bogus item name and the item drops out as
                 // UI-only even though a mesh exists. Recover it from the variant entry list - held / non-body items
-                // (a lantern) keep their mesh in an untoken default entry there even when the rule chain is empty.
-                // Fall back to the icon name only when the item has no variant mesh.
+                // (a lantern) keep their mesh in an untoken default entry there. Fall back to the icon name only when
+                // the item has no variant mesh.
                 resolved_prefab = variant_meshes.empty() ? std::string(icon_prefab) : variant_meshes.front();
             }
             // Prefer the LIVE partprefab wrapper name. For helm variants the engine instantiates `<mesh>_dd`. The bare
-            // `<mesh>` has no live wrapper, so the icon/rule-derived name never matches the swap/carrier path. Rewrite
+            // `<mesh>` has no live wrapper, so the icon-derived name never matches the swap/carrier path. Rewrite
             // to `_dd` only when the bare form is NOT itself a live wrapper but its `_dd` twin IS, so ordinary items
             // (whose bare name is the live wrapper) stay untouched. See the carrier_defaults.hpp Oongka-helm note.
             if (live_wrapper_set.count(resolved_prefab) == 0 && live_wrapper_set.count(resolved_prefab + "_dd") != 0)
