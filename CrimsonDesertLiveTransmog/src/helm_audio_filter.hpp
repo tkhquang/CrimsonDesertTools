@@ -94,7 +94,7 @@
  *   - Consumer layer (the audio-state publisher / Wwise SetState): attempts here mute the world bus, because muffle
  *     state is tightly coupled with RTPC voice attenuation plus Switch routing. The audio reader code also lives in
  *     obfuscated `.tls` space, so static RE is impractical.
- *   - iteminfo desc+0x100 source mutation: a persistent data change that affects NPC inventories, save serialization,
+ *   - iteminfo skill-vector source mutation: a persistent data change that affects NPC inventories, save serialization,
  *     and network sync. Out of scope for a per-actor mod.
  */
 

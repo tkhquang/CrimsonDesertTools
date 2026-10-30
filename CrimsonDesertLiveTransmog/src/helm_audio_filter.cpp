@@ -37,12 +37,18 @@ namespace Transmog::helm_audio_filter
                                                           char,
                                                           std::int64_t);
 
-        // Engine's u16-tag -> skill record resolver. It reads a3 as `*(u16*)a3` and indexes the SkillInfoManager entry
-        // array at manager+0x58, then returns the record pointer. An out-of-range or unbound tag yields the manager's
-        // default record instead. The returned record carries the per-level entry table at +0x18 and a level-count
-        // vector at +0xF8. The entry-array displacement tracks the pa::StaticInfoManager2 layout and moves whenever
-        // that base changes width, so verify it against live memory on patch day.
-        using SkillTagResolverFn = std::int64_t (*)(std::uint16_t *);
+        // Engine's u16-tag -> skill record resolver. It takes the tag by value in edx (the registrar loads it with
+        // `movzx edx, word [a3]`, and rcx is never read) and indexes the SkillInfoManager entry array at manager+0x58,
+        // then returns the record pointer. An out-of-range or unbound tag yields the manager's default record
+        // instead. The returned record carries the per-level entry table at SKILL_RECORD_LEVEL_TABLE_OFFSET. The
+        // entry-array displacement tracks the pa::StaticInfoManager2 layout and moves whenever that base changes
+        // width, so verify it against live memory on patch day.
+        using SkillTagResolverFn = std::int64_t (*)(std::int64_t, std::uint32_t);
+
+        // Skill record -> per-level entry table. The registrar reads the same field right after its own resolver
+        // call (`mov rdx,[rax+disp8]`). A stale value here fails silently: no record's chain reaches the
+        // GameAudioEffectBuffData vtable, so every helm passes through unmuffled.
+        constexpr std::ptrdiff_t SKILL_RECORD_LEVEL_TABLE_OFFSET = 0x38;
 
         PassiveSkillRegistrarFn g_trampoline = nullptr;
         // Bound lazily on the first registrar invocation (see ensure_skill_tag_resolver). Atomic because arbitrary
@@ -269,8 +275,8 @@ namespace Transmog::helm_audio_filter
         // the entry's vtable, and returns true iff the entry's class is `pa::GameAudioEffectBuffData`.
         //
         // Chain:
-        //   record       = skill_tag_resolver(a3)             // engine resolver
-        //   level_table  = *(record + 0x18)                   // per-level table
+        //   record       = skill_tag_resolver(0, *a3)         // engine resolver
+        //   level_table  = *(record + SKILL_RECORD_LEVEL_TABLE_OFFSET)
         //   inner_arr    = *(level_table + 0x00)              // first inner ptr
         //   first_entry  = *(inner_arr + 0x00)                // level 1 entry #1
         //   vtable       = *(first_entry + 0x00)              // class vtable
@@ -298,10 +304,11 @@ namespace Transmog::helm_audio_filter
             // iteminfo refresh can publish a stale pointer mid-equip. The trampoline detour is reached from arbitrary
             // equip threads. Our own SEH frame around the call is cheaper than a proof of the engine's invariants, and
             // a fault here then passes through to the registrar instead of a crash.
+            // The tag read sits inside the same frame, since a3 is the pointer a torn refresh can leave stale.
             std::int64_t record = 0;
             __try
             {
-                record = resolver(a3);
+                record = resolver(0, *a3);
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
@@ -310,11 +317,16 @@ namespace Transmog::helm_audio_filter
             if (!DMK::memory::is_plausible_ptr(DMK::Address{static_cast<std::uintptr_t>(record)}))
                 return false;
 
-            // record +0x18 -> +0x0 -> +0x0 -> +0x0 dereferences the per-level table, first inner ptr, level-1
-            // entry, then the entry's class vtable. walk screens each intermediate link against its plausibility
-            // floor and stops on the first implausible one; the final offset is added but not dereferenced, so the
-            // terminal vtable value is the read below.
-            static constexpr DMK::memory::ChainStep record_to_vtable[] = {{0x18}, {0x0}, {0x0}, {0x0}};
+            // record +SKILL_RECORD_LEVEL_TABLE_OFFSET -> +0x0 -> +0x0 -> +0x0 dereferences the per-level table, first
+            // inner ptr, level-1 entry, then the entry's class vtable. walk screens each intermediate link against its
+            // plausibility floor and stops on the first implausible one. The final offset is added but not
+            // dereferenced, so the terminal vtable value is the read below.
+            static constexpr DMK::memory::ChainStep record_to_vtable[] = {
+                {SKILL_RECORD_LEVEL_TABLE_OFFSET},
+                {0x0},
+                {0x0},
+                {0x0},
+            };
             const auto vtable_slot =
                 DMK::memory::walk(DMK::Address{static_cast<std::uintptr_t>(record)}, record_to_vtable);
             const auto vtable =
@@ -771,13 +783,13 @@ namespace Transmog::helm_audio_filter
         // Resolves the engine's u16-tag -> SkillInfo record resolver in a way meant to survive game updates rather than
         // pinning it to one build's addresses.
         //
-        // The engine emits a family of byte-identical pa::*InfoManager index resolvers from one shared template. They
-        // differ ONLY in the RIP-relative disp32 that names their manager-pointer global. A signature that bakes that
-        // disp32 only matches the build it was captured from, because the linker recomputes that displacement on
-        // every rebuild.
+        // The engine emits a family of pa::*InfoManager index resolvers from one shared template. Their tag capture,
+        // manager load and bound check differ ONLY in the RIP-relative disp32 that names their manager-pointer global.
+        // A signature that bakes that disp32 only matches the build it was captured from, because the linker
+        // recomputes that displacement on every rebuild.
         //
         // This path instead signs ONLY the opcode/ModRM body shape (every movable operand wildcarded: the manager
-        // disp32 and both forward-jump rel32s), then disambiguates the structurally identical hits at runtime by the
+        // disp32 and the forward-jump rel32), then disambiguates the structurally identical hits at runtime by the
         // MSVC RTTI class name of the manager each resolver references. The class name is a source-level identity that
         // tends to outlive recompiles and address reshuffles, so this keeps working when the function or its manager
         // global moves. The SkillInfo resolver is the lowest-address member of the family, so the sweep usually returns
@@ -789,9 +801,9 @@ namespace Transmog::helm_audio_filter
             // The two signature inputs - the resolver's opcode body shape (every movable operand wildcarded) and the
             // target manager's decorated RTTI name - live in aob_resolver.hpp (SKILL_TAG_RESOLVER_BODY_AOB /
             // SKILL_INFO_MANAGER_RTTI_NAME), next to the other candidate cascades, so all of this mod's signatures stay
-            // in one place. This target has no fallback cascade: the RTTI pick is the only path. The body anchors at
-            // function entry+0x12, and the offsets used below to read the manager disp32 and walk back to the entry are
-            // named there too.
+            // in one place. This target has no fallback cascade: the RTTI pick is the only path. The offsets used below
+            // to read the manager disp32 are named there too. The entry comes from the exception table, because the
+            // body's distance from it differs between members of the family.
             // The pattern is compiled at build time (Pattern::literal is consteval), so there is no parse step to
             // fail here.
             const auto range = DMK::Region::host();
@@ -820,7 +832,7 @@ namespace Transmog::helm_audio_filter
                 ++scanned;
                 const auto match = reinterpret_cast<std::uintptr_t>(hit);
 
-                // mov rbx,[rip+disp32]: the 3-byte movzx, then 48 8B 1D + disp32. disp32 sits at body offset
+                // mov rbx,[rip+disp32]: the 2-byte tag move, then 48 8B 1D + disp32. disp32 sits at body offset
                 // +DispOffset. The mov ends at +InstrEnd, which is the RIP base for it. resolve_rip_relative adds
                 // the base and the displacement exactly the same way, reads the disp32 under the fault guard, and
                 // rejects an implausible target before it reaches the host-image screen below.
@@ -839,8 +851,13 @@ namespace Transmog::helm_audio_filter
                         const auto vtbl = DMK::memory::read<std::uintptr_t>(DMK::Address{mgr_obj}).value_or(0);
                         if (DMK::rtti::vtable_is_type(DMK::Address{vtbl}, ::Transmog::SKILL_INFO_MANAGER_RTTI_NAME))
                         {
-                            const auto entry = match - ::Transmog::SKILL_TAG_RESOLVER_ENTRY_BACKOFF;
-                            if (DMK::scan::is_likely_function_prologue(DMK::Address{entry}))
+                            DWORD64 image_base = 0;
+                            const RUNTIME_FUNCTION *unwind =
+                                RtlLookupFunctionEntry(static_cast<DWORD64>(match), &image_base, nullptr);
+                            const std::uintptr_t entry =
+                                unwind ? static_cast<std::uintptr_t>(image_base + unwind->BeginAddress) : 0;
+                            if (entry != 0 && entry < match &&
+                                DMK::scan::is_likely_function_prologue(DMK::Address{entry}))
                             {
                                 log.info(
                                     "[helm-audio] skill-tag resolver resolved via RTTI '{}' at 0x{:X} "

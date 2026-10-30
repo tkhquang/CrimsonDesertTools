@@ -143,8 +143,7 @@ namespace CDCore::anchors
      * @brief MapLookup: the IndexedStringA global-table lookup routine.
      * @details Not hooked. Its address anchors the `mov rax, [rip+disp32]` at +20 that points at the IndexedStringA
      *          global. Both mods walk that global to build their CD_-prefixed part-name tables.
-     * @note A 2-tier ladder that resolves the function entry. The third authored tier cannot live in this ladder:
-     *         see @ref MAP_LOOKUP_CALL_SITE_CANDIDATES.
+     * @note A 2-tier ladder that resolves the function entry.
      */
     inline const Candidate MAP_LOOKUP_CANDIDATES[] = {
 
@@ -190,35 +189,6 @@ namespace CDCore::anchors
     };
 
     /**
-     * @brief MapLookup deep fallback: the unique CALLER whose `E8 rel32` reaches the map primitive.
-     * @details This map primitive is a templated instantiation and the linker emits more than one copy, so no row
-     *          inside the function body can be unique. The way out for a cloned function is to anchor a caller that
-     *          IS unique and follow its `E8 rel32` to the callee.
-     *
-     *          A relative CALL is a branch, not a RIP-relative memory operand, so the RipRelative candidate tier
-     *          rejects it: that tier decode-verifies a RIP memory operand at the match. The row therefore resolves
-     *          the call instruction itself, and the caller follows the displacement with
-     *          scan::resolve_rip_relative(call, 1, 5).
-     * @note A 1-row ladder that resolves the address of the `E8` instruction.
-     */
-    inline const Candidate MAP_LOOKUP_CALL_SITE_CANDIDATES[] = {
-
-        // The caller is identified by its argument setup: a module global, `+0x28` to the owner, then the large
-        // `+0x10778` walk to the map. That displacement is the distinctive part and stays literal. The `|` marker puts
-        // the resolved address on the `E8` itself so the caller can follow its rel32.
-        //
-        // 48 8B 05 ?? ?? ?? ??   mov rax, [rip+d32]
-        // 48 8B 48 28            mov rcx, [rax+0x28]
-        // 48 8B 89 78 07 01 00   mov rcx, [rcx+0x10778]
-        // E8 ?? ?? ?? ??         call <rel32>   <- result offset
-        // 4C 8B E8               mov r13, rax
-        Candidate::direct(
-            "MapLookup_P3_CallerArgSetup",
-            Pattern::literal("48 8B 05 ?? ?? ?? ?? 48 8B 48 28 48 8B 89 78 07 01 00 | E8 ?? ?? ?? ?? 4C 8B E8")
-        ),
-    };
-
-    /**
      * @brief PartAddShow: the PartInOut direct-show bypass.
      * @details Both mods hook this function to suppress stale real-part frames that flash through during state
      *          transitions (glide exit, landings, effect spawns) where the game bypasses the PartInOutSocket vis=2
@@ -249,33 +219,35 @@ namespace CDCore::anchors
         // is a part-hash filter and does not read those fields, so such a move needs an AOB update only, not a code
         // change.
         //
-        // The register-save set (`push rbx / rdi / r15`, five bytes) and the register the show-list array base lands in
-        // are both compiler-owned and move together. P2's walk-back is measured against that push run, so it has to be
-        // re-measured whenever the run changes length.
+        // The third callee-saved register is compiler-owned: it is the register the part-hash pointer parks in (r12
+        // or r15), so its push and the parking move change together. The push keeps its `41 5?` opcode nibble. The
+        // parking move `mov r1x, r8` keeps REX.WRB and the opcode and wildcards its ModRM, because the destination
+        // lives in the ModRM reg field (r12 = `E0`, r15 = `F8`) and no single nibble token spans both values. P2's
+        // walk-back is measured against the push run, so re-measure it whenever the run changes length.
         //
         // 40 53                  push rbx
         // 57                     push rdi
-        // 41 57                  push r15
+        // 41 5?                  push r12
         // 48 83 EC ??            sub rsp, imm8
         // 48 8B 59 ??            mov rbx, [rcx+d8]
-        // 4D 8B F8               mov r15, r8
+        // 4D 8B ??               mov r12, r8
         // 44 8B 89 ?? ?? ?? ??   mov r9d, [rcx+d32]
         // 48 8B F9               mov rdi, rcx
         Candidate::direct(
             "PartAddShow_P1_FullPrologue",
-            Pattern::literal("40 53 57 41 57 48 83 EC ?? 48 8B 59 ?? 4D 8B F8 44 8B 89 ?? ?? ?? ?? 48 8B F9")
+            Pattern::literal("40 53 57 41 5? 48 83 EC ?? 48 8B 59 ?? 4D 8B ?? 44 8B 89 ?? ?? ?? ?? 48 8B F9")
         ),
 
-        // P2 - post-prologue anchor (sub rsp / mov rbx,[rcx+X] / mov r15,r8 / mov r9d,[rcx+disp32]). Offset -5 backs
+        // P2 - post-prologue anchor (sub rsp / mov rbx,[rcx+X] / mov r1x,r8 / mov r9d,[rcx+disp32]). Offset -5 backs
         // up to function start.
         //
         // 48 83 EC ??            sub rsp, imm8
         // 48 8B 59 ??            mov rbx, [rcx+d8]
-        // 4D 8B F8               mov r15, r8
+        // 4D 8B ??               mov r12, r8
         // 44 8B 89 ?? ?? ?? ??   mov r9d, [rcx+d32]
         Candidate::direct(
             "PartAddShow_P2_PostPrologue",
-            Pattern::literal("48 83 EC ?? 48 8B 59 ?? 4D 8B F8 44 8B 89 ?? ?? ?? ??"),
+            Pattern::literal("48 83 EC ?? 48 8B 59 ?? 4D 8B ?? 44 8B 89 ?? ?? ?? ??"),
             -5
         ),
 
@@ -314,7 +286,7 @@ namespace CDCore::anchors
      *                int16_t slot_id,      // DX   equipment slot
      *                int16_t item_id,      // R8W  new item (0xFFFF = removing)
      *                __int64 itemData)    // R9   item data pointer
-     * @note A 4-tier ladder that resolves the function entry.
+     * @note A 3-tier ladder that resolves the function entry.
      */
     inline const Candidate VISUAL_EQUIP_CHANGE_CANDIDATES[] = {
 
@@ -365,26 +337,10 @@ namespace CDCore::anchors
             -0x10
         ),
 
-        // P3 - post-alloca register shuffle (sub rsp,rax; mov rsi,r9; movzx ebx,r8w; movzx edi,dx; mov r14,rcx) plus
-        // the deeper `lea rcx, [rbp+disp32]` and `E8` call. Stack disp32 wildcarded per section 2. Offset -0x2A backs
-        // up to function start.
-        //
-        // 48 2B E0               sub rsp, rax
-        // 49 8B F1               mov rsi, r9
-        // 41 0F B7 D8            movzx ebx, r8w
-        // 0F B7 FA               movzx edi, dx
-        // 4C 8B F1               mov r14, rcx
-        // 48 8D 8D ?? ?? ?? ??   lea rcx, [rbp+d32]
-        // E8                     call <rel32>
-        Candidate::direct(
-            "VisualEquipChange_P3_PostAlloca",
-            Pattern::literal("48 2B E0 49 8B F1 41 0F B7 D8 0F B7 FA 4C 8B F1 48 8D 8D ?? ?? ?? ?? E8"),
-            -0x2A
-        ),
-
-        // P4 - deepest fallback: the same post-alloca shuffle without the leading `sub rsp,rax`, anchored 3 bytes
-        // deeper (mov rsi,r9). Stack disp32 in the `lea rcx,[rbp+disp32]` wildcarded. Offset -0x2D backs up to
-        // function start.
+        // P3 - the post-alloca register shuffle (mov rsi,r9; movzx ebx,r8w; movzx edi,dx; mov r14,rcx) and the
+        // `lea rcx,[rbp+disp32]` behind it. It starts past the `sub rsp,rax` that ends P2 and stops before the next
+        // call, so it shares no failure mode with the chkstk sequence. The stack disp32 is wildcarded. Offset -0x2D
+        // backs up to function start.
         //
         // 49 8B F1               mov rsi, r9
         // 41 0F B7 D8            movzx ebx, r8w
@@ -392,7 +348,7 @@ namespace CDCore::anchors
         // 4C 8B F1               mov r14, rcx
         // 48 8D 8D ?? ?? ?? ??   lea rcx, [rbp+d32]
         Candidate::direct(
-            "VisualEquipChange_P4_PreLeaBody",
+            "VisualEquipChange_P3_PreLeaBody",
             Pattern::literal("49 8B F1 41 0F B7 D8 0F B7 FA 4C 8B F1 48 8D 8D ?? ?? ?? ??"),
             -0x2D
         ),

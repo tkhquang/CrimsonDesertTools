@@ -75,9 +75,9 @@ namespace Transmog
     // Check the triple against a live component rather than against the disassembly alone: a correct base reads a
     // populated (basePtr, count, cap), while a stale one reads 0/0/0 and surfaces as `post-apply live_count=0` on
     // every apply.
-    constexpr std::ptrdiff_t COMP_SLOT_CACHE_BASE_PTR_OFFSET = 0x1F8;
-    constexpr std::ptrdiff_t COMP_SLOT_CACHE_COUNT_OFFSET = 0x200;
-    constexpr std::ptrdiff_t COMP_SLOT_CACHE_CAP_OFFSET = 0x204;
+    constexpr std::ptrdiff_t COMP_SLOT_CACHE_BASE_PTR_OFFSET = 0x208;
+    constexpr std::ptrdiff_t COMP_SLOT_CACHE_COUNT_OFFSET = 0x210;
+    constexpr std::ptrdiff_t COMP_SLOT_CACHE_CAP_OFFSET = 0x214;
 
     // Geometry of one dispatch-cache entry. SlotPopulator appends these at the base pointer above: the slot's native
     // id, the queued blob array, then the blob count. The count is append-only and the engine never resets it, so
@@ -511,7 +511,9 @@ namespace Transmog
         *reinterpret_cast<uint32_t *>(itemData + 8) = 0xFFFFFFFF;
         *reinterpret_cast<uint16_t *>(itemData + 12) = slot_sel;
 
-        // Build empty swap entry.
+        // Build empty swap entry. InitSwapEntry writes fields out to +0xC8, and that extent grows across builds, so
+        // the buffer keeps headroom past the current struct. Re-check the highest field it writes on patch day: an
+        // entry that outgrows this buffer overruns the stack.
         alignas(16) uint8_t swap_entry[256]{};
         init_entry(reinterpret_cast<__int64>(swap_entry));
 

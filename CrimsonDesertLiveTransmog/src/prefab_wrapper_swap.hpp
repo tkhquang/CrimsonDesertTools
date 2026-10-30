@@ -45,9 +45,10 @@
 // of a name carries the same hash, so the engine can hand over any pool instance and the lookup still resolves. The
 // catalog and the engine draw from different pools, which is what pointer keying can never bridge.
 //
-// The wrapper for each StringInfo entry lives at `*(QWORD*)(entry + 0x18)`. AnchorId::StringInfoRegistry resolves the
-// registry the walk starts from. Wrapper layout: `+0x00` string ptr, `+0x08` length, `+0x0C` name hash, `+0x10`
-// refcount.
+// The wrapper for each StringInfo entry lives at `*(QWORD*)(entry + 0x10)`, and the entry carries the name hash at
+// `+0x08`. AnchorId::StringInfoRegistry resolves the registry the walk starts from. Wrapper layout: `+0x00` string
+// ptr, `+0x08` length, `+0x0C` name hash (0xFFFFFFFF when the engine left it unset, which falls back to hashing the
+// name), `+0x10` refcount.
 //
 // Refcount handling: the `Target` wrapper is `_InterlockedIncrement`'d before substitution, so the destination's
 // eventual destruction-time decrement stays balanced. The `Source` wrapper keeps its leftover +1 from the pre-copy

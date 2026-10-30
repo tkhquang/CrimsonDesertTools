@@ -145,18 +145,38 @@ namespace CDCore
         // A view is never null, so the old null guard is gone and an empty prefix matches every entry.
         const std::string_view prefix = cfg.prefix;
 
+        // With an unprefixed-alias filter, every entry has to be copied out so the filter can see it, so the read
+        // drops its prefix gate and the prefix test moves into the loop.
+        const bool alias_unprefixed = cfg.accept_unprefixed != nullptr && !prefix.empty();
+        const std::string_view read_prefix = alias_unprefixed ? std::string_view{} : prefix;
+
         const auto scan_start = std::chrono::steady_clock::now();
         std::uint32_t entries = 0;
+        std::uint32_t aliased = 0;
         char buf[MAX_STRING_LEN + 1];
+        std::string alias_key;
 
         for (std::uint32_t hash = cfg.table_scan_min; hash <= cfg.table_scan_max; ++hash)
         {
-            const auto len = read_table_entry(table_array, hash, prefix, buf, sizeof(buf));
+            const auto len = read_table_entry(table_array, hash, read_prefix, buf, sizeof(buf));
             if (len == 0 || len >= MAX_STRING_LEN)
                 continue;
 
-            name_to_hash[std::string(buf, len)] = hash;
-            ++entries;
+            const std::string_view name{buf, len};
+            if (name.starts_with(prefix))
+            {
+                name_to_hash[std::string(name)] = hash;
+                ++entries;
+                continue;
+            }
+
+            alias_key.assign(prefix);
+            alias_key.append(name);
+            if (cfg.accept_unprefixed(alias_key) && name_to_hash.try_emplace(alias_key, hash).second)
+            {
+                ++entries;
+                ++aliased;
+            }
         }
 
         const auto scan_end = std::chrono::steady_clock::now();
@@ -179,10 +199,11 @@ namespace CDCore
             // does not flood the INFO stream. Call sites that want a one-shot INFO line emit their own at init-time
             // decision points.
             logger.trace(
-                "{}: {} entries for prefix '{}' in range 0x{:X}..0x{:X} in {}ms",
+                "{}: {} entries for prefix '{}' ({} interned without it) in range 0x{:X}..0x{:X} in {}ms",
                 cfg.log_label,
                 entries,
                 prefix,
+                aliased,
                 cfg.table_scan_min,
                 cfg.table_scan_max,
                 ms

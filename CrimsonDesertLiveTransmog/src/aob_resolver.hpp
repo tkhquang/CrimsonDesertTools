@@ -47,53 +47,56 @@ namespace Transmog
      * @note Prefer losing the cascade to matching the wrong function.
      */
     inline const Candidate SAFE_TEAR_DOWN_CANDIDATES[] = {
-        // P1 - full prologue through the word-argument extract. The row wildcards both frame immediates. rdi
-        // SPILLS here rather than pushes, so the register-save run is five pushes and the spill block is three.
+        // P1 - full prologue through the component chain walk, entry-anchored. The two leading spills are pinned. A
+        // bounded gap spans whatever spills and pushes follow them, because the compiler moves registers between the
+        // spill block and the push run from build to build. The word-argument extract and the this-capture
+        // wildcard their register bits, and the chain walk carries the identity. The row wildcards both frame
+        // immediates.
 
         // 48 89 5C 24 10            mov [rsp+0x10], rbx
         // 48 89 74 24 18            mov [rsp+0x18], rsi
-        // 48 89 7C 24 20            mov [rsp+0x20], rdi
-        // 55                        push rbp
-        // 41 54                     push r12
-        // 41 55                     push r13
-        // 41 56                     push r14
-        // 41 57                     push r15
+        // [8-24]                    remaining spills and pushes (push rbp / rdi / r12 / r14 / r15)
         // 48 8D AC 24 ?? ?? ?? ??   lea rbp, [rsp-d32]
         // 48 81 EC ?? ?? ?? ??      sub rsp, imm32
-        // 41 0F B7 F8               movzx edi, r8w
+        // 4? 0F B7 ?0               movzx r14d, r8w
+        // 4? 8B ?1                  mov rsi, rcx
+        // 48 8B 41 08               mov rax, [rcx+0x8]
+        // 48 8B 58 68               mov rbx, [rax+0x68]
+        // 4C 8B ?? 40               mov r15, [rbx+0x40]
+        // 4D 85                     test r15, r15 (truncated)
         Candidate::direct(
             "SafeTearDown_P1_FullPrologue",
             Pattern::literal(
-                "48 89 5C 24 10 48 89 74 24 18 48 89 7C 24 20 55 41 54 41 55 41 56 41 57 48 8D AC 24 ?? ?? ?? ?? "
-                "48 81 EC ?? ?? ?? ?? 41 0F B7 F8"
+                "48 89 5C 24 10 48 89 74 24 18 [8-24] 48 8D AC 24 ?? ?? ?? ?? 48 81 EC ?? ?? ?? ?? 4? 0F B7 ?0 "
+                "4? 8B ?1 48 8B 41 08 48 8B 58 68 4C 8B ?? 40 4D 85"
             )
         ),
 
         // P2 - post-alloca anchor, extended through the component chain walk so it cannot match a function that
-        // merely shares the stack-alloc and the word-argument extract. anchors at function start + 0x20 (three
-        // 5-byte spills, five pushes, an 8-byte frame lea and a 7-byte sub rsp).
+        // merely shares the stack-alloc and the word-argument extract. anchors at function start + 0x1A (two 5-byte
+        // spills, five pushes, an 8-byte frame lea).
 
         // 48 81 EC ?? ?? ?? ??   sub rsp, imm32
-        // 41 0F B7 F8            movzx edi, r8w
-        // ?? 8B F1               mov r14, rcx
+        // 4? 0F B7 ?0            movzx r14d, r8w
+        // 4? 8B ?1               mov rsi, rcx
         // 48 8B 41 08            mov rax, [rcx+0x8]
         // 48 8B 58 68            mov rbx, [rax+0x68]
         Candidate::direct(
             "SafeTearDown_P2_PostAlloca",
-            Pattern::literal("48 81 EC ?? ?? ?? ?? 41 0F B7 F8 ?? 8B F1 48 8B 41 08 48 8B 58 68"),
-            -0x20
+            Pattern::literal("48 81 EC ?? ?? ?? ?? 4? 0F B7 ?0 4? 8B ?1 48 8B 41 08 48 8B 58 68"),
+            -0x1a
         ),
 
         // P3 - the chain walk alone, past the whole prologue: capture the this-pointer, load the component at
         // [this+0x08], take its sub-object at +0x68, take that object's list head at +0x40, and reject an empty list.
-        // Every displacement is a game-struct field, so this row survives any prologue reshuffle. anchors at function
-        // start + 0x2B.
+        // Every displacement is a game-struct field, so the pattern survives any prologue reshuffle, but the
+        // walk-back does not: it anchors at function start + 0x25.
         //
         // The two moves are loosened differently. The first wildcards only its REX prefix, so it still pins the
         // destination's low three bits. The second wildcards its whole ModRM and is destination-agnostic. Tighten or
         // loosen either one deliberately - they are not equivalent.
 
-        // ?? 8B F1      mov r14, rcx
+        // ?? 8B F1      mov rsi, rcx
         // 48 8B 41 08   mov rax, [rcx+0x8]
         // 48 8B 58 68   mov rbx, [rax+0x68]
         // 4C 8B ?? 40   mov reg, [reg+0x40]
@@ -101,7 +104,7 @@ namespace Transmog
         Candidate::direct(
             "SafeTearDown_P3_ComponentChainWalk",
             Pattern::literal("?? 8B F1 48 8B 41 08 48 8B 58 68 4C 8B ?? 40 4D 85"),
-            -0x2b
+            -0x25
         ),
     };
 
@@ -121,80 +124,65 @@ namespace Transmog
      *          two cascades onto one function drift apart and only one of them gets re-anchored on patch day.
      */
     inline const Candidate SUB_TRANSLATOR_CANDIDATES[] = {
-        // The second scratch-buffer lea flips encodings across builds: rsp-relative 5-byte (`48 8D 4C 24 ??`,
-        // lea rcx,[rsp+X]) against rbp-relative 4-byte (`48 8D 4D ??`, lea rcx,[rbp-Y]). Everything else in the entry
-        // block is stable in shape. P1 to P3 pin the current encoding for a precise match, and P4 anchors entirely
-        // past that lea so one more flip cannot take the whole cascade down. If this cascade breaks, look at that
-        // ModRM byte first.
+        // Both scratch-buffer leas change encoding with the frame shape. The first (`lea rdx`, the address of the
+        // homed item id) is rbp-relative (`48 8D 55 ??`) under an rbp frame and rax-relative (`48 8D 50 ??`) under the
+        // `mov rax,rsp` frame. Both forms are 4 bytes, so P2 wildcards its ModRM and displacement. The second (`lea
+        // rcx`) is rsp-relative (`48 8D 4C 24 ??`, 5 bytes) or rbp-relative (`48 8D 4D ??`, 4 bytes), so P2 and P3 keep
+        // its `4?` ModRM nibble and span the SIB and displacement with a `[1-2]` gap. P1 pins the current encoding for
+        // a precise match. If this cascade breaks, look at those ModRM bytes first.
 
-        // P1 - full prologue through the scratch-buffer preparation. The row wildcards the frame and stack-alloc
-        // sizes.
+        // P1 - full prologue through the scratch-buffer preparation. The row wildcards the stack-alloc size.
 
-        // 48 89 5C 24 08         mov [rsp+0x8], rbx
-        // 66 89 54 24 10         mov [rsp+0x10], dx
-        // 55                     push rbp
-        // 56                     push rsi
+        // 48 8B C4               mov rax, rsp
+        // 48 89 58 08            mov [rax+0x8], rbx
+        // 48 89 70 18            mov [rax+0x18], rsi
+        // 66 89 50 10            mov [rax+0x10], dx
         // 57                     push rdi
-        // 48 8D 6C 24 ??         lea rbp, [rsp-d8]
         // 48 81 EC ?? ?? ?? ??   sub rsp, imm32
         // 48 8B F9               mov rdi, rcx
         // 41 B8 01 00 00 00      mov r8d, 0x1
-        // 48 8D 55 ??            lea rdx, [rbp+d8]
+        // 48 8D 50 10            lea rdx, [rax+0x10]
         // 48 8D 4C 24 ??         lea rcx, [rsp+d8]
         Candidate::direct(
             "SubTranslator_P1_FullPrologue",
             Pattern::literal(
-                "48 89 5C 24 08 66 89 54 24 10 55 56 57 48 8D 6C 24 ?? 48 81 EC ?? ?? ?? ?? 48 8B F9 41 B8 01 00 00 00 "
-                "48 8D 55 ?? 48 8D 4C 24 ??"
+                "48 8B C4 48 89 58 08 48 89 70 18 66 89 50 10 57 48 81 EC ?? ?? ?? ?? 48 8B F9 41 B8 01 00 00 00 "
+                "48 8D 50 10 48 8D 4C 24 ??"
             )
         ),
 
-        // P2 - post-alloca anchor. Same body shape as P1 without the head sentinels. The anchor sits at function
-        // start + 0x19, so the walk-back is -0x19.
+        // P2 - post-alloca anchor. Same body shape as P1 without the prologue, with both leas loosened as described
+        // above. The anchor sits at function start + 0x17, so the walk-back is -0x17.
 
         // 48 8B F9            mov rdi, rcx
         // 41 B8 01 00 00 00   mov r8d, 0x1
-        // 48 8D 55 ??         lea rdx, [rbp+d8]
-        // 48 8D 4C 24 ??      lea rcx, [rsp+d8]
+        // 48 8D ?? ??         lea rdx, [rax+d8]
+        // 48 8D 4?            lea rcx, [rsp+d8] (ModRM)
+        // [1-2]               its SIB and displacement
         // E8                  call <rel32>
         Candidate::direct(
             "SubTranslator_P2_PostAlloca",
-            Pattern::literal("48 8B F9 41 B8 01 00 00 00 48 8D 55 ?? 48 8D 4C 24 ?? E8"),
-            -0x19
+            Pattern::literal("48 8B F9 41 B8 01 00 00 00 48 8D ?? ?? 48 8D 4? [1-2] E8"),
+            -0x17
         ),
 
-        // P3 - deeper anchor: the argument-count load and lea pair, then the post-call tail. anchors at function
-        // start + 0x1C, so the walk-back is -0x1C.
-
-        // 41 B8 01 00 00 00   mov r8d, 0x1
-        // 48 8D 55 ??         lea rdx, [rbp+d8]
-        // 48 8D 4C 24 ??      lea rcx, [rsp+d8]
-        // E8 ?? ?? ?? ??      call <rel32>
-        // 90                  nop
-        // 48 8B D0            mov rdx, rax
-        // 48 8B CF            mov rcx, rdi
-        // E8                  call <rel32>
-        Candidate::direct(
-            "SubTranslator_P3_ScratchBufPrep",
-            Pattern::literal("41 B8 01 00 00 00 48 8D 55 ?? 48 8D 4C 24 ?? E8 ?? ?? ?? ?? 90 48 8B D0 48 8B CF E8"),
-            -0x1c
-        ),
-
-        // P4 - post-call tail. This row sits fully past the scratch-buffer preparation block, so it survives another
-        // flip of the lea addressing mode. Shape: the two chained calls, the `movzx ebx,ax` result capture, and the
-        // `cmp bx,0xFFFF` sentinel test. anchors at function start + 0x31, so the walk-back is -0x31.
+        // P3 - post-call tail, past the scratch-buffer preparation block and both of its leas. Shape: the two chained
+        // calls, the `movzx ebx,ax` result capture, and the `cmp bx,0xFFFF` sentinel test. The scratch-buffer lea
+        // between the calls takes the same `4? [1-2]` loosening as P2. anchors at function start + 0x2F, so the
+        // walk-back is -0x2F.
 
         // 48 8B D0         mov rdx, rax
         // 48 8B CF         mov rcx, rdi
         // E8 ?? ?? ?? ??   call <rel32>
         // 0F B7 D8         movzx ebx, ax
-        // 48 8D 4C 24 ??   lea rcx, [rsp+d8]
+        // 48 8D 4?         lea rcx, [rsp+d8] (ModRM)
+        // [1-2]            its SIB and displacement
         // E8 ?? ?? ?? ??   call <rel32>
         // 66 83 FB FF      cmp bx, -0x1
         Candidate::direct(
-            "SubTranslator_P4_PostCallTail",
-            Pattern::literal("48 8B D0 48 8B CF E8 ?? ?? ?? ?? 0F B7 D8 48 8D 4C 24 ?? E8 ?? ?? ?? ?? 66 83 FB FF"),
-            -0x31
+            "SubTranslator_P3_PostCallTail",
+            Pattern::literal("48 8B D0 48 8B CF E8 ?? ?? ?? ?? 0F B7 D8 48 8D 4? [1-2] E8 ?? ?? ?? ?? 66 83 FB FF"),
+            -0x2f
         ),
     };
 
@@ -213,68 +201,64 @@ namespace Transmog
      */
     inline const Candidate INIT_SWAP_ENTRY_CANDIDATES[] = {
         // Entry layout, with the byte lengths that produce each walk-back:
-        //     +0x00  48 89 5C 24 18 / 48 89 4C 24 08   two arg-home spills
-        //     +0x0A  55 56 57 41 56 41 57               five pushes
-        //     +0x11  48 83 EC 20
-        //     +0x15  48 8B D9                           mov rbx,rcx
-        //     +0x18  48 C7 01 FF FF FF FF               <- P2 anchors here, so -0x18
-        //     +0x1F  41 BF FF FF 00 00                  mov r15d,0FFFFh
-        //     +0x25  66 44 89 79 08                     mov [rcx+8],r15w
-        //     +0x2A  45 33 F6 / 4C 89 71 18
-        //     +0x31  4C 89 71 20                        <- P3 anchors here, so -0x31
+        //     +0x00  48 89 4C 24 08                     arg-home spill
+        //     +0x05  53                                 push rbx
+        //     +0x06  48 83 EC 20
+        //     +0x0A  48 8B D9                           mov rbx,rcx
+        //     +0x0D  48 C7 01 FF FF FF FF               <- P2 anchors here, so -0x0D
+        //     +0x14  B9 FF FF 00 00                     mov ecx,0FFFFh
+        //     +0x19  66 89 4B 08                        <- P3 anchors here, so -0x19
+        //     +0x1D  33 D2 / the zero stores through +0x58
+        //
+        // The function immediately after this one in the image is a sibling constructor that runs the same sentinel
+        // stores with a caller-supplied slot word (`movzx eax,word [rdx]`) in place of the 0xFFFF constant. Every row
+        // here keeps the constant load or the store of it, which is what tells the two apart.
 
-        // P1 - true prologue through the first two sentinel writes. P1 and P2 both pin the register the engine
-        // parks the 0xFFFF constant in, so a reallocation of it costs both rows. P3 holds no register at
-        // all and is the row that survives that.
+        // P1 - true prologue through the first two sentinel writes. P1 and P2 both pin the 0xFFFF constant load, so
+        // a different encoding of it costs both rows. P3 holds no register at all and is the row that survives that.
 
-        // 48 89 5C 24 18         mov [rsp+0x18], rbx
         // 48 89 4C 24 08         mov [rsp+0x8], rcx
-        // 55                     push rbp
-        // 56                     push rsi
-        // 57                     push rdi
-        // 41 56                  push r14
-        // 41 57                  push r15
+        // 53                     push rbx
         // 48 83 EC 20            sub rsp, 0x20
         // 48 8B D9               mov rbx, rcx
         // 48 C7 01 FF FF FF FF   mov qword [rcx], -1
-        // 41 BF FF FF 00 00      mov r15d, 0xFFFF
-        // 66 44 89 79 08         mov [rcx+0x8], r15w
+        // B9 FF FF 00 00         mov ecx, 0xFFFF
+        // 66 89 4B 08            mov [rbx+0x8], cx
         Candidate::direct(
             "InitSwapEntry_P1_FullPrologue",
-            Pattern::literal(
-                "48 89 5C 24 18 48 89 4C 24 08 55 56 57 41 56 41 57 48 83 EC 20 48 8B D9 48 C7 01 FF FF FF FF "
-                "41 BF FF FF 00 00 66 44 89 79 08"
-            )
+            Pattern::literal("48 89 4C 24 08 53 48 83 EC 20 48 8B D9 48 C7 01 FF FF FF FF B9 FF FF 00 00 66 89 4B 08")
         ),
 
-        // P2 - init-body anchor with no prologue head: mov qword [rcx],-1 / mov r15d,0xFFFF / mov [rcx+8],r15w.
-        // anchors at function start + 0x18. Survives a prologue reshuffle that leaves the sentinel writes intact.
+        // P2 - init-body anchor with no prologue head: mov qword [rcx],-1 / mov reg,0xFFFF / mov [base+8],reg16 /
+        // xor edx,edx. anchors at function start + 0x0D. Survives a prologue reshuffle that leaves the sentinel writes
+        // intact. The constant load's register nibble is wildcarded, so a legacy-register reallocation keeps it.
 
         // 48 C7 01 FF FF FF FF   mov qword [rcx], -1
-        // 41 BF FF FF 00 00      mov r15d, 0xFFFF
-        // 66 44 89 79 08         mov [rcx+0x8], r15w
+        // B? FF FF 00 00         mov ecx, 0xFFFF
+        // 66 89 ?? 08            mov [rbx+0x8], cx
+        // 33 D2                  xor edx, edx
         Candidate::direct(
             "InitSwapEntry_P2_SentinelBody",
-            Pattern::literal("48 C7 01 FF FF FF FF 41 BF FF FF 00 00 66 44 89 79 08"),
-            -0x18
+            Pattern::literal("48 C7 01 FF FF FF FF B? FF FF 00 00 66 89 ?? 08 33 D2"),
+            -0x0d
         ),
 
-        // P3 - second half of the sentinel run, past both the prologue and the first sentinel writes. Shape: the
-        // zero store at +0x20, the lea of the inline sub-object at +0x28, its own zero and -1 stores, then the u16
-        // zero at +0x40. Every DISPLACEMENT here is a struct field offset or a fixed sentinel. The only
-        // compiler-owned part is the register selection, and it is a different register from the one P1 and P2
-        // depend on, so the three rows do not fail together. anchors at function start + 0x31.
+        // P3 - the 0xFFFF store and the sentinel run behind it, past both the prologue and the constant load. Shape:
+        // the u16 store at +0x08, the zeroing xor, the zero stores at +0x18 / +0x20 / +0x28, and the -1 store at
+        // +0x30. Every DISPLACEMENT here is a struct field offset or a fixed sentinel and every register is
+        // wildcarded. The sibling constructor's run breaks this window with an extra store at +0x10. anchors at
+        // function start + 0x19.
 
-        // 4C 89 71 20               mov [rcx+0x20], r14
-        // 48 8D 79 28               lea rdi, [rcx+0x28]
-        // 4C 89 37                  mov [rdi], r14
-        // 48 C7 47 08 FF FF FF FF   mov qword [rdi+0x8], -1
-        // 4C 89 77 10               mov [rdi+0x10], r14
-        // 66 44 89 71 40            mov [rcx+0x40], r14w
+        // 66 89 ?? 08               mov [rbx+0x8], cx
+        // 33 ??                     xor edx, edx
+        // 48 89 ?? 18               mov [rbx+0x18], rdx
+        // 48 89 ?? 20               mov [rbx+0x20], rdx
+        // 48 89 ?? 28               mov [rbx+0x28], rdx
+        // 48 C7 ?? 30 FF FF FF FF   mov qword [rbx+0x30], -1
         Candidate::direct(
             "InitSwapEntry_P3_SentinelRunTail",
-            Pattern::literal("4C 89 71 20 48 8D 79 28 4C 89 37 48 C7 47 08 FF FF FF FF 4C 89 77 10 66 44 89 71 40"),
-            -0x31
+            Pattern::literal("66 89 ?? 08 33 ?? 48 89 ?? 18 48 89 ?? 20 48 89 ?? 28 48 C7 ?? 30 FF FF FF FF"),
+            -0x19
         ),
     };
 
@@ -668,20 +652,21 @@ namespace Transmog
         ),
 
         // P3 - a third ctor sharing P2's allocator lead-in but a different tail: the vtable store is followed by a
-        // `mov byte [rdi+0x10],1` flag write and a `mov [rdi+0x18],rbp` back-reference. That tail is what separates
-        // it from P2; the two rows are in different functions.
+        // `mov byte [obj+0x10],1` flag write and a `mov [obj+0x18],reg` back-reference. That tail is what separates
+        // it from P2, and the two rows are in different functions. The object's base register and the two stored
+        // registers are compiler-owned and wildcarded. The field displacements and the flag value carry the shape.
 
         // 48 8B 08               mov rcx, [rax]
         // FF 15 ?? ?? ?? ??      call qword [rip+d32]
         // EB 07                  jmp +0x7
         // 4C 8D ?? ?? ?? ?? ??   lea reg, [rip+d32]   <- result offset
-        // 4C 89 77 08            mov [rdi+0x8], r14
-        // C6 47 10 01            mov byte [rdi+0x10], 0x1
-        // 48 89 6F 18            mov [rdi+0x18], rbp
+        // 4C 89 ?? 08            mov [rsi+0x8], r14
+        // C6 ?? 10 01            mov byte [rsi+0x10], 0x1
+        // 4? 89 ?? 18            mov [rsi+0x18], r12
         Candidate::rip_relative(
             "StringInfoVtable_P3_FlaggedCtor",
             Pattern::literal(
-                "48 8B 08 FF 15 ?? ?? ?? ?? EB 07 | 4C 8D ?? ?? ?? ?? ?? 4C 89 77 08 C6 47 10 01 48 89 6F 18"
+                "48 8B 08 FF 15 ?? ?? ?? ?? EB 07 | 4C 8D ?? ?? ?? ?? ?? 4C 89 ?? 08 C6 ?? 10 01 4? 89 ?? 18"
             ),
             3,
             7
@@ -740,21 +725,6 @@ namespace Transmog
         Candidate::rip_relative(
             "LoaderRegistry_P1_AddD0CallSite",
             Pattern::literal("48 8B 0D ?? ?? ?? ?? 48 81 C1 D0 00 00 00 48 8B ?? E8 ?? ?? ?? ?? 48 85 C0 0F 85"),
-            3,
-            7
-        ),
-
-        // P1B - an independent site that does not touch the add-0xD0 window at all, so it cannot inherit P1's decoy
-        // ambiguity. Loads the registry into rbx, spills a frame pointer, then dispatches through the registry's own
-        // `+0xDC` member. Do not go looking for a four-argument call variant with a three-lea argument setup here;
-        // that shape does not exist in the image.
-
-        // 48 8B 1D ?? ?? ?? ??   mov rbx, [rip+d32]
-        // 48 89 7D E7            mov [rbp-0x19], rdi
-        // FF 83 DC 00 00 00      inc [rbx+0xDC]
-        Candidate::rip_relative(
-            "LoaderRegistry_P1B_MemberDispatchSite",
-            Pattern::literal("48 8B 1D ?? ?? ?? ?? 48 89 7D E7 FF 83 DC 00 00 00"),
             3,
             7
         ),
@@ -820,9 +790,13 @@ namespace Transmog
         // is exactly what register allocation drifts - one changed byte there is enough to retire every row that
         // pins it. The `48 2B E0` chkstk adjustment ahead of the shuffle and the `41 83 78 08 00` argument test
         // behind it are what carry the match.
+        //
+        // The fourth argument is a bool, and its home store flips between a qword `mov [rsp+0x20],r9` (`4C 89`) and a
+        // byte `mov [rsp+0x20],r9b` (`44 88`) across builds. Both rows nibble-wildcard those two bytes and pin the
+        // `4C 24 20` ModRM/SIB/disp tail they share.
 
         // 48 89 5C 24 10            mov [rsp+0x10], rbx
-        // 4C 89 4C 24 20            mov [rsp+0x20], r9
+        // 4? 8? 4C 24 20            mov [rsp+0x20], r9b
         // 4C 89 44 24 18            mov [rsp+0x18], r8
         // 48 89 4C 24 08            mov [rsp+0x8], rcx
         // 55                        push rbp
@@ -843,7 +817,7 @@ namespace Transmog
         Candidate::direct(
             "NaturalPipeline_P1_FullPrologueChkstk",
             Pattern::literal(
-                "48 89 5C 24 10 4C 89 4C 24 20 4C 89 44 24 18 48 89 4C 24 08 55 56 57 41 54 41 55 41 56 41 57 "
+                "48 89 5C 24 10 4? 8? 4C 24 20 4C 89 44 24 18 48 89 4C 24 08 55 56 57 41 54 41 55 41 56 41 57 "
                 "48 8D AC 24 ?? ?? FF FF B8 ?? ?? 00 00 E8 ?? ?? ?? ?? 48 2B E0 4D 8B E8 ?? 8B ?? ?? 8B ?? 41 83 78"
             )
         ),
@@ -851,7 +825,7 @@ namespace Transmog
         // P2 - post-arg-spill prologue. anchors past the first arg-home store onto the (wildcarded) lea rbp + chkstk
         // pair and the body shuffle. Walk-back -5 = past `48 89 5C 24 10` to start.
 
-        // 4C 89 4C 24 20            mov [rsp+0x20], r9
+        // 4? 8? 4C 24 20            mov [rsp+0x20], r9b
         // 4C 89 44 24 18            mov [rsp+0x18], r8
         // 48 89 4C 24 08            mov [rsp+0x8], rcx
         // 55                        push rbp
@@ -872,7 +846,7 @@ namespace Transmog
         Candidate::direct(
             "NaturalPipeline_P2_PostArgSpill",
             Pattern::literal(
-                "4C 89 4C 24 20 4C 89 44 24 18 48 89 4C 24 08 55 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 ?? ?? FF FF "
+                "4? 8? 4C 24 20 4C 89 44 24 18 48 89 4C 24 08 55 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 ?? ?? FF FF "
                 "B8 ?? ?? 00 00 E8 ?? ?? ?? ?? 48 2B E0 4D 8B E8 ?? 8B ?? ?? 8B ?? 41 83 78"
             ),
             -5
@@ -1107,18 +1081,22 @@ namespace Transmog
         // lookup call the build opens with. It shares only the sentinel bytes with P2 and nothing at all with P1,
         // and it is downstream of the whole argument shuffle, so a register reallocation across that shuffle - the
         // part of this function that moves most readily - cannot take it down. The row wildcards both frame
-        // displacements and the call target. Walk back 0x56 to the function start.
+        // displacements and the call target. The early-out is a `[2-6]` gap because the compiler owns its width. The
+        // second spill uses an rsp-relative (`48 89 7C 24 ??`) or an rbp-relative (`48 89 7D ??`) slot, and the 3-byte
+        // argument move ahead of the call is `mov rcx,rdx` or `movzx edx,word [rdx]`, depending on the build. The
+        // spill keeps its `7?` ModRM nibble, and one `[4-5]` gap spans its SIB and displacement plus the argument
+        // move. Walk back 0x56 to the function start.
 
         // B8 FF FF 00 00      mov eax, 0xFFFF
         // 66 39 02            cmp [rdx], ax
-        // 0F 84 ?? ?? ?? ??   je <rel32>
+        // [2-6]               je <rel8 or rel32>
         // 48 89 7C 24 ??      mov [rsp+d8], rdi
-        // 48 89 7C 24 ??      mov [rsp+d8], rdi
-        // 48 8B CA            mov rcx, rdx
+        // 48 89 7?            mov [rbp-d8], rdi (ModRM)
+        // [4-5]               its displacement, then movzx edx, word [rdx]
         // E8                  call <rel32>
         Candidate::direct(
             "PartDescriptorBuild_P3_SentinelToNameLookup",
-            Pattern::literal("B8 FF FF 00 00 66 39 02 0F 84 ?? ?? ?? ?? 48 89 7C 24 ?? 48 89 7C 24 ?? 48 8B CA E8"),
+            Pattern::literal("B8 FF FF 00 00 66 39 02 [2-6] 48 89 7C 24 ?? 48 89 7? [4-5] E8"),
             -0x56
         ),
     };
@@ -1142,8 +1120,8 @@ namespace Transmog
      * keeps L and pp) and the REX byte of every GPR move (`4?` keeps the prefix class). The ModRM bytes stay, because
      * their rm fields name ABI-fixed sources (rcx for `this`, xmm1-xmm3 for the arguments).
      *
-     * @warning Every row carries the AVX register-capture triple (`vmovaps xmm9,xmm3 / xmm10,xmm2 / xmm6,xmm1`), the
-     *          `[rcx+0x60] -> +0x1080` walk, or the call site's argument loads. Those are this function's identity.
+     * @warning Every row carries the AVX register-capture triple (`vmovaps xmm9,xmm3 / xmm10,xmm2 / xmm6,xmm1`) or the
+     *          `[rcx+0x60] -> +0x1080` walk. Those are this function's identity.
      *          The capture triple alone is unique module-wide, and a row built from the prologue alone (mov rax,rsp;
      *          spills; pushes; lea rbp; sub rsp) matches dozens of large frame functions.
      * @warning This anchor gates a hook that RUNS ENGINE CALLS: a wrong match would execute the apply inside an
@@ -1212,29 +1190,11 @@ namespace Transmog
             )
         ),
 
-        // P3 - the main-loop call site, resolved through the call's rel32 with the `|` marker on the E8 (displacement
-        // at +1, five-byte instruction). It carries no prologue byte at all, so a rewritten prologue cannot retire
-        // it. The three `vmovss` loads pull the frame timings the step receives in xmm1-xmm3 from `[rcx+0x64..0x6C]`,
-        // and `[rsi+0x18]` is the step's `this`. A second loop body carries the same call with rdx and rbp as bases,
-        // so the rsi/rcx selectors stay pinned: they are what keeps the row at one match.
+        // No call-site row: a RipRelative candidate decode-verifies a RIP-relative MEMORY disp32, and the rel32 of an
+        // `E8` call is an immediate, so a row resolved through the call's target can never resolve. A caller-context
+        // route has to go through scan() plus resolve_rip_relative() at the call site instead.
 
-        // C5 FA 10 59 6C            vmovss xmm3, [rcx+0x6C]
-        // C5 FA 10 51 68            vmovss xmm2, [rcx+0x68]
-        // C5 FA 10 49 64            vmovss xmm1, [rcx+0x64]
-        // 48 8B 4E 18               mov rcx, [rsi+0x18]
-        // | E8 ?? ?? ?? ??          call <FrameUpdate>   <- result: the call target
-        // 48 8B 4E 38               mov rcx, [rsi+0x38]
-        // 33 D2                     xor edx, edx
-        Candidate::rip_relative(
-            "FrameUpdate_P3_MainLoopCallSite",
-            Pattern::literal(
-                "C5 FA 10 59 6C C5 FA 10 51 68 C5 FA 10 49 64 48 8B 4E 18 | E8 ?? ?? ?? ?? 48 8B 4E 38 33 D2"
-            ),
-            1,
-            5
-        ),
-
-        // P4 - first body block, past every prologue byte. The `[rcx+0x60] -> +0x1080` subsystem walk, the `mov edx,4`
+        // P3 - first body block, past every prologue byte. The `[rcx+0x60] -> +0x1080` subsystem walk, the `mov edx,4`
         // second call and the frame-counter `inc dword [rax]` are the function-defining behavior. Walk-back -0x52 to
         // the entry across the fixed-length prologue above. It is the last rung on purpose: a prologue that changes
         // LENGTH retires it through function_entry_site instead of hooking mid-instruction.
@@ -1249,7 +1209,7 @@ namespace Transmog
         // FF 00                     inc dword [rax]
         // 4? 8B 5E 60               mov rbx, [rsi+0x60]
         Candidate::direct(
-            "FrameUpdate_P4_UpdateStepBody",
+            "FrameUpdate_P3_UpdateStepBody",
             Pattern::literal(
                 "4? 8B 49 60 4? 8B 89 ?? ?? 00 00 E8 ?? ?? ?? ?? BA 04 00 00 00 4? 8B 4E ?? E8 ?? ?? ?? ?? "
                 "4? 8B 86 ?? ?? 00 00 FF 00 4? 8B 5E 60"
@@ -1370,18 +1330,20 @@ namespace Transmog
      * @brief Step-1 anchor inside SubTranslator (current encoding).
      *
      * Locates the scratch-buffer call inside SubTranslator. The second `lea` encodes rsp-relative (`48 8D 4C 24 ??`,
-     * 4 bytes) instead of the rbp-relative form (`48 8D 4D ??`, 3 bytes). The row wildcards the disp8 slots, so a
+     * 5 bytes) instead of the rbp-relative form (`48 8D 4D ??`, 4 bytes). The first `lea` (rdx, the homed item id) is
+     * rbp-relative (`48 8D 55 ??`) under an rbp frame and rax-relative (`48 8D 50 ??`) under a `mov rax,rsp` frame, so
+     * its ModRM keeps only the mod/reg nibble (`5?`) that both forms share. The row wildcards the disp8 slots, so a
      * stack-frame shift inside the same function does not require another anchor variant.
      *
-     * Used as the FIRST pattern in a 0x80-byte scan window. The anchor offset `|` lands on the byte immediately after
-     * the `E8` opcode, which is the start of the call's disp32.
+     * Used as the FIRST pattern in a 0x80-byte scan window. The anchor offset `|` lands on the `E8` opcode, so the
+     * match is the call instruction itself.
      */
     // 41 B8 01 00 00 00   mov r8d, 0x1
-    // 48 8D 55 ??         lea rdx, [rbp+d8]
+    // 48 8D 5? ??         lea rdx, [rax+d8]
     // 48 8D 4C 24 ??      lea rcx, [rsp+d8]
     // E8 ?? ?? ?? ??      call <rel32>   <- result offset
     inline constexpr Pattern NAMETABLE_SUB_TX_RSP_LEA_ANCHOR =
-        Pattern::literal("41 B8 01 00 00 00 48 8D 55 ?? 48 8D 4C 24 ?? | E8 ?? ?? ?? ??");
+        Pattern::literal("41 B8 01 00 00 00 48 8D 5? ?? 48 8D 4C 24 ?? | E8 ?? ?? ?? ??");
 
     /**
      * @brief Step-1 anchor inside SubTranslator, for the rbp-relative second `lea`.
@@ -1389,21 +1351,25 @@ namespace Transmog
      * The scan tries it after the rsp-relative anchor, inside the same 0x80-byte window.
      */
     // 41 B8 01 00 00 00   mov r8d, 0x1
-    // 48 8D 55 ??         lea rdx, [rbp-d8]
+    // 48 8D 5? ??         lea rdx, [rbp-d8]
     // 48 8D 4D ??         lea rcx, [rbp-d8]
     // E8 ?? ?? ?? ??      call <rel32>   <- result offset
     inline constexpr Pattern NAMETABLE_SUB_TX_RBP_LEA_ANCHOR =
-        Pattern::literal("41 B8 01 00 00 00 48 8D 55 ?? 48 8D 4D ?? | E8 ?? ?? ?? ??");
+        Pattern::literal("41 B8 01 00 00 00 48 8D 5? ?? 48 8D 4D ?? | E8 ?? ?? ?? ??");
 
     /**
      * @brief Step-3 anchor inside ItemAccessor.
      *
      * Locates the `mov rbx, [rip+disp32]` that loads the iteminfo global inside the 4th hop of the name-table chain.
-     * The 6-byte prologue-tail anchor (push r14 + sub rsp,imm8 + movzx edi,word ptr [rcx]) pins the call site inside a
-     * bounded 0x40-byte scan of the function. Global uniqueness is not required because the scan is locally bounded.
+     * The prologue-tail anchor (push r14 + sub rsp,imm8 + the tag capture) pins the call site inside a bounded
+     * 0x40-byte scan of the function. Global uniqueness is not required because the scan is locally bounded.
      *
-     * The anchor offset `|` lands on the start of the `48 8B 1D disp32` instruction. The consumer reads the disp32
-     * with `read_i32_safe` at `match + 3` for RIP-relative resolution to the iteminfo global.
+     * The tag capture is a `[2-3]` gap. ItemAccessor is a member of the pa::*InfoManager resolver family (see
+     * SKILL_TAG_RESOLVER_BODY_AOB), and depending on the build that family takes the tag through a pointer
+     * (`movzx edi,word [rcx]`, 3 bytes) or by value (`mov edi,edx`, 2 bytes).
+     *
+     * The anchor offset `|` lands on the start of the `48 8B 1D disp32` instruction. The consumer resolves the disp32
+     * at `match + 3` for RIP-relative resolution to the iteminfo global.
      *
      * The row wildcards the stack-alloc imm8, because the frame size changes across builds. A row that pins that imm8
      * makes resolve_chain() fail at Step 3 with "[nametable] mov-rbx anchor not found" even when SubTranslator
@@ -1412,10 +1378,10 @@ namespace Transmog
      */
     // 41 56                  push r14
     // 48 83 EC ??            sub rsp, imm8
-    // 0F B7 39               movzx edi, word [rcx]
+    // [2-3]                  mov edi, edx
     // 48 8B 1D ?? ?? ?? ??   mov rbx, [rip+d32]   <- result offset
     inline constexpr Pattern NAMETABLE_ITEM_ACCESSOR_ANCHOR =
-        Pattern::literal("41 56 48 83 EC ?? 0F B7 39 | 48 8B 1D ?? ?? ?? ??");
+        Pattern::literal("41 56 48 83 EC ?? [2-3] | 48 8B 1D ?? ?? ?? ??");
 
     // dye_record_inject function targets.
     //
@@ -1442,36 +1408,30 @@ namespace Transmog
      * vector at src+120 into dst+120 through the DyeCopy primitive. dye_record_inject installs an inline detour here to
      * append 16 fabricated dye records post-trampoline (see `dye_copier_inline_detour` in dye_record_inject.cpp).
      *
-     * The prologue spills rbx to its home slot, homes two register arguments, saves five callee-saved registers
-     * (rsi/rdi/r12/r14/r15), then runs the field-by-field copy through the first 0x60 bytes of the iteminfo struct.
-     * No RIP-relative bytes inside the chosen anchor windows - wildcards are not needed for addressing.
+     * The prologue spills rbx to its home slot, homes register arguments, saves the callee-saved registers the body
+     * needs, then runs the field-by-field copy through the first 0x60 bytes of the iteminfo struct. No RIP-relative
+     * bytes inside the chosen anchor windows - wildcards are not needed for addressing.
      *
      * Entry layout, with the byte lengths that produce the walk-backs:
      *     +0x00  48 89 5C 24 18                     mov [rsp+18],rbx
-     *     +0x05  two 5-byte arg-home spills         (wildcarded, see P1)
-     *     +0x0F  56 57 41 54 41 56 41 57            five pushes
-     *     +0x17  48 83 EC 20
-     *     +0x1B  48 8B F2 ...                       <- P2 anchors here, so -0x1B
-     *     +0x4F  C5 F8 10 42 28 ...                 <- P3 anchors here, so -0x4F
+     *     +0x05  48 89 4C 24 08                     arg-home spill
+     *     +0x0A  55 56 57 41 54 41 55 41 56 41 57   seven pushes
+     *     +0x15  48 83 EC 20
+     *     +0x19  48 8B F2 ...                       <- P2 anchors here, so -0x19
+     *     +0x4D  C5 F8 10 42 28 ...                 <- P3 anchors here, so -0x4D
      */
     inline const Candidate DYE_COPIER_CANDIDATES[] = {
         // P1 - full prologue + first three field copies. The `48 8B F2 4C 8B F1` (mov rsi,rdx ; mov r14,rcx)
         // arg-shuffle followed by the qword/word/word field copies through [rdx+0..0xA] is unique to this
         // iteminfo-copy function. One match module-wide.
         //
-        // The ten bytes between the rbx spill and the push run are two arg-home spills. They are compiler-owned and
-        // drift, so the row wildcards them rather than pins them. The field-copy chain at the end makes the row
-        // unique. Their LENGTH is load-bearing even though their content is not - it is what puts the push run at
-        // +0x0F and both walk-backs below where they are.
+        // Between the rbx spill and the frame allocation sit the arg-home spills and the push run. Both are
+        // compiler-owned, and the compiler trades an arg-home spill for extra pushes between builds. One bounded gap
+        // spans the whole run, so its length can move without retiring the row. The field-copy chain at the end makes
+        // the row unique.
 
         // 48 89 5C 24 18   mov [rsp+0x18], rbx
-        // ?? ?? ?? ?? ??   spill, 5 wildcarded bytes
-        // ?? ?? ?? ?? ??   spill, 5 wildcarded bytes
-        // 56               push rsi
-        // 57               push rdi
-        // 41 54            push r12
-        // 41 56            push r14
-        // 41 57            push r15
+        // [13-22]          arg-home spills and the push run
         // 48 83 EC 20      sub rsp, 0x20
         // 48 8B F2         mov rsi, rdx
         // 4C 8B F1         mov r14, rcx
@@ -1480,13 +1440,10 @@ namespace Transmog
         // 0F B7 42 08      movzx eax, word [rdx+0x8]
         Candidate::direct(
             "DyeCopier_P1_FullPrologue",
-            Pattern::literal(
-                "48 89 5C 24 18 ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? 56 57 41 54 41 56 41 57 48 83 EC 20 48 8B F2 4C 8B F1 "
-                "48 8B 02 48 89 01 0F B7 42 08"
-            )
+            Pattern::literal("48 89 5C 24 18 [13-22] 48 83 EC 20 48 8B F2 4C 8B F1 48 8B 02 48 89 01 0F B7 42 08")
         ),
 
-        // P2 - post-shuffle anchor on the field-copy chain. Walk-back -0x1B to function start. Survives a future
+        // P2 - post-shuffle anchor on the field-copy chain. Walk-back -0x19 to function start. Survives a future
         // build that drops or reorders the early callee-save pushes, because the field-copy shape is the
         // function-defining behavior.
 
@@ -1506,13 +1463,13 @@ namespace Transmog
                 "48 8B F2 4C 8B F1 48 8B 02 48 89 01 0F B7 42 08 66 89 41 08 0F B7 42 0A 66 89 41 0A 48 8B 42 10 "
                 "48 89 41 10"
             ),
-            -0x1b
+            -0x19
         ),
 
         // P3 - mid-body AVX xmm copy. The `vmovups xmm0, [rdx+28h] ; vmovups [rcx+28h], xmm0` pair followed by the
         // `vmovsd` qword move and continued field copies is a unique SSE/AVX shape this function emits at offset
-        // +0x4F. Walk-back -0x4F to function start. anchors entirely past the prologue, so a prologue-shape shuffle
-        // does not sink P3.
+        // +0x4D. Walk-back -0x4D to function start. Its pattern lies entirely past the prologue, but its walk-back
+        // still spans it, so a prologue that changes length retires this row through function_entry_site.
 
         // C5 F8 10 42 28   vmovups xmm0, [rdx+0x28]
         // C5 F8 11 41 28   vmovups [rcx+0x28], xmm0
@@ -1528,7 +1485,7 @@ namespace Transmog
                 "C5 F8 10 42 28 C5 F8 11 41 28 C5 FB 10 4A 38 C5 FB 11 49 38 0F B7 42 40 66 89 41 40 48 8B 42 48 "
                 "48 89 41 48"
             ),
-            -0x4f
+            -0x4d
         ),
     };
 
@@ -1660,17 +1617,18 @@ namespace Transmog
      * pa::ClientFrameEventChange{,Global}MaterialParameter. The cascade below resolves the target by AOB, so no
      * absolute address is recorded here.
      *
-     * The prologue homes two register arguments, saves eight callee-saved registers (rbp, rbx, rsi, rdi, r12-r15),
-     * then frames with `lea rbp,[rsp-disp8]; sub rsp, imm32`. Both frame immediates are compiler-owned and are
-     * wildcarded in every row below. What identifies the function is the arg-home stores, the eight-push saved-reg
-     * run, and the arg-reload quad (r12<-r9, rdi<-r8, r13<-rdx, r15<-rcx).
+     * The prologue homes the first register argument, saves eight callee-saved registers (rbp, rbx, rsi, rdi,
+     * r12-r15), then frames with `lea rbp,[rsp-disp8]; sub rsp, imm32`. Both frame immediates are compiler-owned and
+     * are wildcarded in every row below. What identifies the function is the eight-push saved-reg run and the
+     * arg-reload quad (r14<-r9, r12<-r8, r13<-rdx, r15<-rcx). Two parts of that shape are compiler-owned and differ
+     * between builds: an optional r8 home store ahead of the rcx one, and the callee-saved registers r8 and r9 park
+     * in.
      */
     inline const Candidate COLOR_PUBLISHER_CANDIDATES[] = {
         // P1 - full prologue through the arg-reload quad. The row wildcards both frame immediates, because the
         // frame size and the lea displacement shift whenever a patch adds or removes locals. The quad itself
         // identifies the function, and the row pins it. One match module-wide.
 
-        // 4C 89 44 24 18         mov [rsp+0x18], r8
         // 48 89 4C 24 08         mov [rsp+0x8], rcx
         // 55                     push rbp
         // 53                     push rbx
@@ -1682,60 +1640,71 @@ namespace Transmog
         // 41 57                  push r15
         // 48 8D 6C 24 ??         lea rbp, [rsp-d8]
         // 48 81 EC ?? ?? ?? ??   sub rsp, imm32
-        // 4D 8B E1               mov r12, r9
-        // 49 8B F8               mov rdi, r8
+        // 4D 8B F1               mov r14, r9
+        // 4D 8B E0               mov r12, r8
         // 4C 8B EA               mov r13, rdx
         // 4C 8B F9               mov r15, rcx
         Candidate::direct(
             "ColorPublisher_P1_FullPrologue",
             Pattern::literal(
-                "4C 89 44 24 18 48 89 4C 24 08 55 53 56 57 41 54 41 55 41 56 41 57 48 8D 6C 24 ?? 48 81 EC ?? ?? ?? ?? "
-                "4D 8B E1 49 8B F8 4C 8B EA 4C 8B F9"
+                "48 89 4C 24 08 55 53 56 57 41 54 41 55 41 56 41 57 48 8D 6C 24 ?? 48 81 EC ?? ?? ?? ?? "
+                "4D 8B F1 4D 8B E0 4C 8B EA 4C 8B F9"
             )
         ),
 
-        // P2 - post-saves frame anchor. Picks up at the `lea rbp,[rsp-disp8]; sub rsp, imm32` pair followed by the
-        // arg-reload quad, and runs on into the zeroed stack slot after it so the window is not just the quad.
-        // Walk-back -0x16 (10 bytes of arg homes, 12 of pushes) to function start.
+        // P2 - from the push run through the arg-reload quad and the zeroing that follows it. The two r9 / r8
+        // parking moves keep only their source nibble (`?1` = from r9, `?0` = from r8), so a rotation of the
+        // destination register does not retire the row. Walk-back -0x05 (the rcx home store) to function start.
 
+        // 55                     push rbp
+        // 53                     push rbx
+        // 56                     push rsi
+        // 57                     push rdi
+        // 41 54                  push r12
+        // 41 55                  push r13
+        // 41 56                  push r14
+        // 41 57                  push r15
         // 48 8D 6C 24 ??         lea rbp, [rsp-d8]
         // 48 81 EC ?? ?? ?? ??   sub rsp, imm32
-        // 4D 8B E1               mov r12, r9
-        // 49 8B F8               mov rdi, r8
+        // 4D 8B ?1               mov r14, r9
+        // 4D 8B ?0               mov r12, r8
         // 4C 8B EA               mov r13, rdx
         // 4C 8B F9               mov r15, rcx
-        // 33 C9                  xor ecx, ecx
-        // 89 4C 24               mov [rsp+d8], ecx (truncated)
+        // 33 F6                  xor esi, esi
         Candidate::direct(
-            "ColorPublisher_P2_PostSavesFrame",
-            Pattern::literal("48 8D 6C 24 ?? 48 81 EC ?? ?? ?? ?? 4D 8B E1 49 8B F8 4C 8B EA 4C 8B F9 33 C9 89 4C 24"),
-            -0x16
+            "ColorPublisher_P2_PushRunToArgReload",
+            Pattern::literal(
+                "55 53 56 57 41 54 41 55 41 56 41 57 48 8D 6C 24 ?? 48 81 EC ?? ?? ?? ?? 4D 8B ?1 4D 8B ?0 4C 8B EA "
+                "4C 8B F9 33 F6"
+            ),
+            -0x05
         ),
 
         // P3 - mid-body host-context load, entirely past the prologue and branch-free:
         //   mov rax,[rip+global]        ; the world/host singleton slot
         //   mov r10,[rax]
-        //   mov rsi,[r10+0x0004xxxx]    ; the sub-object this publisher runs against
-        //   mov [rbp-X],rsi ; mov [rbp+X],rcx ; lea rax,[rsp+X] ; mov [rbp+X],rax
-        // The row wildcards the RIP displacement and every frame slot. The load chain and the 0x0004xxxx sub-object
-        // displacement make the window unique. Walk-back -0x34 to function start.
+        //   mov reg,[r10+0x0004xxxx]    ; the sub-object this publisher runs against
+        //   mov [rbp-X],reg ; mov [rbp+X],rsi ; lea rax,[rsp+X] ; mov [rbp+X],rax
+        // The row wildcards the RIP displacement, the sub-object's destination register and every frame slot. The
+        // load chain and the 0x0004xxxx sub-object displacement make the window unique. Walk-back -0x2F to function
+        // start.
         //
         // Do not try to anchor this row on the permutations-token canary XOR (`xor r10b,al ; and r10b,1 ; or al,2`).
         // That bit-twiddle does not exist in the image. The host-context load is what this function reliably emits.
 
         // 48 8B 05 ?? ?? ?? ??   mov rax, [rip+d32]
         // 4C 8B 10               mov r10, [rax]
-        // 49 8B B2 ?? ?? 04 00   mov rsi, [r10+d32]
-        // 48 89 75 ??            mov [rbp-d8], rsi
-        // 48 89 4D ??            mov [rbp+d8], rcx
+        // 49 8B ?? ?? ?? 04 00   mov rax, [r10+d32]
+        // 48 89 ?? ??            mov [rbp-d8], rax
+        // 48 89 75 ??            mov [rbp+d8], rsi
         // 48 8D 44 24 ??         lea rax, [rsp+d8]
         // 48 89 45 ??            mov [rbp+d8], rax
         Candidate::direct(
             "ColorPublisher_P3_HostContextLoad",
             Pattern::literal(
-                "48 8B 05 ?? ?? ?? ?? 4C 8B 10 49 8B B2 ?? ?? 04 00 48 89 75 ?? 48 89 4D ?? 48 8D 44 24 ?? 48 89 45 ??"
+                "48 8B 05 ?? ?? ?? ?? 4C 8B 10 49 8B ?? ?? ?? 04 00 48 89 ?? ?? 48 89 75 ?? 48 8D 44 24 ?? 48 89 45 ??"
             ),
-            -0x34
+            -0x2f
         ),
     };
 
@@ -1745,25 +1714,25 @@ namespace Transmog
      *        owner container) for the player-vs-NPC election.
      *
      * The function is one of three byte-identical sibling thunks, so nothing inside the thunk can single it out. The
-     * only discriminator is the preceding function, which is why the single row below anchors on that function's
-     * tail epilogue plus the alignment padding and then walks FORWARD into the prologue.
+     * only discriminator is the preceding function, which is why both rows below anchor on that function's tail
+     * epilogue plus the alignment padding and then walk FORWARD into the prologue.
      *
      * THREE byte-identical clones of this thunk exist. They differ only in two `call rel32` displacements, and those
      * displacements resolve to the SAME two absolute targets, so the three functions are literally the same code
      * emitted three times. No window cut from the thunk body can ever tell them apart.
      *
-     * The clone this row selects is the one the vast majority of vtables reference, which maximizes what an
+     * The clone these rows select is the one the vast majority of vtables reference, which maximizes what an
      * observational mid-hook sees. Because the hook only reads RCX and never alters control flow, resolving to a
      * different clone is harmless, but it observes far fewer containers. Prefer the most-referenced one when
      * re-deriving.
      *
-     * @warning That leaves the preceding function as the only discriminator, so the row below crosses inter-function
-     *          padding, normally forbidden, and the reason this cascade is one row rather than three. The padding
-     *          bytes stay LITERAL for exactly that reason. If the linker rebalances them the row fails to match and
-     *          the RTTI witness takes over: HOST_SCOPE_VFUNC1_BIND_TYPE names a class whose vtable holds this thunk
-     *          at HOST_SCOPE_VFUNC1_SLOT, the registry resolves that vtable by mangled name, and
-     *          resolve_all_anchors() corroborates the row against the slot and adopts the slot when the row misses.
-     *          The row must never silently resolve to a neighboring function.
+     * @warning That leaves the preceding function as the only discriminator, so both rows cross inter-function
+     *          padding, which aob-signatures.md normally forbids. P1 keeps the padding LITERAL. P2 spans it with a
+     *          bounded gap, so a linker that rebalances the padding retires P1 only. If the preceding function's tail
+     *          changes, both rows miss and the RTTI witness takes over: HOST_SCOPE_VFUNC1_BIND_TYPE names a class
+     *          whose vtable holds this thunk at HOST_SCOPE_VFUNC1_SLOT, the registry resolves that vtable by mangled
+     *          name, and resolve_all_anchors() corroborates the ladder against the slot and adopts the slot when the
+     *          ladder misses. No row may silently resolve to a neighboring function.
      */
     inline const Candidate HOST_SCOPE_VFUNC1_CANDIDATES[] = {
         // P1 - preceding-function tail (a two-arm indirect-dispatch epilogue ending in `jmp rax`), then six bytes of
@@ -1796,6 +1765,30 @@ namespace Transmog
             Pattern::literal(
                 "48 8B 41 78 49 8B C8 48 FF E0 48 63 49 68 49 03 C8 48 FF E0 CC CC CC CC CC CC | 48 89 5C 24 08 "
                 "48 89 6C 24 10 56 57 41 56 48 83 EC 30 45 33 F6 49 8B F9"
+            )
+        ),
+
+        // P2 - the second dispatch arm of the same tail, the alignment padding as a `[0-15]` bounded gap, then the
+        // same thunk head. The gap admits any padding width a 16-byte function alignment can produce, and the `|`
+        // marker after it lands on the thunk entry whatever width the linker chose.
+
+        // 48 63 49 68      movsxd rcx, dword [rcx+0x68]
+        // 49 03 C8         add rcx, r8
+        // 48 FF E0         jmp rax
+        // [0-15]           int 3 alignment padding
+        // 48 89 5C 24 08   mov [rsp+0x8], rbx   <- result marker, the thunk entry
+        // 48 89 6C 24 10   mov [rsp+0x10], rbp
+        // 56               push rsi
+        // 57               push rdi
+        // 41 56            push r14
+        // 48 83 EC 30      sub rsp, 0x30
+        // 45 33 F6         xor r14d, r14d
+        // 49 8B F9         mov rdi, r9
+        Candidate::direct(
+            "HostScopeVfunc1_P2_PrevTailGapStart",
+            Pattern::literal(
+                "48 63 49 68 49 03 C8 48 FF E0 [0-15] | 48 89 5C 24 08 48 89 6C 24 10 56 57 41 56 48 83 EC 30 45 33 F6 "
+                "49 8B F9"
             )
         ),
     };
@@ -2104,11 +2097,12 @@ namespace Transmog
             -0x24
         ),
 
-        // P3 - deep-body cap-init magic-write anchor. Walks back -0x123 from the matched site to reach the function
+        // P3 - deep-body cap-init magic-write anchor. Walks back -0x128 from the matched site to reach the function
         // start. After the once-only `lock cmpxchg` init guard succeeds, the function writes the four-constant
         // fingerprint below. That fingerprint survives wholesale prologue rewrites (e.g., a future patch swapping the
         // fastcall ABI for a different register save list) because the constants are dictated by the interner's
-        // data-structure contract, not by compiler layout.
+        // data-structure contract, not by compiler layout. The compiler can schedule a call between the two stores and
+        // the allocator arguments, so a `[0-5]` gap absorbs one.
         //
         // The distance is the one thing this row cannot verify for itself: it spans the whole prologue and the
         // init-guard path, and both move whenever the compiler re-lays the function. Re-measure it against P1 on
@@ -2118,12 +2112,15 @@ namespace Transmog
         // 48 8B F3               mov rsi, rbx
         // C7 46 50 8E 00 00 00   mov [rsi+0x50], 0x8E     ; bucket prime
         // C7 46 54 FF FF 02 00   mov [rsi+0x54], 0x2FFFF  ; sentinel cap
+        // [0-5]                  call <rel32>, when scheduled here
         // BA F8 FF 2F 00         mov edx, 0x2FFFF8        ; alloc size
         // 41 B8 10 00 00 00      mov r8d, 0x10            ; entry stride
         Candidate::direct(
             "ColorTokenInterner_P3_CapInitMagicWrite",
-            Pattern::literal("48 8B F3 C7 46 50 8E 00 00 00 C7 46 54 FF FF 02 00 BA F8 FF 2F 00 41 B8 10 00 00 00"),
-            -0x123
+            Pattern::literal(
+                "48 8B F3 C7 46 50 8E 00 00 00 C7 46 54 FF FF 02 00 [0-5] BA F8 FF 2F 00 41 B8 10 00 00 00"
+            ),
+            -0x128
         ),
     };
 
@@ -2210,40 +2207,35 @@ namespace Transmog
      *
      * This is the only resolution path for that target, and it is deliberately NOT unique.
      *
-     * The engine emits one u16-tag resolver per pa::*InfoManager, and they are byte-identical for more than forty
-     * bytes: same prologue, same tag load, same bound check, same entry fetch. The single difference is which manager
-     * global each one loads, and that lives in a RIP-relative displacement. A unique byte signature must therefore
-     * bake that displacement, which stops matching on the next build that relocates the global. This AOB instead
-     * signs only the opcode and ModRM shape, with every movable operand wildcarded: the manager disp32 and the
-     * forward-jump rel32. It matches every member of the family. The consumer enumerates the hits and picks the right
-     * one by reading each resolver's manager pointer and comparing that manager's MSVC RTTI class name against
-     * @ref SKILL_INFO_MANAGER_RTTI_NAME. A class name survives relocation. A displacement does not.
+     * The engine emits one u16-tag resolver per pa::*InfoManager, and they share their tag capture, manager load and
+     * bound check byte for byte. The single difference that matters is which manager global each one loads, and that
+     * lives in a RIP-relative displacement. A unique byte signature must therefore bake that displacement, which
+     * stops matching on the next build that relocates the global. This AOB instead signs only the opcode and ModRM
+     * shape, with every movable operand wildcarded: the manager disp32 and the forward-jump rel32. It matches every
+     * member of the family. The consumer enumerates the hits and picks the right one by reading each resolver's
+     * manager pointer and comparing that manager's MSVC RTTI class name against @ref SKILL_INFO_MANAGER_RTTI_NAME. A
+     * class name survives relocation. A displacement does not.
      *
-     * The body anchors at function entry + 0x12, past the first five bytes, so a sibling mod that inline-hooks the
-     * resolver and overwrites its prologue does not stop the scan from matching.
+     * The resolvers take the tag BY VALUE in edx (`f(unused, u32 tag)`, rcx is never read). A build that passes a
+     * `u16*` in rcx instead opens on `movzx edi,word [rcx]`, which this AOB rejects. Change this AOB and the
+     * consumer's call signature together.
      *
-     * The REX prefix of the index-scale `lea` and of the entry load is a per-nibble `4?` token, because the register
-     * allocator moves the index between an extended register and a legacy one across builds. That rotation rewrites
-     * only the REX byte: the ModRM `34` and SIB `FD` of the lea, and the ModRM `04` and SIB `06` of the load, are
-     * identical either way. A row that pins the REX byte therefore dies on a rotation that crosses the
-     * extended-versus-legacy line while the instruction stream is otherwise unchanged. The same treatment keeps the
-     * BatchEquip rows alive in cdcore/anchors.hpp.
+     * The body sits a few bytes past the entry, behind a prologue whose length differs between members of the family,
+     * so the consumer takes the entry from the exception table, not from a fixed distance. Starting past the entry also
+     * keeps the scan matching when a sibling mod inline-hooks the resolver and overwrites its prologue.
      *
-     * The entry-array displacement (`48 8B 43 58` here) tracks the pa::StaticInfoManager2 layout and moves when that
-     * base changes width. A stale value produces zero matches, and the scan reports that at trace level only. Verify
-     * this signature against live memory on every patch day, because a dead scan looks like a clean log.
+     * The tag-capture move keeps only its edx source nibble (`?A`), because the register it parks the tag in is
+     * compiler-owned. The bound check pins `cmp edx,[rbx+8]`: edx is the ABI argument register and rbx is where every
+     * member loads its manager, and `+0x08` is the pa::StaticInfoManager2 count field. Verify this signature against
+     * live memory on every patch day, because a dead scan looks like a clean log.
      */
 
-    // 0F B7 39                  movzx edi, word [rcx]   ; *tag
+    // 8B ?A                     mov edi, edx            ; tag, by value
     // 48 8B 1D ?? ?? ?? ??      mov rbx, [rip+d32]      ; manager global
-    // 3B 7B 08                  cmp edi, [rbx+0x8]      ; bound check
-    // 0F 83 ?? ?? ?? ??         jae <rel32>             ; out of range
-    // 4? 8D 34 FD 00 00 00 00   lea reg, [reg*8+0x0]    ; index scale, REX nibble-wildcarded
-    // 48 8B 43 58               mov rax, [rbx+0x58]     ; entry array
-    // 4? 8B 04 06               mov reg, [reg+reg]      ; entry load, REX nibble-wildcarded
-    inline constexpr Pattern SKILL_TAG_RESOLVER_BODY_AOB = Pattern::literal(
-        "0F B7 39 48 8B 1D ?? ?? ?? ?? 3B 7B 08 0F 83 ?? ?? ?? ?? 4? 8D 34 FD 00 00 00 00 48 8B 43 58 4? 8B 04 06"
-    );
+    // 3B 53 08                  cmp edx, [rbx+0x8]      ; bound check
+    // 0F 83                     jae <rel32> (truncated) ; out of range
+    inline constexpr Pattern SKILL_TAG_RESOLVER_BODY_AOB =
+        Pattern::literal("8B ?A 48 8B 1D ?? ?? ?? ?? 3B 53 08 0F 83");
 
     /**
      * @brief Decorated MSVC RTTI name of the manager whose resolver we want. Compared byte-exact
@@ -2254,11 +2246,9 @@ namespace Transmog
     inline constexpr std::string_view SKILL_INFO_MANAGER_RTTI_NAME = ".?AVSkillInfoManager@pa@@";
 
     /// Body offset of the disp32 inside the `mov rbx,[rip+disp32]`.
-    inline constexpr std::ptrdiff_t SKILL_TAG_RESOLVER_DISP_OFFSET = 6;
+    inline constexpr std::ptrdiff_t SKILL_TAG_RESOLVER_DISP_OFFSET = 5;
     /// End of the `mov rbx,[rip+disp32]`, i.e. the RIP base for its disp32.
-    inline constexpr std::ptrdiff_t SKILL_TAG_RESOLVER_INSTR_END = 10;
-    /// Distance from the body anchor (entry+0x12) back to the entry.
-    inline constexpr std::ptrdiff_t SKILL_TAG_RESOLVER_ENTRY_BACKOFF = 0x12;
+    inline constexpr std::ptrdiff_t SKILL_TAG_RESOLVER_INSTR_END = 9;
 
     /**
      * @brief `pa::GameAudioEffectBuffData` vtable - the class marker we compare buff-instance vtable pointers against
@@ -2366,44 +2356,44 @@ namespace Transmog
      *          cascade alive even when a future patch reshapes the whole writer function that P1 and P2 sit in.
      */
     inline const Candidate PLAYER_STATIC_CANDIDATES[] = {
-        // P1 - unique writer site. It carries the distinctive `mov r12d, <scratch-id>` init tag immediately after the
-        // writer, plus a follow-on load from [rdi+0xF8]. The scratch-id is NOT build-stable across patches, so the
-        // row wildcards the imm32. The +0xF8 ABI offset and the writer+test shape keep the site unique. The row
-        // also wildcards the rel8 of the trailing jcc.
+        // P1 - unique writer site: the clearing store, then a follow-on load from [rdi+0xF8] and its null test. The
+        // load's destination register is compiler-owned, so its ModRM keeps only the rdi base nibble (`?F`). Some
+        // builds schedule the per-thread scratch-id load (`mov r12d, imm32`, 6 bytes) between the load and the test,
+        // others move it past the null check, so a `[0-6]` gap spans it. The +0xF8 ABI offset and the writer+test
+        // shape keep the site unique.
 
         // 4C 89 3D ?? ?? ?? ??   mov [rip+d32], r15
-        // 48 8B 8F F8 00 00 00   mov rcx, [rdi+0xF8]
-        // 41 BC ?? ?? 00 00      mov r12d, imm32
-        // 48 85 C9               test rcx, rcx
-        // ??                     je <rel8>
+        // 48 8B ?F F8 00 00 00   mov rbx, [rdi+0xF8]
+        // [0-6]                  mov r12d, imm32, when scheduled here
+        // 48 85 ??               test rbx, rbx
         Candidate::rip_relative(
             "PlayerStatic_P1_WriterSite",
-            Pattern::literal("4C 89 3D ?? ?? ?? ?? 48 8B 8F F8 00 00 00 41 BC ?? ?? 00 00 48 85 C9 ??"),
+            Pattern::literal("4C 89 3D ?? ?? ?? ?? 48 8B ?F F8 00 00 00 [0-6] 48 85 ??"),
             3,
             7
         ),
 
-        // P2 - writer site extended through the TLS-guard tail. Same store as P1 (`mov [rip+disp32], r15`) followed by
-        // the [rdi+0xF8] field load and the (wildcarded) scratch-id tag, then continues past the short-jz into the TIB
-        // load and the per-thread flag-byte compare. The jz sits in a `[2-6]` bounded gap, so the rel8 and the
-        // rel32 encodings both match. The trailing TLS+compare shape is unique text and pins the writer. The row
-        // wildcards the scratch-id imm32, because it shifts across patches. The RipRelative offsets are unchanged
-        // from P1 (disp_offset = 3, instr_end_offset = 7) because the store is still the first instruction in the
-        // window.
+        // P2 - writer site extended through the TLS-guard tail. Same store and field load as P1, then continues past
+        // the null-check jz into the TIB load and the per-thread flag-byte compare. One `[2-16]` gap spans the jz in
+        // either width plus whatever the compiler puts between it and the TIB load: nothing, or a TLS-init call and
+        // the scratch-id load (`call rel32 ; mov ecx, imm32`). The trailing TLS+compare shape is unique text and pins
+        // the writer. Its base register is nibble-wildcarded, because the scratch id lands in r12 or in rcx. The
+        // RipRelative offsets are unchanged from P1 (disp_offset = 3, instr_end_offset = 7) because the store is still
+        // the first instruction in the window.
 
         // 4C 89 3D ?? ?? ?? ??         mov [rip+d32], r15
-        // 48 8B 8F F8 00 00 00         mov rcx, [rdi+0xF8]
-        // 41 BC ?? ?? 00 00            mov r12d, imm32
-        // 48 85 C9                     test rcx, rcx
-        // [2-6]                        je <rel8 or rel32>
+        // 48 8B ?F F8 00 00 00         mov rbx, [rdi+0xF8]
+        // [0-6]                        mov r12d, imm32, when scheduled here
+        // 48 85 ??                     test rbx, rbx
+        // [2-16]                       je <rel8 or rel32> ; call <rel32> ; mov ecx, imm32
         // 65 48 8B 04 25 58 00 00 00   mov rax, gs:[0x58]    ; TIB
         // 48 8B 10                     mov rdx, [rax]        ; TLS block
-        // 45 38 3C 14                  cmp [r12+rdx], r15b   ; flag test
+        // 4? 38 3C 1?                  cmp [rcx+rdx], r15b   ; flag test
         Candidate::rip_relative(
             "PlayerStatic_P2_WriterSiteTlsTail",
             Pattern::literal(
-                "4C 89 3D ?? ?? ?? ?? 48 8B 8F F8 00 00 00 41 BC ?? ?? 00 00 48 85 C9 [2-6] 65 48 8B 04 25 58 00 00 00 "
-                "48 8B 10 45 38 3C 14"
+                "4C 89 3D ?? ?? ?? ?? 48 8B ?F F8 00 00 00 [0-6] 48 85 ?? [2-16] 65 48 8B 04 25 58 00 00 00 "
+                "48 8B 10 4? 38 3C 1?"
             ),
             3,
             7
@@ -2433,26 +2423,26 @@ namespace Transmog
     /**
      * @brief HelmAudioRegistrar: the per-tag passive-skill registrar the helm-audio filter hooks to drop muffle tags.
      * @details The engine invokes it once per `{u16 tag, u32 lvl}` audio-classifier entry on the equipped item
-     *          (iteminfo desc+0x100 vector). It reads the tag from `*r8`, the level from `r9`, and the character
-     *          skill manager from `rcx`. The filter hooks the function entry inline and short-circuits the call (zero
-     *          the status int, return) when the call matches the audio-classifier code path (a7==0, 8-byte {u16 tag,
-     *          u16 0, u16 lvl, u16 0} buffer at `a3`) AND the resolved skill's first per-level entry classifies as
-     *          `pa::GameAudioEffectBuffData` AND the host actor classifies as a configured protagonist. That drops
-     *          the muffle tag set before the engine publishes it, which is what unmuffles voice under a plate helm.
+     *          (the iteminfo descriptor's skill vector). It reads the tag from `*r8`, the level from `r9`, and the
+     *          character skill manager from `rcx`. The filter hooks the function entry inline and short-circuits the
+     *          call (zero the status int, return) when the call matches the audio-classifier code path (a7==0, 8-byte
+     *          {u16 tag, u16 0, u16 lvl, u16 0} buffer at `a3`) AND the resolved skill's first per-level entry
+     *          classifies as `pa::GameAudioEffectBuffData` AND the host actor classifies as a configured protagonist.
+     *          That drops the muffle tag set before the engine publishes it, which is what unmuffles voice under a
+     *          plate helm.
      *          The gate derives muffle-class membership from the engine's own RTTI rather than from a hardcoded
      *          tag-id set, so it admits any future tag backed by the same class automatically. See
      *          helm_audio_filter.{cpp,hpp} for the gate rationale and the bypass-safety analysis on the single
      *          virtual call SUPPRESS bypasses.
      *
      *          Entry layout, with the byte lengths that produce the walk-backs in the candidate table:
-     *            +0x00  48 89 5C 24 18             mov  [rsp+18h], rbx   ; rbx is SPILLED here, not pushed
-     *            +0x05  44 89 4C 24 20             mov  [rsp+20h], r9d   ; home a3
-     *            +0x0A  48 89 54 24 10             mov  [rsp+10h], rdx   ; home a1
-     *            +0x0F  55 56 57                   push rbp/rsi/rdi
-     *            +0x12  41 54 41 55 41 56 41 57    push r12/r13/r14/r15
-     *            +0x1A  48 8D ac 24 ?? ?? FF FF    lea  rbp, [rsp-disp32]
-     *            +0x22  48 81 EC ?? ?? 00 00       sub  rsp, imm32
-     *            +0x29  48 8B 41 08 ...            registry read and arg parking
+     *            +0x00  44 89 4C 24 20             mov  [rsp+20h], r9d   ; home a4
+     *            +0x05  48 89 54 24 10             mov  [rsp+10h], rdx   ; home a2
+     *            +0x0A  55 53 56 57                push rbp/rbx/rsi/rdi  ; rbx is PUSHED here, not spilled
+     *            +0x0E  41 54 41 55 41 56 41 57    push r12/r13/r14/r15
+     *            +0x16  48 8D ac 24 ?? ?? FF FF    lea  rbp, [rsp-disp32]
+     *            +0x1E  48 81 EC ?? ?? 00 00       sub  rsp, imm32
+     *            +0x25  48 8B 41 08 ...            registry read and arg parking
      * @warning The register-save run alone is NOT unique. It matches several functions, so every row runs on into the
      *          registry read. Each row wildcards both frame immediates, which are compiler-owned. Pinning them buys
      *          no uniqueness the body read does not already provide, and costs the row on the next frame resize.
@@ -2462,15 +2452,16 @@ namespace Transmog
         // The prologue alone matches five functions, so the row runs on into the `mov rax,[rcx+8]` body read to
         // single this one out. The row wildcards both frame immediates and the register the a1 pointer parks in.
         //
-        // The leading `mov [rsp+18],rbx` is the real entry and MUST stay the first byte of this row. Opening on the
-        // r9d arg-home store instead resolves to entry+5, which is inside the function: the inline hook's trampoline
-        // then skips the rbx spill, and the epilogue restores rbx from stack the spill never wrote. Re-measure both
-        // walk-backs below against this row whenever the prologue changes.
+        // The first byte of this row MUST be the function's first byte. The compiler either spills rbx with a leading
+        // `mov [rsp+18h],rbx` or pushes it inside the run. When it spills, a row opening on the r9d home store
+        // resolves to entry+5, inside the function: the inline hook's trampoline then skips the rbx spill, and the
+        // epilogue restores rbx from a stack slot the spill never wrote. function_entry_site rejects that value, but
+        // re-measure both walk-backs below against this row whenever the prologue changes.
 
-        // 48 89 5C 24 18            mov [rsp+0x18], rbx
         // 44 89 4C 24 20            mov [rsp+0x20], r9d
         // 48 89 54 24 10            mov [rsp+0x10], rdx
         // 55                        push rbp
+        // 53                        push rbx
         // 56                        push rsi
         // 57                        push rdi
         // 41 54                     push r12
@@ -2486,15 +2477,15 @@ namespace Transmog
         Candidate::direct(
             "HelmAudioRegistrar_P1_FullPrologue",
             Pattern::literal(
-                "48 89 5C 24 18 44 89 4C 24 20 48 89 54 24 10 55 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 ?? ?? FF FF "
+                "44 89 4C 24 20 48 89 54 24 10 55 53 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 ?? ?? FF FF "
                 "48 81 EC ?? ?? 00 00 48 8B 41 08 4C 8B ?? 48 89 45 90 48 8B FA"
             )
         ),
 
-        // P2 - post-prologue lea+sub+arg-stash chain at entry+0x1A, past SafetyHook's 5-byte JMP window so the
+        // P2 - post-prologue lea+sub+arg-stash chain at entry+0x16, past SafetyHook's 5-byte JMP window so the
         // resolver still works after a sibling inline-hooks the entry. The wildcarded lea/sub frame pair followed by
         // `mov rax,[rcx+8]` / `mov <a1reg>,rcx` / `mov [rbp-0x70],rax` / `mov rdi,rdx` is what makes it unique. The
-        // frame pair alone is not. dispOffset = -0x1A walks back to the entry.
+        // frame pair alone is not. dispOffset = -0x16 walks back to the entry.
 
         // 48 8D AC 24 ?? ?? FF FF   lea rbp, [rsp-d32]
         // 48 81 EC ?? ?? 00 00      sub rsp, imm32
@@ -2505,10 +2496,10 @@ namespace Transmog
         Candidate::direct(
             "HelmAudioRegistrar_P2_PostPrologue",
             Pattern::literal("48 8D AC 24 ?? ?? FF FF 48 81 EC ?? ?? 00 00 48 8B 41 08 4C 8B ?? 48 89 45 90 48 8B FA"),
-            -0x1a
+            -0x16
         ),
 
-        // P3 - deep body anchor at entry+0x29. Lands well past the 5-byte SafetyHook JMP window, so it still
+        // P3 - deep body anchor at entry+0x25. Lands well past the 5-byte SafetyHook JMP window, so it still
         // resolves when a sibling mod inline-hooks the entry, and it shares no bytes with the prologue that P1 and P2
         // both depend on.
         //
@@ -2538,7 +2529,7 @@ namespace Transmog
             Pattern::literal(
                 "48 8B 41 08 4C 8B ?? 48 89 45 90 48 8B FA 33 D2 45 8B F1 4D 8B E8 48 8B 40 68 48 8B 88 ?? ?? 00 00"
             ),
-            -0x29
+            -0x25
         ),
     };
 

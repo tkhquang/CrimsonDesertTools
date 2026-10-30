@@ -134,7 +134,7 @@ namespace Transmog
         [[nodiscard]] CatalogInfo catalog_info() const noexcept;
 
         /**
-         * @brief Address of ItemAccessor (IndexedStringA short->hash lookup), cached during the build() chain walk.
+         * @brief Address of ItemAccessor (iteminfo id -> descriptor), cached during the build() chain walk.
          *
          * This function has many byte-identical template-instantiation siblings, so it cannot be AOB-located directly.
          * `resolve_chain` reaches it through the same bounded-AOB chain the catalog walk uses (SubTranslator anchor ->
@@ -145,7 +145,7 @@ namespace Transmog
          * and does NOT depend on the iteminfo global, so this address becomes valid even on the first
          * BuildResult::Deferred return.
          */
-        [[nodiscard]] uintptr_t indexed_string_lookup_addr() const noexcept;
+        [[nodiscard]] uintptr_t item_accessor_addr() const noexcept;
 
         /**
          * @brief Address of the iteminfo global holder slot, cached during the same build() chain walk.
@@ -156,7 +156,7 @@ namespace Transmog
          * the whole image, which lives inside such a clone. The bounded chain walk sidesteps both problems by
          * reaching the right clone through the call graph first and only then reading its displacement.
          *
-         * Returns 0 before the first successful resolve_chain call. Like indexed_string_lookup_addr(), it becomes
+         * Returns 0 before the first successful resolve_chain call. Like item_accessor_addr(), it becomes
          * valid even on a BuildResult::Deferred return, because the walk reads static exe bytes only.
          */
         [[nodiscard]] uintptr_t iteminfo_holder_addr() const noexcept;

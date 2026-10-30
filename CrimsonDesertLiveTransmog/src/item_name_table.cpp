@@ -49,29 +49,33 @@ namespace Transmog
         return key;
     }
 
-    // Variant-metadata detection (see item_name_table.hpp::has_variant_meta). Clean base items have `*(desc+<offset>)
-    // == <sentinel>`, where <sentinel> is a shared empty-object pointer - an IRefCounted vtable in the exe's .data
-    // section. Non-sentinel values point to a per-item metadata struct threaded through a catalog-wide linked list.
-    // Members of that list do not render via runtime transmog.
+    // Variant-metadata detection (see item_name_table.hpp::has_variant_meta). Clean base items hold the catalog-wide
+    // "none" value in this field, and carrier-required items hold a per-item variant key. Members of the variant set do
+    // not render via runtime transmog.
+    //
+    // The field is a u32 (`0xFFFFFFFF` on base items, a packed variant key otherwise). Read it at exactly that width:
+    // a qword read takes in the unrelated dword after it, and the mode no longer dominates.
     //
     // The field offset moves whenever the descriptor struct changes shape. The region grows on some patches and
     // SHRINKS on others, so do not extrapolate a direction from the last move. A stale offset fails SILENTLY: the
-    // neighboring qwords hold plausible values too (a constant 0, or an unrelated bit pattern such as 0x1FFFFFFFF), so
+    // neighboring fields hold plausible values too (a constant 0, or an unrelated bit pattern such as 0x1FFFFFFFF), so
     // nothing trips and every item classifies wrong.
     //
-    // Re-derive the offset like this. probe every descriptor qword across a 0x380..0x480 window, then correlate
-    // "value != mode" for each candidate offset against the Variant column of the previous game version's item dump,
-    // matched BY NAME. The correct offset produces no false positives. No other offset in the window comes close, so
-    // the result is unambiguous. At least one other descriptor offset also holds a sentinel on every item, so "most
-    // items share this value" alone does NOT identify the field. The deciding constraint is: sentinel for direct-wear
-    // items, per-item heap pointer for carrier-required items.
+    // Re-derive the offset like this. Dump every descriptor's head, then correlate "value != mode" for every candidate
+    // offset, at both dword and qword width, against the Variant column of the previous game version's item dump,
+    // matched BY NAME. The correct field produces a handful of mismatches at most (items whose variant status genuinely
+    // changed) and no other candidate comes close, so the result is unambiguous. At least one other descriptor field
+    // also holds one value on most items, so "most items share this value" alone does NOT identify the field.
     //
-    // The sentinel value itself is also unstable, because any .data reshuffle moves it. The builder hardcodes neither
-    // the offset nor the sentinel address. It resolves the sentinel statistically at catalog-build time. It scans
-    // every valid descriptor's qword at this offset, and the value that appears in the clear majority of items IS the
-    // sentinel. This self-heals across future game updates as long as base items keep their statistical dominance of
-    // the catalog.
-    static constexpr std::ptrdiff_t DESC_VARIANT_META_OFFSET = 0x3B0;
+    // The builder does not hardcode the "none" value. It resolves it statistically at catalog-build time: the value
+    // that appears in the clear majority of items IS the sentinel. This self-heals across future game updates as long
+    // as base items keep their statistical dominance of the catalog.
+    static constexpr std::ptrdiff_t DESC_VARIANT_META_OFFSET = 0xE8;
+
+    // Item-name wrapper: a pointer to the wrapper whose first qword is the internal name's char*. It moves when the
+    // descriptor head changes shape. A stale value reads a packed scalar, every descriptor fails the plausibility
+    // check, and the catalog builds EMPTY: presets are keyed by name, so nothing resolves.
+    static constexpr std::ptrdiff_t DESC_NAME_WRAPPER_OFFSET = 0x00;
 
     // Item-type code, u16. This is the engine's own equip-slot key: SlotPopulator reads it out of the descriptor to
     // index its EquipTypeInfo table.
@@ -88,7 +92,7 @@ namespace Transmog
     // The offset moves when the descriptor head changes width. A wrong value no longer mis-slots items silently: it
     // yields scattered keys that nothing votes for twice, so the learned table collapses and the [catalog-slots]
     // histogram drops to the group-only counts.
-    static constexpr std::ptrdiff_t DESC_TYPE_CODE_OFFSET = 0x42;
+    static constexpr std::ptrdiff_t DESC_TYPE_CODE_OFFSET = 0x4A;
     /// Arrows, quest items, anything with no equip slot.
     static constexpr uint16_t TYPE_CODE_NONE = 0xFFFF;
 
@@ -376,14 +380,20 @@ namespace Transmog
     // ItemGroupInfo registry
     //
     // `_itemGroupInfoList` on the item descriptor: a vector of u16 group values. The generated deserializer resolves
-    // each serialized key through the group registry's hash map at load time and stores `index + 1`, reserving 0 for
-    // "key not found" (every item carries one such 0). So the def-array index is `value - 1`.
+    // each serialized key through the group registry's hash map at load time and stores the registry row index
+    // directly. A misread index shifts every item onto its neighbor's groups (a helm reads as Category_Document /
+    // SubCategory_Animal_Item), which classifies nothing and reads as an empty slot bucket.
     // The vector is {qword data, dword size, dword capacity}. Size and capacity hold the same value on a loaded
     // descriptor, so reading the pair as one qword yields a huge number rather than a wrong-but-plausible count.
+    // Re-derive the offset by decoding armor items' vectors to group NAMES and checking the decoded
+    // `SubCategory_Equip_Armor_Player_<slot>` against the item's own type code. The right offset agrees on every
+    // item. Stay inside one descriptor: the descriptors sit back to back in memory (measure the stride between
+    // consecutive ptr_array entries), so a candidate past the stride reads the NEIGHBOR's field, passes every shape
+    // check, and classifies each item by the next item's groups.
     /// Qword, base of the u16 group-value array.
-    static constexpr std::ptrdiff_t DESC_ITEM_GROUP_DATA_OFFSET = 0x350;
+    static constexpr std::ptrdiff_t DESC_ITEM_GROUP_DATA_OFFSET = 0x1F0;
     /// Dword element count.
-    static constexpr std::ptrdiff_t DESC_ITEM_GROUP_COUNT_OFFSET = 0x358;
+    static constexpr std::ptrdiff_t DESC_ITEM_GROUP_COUNT_OFFSET = 0x1F8;
     static constexpr std::size_t MAX_ITEM_GROUPS_PER_ITEM = 64;
 
     // The registry is a pa::StaticInfoManager2 like iteminfo - same count and def-array offsets - and its holder
@@ -395,15 +405,11 @@ namespace Transmog
     /// Rows sampled per candidate before the probe rejects it.
     static constexpr std::size_t GROUP_HOLDER_PROBE_ROWS = 16;
 
-    /// Registry row -> group-def object.
-    static constexpr std::ptrdiff_t GROUP_ROW_DEF_OFFSET = 0x18;
-
-    // The name's {ptr,len} wrapper sits at a VARIABLE offset inside the def object: a name short enough to live in the
-    // object's inline buffer pushes the wrapper past it, and the neighboring member is a variable-length u16 array of
-    // member item ids. Scan a bounded window for a pair that resolves to a string of exactly the stated length whose
-    // prefix is "ItemGroup". A wrong pair fails all three checks, so the scan cannot silently pick up a neighbor.
-    static constexpr std::ptrdiff_t GROUP_NAME_SCAN_BEGIN = 0x18;
-    static constexpr std::ptrdiff_t GROUP_NAME_SCAN_END = 0x60;
+    // A group row names itself through a {char*, u32 length} wrapper, the same shape an item descriptor's name uses.
+    // The reader accepts only a string of exactly the stated length whose prefix is "ItemGroup", so a stale offset
+    // resolves nothing instead of a neighbor's field.
+    /// Registry row -> name wrapper.
+    static constexpr std::ptrdiff_t GROUP_ROW_NAME_WRAPPER_OFFSET = 0x00;
     static constexpr std::size_t MAX_GROUP_NAME_LEN = 160;
     static constexpr std::string_view GROUP_NAME_PREFIX = "ItemGroup";
 
@@ -416,27 +422,21 @@ namespace Transmog
     static std::string read_group_name(uintptr_t row) noexcept
     {
         bool ok = false;
-        const uintptr_t def = read_qword_safe(row + GROUP_ROW_DEF_OFFSET, ok);
-        if (!ok || !DMK::memory::is_plausible_ptr(DMK::Address{def}))
+        const uintptr_t wrapper = read_qword_safe(row + GROUP_ROW_NAME_WRAPPER_OFFSET, ok);
+        if (!ok || !DMK::memory::is_plausible_ptr(DMK::Address{wrapper}))
             return {};
-
+        const uintptr_t str_ptr = read_qword_safe(wrapper, ok);
+        const uint32_t len = ok ? read_u32_safe(wrapper + 8, ok) : 0;
+        if (!ok || !DMK::memory::is_plausible_ptr(DMK::Address{str_ptr}) || len < GROUP_NAME_PREFIX.size() ||
+            len > MAX_GROUP_NAME_LEN)
+            return {};
         char buf[MAX_GROUP_NAME_LEN + 1];
-        for (std::ptrdiff_t off = GROUP_NAME_SCAN_BEGIN; off <= GROUP_NAME_SCAN_END; off += 4)
-        {
-            const uintptr_t str_ptr = read_qword_safe(def + off, ok);
-            if (!ok || !DMK::memory::is_plausible_ptr(DMK::Address{str_ptr}))
-                continue;
-            const uint32_t len = read_u32_safe(def + off + 8, ok);
-            if (!ok || len < GROUP_NAME_PREFIX.size() || len > MAX_GROUP_NAME_LEN)
-                continue;
-            const auto got = read_cstring_safe(str_ptr, buf, sizeof(buf));
-            if (got != len)
-                continue;
-            const std::string_view name(buf, got);
-            if (name.substr(0, GROUP_NAME_PREFIX.size()) == GROUP_NAME_PREFIX)
-                return std::string(name);
-        }
-        return {};
+        if (read_cstring_safe(str_ptr, buf, sizeof(buf)) != len)
+            return {};
+        const std::string_view name(buf, len);
+        if (name.substr(0, GROUP_NAME_PREFIX.size()) != GROUP_NAME_PREFIX)
+            return {};
+        return std::string(name);
     }
 
     /**
@@ -578,9 +578,9 @@ namespace Transmog
         for (uint32_t i = 0; i < count; ++i)
         {
             const uint16_t value = read_u16_safe(data + i * 2ull, ok);
-            if (!ok || value == 0) // 0 is the deserializer's "key not resolved" filler
+            if (!ok)
                 continue;
-            const std::size_t index = value - 1u;
+            const std::size_t index = value;
             if (index >= group_slots.size())
                 continue;
             const auto &candidate = group_slots[index];
@@ -604,7 +604,7 @@ namespace Transmog
     {
         bool resolved = false;
         uintptr_t global_holder = 0; // address of the iteminfo global pointer holder
-        uintptr_t item_accessor = 0; // ItemAccessor - IndexedStringA short->hash
+        uintptr_t item_accessor = 0; // ItemAccessor - iteminfo id -> descriptor
     };
 
     static ResolvedChain &cached_chain()
@@ -634,19 +634,9 @@ namespace Transmog
 
         // Locate the call to the item descriptor initializer inside SubTranslator. A fixed offset into the function
         // is not reliable, because a compiler prologue reshuffle drifts that offset between patches. Scan a bounded
-        // 0x80-byte window of the function instead.
+        // 0x80-byte window of the function instead, with the rsp-relative scratch-lea encoding first and the
+        // rbp-relative one second (NAMETABLE_SUB_TX_RSP_LEA_ANCHOR, NAMETABLE_SUB_TX_RBP_LEA_ANCHOR).
         //
-        // The scan tries two anchor encodings, current first:
-        //   NAMETABLE_SUB_TX_RSP_LEA_ANCHOR: 41 B8 01 00 00 00 48 8D 55 ?? 48 8D 4C 24 ??
-        //             (mov r8d,1 / lea rdx,[rbp+disp8] / lea rcx,[rsp+disp8])
-        //             The second lea is rsp-relative, so it carries a SIB
-        //             byte and is one byte longer than the older form.
-        //   NAMETABLE_SUB_TX_RBP_LEA_ANCHOR: 41 B8 01 00 00 00 48 8D 55 ?? 48 8D 4D ??
-        //             (mov r8d,1 / lea rdx,[rbp+disp8] / lea rcx,[rbp+disp8])
-        //             The second lea is rbp-relative and has no SIB byte.
-        //
-        // Both disp8 slots carry a wildcard so a future stack-frame shift inside the same function does not require
-        // another anchor variant. The 0x80-byte window keeps a stray match elsewhere in .text from leaking in.
         // The window is this function's prologue, so the sweep is bounded to it and global uniqueness never
         // matters. Pages::Executable keeps a byte twin in a data page from being considered at all.
         const DMK::Region sub_tx_window{DMK::Address{sub_translator_addr}, 0x80};
@@ -707,38 +697,37 @@ namespace Transmog
         const uintptr_t item_accessor = accessor_addr->raw();
 
         // Locate the `mov rbx, cs:<iteminfo holder>` inside ItemAccessor. A fixed offset is not reliable here either,
-        // so scan instead. A distinctive 9-byte prologue-tail anchor precedes the `48 8B 1D disp32`
-        //   41 56 48 83 EC ?? 0F B7 39
-        // (push r14 / sub rsp,imm8 / movzx edi,word ptr [rcx]) which pins the specific call site inside a bounded
-        // 0x40-byte scan of THIS function. Global uniqueness does not matter, because the scan is locally bounded.
-        // The stack-alloc imm8 carries a wildcard, because it changes with the frame size (see
-        // NAMETABLE_ITEM_ACCESSOR_ANCHOR).
-        const auto match3 = DMK::scan::scan(
-            Transmog::NAMETABLE_ITEM_ACCESSOR_ANCHOR,
-            DMK::Region{DMK::Address{item_accessor}, 0x40},
-            1,
-            DMK::scan::Pages::Executable
-        );
-        if (!match3)
-        {
-            (void)logger.try_log(
-                DMK::LogLevel::Warning,
-                "[nametable] mov-rbx anchor not found within the ItemAccessor prologue: {}",
-                match3.error().message()
-            );
-            return false;
-        }
+        // so scan a bounded 0x40-byte window of THIS function for the prologue tail that precedes it
+        // (NAMETABLE_ITEM_ACCESSOR_ANCHOR). Global uniqueness does not matter, because the scan is locally bounded.
+        //
+        // When the prologue tail misses, the first `mov rbx,[rip+disp32]` in the same window is still the holder
+        // load: every member of the resolver family loads its manager into rbx before any other RIP-relative access
+        // (see SKILL_TAG_RESOLVER_BODY_AOB). The anchored scan stays first because it also pins the instruction's
+        // position behind the tag capture.
+        const DMK::Region accessor_window{DMK::Address{item_accessor}, 0x40};
+        const auto match3 =
+            DMK::scan::scan(Transmog::NAMETABLE_ITEM_ACCESSOR_ANCHOR, accessor_window, 1, DMK::scan::Pages::Executable);
         // The `|` marker points at the start of the `48 8B 1D disp32` instruction: disp32 at +3, total length 7.
-        const auto holder = DMK::scan::resolve_rip_relative(*match3, 3, 7);
+        const auto holder =
+            match3 ? DMK::scan::resolve_rip_relative(*match3, 3, 7)
+                   : DMK::scan::find_and_resolve_rip_relative(accessor_window, DMK::scan::PREFIX_MOV_RBX_RIP, 7);
         if (!holder)
         {
             (void)logger.try_log(
                 DMK::LogLevel::Warning,
-                "[nametable] mov-rbx at 0x{:X} did not resolve: {}",
-                match3->raw(),
+                "[nametable] iteminfo holder load not resolved within the ItemAccessor prologue at 0x{:X}: {}",
+                item_accessor,
                 holder.error().message()
             );
             return false;
+        }
+        if (!match3)
+        {
+            (void)logger.try_log(
+                DMK::LogLevel::Warning,
+                "[nametable] ItemAccessor prologue anchor missed ({}); took the first mov-rbx load instead",
+                match3.error().message()
+            );
         }
         chain.global_holder = holder->raw();
         chain.item_accessor = item_accessor;
@@ -751,7 +740,7 @@ namespace Transmog
         return true;
     }
 
-    uintptr_t ItemNameTable::indexed_string_lookup_addr() const noexcept
+    uintptr_t ItemNameTable::item_accessor_addr() const noexcept
     {
         return cached_chain().item_accessor;
     }
@@ -894,16 +883,16 @@ namespace Transmog
         variant_flag.reserve(count);
         slot_map.reserve(count);
 
-        // Walk the catalog and collect the name, the variant-meta pointer and the transmog slot for every valid
+        // Walk the catalog and collect the name, the variant-meta value and the transmog slot for every valid
         // descriptor. The variant flag cannot resolve yet, because the sentinel derives statistically from the values
         // this walk collects.
         struct ScratchEntry
         {
             uint16_t id;
             std::string name;
-            uintptr_t meta_ptr; // 0 on read fault
-            TransmogSlot slot;  // from the item's group membership, Count when its groups name no slot
-            uint16_t type_code; // join key for the learned pass below
+            uint32_t variant_meta; // 0 on read fault
+            TransmogSlot slot;     // from the item's group membership, Count when its groups name no slot
+            uint16_t type_code;    // join key for the learned pass below
         };
         std::vector<ScratchEntry> scratch;
         scratch.reserve(count);
@@ -918,9 +907,10 @@ namespace Transmog
             if (!ok || !DMK::memory::is_plausible_ptr(DMK::Address{desc_ptr}))
                 continue;
 
-            // desc_ptr is reused by two downstream reads (meta_ptr and type_code), so it is resolved separately. Only
-            // the wrapper to string pointer hops (desc_ptr -> +0x8 -> +0x0) are folded into one guarded walk.
-            static constexpr DMK::memory::ChainStep wrapper_to_string[] = {{0x8}, {0x0}};
+            // desc_ptr is reused by two downstream reads (variant_meta and type_code), so it is resolved separately.
+            // Only the wrapper to string pointer hops (desc_ptr -> +DESC_NAME_WRAPPER_OFFSET -> +0x0) are folded into
+            // one guarded walk.
+            static constexpr DMK::memory::ChainStep wrapper_to_string[] = {{DESC_NAME_WRAPPER_OFFSET}, {0x0}};
             const auto str_slot = DMK::memory::walk(DMK::Address{desc_ptr}, wrapper_to_string);
             if (!str_slot)
                 continue;
@@ -934,10 +924,10 @@ namespace Transmog
                 continue;
 
             const auto id16 = static_cast<uint16_t>(id);
-            const uintptr_t meta_ptr = read_qword_safe(desc_ptr + DESC_VARIANT_META_OFFSET, ok);
+            const uint32_t variant_meta = read_u32_safe(desc_ptr + DESC_VARIANT_META_OFFSET, ok);
 
-            // The walk does NOT read wearer-body classification. The rule list at desc+0x248 carries no usable body
-            // class, because a game update re-keyed those tokens. Body comes from the equip-eligibility
+            // The walk does NOT read wearer-body classification. The descriptor's body-class tokens carry no usable
+            // body class, because a game update re-keys them. Body comes from the equip-eligibility
             // ("Male"/"Female") column of the display_names TSV (see
             // load_display_names / m_body_by_name), applied at query time in sorted_entries and is_player_compatible.
             // The body-table generator (kept out of tree) fills that column from the packed gamedata.
@@ -956,7 +946,7 @@ namespace Transmog
             scratch.push_back({
                 id16,
                 std::string(buf, len),
-                ok ? meta_ptr : 0,
+                ok ? variant_meta : 0u,
                 slot,
                 tc_ok ? type_code : TYPE_CODE_NONE,
             });
@@ -964,18 +954,18 @@ namespace Transmog
         }
 
         // Derive the variant-meta sentinel statistically. The sentinel is the value that appears at
-        // desc+DESC_VARIANT_META_OFFSET in the clear majority of items. Any other pointer at that slot is per-item
-        // variant metadata and gates the item out of runtime transmog. Tally the non-zero meta_ptr values, and the
-        // mode is the sentinel.
-        uintptr_t resolved_sentinel = 0;
+        // desc+DESC_VARIANT_META_OFFSET in the clear majority of items. Any other value in that field is a per-item
+        // variant key and gates the item out of runtime transmog. Tally the non-zero values, and the mode is the
+        // sentinel.
+        uint32_t resolved_sentinel = 0;
         std::size_t sentinel_count = 0;
         {
-            std::unordered_map<uintptr_t, std::size_t> tally;
+            std::unordered_map<uint32_t, std::size_t> tally;
             tally.reserve(64);
             for (const auto &e : scratch)
             {
-                if (e.meta_ptr != 0)
-                    ++tally[e.meta_ptr];
+                if (e.variant_meta != 0)
+                    ++tally[e.variant_meta];
             }
             for (const auto &kv : tally)
             {
@@ -985,7 +975,7 @@ namespace Transmog
                     resolved_sentinel = kv.first;
                 }
             }
-            // Require the mode to dominate - at least 1/3 of valid items must point at it. Below that threshold the
+            // Require the mode to dominate - at least 1/3 of valid items must hold it. Below that threshold the
             // data is garbage, and the builder must not flag anything as variant.
             if (valid == 0 || sentinel_count * 3 < valid)
             {
@@ -1069,7 +1059,8 @@ namespace Transmog
             // gives nearly every item the same large rule count, so that heuristic over-flags and yields hundreds of
             // false positives. The variant-meta pointer alone is the reliable signal. See DESC_VARIANT_META_OFFSET for
             // how to re-derive the offset.
-            const bool has_variant = (resolved_sentinel != 0) && (e.meta_ptr != 0) && (e.meta_ptr != resolved_sentinel);
+            const bool has_variant =
+                (resolved_sentinel != 0) && (e.variant_meta != 0) && (e.variant_meta != resolved_sentinel);
             if (has_variant)
                 ++variant_count;
 

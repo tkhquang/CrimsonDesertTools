@@ -1,5 +1,9 @@
 Aant_PlateArmor_Helm	Awrain Plate Helm	Female
 Abacus	Abacus
+Abalone_Porridge	Abalone Porridge
+Abalone_Porridge_Large	Satisfying Abalone Porridge
+Abalone_Porridge_Medium	Filling Abalone Porridge
+Abalone_Porridge_XLarge	Hearty Abalone Porridge
 Abidon_Fabric_Helm	Pailunese Hat	Male
 Abidon_Fabric_Helm_T5_QA	Abidon Fabric Helm T5 QA	Male
 AbyssGear_Epistle	White Crow's Letter
@@ -30,6 +34,7 @@ Abyss_Surreal_Wolf_Leather_Cloak	Jester Leather Cloak	Male
 Abyss_Surreal_Wolf_Leather_Gloves	Jester Leather Gloves	Male
 Abyss_Surreal_Wolf_Leather_Helm	Jester Leather Mask	Male
 Abyss_Surreal_Wolf_Necklace	Surreal Necklace
+Abyssal_Fang_TwoHandGiantSpear	Fang of the Depths
 Acembel_Leather_Gloves	Essembel Leather Gloves	Male
 Acid_Spider_Poison	Acid Spider Venom
 Acorn	Acorn
@@ -54,6 +59,7 @@ Alida_Restraint_OneHandPistol	Shadow of the Past Pistol
 Allbit_Leather_Boots	Alvitt Leather Boots	Male
 Alpein_Fabric_Armor	Alphen Cloth Armor	Male
 AlpineIbex_Armor	Ibex Saddle
+AlpineIbex_Ent_Armor	Ibex Shadowleaf Armor
 Alsace_Fabric_Armor	Alsace Cloth Armor	Male
 Alustin_Journal_Book_I	Archive Records: Vol. I
 Alustin_Journal_Book_II	Archive Records: Vol. II
@@ -78,6 +84,10 @@ Ancient_Shield	Ancient Shield
 Andaran_Leather_Boots	Andaran Leather Boots	Female
 Andre_ChainMail_Armor	Andre Chain Mail	Male
 Andria_Leather_Gloves	Andria Leather Gloves	Male
+Angler_Fabric_Armor	Fisherman's Cloth Attire	Male
+Angler_Fabric_Cloak	Fisherman's Cloth Cloak	Male
+Angler_Fabric_Helm	Fisherman's Cloth Hat	Male
+Angler_Leather_Boots	Fisherman's Leather Boots	Male
 Angry_Wave_Ring_Drill	Furious Waves Gauntlet	Male
 Animal_Bone	Small Bone
 Animal_Spirit	Animal Spirit
@@ -175,6 +185,23 @@ Austphelt_Fabric_Armor	Austfeld Cloth Armor	Male
 Austphelt_Leather_Gloves	Austfeld Leather Gloves	Male
 Avignon_Fabric_Armor	Avignon Cloth Armor	Male
 Awaken_Caliburn_TwoHandSword	Twisted Verdict
+Azure_Gem_Ring	Blue Gem Ring
+Background_Breakable_02	Continent of Pywel Map Holder
+Background_Breakable_Wood_14	Map Storage Box
+Background_Lamp_01	Thirteen-Candle Candelabra
+Background_Lamp_04	Five-Candle Candelabra
+Background_Lamp_08	Stone Candle Holder
+Background_Lamp_09	Stone Melted Candle Holder
+Background_Lamp_15	Iron Candle Lamp
+Background_Lamp_16	Net Lamp
+Background_Lamp_17	Wooden Melted Candle Holder
+Background_Lamp_18	Wooden Candle Lamp
+Background_Lamp_19	Bright Wooden Candle Lamp
+Background_Lamp_21	Iron Lamp
+Background_Lamp_27	Silver Candlestick
+Background_Lamp_28	Golden Candlestick
+Background_map_03	Great Ocean of Pywel Map Holder
+Backgroundcd_in_dpfo_candle_02_Lamp_01	Candle Arrangement
 Badran_Leather_Boots	Badran Leather Boots
 Badran_Leather_Gloves	Badran Leather Gloves
 Baidan_Fabric_Helm	Baidan Cloth Headband	Male
@@ -235,6 +262,9 @@ Barbarian_Leather_Gloves_I	Barbarian Leather Gloves	Male
 Barbaros_Leather_Armor	Barbaros Leather Armor	Male
 Barbaroy_Fabric_Armor	Barbaroy Cloth Armor	Male
 Barbaroy_Leather_Armor	Barbaroy Leather Armor	Male
+BarberShop_Fabric_Armor_I	Barber Cloth Armor
+BarberShop_Fabric_Boots	Barber Cloth Boots
+BarberShop_Fabric_Helm	Barber Cloth Hat
 Barch_Fabric_Armor	Barch Cloth Armor	Male
 Barcy_Fabric_Armor	Barcy Cloth Armor	Male
 Baredin_OneHandBow	Tommasoan Bow	Male
@@ -269,13 +299,17 @@ Batz_Plate_Boots	Batz Plate Boots	Male
 Bayur_Fabric_Armor	The Faceless's Cloth Armor	Male
 Bayur_Leather_Boots	Bayer Leather Boots	Male
 Bayur_PlateArmor_Helm	Bayer Plate Helm
+Beam_OneHandSword	Lumen Sword
+Beam_TwoHandSword	Lumen Longsword
 Bean	Beans
 Bear_Armor	Bear Saddle
 Bear_BackPack	Bear Pack
 Bear_Bile	Bear's Gallbladder
 Bear_Chief_Leather_Helm	Boss Bear Hat	Male
+Bear_Dverkan_Armor	Bear Dverkhan Armor
 Bear_Leather	Thick Hide
 Bear_Leather_cloak	Bear Hide Cloak	Male
+BeastClaw_TwoHandSword	Feral Claw
 Beastman_ChainMail_Gloves	Beastman Chain Gloves	Male
 Beastman_Leather_Armor	Beastman Leather Armor	Male
 Beastman_PlateArmor_Helm	Beastman Bone Helmet	Male
@@ -293,6 +327,7 @@ Begill_Leather_Boots	Begill Leather Boots	Male
 Begonia	Begonia
 Bekker_OneHandAxe	Bekker Axe
 Bekker_OneHandSword	Alabaster Curved Sword
+Beldrak_Warthog_Armor	Beldrak Warthog Armor
 Bell_BackPack	Bell Pack
 Bell_Flower	Lily of the Valley
 Bellac_HorseArmor_Helm	Velok Champron
@@ -373,7 +408,9 @@ Blackbear_Flag_II	Medium Black Bears Banner Pike
 Blackbear_Flag_IV	Black Bears Banner Pike with Tassel
 Blackberry	Blackberry
 Blackburn_PlateArmor_Armor	Blackburn Plate Armor	Male
+Blackfang_OneHandSword	Black Fang Sword
 Blacksmith_Leather_Armor	Blacksmith's Leather Armor	Male
+Blackwave_TwoHandGiantSpear	Blackwave Spear
 Blady_ChainMail_Armor	Blandry Chain Mail	Male
 Blank_Book	Empty Book
 Bleann_Leather_Armor	Blin Leather Armor	Male
@@ -443,6 +480,30 @@ Book_Marni_Tech_Book	Marni's Skills from Marshell
 Book_MasterJournal_01	A Master's Journal
 Book_Merrick_Memoris_01	Merrick's Journal
 Book_Misappropriation_Log	Investigative Log: Ambition in the Ruins
+Book_Ocean_Antumbra_SecretReport	Inquisitor's Top-Secret Report
+Book_Ocean_Auronui_Log	A Sailor's Journal
+Book_Ocean_Carcano_Shanty	Songs of Pywel - To Carcano!
+Book_Ocean_Diederik_Poems	How to Steal a Woman's Heart by Diederik
+Book_Ocean_Fence_ContactGuide	Dealing with Fences
+Book_Ocean_GhostShip_Diary	A Returning Soldier's Journal
+Book_Ocean_GoldenMarlin_Fairytale	The Golden Striped Marlin, the Old Man, and the Three Bets
+Book_Ocean_GreatSerpent_Myth	Tale of the Great Serpent
+Book_Ocean_Healer_CareLog	Excerpt from a Healer's Nursing Journal.
+Book_Ocean_Iliya_Survey	Iliya Island Expedition Log
+Book_Ocean_Legendary_Story_I	The Ship of the East
+Book_Ocean_Legendary_Story_II	Legendary Ship Hunt
+Book_Ocean_Legendary_Story_III	Pailune Ship Design Log
+Book_Ocean_Marius_PoorGuide	How to Treat the Poor
+Book_Ocean_MayaTemple	The Tales of the Honed Light
+Book_Ocean_Noble_ConversationGuide	A Guide to Talking with Nobles
+Book_Ocean_Ocula_Log	Pirate First Mate's Journal
+Book_Ocean_PinkDolphin_Shanty	Songs of Pywel - Following the Pink
+Book_Ocean_PinkManta_Research	Chasing the Truth of the Pink Manta Ray
+Book_Ocean_Samora_Folklore	The Folklore of Samora Island
+Book_Ocean_Sebastian_Diary_Seaside	Sebastian's Journal - The Seaside Village
+Book_Ocean_Selina_Diary	Celina's Diary
+Book_Ocean_ShipManager_Log	A Sailor's Journal
+Book_Ocean_Spagnola_Log	A Sailor's Journal
 Book_Octabus_Research_Diary	Octavius's Research Log
 Book_Old_Kliff_Diary	Goyen's Journal
 Book_Orphanage_Register_01	Orphanage Registry
@@ -481,6 +542,7 @@ Book_WyvernJournal	Balthazar's Wyvern Observation Journal
 Bopet_PlateArmor_Helm	Bobfett Plate Helm	Male
 Borman_Fabric_Armor	Borman Cloth Armor	Male
 Borsehir_Fabric_Armor	Borsehir Cloth Armor	Male
+BossRush_WhiteCrow_Witch_Letter	White Crow's Letter
 Boss_Hyena_Skevald_Report	Sighting of Skevald, the Carrion King
 Boss_Ludvig_Awakening_Leahter_Armor	Awakened Jackal's Leather Armor	Male
 Boss_Ludvig_Awakening_Leather_Boots	Awakened Jackal's Leather Boots	Male
@@ -507,6 +569,7 @@ Boss_Reward_MiraculousRecovery	Bloodstained Blessing
 Boss_Reward_Npc01Intimacy	Mysterious Gift
 Boss_Reward_QuickLearner_Charm	Sage's Eye
 Boss_Reward_ReturnCamp	Memory of a Fallen Kingdom
+Boss_Reward_StatsBreath	Tear of Oquilla
 Boss_Reward_StatsCrime	Chalice of Corruption
 Boss_Reward_StatsMp	T'rukan's Fighting Spirit
 Boss_Reward_StatsStamina	Dark Red Goblet
@@ -588,6 +651,7 @@ Brimstone_Leather_Helm	Black Bear Gas Mask	Male
 Brimstone_Leather_Helm_I	Demenissian Soldiers' Brimstone Gas Mask	Male
 Brimstone_Leather_Helm_II	Demeniss Brimstone Gas Mask	Male
 Brina_PlateArmor_Armor	Brina Plate Armor	Male
+Brindor_Wolf_Armor	Brynndor Wolf Armor
 Brittle_Leather_Gloves	Bristel Leather Gloves	Male
 Brizzle_Leather_Armor	Breitzle Leather Armor	Male
 Brogue_Leather_Armor	Brogue Leather Armor	Male
@@ -655,6 +719,7 @@ Cantu_Leather_Boots	Cantu Leather Boots	Female
 Canusti_PlateArmor_Armor	Canusti Plate Armor	Male
 Canusti_PlateArmor_Armor_I	Canusti Plate Armor	Male
 CapitalPatrol_OneHandShield	City Guard's Shield
+Capsule_Riding_Underwater_Atag_Scooter_1	Ancients' Chest
 Carcon_Leather_Boots	Carcon Leather Boots	Male
 Card_Vision_Helm	Deceiver's Fedora	Male
 Cardion_Leather_Boots	Bolton Leather Boots	Male
@@ -679,6 +744,7 @@ Caviden_Wood_OneHandShield	Sydmon Kite Shield
 Cebro_Fabric_Gloves	Serbello Cloth Gloves
 Cecilia_Kokes_OneHandMace	Acorn Mace
 Ceremonial_OneHandDagger	Ator's Finger
+Ceremonial_OneHandSword	Priest's Ceremonial Sword
 Cernos_HorseArmor_Armor	Cernos Barding
 Ceruon_PlateArmor_Armor	Cerruan Plate Armor	Male
 Cetry_Fabric_Gloves	Setri Cloth Gloves
@@ -695,6 +761,10 @@ Chaya_seed	Chaya Seed
 Checia_PlateArmor_Helm	Chelcia Plate Helm	Male
 Checia_PlateArmor_Helm_I	Wells Elite Plate Helm	Male
 Cheese	Cheese
+Cheese_GrilledClams	Grilled Cheese Clams
+Cheese_GrilledClams_Large	Satisfying Grilled Cheese Clams
+Cheese_GrilledClams_Medium	Filling Grilled Cheese Clams
+Cheese_GrilledClams_XLarge	Hearty Grilled Cheese Clams
 Chelcia_Plate_Boots	Chelcia Plate Boots	Male
 Chelti_Leather_Boots	Chanti Leather Boots	Male
 Cheon_Leather_Armor	Chayten Leather Armor	Male
@@ -703,6 +773,7 @@ Cherke_Leather_Armor	Cherke Leather Armor	Male
 Chickadee	False Hellebore
 Chicken_Helm	Herald of Six O'Clock	Male
 Chicken_Meat	Bird Meat
+Chieftain_OneHandMace	Chieftain's Mace
 Chijar_Fabric_Armor	Chizhar Cloth Armor	Male
 Chijar_Fabric_Boots	Chizhar Cloth Boots	Male
 Chijar_Fabric_Gloves	Chizhar Cloth Gloves	Male
@@ -746,6 +817,10 @@ Collection_Lamp_Candle_0003_index02	Lilac Watchtower Glass Lamp
 Collection_Lamp_Candle_0004	Icy White Hexagonal Lamp
 Collection_Lamp_Candle_0004_index01	Twilight Hexagonal Lamp
 Collection_Lamp_Candle_0004_index02	Lilac Hexagonal Lamp
+Collection_Lamp_stand_ocean_0001	Octopus-legged Candlestick
+Collection_Lamp_stand_ocean_0002	Pearl Remembrance Lamp
+Collection_Lamp_stand_ocean_0003	Blue Coral Lamp
+Collection_Lamp_stand_ocean_0004	Moonshell Cluster
 Collection_Prop_Bismuthornament_0001	Broken Bismuth Ornament
 Collection_Prop_Bismuthornament_0002	Angular Bismuth Ornament
 Collection_Prop_Bismuthornament_0003	Round Bismuth Ornament
@@ -892,6 +967,7 @@ Collection_Prop_Chest_0007	Jewelry Storage
 Collection_Prop_Chest_0008	Jewel Box
 Collection_Prop_Chest_0009	Multipurpose Wooden Box
 Collection_Prop_Chest_0010	Cylindrical Wooden Box
+Collection_Prop_Chest_0020	Cylindrical Wooden Box
 Collection_Prop_Cup_0001	Golden Goblet
 Collection_Prop_Cup_0002	Silver Goblet
 Collection_Prop_Cup_0003	Bronze Goblet
@@ -1144,6 +1220,9 @@ Contribution_Graymane	Greymane Contribution
 Contribution_Hernandian	Hernandian Contribution
 Contribution_Pailunese	Pailunese Contribution
 Contribution_Tashkalpan	Tashkalp Contribution
+Cook_Fabric_Armor	Cook's Cloth Uniform	Male
+Cook_Fabric_Helm	Cook's Cloth Hat	Male
+Cook_Leather_Gloves	Cook's Leather Gloves	Male
 Cooking_Oil	Cooking Oil
 CopperOre	Copper Ore
 Copper_Pack	Modest Copper Pouch
@@ -1158,6 +1237,7 @@ Corvo_PlateArmor_Gloves_II	Corvo Plate Gloves	Male
 Cotton	Cotton
 Cournantry_Fabric_Armor	Conentry Cloth Armor	Male
 Cournantry_Leather_Boots	Conentry Leather Boots	Male
+Crab_PlateArmor_Helm	Deepwater Carapace Helm	Male
 Cradbahn_Leather_Armor	Cradbahn Leather Armor	Male
 CraftingRecipe_Demian_Leather_Armor_V	Elegant Carmine Armor Blueprint
 CraftingRecipe_Demian_Leather_Cloak_I	Elegant Carmine Cloak Blueprint
@@ -1204,6 +1284,7 @@ Cucumber	Cucumber
 Cueman_Fabric_Armor	Quandan Cloth Armor	Male
 Cuenantta_Fabric_Armor	Qunanta Cloth Armor	Male
 Cuetain_Fabric_Armor	Qutin Cloth Armor	Male
+Cursed_Doll	Kliff Cursed Doll
 Cuthbertson_Leather_Armor	Cuthbertson Leather Armor	Male
 Cuzerchin_Leather_Armor	Churrchen Leather Armor	Male
 Cyton_Leather_Armor	Cyton Leather Armor	Male
@@ -1232,9 +1313,11 @@ Damian_Demeniss_Uniform_Leather_Gloves	Demenissian Uniform Leather Gloves	Female
 Damian_OneHandPistol	Spencer Pistol
 Damian_OneHandShield	Demenissian Gold-Decorated Shield
 Damian_OneHandShield_IV	Demenissian Silver-Decorated Shield
+Damian_OneHandShield_IX	Azurewater Shield
 Damian_OneHandShield_VI	Artisan's Ornamented Shield
 Damian_OneHandShield_VII	Shield of Radiance
 Damian_OneHandShield_VIII	Golden Kerria Shield
+Damian_OneHandShield_X	Stormforged Shield
 Danda_ChainMail_Armor	Danda Chain Mail
 Danda_Fabric_Helm	Danda Cloth Cap
 Danda_Leather_Gloves	Danda Leather Bracers
@@ -1247,6 +1330,7 @@ DarkLeader_TwoHandGiantSpear	Thorn of Dark Pursuit
 DarkLeader_TwoHandSword	Vessel of Dark Pursuit
 DarkLeader_TwoHandWarHammer	Guidance of Dark Pursuit
 Dark_King_Fabric_Armor	Antumbra Cloth Armor	Male
+Dark_King_Fabric_Armor_I	Desert Antumbra Cloth Armor	Male
 Dark_King_Metal_OneHandShield	Mirror of Night
 Dark_King_Plate_Boots	Antumbra Plate Greaves	Male
 DarknessKing_PlateArmor_Armor	Plate Armor of the Shadows	Male
@@ -1356,6 +1440,12 @@ Demeniss_HorseArmor_Helm	Demenissian Champron
 Demeniss_HorseArmor_Saddle	Demenissian Saddle
 Demeniss_HorseArmor_Stirrup	Demenissian Stirrups
 Demeniss_Nobility_Degree_I	Demenissian Signet
+Demeniss_Paper_Flyer_0001	Heralds of a New Demeniss Poster
+Demeniss_Paper_Flyer_0002	Heralds of a New Demeniss Poster
+Demeniss_Paper_Flyer_0003	Heralds of a New Demeniss Poster
+Demeniss_Paper_Flyer_0004	Demeniss Justice Defenders Poster
+Demeniss_Paper_Flyer_0005	Demeniss Justice Defenders Poster
+Demeniss_Paper_Flyer_0006	Demeniss Justice Defenders Poster
 Demeniss_PlateArmor_Armor	Chelcia Plate Armor	Male
 Demeniss_PlateArmor_Cloak	Chelcia Plate Cloak	Male
 Demeniss_Revolutionary_Paper_I	Demenissian Rebel's Secret Letter
@@ -1387,6 +1477,8 @@ Demian_Leather_Gloves_II	Leather Gloves of Earth's Honor	Female
 Demian_Leather_Gloves_III	Autumn Banquet Leather Gloves	Female
 Demian_Leather_Gloves_IV	Wanderer of Faith Leather Gloves	Female
 Demian_OneHandRapier	White Wind Rapier
+Demian_Pirate_Fabric_Armor	Stormlord Combat Suit	Female
+Demian_Pirate_Leather_Helm	Stormlord Hat
 Demian_PlateArmor_Armor_II	Light of the Battlefield Plate Armor	Female
 Demian_PlateArmor_Armor_VI	Official Knight's Plate Armor	Female
 Demian_PlateArmor_Cloak_III	Goldlight Plate Cloak	Female
@@ -1445,14 +1537,17 @@ Desert_HorseArmor_Armor	Sahareum Barding
 Desert_HorseArmor_Helm	Sahareum Champron
 Desert_HorseArmor_Saddle	Sahareum Saddle
 Desert_HorseArmor_Stirrup	Sahareum Stirrups
+Desert_ShinyStone_01	Glowing Seed
 Desert_Watermelon	Desert Melon
 Deshret_Ceremonial_TwoHandedWarHammer	Ceremonial Warhammer
 Deshret_Fabric_Armor	Deshret Cloth Armor	Male
 Deshret_Leather_Armor	Ziggurat Leather Armor	Male
 Deshret_Leather_Boots	Deshret Leather Boots	Male
 Deshret_Soldier_Fabric_Armor	Deshret Cloth Armor	Male
+Destroyed_Mechanism	Destroyed Mechanical Device
 Detail_Gold_Necklace	Finely Crafted Gold Necklace
 Detail_Gold_Ring	Finely Crafted Gold Ring
+Detail_Jade_Ring	Ornate Green Jade Ring
 Dev_Growth_Ring_I	Dev Growth Ring I
 Dev_Growth_Ring_II	Dev Growth Ring II
 Dev_Growth_Ring_III	Dev Growth Ring III
@@ -1523,9 +1618,34 @@ Diskio_Leather_Gloves	Deskio Leather Gloves	Male
 Diskio_Metal_OneHandShield	Sydmon Round Shield
 Ditter_Fabric_Armor	Ditter Cloth Armor	Male
 Diver_Steel_Drill	Diver's Machine Knuckledrill
+Diving_BackPack_02	Explorer's Breathing Device
+Diving_PlateArmor_Armor_01	Charter's Diving Suit	Male
+Diving_PlateArmor_Armor_02	Charter's Light Diving Suit	Female
+Diving_PlateArmor_Armor_03	Marine Charter's Diving Suit	Male
+Diving_PlateArmor_Armor_04	Marine Charter's Light Diving Suit	Female
+Diving_PlateArmor_Boots_01	Charter's Diving Boots	Male
+Diving_PlateArmor_Boots_02	Charter's Light Diving Boots
+Diving_PlateArmor_Boots_03	Marine Charter's Diving Boots	Male
+Diving_PlateArmor_Boots_04	Marine Charter's Light Diving Boots	Female
+Diving_PlateArmor_Gloves_01	Charter's Diving Gloves	Male
+Diving_PlateArmor_Gloves_02	Charter's Light Diving Gloves	Female
+Diving_PlateArmor_Gloves_03	Marine Charter's Diving Gloves	Male
+Diving_PlateArmor_Gloves_04	Marine Charter's Light Diving Gloves	Female
+Diving_PlateArmor_Helm_01	Charter's Diving Helm	Male
+Diving_PlateArmor_Helm_02	Charter's Light Diving Helm	Female
+Diving_PlateArmor_Helm_03	Marine Charter's Diving Helm	Male
+Diving_PlateArmor_Helm_04	Marine Charter's Light Diving Helm	Female
+Diving_Propulsion_BackPack	Propulsion-Type Breathing Device
+Diving_Propulsion_BackPack_I	Enhanced Propulsion Breathing Device
 Dohahn_Fabric_Armor	Dohann Cloth Armor	Male
 Dollette_Fabric_Armor	Dollette Cloth Armor	Male
 Dolters_Leather_Boots	Dolters Leather Boots	Male
+Dommsday_PlateArmor_Armor	Plate Armor of Void	Male
+Dommsday_PlateArmor_Cloak	Plate Cloak of Void	Male
+Dommsday_PlateArmor_Gloves	Plate Gloves of Void	Male
+Dommsday_PlateArmor_Helm	Plate Helm of Void	Male
+Dommsday_Plate_Boots	Plate Boots of Void	Male
+Dommsday_TwoHandSword	Longsword of Void
 Donaf_Leather_Boots	Donaff Leather Boots	Male
 Dongdegobi_Fabric_Armor	Dondegobi Cloth Armor	Male
 Dongdegobi_Leather_Gloves	Dondegobi Leather Gloves	Male
@@ -1565,7 +1685,10 @@ Dria_PlateArmor_Helm	Drea Plate Helm	Male
 Drimnarrow_Fabric_Armor	Drimrow Cloth Armor	Male
 Drivon_ChainMail_Armor	Drivon Chain Mail	Male
 Drone_Backpack	Sandwatcher Watcher Pack
+DropItem_Pirate_Ocean_Box	Pirate's Loot
+DropItem_Premium_Ocean_Chest	Rare Ocean Relic
 DropItem_Quest_Paper_Cult_Order	Antumbra Order Directive Box
+DropItem_Recipe_Paper_HousingObject_Windmill_SandCrawler	Mysterious Old Blueprint Box
 Drottesel_Leather_Armor	Drossel Leather Armor
 Drug_Leather_Helm	Scarlet Blades Gas Mask	Male
 Drug_Leather_Helm_I	Bleed Bandits' Gas Mask	Male
@@ -1654,13 +1777,28 @@ Ellachic_Leather_Gloves	Elashe Leather Gloves	Male
 Elliot_Leather_Armor	Elliot Leather Armor	Male
 Elsiguo_Leather_Gloves	Ellisco Leather Bracers	Male
 Emil_PlateArmor_Armor	Emil Plate Armor	Male
+Empty_Armor	Transparent Armor
 Empty_BackPack	Empty Pack
+Empty_Boots	Transparent Boots
 Empty_Bottle	Empty Bottle
+Empty_Cloak	Transparent Cloak
+Empty_Earring	Transparent Earring
+Empty_Gloves	Transparent Gloves
+Empty_Helm	Transparent Hat
+Empty_Mask	Transparent Mask
+Empty_Necklace	Transparent Necklace
+Empty_Ring	Transparent Ring
+Empty_glasses	Transparent Glasses
 Endnion_PlateArmor_Armor	Endnion Plate Armor	Male
 Endoron_Leather_Boots	Endoron Leather Boots	Male
 Endour_PlateArmor_Helm	Goldbranch Plate Crown	Male
 Enge_Leather_Armor	Enge Leather Armor
 EngineerWorkLog_Book	An Engineer's Work Log
+Enhanced_HandCannon_AbyssRuinsCreatureCore	Dense Abyss Cell
+Enhanced_HandCannon_Gun_Powder	Blended Gunpowder
+Enhanced_HandCannon_IronStone	Smelted Iron Ore
+Enhanced_HandCannon_MarniMachineLaser	Upgraded Marni Laser Component
+Enhanced_HandCannon_Platinum	Refined Platinum
 Enratte_PlateArmor_Helm	Enratte Plate Helm	Male
 Enratte_PlateArmor_Helm_I	Large Enratte Plate Helm	Male
 Ensete_seed	Enset Seed
@@ -1696,6 +1834,7 @@ Equip_TriRake	Wooden Pitchfork
 Equip_Trumpet	Trumpet
 Equip_WoodRake	Wooden Rake
 Equip_Work_Hammer	Mallet
+Equip_wood_RollerMop	Wooden Roller Mop
 Erday_Leather_Armor	Erday Leather Armor	Male
 Erin_Fabric_Helm	Eryn Cloth Cap	Male
 Erkeney_Fabric_Armor	Eckney Cloth Armor	Male
@@ -1706,11 +1845,18 @@ Esahah_Leather_Boots	Esha Leather Boots	Male
 Esahah_Leather_Gloves	Esha Leather Bracers	Male
 Esirun_Leather_Armor	Eshrun Leather Armor	Male
 Esleague_Leather_Armor	Islekk Leather Armor	Male
+Essence_Riding_Big_Player_ship_PanokSeon_I	Unidentified Box
+Essence_Riding_Big_Player_ship_PanokSeon_II	Unidentified Box
+Essence_Riding_Player_Big_Ship_TurtleShip_I	Unidentified Box
+Essence_Riding_Player_Big_Ship_TurtleShip_II	Unidentified Box
+Essence_Riding_Player_Big_Ship_TurtleShip_III	Unidentified Box
+Essence_Riding_Player_Big_Ship_TurtleShip_IV	Unidentified Box
 Estir_Leather_Boots	Estelle Leather Boots	Female
 Euler_OneHandRapier	Elenore Rapier
 Eustis_Leather_Boots	Eustice Leather Boots	Male
 Evanizer_Leather_Boots	Ebenezer Leather Boots	Male
 Ewen_Fabric_Armor	Ewen Cloth Armor
+Faded_Guardians_Necklace	Faded Guardian's Necklace
 Faded_Necklace	Tarnished Necklace
 Faded_Ring	Tarnished Ring
 Faience_Fabric_Armor	Faians Cloth Armor	Male
@@ -1734,6 +1880,7 @@ FieldBattle_BackPack_III	Field Pack
 Fighter_Fabric_Armor	Martial Artist's Cloth Garb	Male
 Figs	Fig
 Figs_Seed	Fig Seed
+FigureHead_TwoHandHammer	Wailing Sea Greathammer
 Fine_Stone	Fine Stone
 Fine_Wood	Fine Timber
 Finraysen_Leather_Armor	Finneron Leather Armor	Male
@@ -1782,6 +1929,7 @@ FishingRod_III	Pororin Fishing Rod
 FlameThrower	Electromagnetic Flamespitter
 Flame_Knights_PlateArmor_Helm	Elite Flame Knights Plate Helm	Male
 Flame_Knights_PlateArmor_Helm_I	Flame Knights Plate Helm	Male
+Flame_Ring	Blazing Ring
 Flame_SwordMan_PlateArmor_Gloves	Flame Swordsman Plate Gloves	Male
 Flame_SwordMan_TwoHandHammer	Greathammer of Fire
 Flame_staff_spear_TwoHandSpear	Blazing Spear
@@ -1792,47 +1940,78 @@ Flolin_BackPack_II	Florindale Empty Pack
 Flordanus_Leather_Armor	Flordanus Leather Armor	Male
 Florin_Fabric_Cloak	Pororin Cloth Cloak	Male
 Florin_Fabric_Helm	Pororin Petal Hat
+Florin_deer_Armor	Pororin Petal Deer Saddle
 Flynn_PlateArmor_Helm	Flynn Plate Helm	Male
 Folorin_Earring	Flower Petal Earring
 Fontergear_OneHandMace	Bonepit Mace
 Fontine_Leather_Armor	Fontine Leather Armor	Male
+Food_Angelshark	Angel Shark
+Food_AtlanticBlueTang	Dawnwave Blue Tang
+Food_AtlanticGreenTang	Dewleaf Green Tang
 Food_BaliOgluChub	Small Minnow
 Food_Bass_I	Bass
 Food_Bass_II	Yellow Bass
 Food_Benjari	Threeline Grunt
 Food_Beyaz	Small Rasbora
+Food_Big_Rock_Bream	Oceanic Barred Knifejaw
 Food_BlackSeaBream	Blackhead Seabream
 Food_Blackbrow_Bleak	Small Blackbrow Bleak
+Food_Blobfish	Blobfish
 Food_BlueCrab	Blue Crab
+Food_BlueLobster	Blue Lobster
+Food_BlueTang	Blue Tang
 Food_Burbot	Burbot
 Food_Carp	Carp
 Food_Catfish	Catfish
+Food_ClownFish	Clownfish
 Food_Coelacanth	Coelacanth
 Food_CookFailed	Mysterious Dish
 Food_Crayfish	Crayfish
 Food_Crucian_Carp	Crucian Carp
 Food_Cuvier	Saw-Edged Perch
+Food_Discus	Discus
+Food_Dolphin	Dolphin
 Food_Dover_Sole	Red Tonguesole
 Food_Dried_Fish	Dried Fish
 Food_DrinkFailed	Mysterious Liquid
+Food_EagleRay	Eagle Ray
 Food_Eel	Freshwater Eel
 Food_Fish_Meat	Fish Fillet
 Food_GiantMudfish	Giant Pond Loach
 Food_GiantRedSeaBream	Giant Red Seabream
+Food_Giant_Mantaray	Giant Manta Ray
+Food_Giant_Shark	Megalodon
 Food_GoldCarp	Golden Carp
 Food_GoldTenchi	Golden Tench
+Food_Gold_Shark	Golden Shark
 Food_Golden_Coelacanth	Golden Coelacanth
 Food_HexeFish	Hexe Earthen Fish
+Food_Honeycomb_Grouper	Honeycomb Grouper
+Food_JellyFish	Jellyfish Bell
+Food_KingCrab	King Crab
 Food_Lenok	Lenok
 Food_LightCrotch	Anglerfish
 Food_LightningEel	Electric Eel
+Food_Lightning_JellyFish	Shocking Jellyfish Bell
+Food_Lightningray	Electric Ray
+Food_Longfin_Batfish	Longfin Batfish
 Food_Mackerel	Mackerel
+Food_Mantaray	Manta Ray
 Food_Marlin	Striped Marlin
 Food_MechanicFish	Clockwork Fish
 Food_Mudfish	Pond Loach
+Food_OceanFootballfish	Oceanic Anglerfish
+Food_Oceansunfish	Sunfish
+Food_Orca	Orca
+Food_Parrotfish	Parrotfish
 Food_Perch	Perch
 Food_Pikefish	Northern Pike
+Food_Pink_Dolphin	Pink Dolphin
+Food_Pink_Mantaray	Pink Manta Ray
+Food_Poison_JellyFish	Bitter Jellyfish Bell
 Food_RedSnapper	Crimson Opaleye
+Food_RedTang	Red Tang
+Food_Red_Sailfish	Red Sailfish
 Food_Red_Seabream	Red Seabream
 Food_Red_Snapper	Opaleye
 Food_Ricefish	Ricefish
@@ -1843,7 +2022,9 @@ Food_Sammy	Small Gudgeon
 Food_Schneider	Small Spirlin
 Food_Seahorse	Seahorse
 Food_SevenStarShark	Broadnose Sevengill Shark
+Food_Shark	Shark
 Food_Shrimp	Shrimp
+Food_SnowCrab	Snow Crab
 Food_Sockeye_Salmon	Sockeye Salmon
 Food_SpatulaSturgeon	Paddlefish
 Food_Squid	Squid
@@ -1852,6 +2033,12 @@ Food_Starfish	Starfish
 Food_Sturgeon	Sturgeon
 Food_Tenchi	Tench
 Food_Trout	Trout
+Food_Vulcanoctopus	Pearl Octopus
+Food_YellowTang	Yellow Tang
+Food_gold_Marlin	Golden Striped Marlin
+Food_hammerhead_shark	Hammerhead Shark
+Food_lionfish	Lionfish
+Food_purpleTang	Purple Tang
 Food_river_Crab	Freshwater Crab
 ForestFairy_TwoHandedWarHammer	Shadowleaf Soul Branch
 Forest_Fairy_Leather_Armor	Forest Fae Armor	Male
@@ -1885,6 +2072,26 @@ Fruit_Porridge_Large	Satisfying Fruit Punch
 Fruit_Porridge_Medium	Filling Fruit Punch
 Fruit_Porridge_XLarge	Hearty Fruit Punch
 Fruit_Wine	Wine
+FryingPan_Lid_OneHandShield	Frying Pan Lid
+FryingPan_Lid_OneHandShield_II	Novice Cook's Frying Pan Lid
+FryingPan_Lid_OneHandShield_III	Apprentice Cook's Frying Pan
+FryingPan_Lid_OneHandShield_IV	Skilled Cook's Frying Pan Lid
+FryingPan_Lid_OneHandShield_IX	Maestro's Frying Pan Lid
+FryingPan_Lid_OneHandShield_V	Expert Cook's Frying Pan Lid
+FryingPan_Lid_OneHandShield_VI	Sous-Chef's Frying Pan Lid
+FryingPan_Lid_OneHandShield_VII	Head Chef's Frying Pan Lid
+FryingPan_Lid_OneHandShield_VIII	Grandmaster's Frying Pan Lid
+FryingPan_Lid_OneHandShield_X	Master's Frying Pan Lid
+FryingPan_OneHandMace	Frying Pan
+FryingPan_OneHandMace_II	Novice Cook's Frying Pan
+FryingPan_OneHandMace_III	Apprentice Cook's Frying Pan
+FryingPan_OneHandMace_IV	Skilled Cook's Frying Pan
+FryingPan_OneHandMace_IX	Maestro's Frying Pan
+FryingPan_OneHandMace_V	Expert Cook's Frying Pan
+FryingPan_OneHandMace_VI	Sous-Chef's Frying Pan
+FryingPan_OneHandMace_VII	Head Chef's Frying Pan
+FryingPan_OneHandMace_VIII	Grandmaster's Frying Pan
+FryingPan_OneHandMace_X	Master's Frying Pan
 Full_Course_of_Braised_Fish	Assorted Braised Fish
 Full_Course_of_Braised_Fish_Large	Satisfying Assorted Braised Fish
 Full_Course_of_Braised_Fish_Medium	Filling Assorted Braised Fish
@@ -1914,12 +2121,14 @@ Gardbedeff_Fabric_Armor	Gardeiff Cloth Armor	Male
 Garff_Fabric_Armor	Gaph Cloth Armor	Male
 Garlic	Garlic
 Gas_Mask_Helm_I	Brimstone Gas Mask	Male
+Gatekeeper_TwoHandSword	Gatekeeper's Longsword
 Gatin_Leather_Boots	Gatin Leather Boots	Male
 Gaurah_Fabric_Helm	Gaurra Cloth Cap	Male
 Gaut_Fabric_Armor	Gaut Cloth Armor	Male
 Gaut_Fabric_Boots	Gaut Cloth Boots
 Gaut_Leather_Armor	Gaut Leather Armor	Male
 Gelhouke_OneHandTowerShield	The Laughing Marionette Shield
+Generator_PlateArmor_Armor	Sunforged Shade Armor	Male
 Georg_Leather_Armor	Gorg Leather Armor	Male
 Gerano_Leather_Armor	Gerano Leather Armor	Male
 Germion_PlateArmor_Armor	Jerrinmarne Plate Armor	Male
@@ -1928,12 +2137,15 @@ Ghost_TwohandSword	Invisible Longsword
 GiantBallista_Book	Pailunese Guard's Journal
 GiantIguana_Armor	Giant Iguana Saddle
 Giant_Copper_Drill	Copper Knuckledrill
+Giant_JellyFish_Skin	Giant Jellyfish Skin
 Giant_ReiGhis_TwoHandGiantAxe	Gorthak Greataxe
+Giant_Salamander_Leather	Giant Hydrothermal Salamander Hide
 Giant_Warriors_TwoHandGiantAxe	Patterned Stone Greataxe
 Gias_Leather_Armor	Giath's Leather Armor	Male
 Gias_OneHandSword	Savage Sawblade
 Gilded_OneHandShield	Gilded Shield
 Gilded_OneHandTowerShield	Large Gilded Shield
+Gimbap_BossRush_00	Battlefield Feast - Restores Health and Spirit
 Ginseng_Seed	Wild Ginseng Seed
 Girrin_PlateArmor_Armor	Guilan Plate Armor	Male
 Gladiator_Fabric_Armor	Gladiator's Cloth Armor	Male
@@ -2013,6 +2225,8 @@ GreyWolf_OneHandBow	Grey Wolf Bow	Male
 Greyfur_Fabric_Armor	Balder's Cloth Armor	Male
 Greyfur_Fabric_Armor_C	Ronald's Cloth Armor	Male
 Greyfur_Fabric_Armor_CI	Greymane Cloth Armor	Male
+Greyfur_Fabric_Armor_CII	Greymane Cloth Armor	Male
+Greyfur_Fabric_Armor_CIII	Greymane Cloth Armor	Male
 Greyfur_Fabric_Armor_D	Fritz's Cloth Armor	Male
 Greyfur_Fabric_Armor_I	Matilda's Cloth Armor	Female
 Greyfur_Fabric_Armor_III	Devan's Cloth Armor	Male
@@ -2043,6 +2257,7 @@ Greyfur_Fabric_Helm_I	Arnold's Cloth Cap	Male
 Greyfur_Fabric_Helm_II	Wybert's Cloth Cap	Male
 Greyfur_Fabric_Helm_III	Fritz's Cloth Cap	Male
 Greyfur_Fabric_Helm_IV	Shane's Cloth Headband	Male
+Greyfur_Fabric_Helm_X	Greymane Cloth Helm	Male
 Greyfur_Leather_Armor	Greymanes' Leather Armor	Male
 Greyfur_Leather_Armor_I	Greymanes' Leather Armor	Male
 Greyfur_Leather_Armor_II	Greymanes' Leather Armor	Male
@@ -2083,6 +2298,10 @@ Greyfur_Leather_Helm_II	Greymanes' Leather Helm	Male
 Greyfur_Necklace	Greymane Necklace
 Greyfur_PlateArmor_Gloves_I	Darren Plate Gloves	Male
 Greymane_Nobility_Degree_I	Greymane Signet
+GrilledClams	Grilled Clams
+GrilledClams_Large	Satisfying Grilled Clams
+GrilledClams_Medium	Filling Grilled Clams
+GrilledClams_XLarge	Hearty Grilled Clams
 Grilled_Big_Fish	Large Grilled Fish
 Grilled_Big_Fish_Large	Satisfying Large Grilled Fish
 Grilled_Big_Fish_Medium	Filling Large Grilled Fish
@@ -2116,6 +2335,7 @@ Grommet_Leather_Armor	Grommet Leather Armor	Male
 Gronerd_Leather_Armor	Gronerd Leather Armor	Male
 Groucca_Leather_Armor	Groucca Leather Armor	Male
 Gruun_Fabric_Armor	Gruun Cloth Armor	Male
+GuardianHorn_OneHandMace	Guardian's Horn
 GuardianTree_Pear	Fruit of Life
 Guardian_PlateArmor_Armor	Guardian Plate Armor	Male
 Guff_Leather_Armor	Guff Leather Armor	Male
@@ -2156,9 +2376,12 @@ Haran_Fabric_Armor	Harran Cloth Armor	Female
 Hard_Thorn_OneHandTowerShield	Legion Spearmen's Large Shield
 Harghai_Fabric_Armor	Harghai Cloth Armor	Male
 Hark_Leather_Gloves	Hark Leather Gloves	Male
+Harkan_Leather_Armor	Harkan Leather Armor	Male
+Harkan_PlateArmor_Helm	Helms Harkan Helm	Male
 Harker_Fabric_Helm	Harker Cloth Cap	Male
 Harkias_OneHandAxe	Gilliam Axe
 Haron_Fabric_Gloves	Haron Cloth Wristband	Male
+Harpoon_TwoHandSpear	Harpoon Spear
 Harpy_Feather	Harpy Feather
 Hartman_PlateArmor_Helm	Hartmann Plate Helm	Male
 Hasets_ChainMail_Armor	Hasets Chain Mail	Male
@@ -2214,6 +2437,46 @@ Hexe_Soldier_OneHandSword	Sword of the Fleeting
 Hexe_Soldier_TwoHandSpear	Staff of the Fleeting
 Hexe_Warrior_TwoHandSpear	Spear of the Fleeting
 Hexe_Wooden_Toy	Wooden Soldier Figurine
+Hidden_Ocean_TreasureMap_0001	Forgotten Treasure Map
+Hidden_Ocean_TreasureMap_0002	Forgotten Treasure Map
+Hidden_Ocean_TreasureMap_0003	Forgotten Treasure Map
+Hidden_Ocean_TreasureMap_0004	Forgotten Treasure Map
+Hidden_Ocean_TreasureMap_0005	Forgotten Treasure Map
+Hidden_Ocean_TreasureMap_0006	Forgotten Treasure Map
+Hidden_Ocean_TreasureMap_0007	Forgotten Treasure Map
+Hidden_Ocean_TreasureMap_0008	Forgotten Treasure Map
+Hidden_Ocean_TreasureMap_0009	Forgotten Treasure Map
+Hidden_Ocean_TreasureMap_0010	Forgotten Treasure Map
+Hidden_Ocean_TreasureMap_0011	Forgotten Treasure Map
+Hidden_Ocean_TreasureMap_0012	Forgotten Treasure Map
+Hidden_Ocean_TreasureMap_0013	Forgotten Treasure Map
+Hidden_Ocean_TreasureMap_0014	Forgotten Treasure Map
+Hidden_Ocean_TreasureMap_0015	Forgotten Treasure Map
+Hidden_Ocean_TreasureMap_0016	Forgotten Treasure Map
+Hidden_Ocean_TreasureMap_0017	Forgotten Treasure Map
+Hidden_Ocean_TreasureMap_0018	Forgotten Treasure Map
+Hidden_Ocean_TreasureMap_0019	Forgotten Treasure Map
+Hidden_Ocean_TreasureMap_0020	Forgotten Treasure Map
+Hidden_Ocean_TreasureMap_0021	Forgotten Treasure Map
+Hidden_Ocean_TreasureMap_0022	Forgotten Treasure Map
+Hidden_Ocean_TreasureMap_0023	Forgotten Treasure Map
+Hidden_Ocean_TreasureMap_0024	Forgotten Treasure Map
+Hidden_Ocean_TreasureMap_0025	Forgotten Treasure Map
+Hidden_Ocean_TreasureMap_0026	Forgotten Treasure Map
+Hidden_Ocean_TreasureMap_0027	Forgotten Treasure Map
+Hidden_Ocean_TreasureMap_0028	Forgotten Treasure Map
+Hidden_Ocean_TreasureMap_0029	Forgotten Treasure Map
+Hidden_Ocean_TreasureMap_0030	Forgotten Treasure Map
+Hidden_Ocean_TreasureMap_0031	Forgotten Treasure Map
+Hidden_Ocean_TreasureMap_0032	Forgotten Treasure Map
+Hidden_Ocean_TreasureMap_0033	Forgotten Treasure Map
+Hidden_Ocean_TreasureMap_0034	Forgotten Treasure Map
+Hidden_Ocean_TreasureMap_0035	Forgotten Treasure Map
+Hidden_Ocean_TreasureMap_0036	Forgotten Treasure Map
+Hidden_Ocean_TreasureMap_0037	Forgotten Treasure Map
+Hidden_Ocean_TreasureMap_0038	Forgotten Treasure Map
+Hidden_Ocean_TreasureMap_0039	Forgotten Treasure Map
+Hidden_Ocean_TreasureMap_0040	Forgotten Treasure Map
 Hidden_TreasureMap_I	Hidden Treasure Map Piece 1
 Hidden_TreasureMap_II	Hidden Treasure Map Piece 2
 Hidden_TreasureMap_III	Hidden Treasure Map Piece 3
@@ -2341,6 +2604,7 @@ Item_AbyssGear_Recipe_Box_III	Unidentified Abyss Gear Blueprint
 Item_AbyssGear_Recipe_Box_IV	Unidentified Abyss Gear Blueprint
 Item_AbyssGear_Recipe_Box_V	Unidentified Abyss Gear Blueprint
 Item_AbyssGear_Recipe_Box_VI	Unidentified Abyss Gear Blueprint
+Item_AbyssGear_Recipe_Box_VII	Unidentified Abyss Gear Blueprint
 Item_AbyssGear_SKill_Lv1_Box	Unidentified Abyss Gear
 Item_AbyssGear_SKill_Lv2_Box	Unidentified Abyss Gear
 Item_AbyssGear_SKill_Lv3_Box	Unidentified Abyss Gear
@@ -2352,10 +2616,21 @@ Item_Abyss_Artifact_Maker	Abyss Artifact Fabricator
 Item_Axolotl	Axolotl
 Item_Baby_Hedgehog	Baby Hedgehog
 Item_BackPackChocolate	Cacao Snack
-Item_Background_Breakable_Wood_10	Table
-Item_Background_Breakable_Wood_11	Table
+Item_Background_Breakable_04	Training Sack Scarecrow
+Item_Background_Breakable_11	Archery Target
+Item_Background_Breakable_20	Multipurpose Storage Box
+Item_Background_Breakable_39	Branched Totem
+Item_Background_Breakable_43	Long Branch Totem
+Item_Background_Breakable_81	Solid Wood Bookshelf
+Item_Background_Breakable_Metal_01	Decorative Armor
+Item_Background_Breakable_Metal_02	Decorative Breastplate
+Item_Background_Breakable_Wood_10	Slim-Legged Table
+Item_Background_Breakable_Wood_11	Rustic Wood Table
+Item_Background_Breakable_Wood_132	Transport Cart Frame
+Item_Background_Breakable_Wood_176	Crude Wooden Bench
 Item_Background_Breakable_Wood_230	Large Bright Table
 Item_Background_Breakable_Wood_257	Dark Pillared Side Table
+Item_Background_Breakable_Wood_259	Large Crude Wooden Bench
 Item_Background_Breakable_Wood_280	Mechanical Cogwheel Chair
 Item_Background_Breakable_Wood_281	Antler Chair
 Item_Background_Breakable_Wood_285	Double-Patterned Chair
@@ -2375,9 +2650,19 @@ Item_Background_Breakable_Wood_313	Side Table
 Item_Background_Breakable_Wood_320	Timber Nightstand
 Item_Background_Breakable_Wood_323	Small Timberton Table
 Item_Background_Breakable_Wood_323_index01	Small Bright Timberton Table
-Item_Background_Breakable_Wood_339	Book Stand
-Item_Background_Breakable_Wood_340	Book Stand
+Item_Background_Breakable_Wood_339	Wooden Book Stand
+Item_Background_Breakable_Wood_340	Antique Book Stand
 Item_Background_Breakable_Wood_363	Round Table
+Item_Background_Breakable_Wood_56	Wooden Crane
+Item_Background_Breakable_Wood_56_index0001	Sturdy Wooden Crane
+Item_Background_Breakable_Wood_92	Ballista Arrows
+Item_Background_Straw_01	Neat Bundle of Hay
+Item_Background_Straw_02	Pile of Hay
+Item_Background_Straw_04a	Bundle of Hay Pile
+Item_Background_Straw_06	Bundle of Hay
+Item_Background_Straw_07	Large Bundle of Hay
+Item_Background_Straw_08	Bundled Hay Bale
+Item_Background_Straw_09a	Hay Drying Rack
 Item_BananaSpider	Yellow Garden Spider
 Item_Banded_Peacock	Banded Peacock Butterfly
 Item_Bee	Honeybee
@@ -2411,6 +2696,7 @@ Item_Dem_Enchant_Coin	Demeniss Refinement Token
 Item_Desert_Orange_tip	Scarlet Leafwing Butterfly
 Item_DiademSpider	Golden Silk Spider
 Item_Diana_Fritillary	Diana Fritillary Butterfly
+Item_DropSet_Collect_Manganese	Manganese Nodule
 Item_ETC_CooltimeReduce_ATAG	A.T.A.G. Emergency Power Device
 Item_ETC_CooltimeReduce_ATAGII	A.T.A.G. Power Module
 Item_ETC_CooltimeReduce_Dragon	Dragon Claw Horn
@@ -2420,6 +2706,7 @@ Item_Eastern_Tailed_Blue	Blue Tailed Butterfly
 Item_Eastern_Tiger_Swallowtail	Swallowtail
 Item_Egg_KuKu	Kuku Bird's Egg
 Item_Egg_Wyvern	Wyvern Egg
+Item_Eupatorus_Beetle	Five-Horned Rhinoceros Beetle
 Item_FireFly_Box	Firefly Colony
 Item_Firefly	Firefly
 Item_Fist_Damian	Ordinary Gloves	Female
@@ -2431,14 +2718,19 @@ Item_Giant_Salamander	Burrowing Salamander
 Item_Gnat	Fruit Fly
 Item_GnatWide	Medium Fly
 Item_Goanna	Goanna
+Item_Golden_Butterfly	Golden Butterfly
+Item_Golden_Jewel_Beetle	Golden Jewel Beetle
+Item_Golden_Rhinoceros_Beetle	Golden Rhinoceros Beetle
 Item_GrassHopper	Grasshopper
 Item_Great_Purple_Hairstreak	Great Purple Hairstreak Butterfly
 Item_Grizzled_Skipper	Grizzled Skipper Butterfly
 Item_Guava_Skipper	Guava Skipper Butterfly
 Item_Her_Enchant_Coin	Hernand Refinement Token
+Item_Hercules_Beetle	Great Horned Rhinoceros Beetle
 Item_Hila_Lizard	Heloderma Lizard
 Item_Hornet	Hornet
 Item_House_Centipede	House Centipede
+Item_Hydrothermal_Snail	Scaly-Foot Snail
 Item_Hypaurotis_Crysalus	Violet Hairstreak Butterfly
 Item_Iguana	Iguana
 Item_Jewel_Beetle	Jewel Beetle
@@ -2456,6 +2748,7 @@ Item_Luna_Moth	Wild Silkworm Moth
 Item_Lustrous_Copper	Red Lycaenid Butterfly
 Item_Lycaena_Phlaeas	Spotted Lycaenid Butterfly
 Item_Malachite	Malachite Butterfly
+Item_Mecoptera	Scorpionfly
 Item_Meerkat	Meerkat
 Item_Milbert_Tortoiseshell	Flame-Bordered Butterfly
 Item_Mole	Mole
@@ -2463,7 +2756,9 @@ Item_Monarch	Monarch Butterfly
 Item_Moth	Mountain Moth
 Item_Muskrat	Muskrat
 Item_Myscelia_Ethusa	Bluewing Butterfly
+Item_Natural_Pearl	Natural Pearl
 Item_Neophasia_Terlooii	White Butterfly
+Item_Ocean_Parrot_PetBox	Chitty-Chatty Companion Chest
 Item_Orange_Barred_Sulphur	Orange-Barred Sulphur Butterfly
 Item_Oriole	Black-Naped Oriole
 Item_Ornythion_Swallowtail	Ornythion Swallowtail Butterfly
@@ -2476,15 +2771,30 @@ Item_Pipevine_Swallowtail	Pipevine Swallowtail Butterfly
 Item_Polydamas_Swallowtail	Polydamas Swallowtail Butterfly
 Item_Possum	Opossum
 Item_Purple_Emperor	Purple Emperor Butterfly
+Item_Rare_Collect_Abalone	Abalone
 Item_Rare_Collect_Chaya	Chaya
+Item_Rare_Collect_Conch	Conch
 Item_Rare_Collect_Dulse	Red Seaweed
 Item_Rare_Collect_Ensete	Enset
+Item_Rare_Collect_GiantAbalone	Giant Abalone
+Item_Rare_Collect_GiantConch	Giant Conch
+Item_Rare_Collect_GiantPenShell	Giant Pen Shell
+Item_Rare_Collect_GiantSeaCucumber	Giant Sea Cucumber
+Item_Rare_Collect_GiantSeaPineapple	Giant Sea Pineapple
+Item_Rare_Collect_GiantSeaSquirt	Giant Stalked Sea Squirt
+Item_Rare_Collect_GiantStarfish	Giant Starfish
 Item_Rare_Collect_Kudzu	Skyroot
 Item_Rare_Collect_Mercury	Mercury
+Item_Rare_Collect_Mussel	Mussel
 Item_Rare_Collect_Platinum	Platinum
 Item_Rare_Collect_RazorClam	Razor Clam
 Item_Rare_Collect_RazorClam_01	Freshwater Clam
 Item_Rare_Collect_Rubber	Rubber
+Item_Rare_Collect_Scallops	Scallop
+Item_Rare_Collect_Sea_Kelp	Kelp
+Item_Rare_Collect_Sea_String	Red Seaweed
+Item_Rare_Collect_Sea_Weed	Seaweed
+Item_Rare_Collect_Shortneckclam	Clams
 Item_Rare_Collect_Stalactites	Stalactite
 Item_Rare_Collect_SulfurStone	Brimstone
 Item_Rare_Collect_Taro	Taro
@@ -2492,6 +2802,10 @@ Item_Rare_Collect_amaranth	Amaranth
 Item_Rare_Collect_chlorella	Green Algae
 Item_Rare_Collect_jijeongta_leaf	Palmar Leaf
 Item_Rare_Collect_opuntia	Prickly Pear
+Item_Rare_Collect_sea_blackcoral	Sea Fan Coral
+Item_Rare_Collect_sea_goldencoral	Golden Coral
+Item_Rare_Collect_seapineapple	Sea Pineapple
+Item_Rare_Collect_seaurchin	Sea Urchin Roe
 Item_Rat	Rat
 Item_Red_Spotted_Purple	Red-Spotted Purple Butterfly
 Item_Red_Squirrel	Red Squirrel
@@ -2501,18 +2815,33 @@ Item_Ruddy_Daggerwing	Ruddy Daggerwing Butterfly
 Item_Rusty_Tipped_Page	Rusty Tipped Page Butterfly
 Item_Salamander	Salamander
 Item_Scale	Scales of Fairness and Justice
+Item_Sea_Coin	Ancient Relic
+Item_Sea_Coin_Broken	Shattered Ancient Relic
 Item_Sea_Siater	Wharf Roach
 Item_Set_A_Enhance_RestArea	Adventurer's Refinement Inventory Type A
+Item_Set_A_Ocean_Box	The Sea's Treasures - Ingredients
 Item_Set_A_RestArea	Adventurer's Cooking Inventory Type A
+Item_Set_All_Ocean_Box	The Sea's Treasures - Collection
 Item_Set_B_Enhance_RestArea	Adventurer's Refinement Inventory Type B
+Item_Set_B_Ocean_Box	The Sea's Treasures - Fiber
 Item_Set_B_RestArea	Adventurer's Cooking Inventory Type B
 Item_Set_C_Enhance_RestArea	Adventurer's Refinement Inventory Type C
+Item_Set_C_Ocean_Box	The Sea's Treasures - Crafted Ornaments
 Item_Set_C_RestArea	Adventurer's Cooking Inventory Type C
 Item_Set_D_Enhance_RestArea	Adventurer's Refinement Inventory Type D
+Item_Set_D_Ocean_Box	The Sea's Treasures - Meat
 Item_Set_D_RestArea	Adventurer's Cooking Inventory Type D
 Item_Set_E_Enhance_RestArea	Adventurer's Refinement Inventory Type E
+Item_Set_E_Ocean_Box	The Sea's Treasures - Spices
 Item_Set_E_RestArea	Adventurer's Cooking Inventory Type E
 Item_Set_F_Enhance_RestArea	Adventurer's Refinement Inventory Type F
+Item_Set_F_Ocean_Box	The Sea's Treasures - Processed Foods
+Item_Set_G_Ocean_Box	The Sea's Treasures - Delicacies
+Item_Set_H_Ocean_Box	The Sea's Treasures - Premium Goods
+Item_Set_I_Ocean_Box	The Sea's Treasures - Luxury Goods
+Item_Set_J_Ocean_Box	The Sea's Treasures - Artwork
+Item_Set_K_Ocean_Box	The Sea's Treasures - Armor
+Item_Set_L_Ocean_Box	The Sea's Treasures - Munitions
 Item_Silkworm_Moth	Silkworm Moth
 Item_Skill_AbyssGear_AbsoluteDefense_LV1	Piercing Bloom
 Item_Skill_AbyssGear_AbyssGrass_Immune	Abyssal Assimilation
@@ -2537,14 +2866,19 @@ Item_Skill_AbyssGear_AddMoneyDropRate_LV3	Fortune III
 Item_Skill_AbyssGear_AdditionalThief_LV1	Ledgermain I
 Item_Skill_AbyssGear_AdditionalThief_LV2	Ledgermain II
 Item_Skill_AbyssGear_AdditionalThief_LV3	Ledgermain III
+Item_Skill_AbyssGear_AncientPeople_ChargeShot	Rushing Wind
+Item_Skill_AbyssGear_AntumbraArchon	Revelation's End
 Item_Skill_AbyssGear_Antumbra_Spear	Warden of Darkness
 Item_Skill_AbyssGear_Antumbra_TwoHandRod	Dark Crescent
+Item_Skill_AbyssGear_ArmorGoblin	Ashen Blitz
 Item_Skill_AbyssGear_ArrowRain_LV1	Arrow Rain
 Item_Skill_AbyssGear_AtorDrone_LV1	Ator's Orb
 Item_Skill_AbyssGear_Attack_HPRecover_LV1	Life Transference
+Item_Skill_AbyssGear_Attack_HPRecover_LV2	Solar Transference
 Item_Skill_AbyssGear_Attack_MPRecover_LV1	Spirit Transference
 Item_Skill_AbyssGear_Attack_SPRecover_LV1	Stamina Transference
 Item_Skill_AbyssGear_Attack_SPRecover_LV2	Celestial Transference
+Item_Skill_AbyssGear_AwakenCaliburn	Judicator of Ruin
 Item_Skill_AbyssGear_Bastier	Flames of Judgment
 Item_Skill_AbyssGear_BlockAmmoConsume_LV1	Infinite Arrows I
 Item_Skill_AbyssGear_BlockAmmoConsume_LV2	Infinite Arrows II
@@ -2555,6 +2889,7 @@ Item_Skill_AbyssGear_Boss_AdditionalDamage_LV2	Malicebane II
 Item_Skill_AbyssGear_Boss_AdditionalDamage_LV3	Malicebane III
 Item_Skill_AbyssGear_Boss_AdditionalDamage_Special	Greater Malicebane
 Item_Skill_AbyssGear_Catfish_BodySlam_LV1	Rising Torrent
+Item_Skill_AbyssGear_CircusMachine	Trial by Fire
 Item_Skill_AbyssGear_CollectDrop_Animal_LV1	Blessing of the Beast I
 Item_Skill_AbyssGear_CollectDrop_Animal_LV2	Blessing of the Beast II
 Item_Skill_AbyssGear_CollectDrop_Animal_LV3	Blessing of the Beast III
@@ -2600,6 +2935,8 @@ Item_Skill_AbyssGear_DAM_UP_RotationBash	Momentum
 Item_Skill_AbyssGear_DarkChase_LV1	Greysoul Howling
 Item_Skill_AbyssGear_DarkenRobe_LV1	Wound of Darkness
 Item_Skill_AbyssGear_DogClaw_LV1	Hound's Claws
+Item_Skill_AbyssGear_DrylandsGolem	Guardian's Gaze
+Item_Skill_AbyssGear_EchoStrom	Storm's Echo
 Item_Skill_AbyssGear_EnergyBurst_LV1	Kinetic Burst
 Item_Skill_AbyssGear_EnlightenmentWave_LV1	Karmic Pulse
 Item_Skill_AbyssGear_EquipDropRate_LV1	Disarm I
@@ -2623,27 +2960,38 @@ Item_Skill_AbyssGear_FrostSpike_LV1	Frost Spike
 Item_Skill_AbyssGear_Hyena_PoisonImmune	Heart of the Serpent
 Item_Skill_AbyssGear_Immune_Bismuth	Heart of Stone
 Item_Skill_AbyssGear_ImpBoss	Howling of Chaos
+Item_Skill_AbyssGear_Incarnation	Ascended Incarnate
 Item_Skill_AbyssGear_Karanda	Pillar of Wind
+Item_Skill_AbyssGear_Karanda_Feather	Unfurled Feathers
 Item_Skill_AbyssGear_LanFord	Parting Gift
+Item_Skill_AbyssGear_LanFord_ChargeShot	Focus Fire
 Item_Skill_AbyssGear_LandMash_LV1	Groundsurge
 Item_Skill_AbyssGear_Leebur	Shadow Claw
 Item_Skill_AbyssGear_LightningBreath_LV1	Orbs of Lightning
 Item_Skill_AbyssGear_LightningStab_LV1	Storm Fang
+Item_Skill_AbyssGear_Ludvig_OneArmed	Writhebolt
 Item_Skill_AbyssGear_Machine_AdditionalDamage_LV1	Steelbane I
 Item_Skill_AbyssGear_Machine_AdditionalDamage_LV2	Steelbane II
 Item_Skill_AbyssGear_Machine_AdditionalDamage_LV3	Steelbane III
 Item_Skill_AbyssGear_Machine_AdditionalDamage_Special	Greater Steelbane
+Item_Skill_AbyssGear_MarniKnight_Spear	Power Overload
 Item_Skill_AbyssGear_Merrick	Order from Above
+Item_Skill_AbyssGear_Merrick_DefenceCounter	Radiant Flash
+Item_Skill_AbyssGear_MirageFlurry	Mirage Cascade
 Item_Skill_AbyssGear_Muscan	The Showstopper
 Item_Skill_AbyssGear_Ogre	Colossal Might
+Item_Skill_AbyssGear_Ogre_GroundEdge	Earthen Wedge
 Item_Skill_AbyssGear_PhantomStab_LV1	Abyssal Rays
 Item_Skill_AbyssGear_Praevus	Ancient Wrath
 Item_Skill_AbyssGear_Primus	Ancient Reckoning
 Item_Skill_AbyssGear_Priscus	Ancient Retribution
 Item_Skill_AbyssGear_QueenSpider	Queen's Fangs
+Item_Skill_AbyssGear_RedNightmare	Venomous Fangs
 Item_Skill_AbyssGear_ReduceCraftMaterial_LV1	Efficiency I
 Item_Skill_AbyssGear_ReduceCraftMaterial_LV2	Efficiency II
 Item_Skill_AbyssGear_ReduceCraftMaterial_LV3	Efficiency III
+Item_Skill_AbyssGear_Satyros	Eclipsed Thorn
+Item_Skill_AbyssGear_ScrapQueenGoblin	Magnetic Burst
 Item_Skill_AbyssGear_Skevald	Putrid Touch
 Item_Skill_AbyssGear_SkillPointExp_LV1	Aptitude I
 Item_Skill_AbyssGear_SkillPointExp_LV2	Aptitude II
@@ -2717,6 +3065,16 @@ Item_Tiger_Mimic_Queen	Tiger Mimic Queen Butterfly
 Item_Tomaso_Enchant_Coin	Tommaso Refinement Token
 Item_Varnia_Enchant_Coin	Varnia Refinement Token
 Item_Viceroy	Commander Butterfly
+Item_Wagon_Base_Seat_0001	Meticulous Carpenter's Wagon Seat
+Item_Wagon_Base_Seat_0002	The Laughing Marionette's Wagon Seat
+Item_Wagon_Base_Seat_0003	Seasoned Comrade's Wagon Seat
+Item_Wagon_Base_Seat_0004	Noble Delegation's Wagon Seat
+Item_Wagon_Base_Seat_0005	Wandering Merchant's Wagon Seat
+Item_Wagon_Base_Seat_0006	Renowned Magnate's Wagon Seat
+Item_Wagon_Base_Seat_0007	Eccentric Doctor's Wagon Seat
+Item_Wagon_Base_Seat_0008	Eccentric Lord's Wagon Seat
+Item_Wagon_Base_Seat_0009	Elegant Noble's Wagon Seat
+Item_Wagon_Base_lantern_0001	Wagon Lantern
 Item_WaterStrider	Water Strider
 Item_WhiteWing_Flycatcher	White-Winged Redstart
 Item_White_M_Hairstreak	White Streaked butterfly
@@ -2724,6 +3082,14 @@ Item_White_Peacock	White Peacock Butterfly
 Item_Wood_Pecker	Three-Toed Woodpecker
 Item_Zebra_Heliconian	Zebra Longwing Butterfly
 Item_Zebra_Swallowtail	Zebra Swallowtail
+Item_animal_feedstock_01	Hay Feeder
+Item_basecamp_desk_barbershop_0001_housing	Barber Shops
+Item_basecamp_desk_cook_01_housing	Cook
+Item_basecamp_desk_dye_01_housing	Dyehouse
+Item_basecamp_desk_furniture_01_housing	Facilities Shop
+Item_basecamp_desk_jeweler_01_housing	Lapidarist
+Item_basecamp_desk_smithy_01_housing	Equipment Shop
+Item_basecamp_desk_supplies_01_housing	Provisioner's Shop
 Item_bookcase_0001	Whitesand Bookshelf
 Item_bookcase_02	Dark Timberton Bookshelf
 Item_bookcase_02_index01	Bright Timberton Bookshelf
@@ -2744,24 +3110,153 @@ Item_cabinet_15	Delesyian Metal Lock Cabinet
 Item_cabinet_19	Royal Gold Display Cabinet
 Item_cabinet_19_index01	Sacred Gold Display Cabinet
 Item_cabinet_23	Small Crest Drawer
+Item_carpenter_0001	Crude Workstation
+Item_carpenter_0002_housing	Sturdy Workstation
+Item_cattower_0001_in	Small Pororin Cat Watchtower
+Item_cattower_0002_in	Small Marni Cat Watchtower
+Item_cattower_0003	Pororin Cat Haven
+Item_cattower_0003_in	Small Cat Watchtower
+Item_cattower_0004	Medium Cat Watchtower
+Item_cattower_0005	Large Cat Watchtower
+Item_cattower_0007	Cat Watchtower
 Item_catwheel_01	Pororin Cat Wheel
 Item_catwheel_02	Marni Cat Wheel
+Item_cd_akapen_hernand_str_stable_01_lumber_housing	Private Wooden Shade
+Item_cd_akapen_hernand_str_stable_01_lumber_housing_index0001	Dark Private Wooden Shade
+Item_cd_akapen_mercenary_str_stable_dem_01_housing	Large Stone Roof Shade
+Item_cd_akapen_mercenary_str_stable_dem_01_housing_index0001	Large Black Stone Roof Shade
+Item_cd_akapen_mercenary_str_stable_dem_01_housing_index0002	Large Ancient Tree Shade
+Item_cd_barnia_obj_pillar_deco_02_housing	Carved White Stone Pillar
+Item_cd_barnia_obj_pillar_deco_02_housing_index0001	Carved Black Stone Pillar
+Item_cd_barnia_obj_pillar_deco_02_housing_index0002	Sandstone Sculpted Pillar
+Item_cd_crimsondesert_tommaso_str_attachbuilding_02_01_housing	Small White Stone Pillar Shelter
+Item_cd_crimsondesert_tommaso_str_attachbuilding_02_01_housing_index0001	Small Black Stone Pillar Shelter
+Item_cd_crimsondesert_tommaso_str_attachbuilding_02_01_housing_index0002	Small Sandstone Pillar Shelter
+Item_cd_ex_dpf_dryinglaundry_01_housing	Rough Tree Branch Clothesline
+Item_cd_ex_dpf_dryinglaundry_01_housing_index0001	Rough Dark Tree Branch Clothesline
 Item_cd_ex_dpf_flowerpot_16_housing	Palm Tree Pot
 Item_cd_ex_dpf_flowerpot_21_housing	Small Tree Pot
 Item_cd_ex_dpf_flowerpot_23_housing	Laurel Pot
 Item_cd_ex_dpf_flowerpot_24_housing	Large Alocasia Pot
 Item_cd_ex_dpf_flowerpot_37_housing	Desert Cactus Pot
 Item_cd_ex_dpf_flowerpot_61_housing	Apple Tree Pot
+Item_cd_ex_dpf_gazebo_02_housing	White Stone Pavilion
+Item_cd_ex_dpf_gazebo_02_housing_index0001	Black Stone Pavilion
+Item_cd_ex_dpf_siege_ballista_01_housing	Sturdy Ballista
+Item_cd_ex_dpf_smity_forge_03_housing	Sturdy Stone Hearth
+Item_cd_ex_dpf_smity_forge_03_housing_index0001	Dark Sturdy Stone Hearth
+Item_cd_ex_dpf_smity_forge_03_housing_index0002	Red Sturdy Stone Hearth
+Item_cd_ex_dpf_stone_totem_09_housing	Reverent Stone Shrine
+Item_cd_ex_dpf_stone_totem_09_housing_index0001	Reverent Dark Stone Shrine
+Item_cd_ex_dpf_stone_totem_09_housing_index0002	Red Reverent Stone Shrine
+Item_cd_ex_dpt_flowerbed_set_000_0101_housing	Lush Yellow Flowerbed
+Item_cd_ex_dpt_flowerbed_set_000_0101_housing_index0001	Opulent Yellow Flowerbed
+Item_cd_ex_dpt_flowerbed_set_000_0101_housing_index0002	Lush Sunkissed Yellow Flowerbed
+Item_cd_ex_dpt_flowerbed_set_000_0102_housing	Mystical Blue Flowerbed
+Item_cd_ex_dpt_flowerbed_set_000_0102_housing_index0001	Dusky Blue Flowerbed
+Item_cd_ex_dpt_flowerbed_set_000_0102_housing_index0002	Mystical Sunkissed Blue Flowerbed
+Item_cd_ex_dpt_flowerbed_set_000_0103_housing	Vibrant Red Flowerbed
+Item_cd_ex_dpt_flowerbed_set_000_0103_housing_index0001	Lavish Red Flowerbed
+Item_cd_ex_dpt_flowerbed_set_000_0103_housing_index0002	Vibrant Sunkissed Red Flowerbed
+Item_cd_ex_dpt_flowerbed_set_001_0101_housing	Narrow Lush Yellow Flowerbed
+Item_cd_ex_dpt_flowerbed_set_001_0101_housing_index0001	Narrow Opulent Yellow Flowerbed
+Item_cd_ex_dpt_flowerbed_set_001_0101_housing_index0002	Narrow Lush Sunkissed Yellow Flowerbed
+Item_cd_ex_dpt_flowerbed_set_001_0102_housing	Narrow Mystical Blue Flowerbed
+Item_cd_ex_dpt_flowerbed_set_001_0102_housing_index0001	Narrow Dusky Blue Flowerbed
+Item_cd_ex_dpt_flowerbed_set_001_0102_housing_index0002	Narrow Mystical Sunkissed Blue Flowerbed
+Item_cd_ex_dpt_flowerbed_set_001_0103_housing	Narrow Vibrant Red Flowerbed
+Item_cd_ex_dpt_flowerbed_set_001_0103_housing_index0001	Narrow Lavish Red Flowerbed
+Item_cd_ex_dpt_flowerbed_set_001_0103_housing_index0002	Narrow Vibrant Sunkissed Red Flowerbed
+Item_cd_ex_dpt_flowerbed_set_002_0101_housing	Small Lush Yellow Flowerbed
+Item_cd_ex_dpt_flowerbed_set_002_0101_housing_index0001	Small Opulent Yellow Flowerbed
+Item_cd_ex_dpt_flowerbed_set_002_0101_housing_index0002	Small Lush Sunkissed Yellow Flowerbed
+Item_cd_ex_dpt_flowerbed_set_002_0102_housing	Small Mystical Blue Flowerbed
+Item_cd_ex_dpt_flowerbed_set_002_0102_housing_index0001	Small Dusky Blue Flowerbed
+Item_cd_ex_dpt_flowerbed_set_002_0102_housing_index0002	Small Mystical Sunkissed Blue Flowerbed
+Item_cd_ex_dpt_flowerbed_set_002_0103_housing	Small Vibrant Red Flowerbed
+Item_cd_ex_dpt_flowerbed_set_002_0103_housing_index0001	Small Lavish Red Flowerbed
+Item_cd_ex_dpt_flowerbed_set_002_0103_housing_index0002	Small Vibrant Sunkissed Red Flowerbed
+Item_cd_ex_dpt_flowerbed_set_003_0101_housing	Lush Yellow Corner Flowerbed
+Item_cd_ex_dpt_flowerbed_set_003_0101_housing_index0001	Opulent Yellow Corner Flowerbed
+Item_cd_ex_dpt_flowerbed_set_003_0101_housing_index0002	Lush Sunkissed Yellow Corner Flowerbed
+Item_cd_ex_dpt_flowerbed_set_003_0102_housing	Mystical Blue Corner Flowerbed
+Item_cd_ex_dpt_flowerbed_set_003_0102_housing_index0001	Dusky Blue Corner Flowerbed
+Item_cd_ex_dpt_flowerbed_set_003_0102_housing_index0002	Mystical Sunkissed Blue Corner Flowerbed
+Item_cd_ex_dpt_flowerbed_set_003_0103_housing	Vibrant Red Corner Flowerbed
+Item_cd_ex_dpt_flowerbed_set_003_0103_housing_index0001	Lavish Red Corner Flowerbed
+Item_cd_ex_dpt_flowerbed_set_003_0103_housing_index0002	Vibrant Sunkissed Red Corner Flowerbed
+Item_cd_ex_dpt_flowerbed_set_004_0101_housing	Lush Yellow Edge Flowerbed
+Item_cd_ex_dpt_flowerbed_set_004_0101_housing_index0001	Opulent Yellow Edge Flowerbed
+Item_cd_ex_dpt_flowerbed_set_004_0101_housing_index0002	Lush Sunkissed Yellow Edge Flowerbed
+Item_cd_ex_dpt_flowerbed_set_004_0102_housing	Mystical Blue Edge Flowerbed
+Item_cd_ex_dpt_flowerbed_set_004_0102_housing_index0001	Dusky Blue Edge Flowerbed
+Item_cd_ex_dpt_flowerbed_set_004_0102_housing_index0002	Mystical Sunkissed Blue Edge Flowerbed
+Item_cd_ex_dpt_flowerbed_set_004_0103_housing	Vibrant Red Edge Flowerbed
+Item_cd_ex_dpt_flowerbed_set_004_0103_housing_index0001	Lavish Red Edge Flowerbed
+Item_cd_ex_dpt_flowerbed_set_004_0103_housing_index0002	Vibrant Sunkissed Red Edge Flowerbed
+Item_cd_ex_dpt_flowerbed_set_005_0101_housing	Wide Lush Yellow Edge Flowerbed
+Item_cd_ex_dpt_flowerbed_set_005_0101_housing_index0001	Wide Opulent Yellow Edge Flowerbed 
+Item_cd_ex_dpt_flowerbed_set_005_0101_housing_index0002	Wide Lush Sunkissed Corner Flowerbed
+Item_cd_ex_dpt_flowerbed_set_005_0102_housing	Wide Mystical Blue Edge Flowerbed
+Item_cd_ex_dpt_flowerbed_set_005_0102_housing_index0001	Wide Dusky Blue Edge Flowerbed
+Item_cd_ex_dpt_flowerbed_set_005_0102_housing_index0002	Wide Mystical Sunkissed Blue Corner Flowerbed
+Item_cd_ex_dpt_flowerbed_set_005_0103_housing	Wide Vibrant Red Edge Flowerbed
+Item_cd_ex_dpt_flowerbed_set_005_0103_housing_index0001	Wide Lavish Red Edge Flowerbed
+Item_cd_ex_dpt_flowerbed_set_005_0103_housing_index0002	Wide Vibrant Sunkissed Red Corner Flowerbed
+Item_cd_in_dff_bench_01_housing	Rustic Plank Bench
+Item_cd_in_dff_bench_01_housing_index0001	Rough Plank Bench
+Item_cd_in_dff_chair_09a_housing	Rustic Wooden Armchair
+Item_cd_in_dff_chair_09a_housing_index0001	Weathered Wooden Armchair
+Item_cd_in_dff_standing_table_02_housing	Crude Wooden Table
+Item_cd_in_dff_standing_table_02_housing_index0001	Rugged Wooden Table
+Item_cd_in_dpf_bigbazier_01_housing	Low Wooden Brazier
+Item_cd_in_dpf_bigbazier_01_housing_index0001	Low Dark Wooden Brazier
 Item_cd_lamp_hanger_legendanimal_0002	Twisted Nightmare Lamp
+Item_cd_preset_shop_npctable_sawmill_01	Crude Plank Workbench
+Item_cd_preset_shop_npctable_sawmill_02	Precision Plank Workbench
+Item_cd_product_farm_akapen_attachbuilding_01_housing	Small Arched White Stone Shade
+Item_cd_product_farm_akapen_attachbuilding_01_housing_index0001	Small Vine Arched White Stone Shade
+Item_cd_product_farm_akapen_attachbuilding_01_housing_index0002	Small Arched Black Stone Shade
+Item_cd_product_farm_akapen_attachbuilding_01_housing_index0003	Small Arched Sandstone Shade
+Item_cd_product_farm_akapen_attachbuilding_04_housing	Small White Stone Wall Shelter
+Item_cd_product_farm_akapen_attachbuilding_04_housing_index0001	Small Black Stone Wall Shelter
+Item_cd_product_farm_akapen_attachbuilding_04_housing_index0002	Small Sandstone Wall Shelter
+Item_cd_product_farm_attach_09	Timber Storage
+Item_cd_product_farm_attach_10	Mineral Storage
+Item_cd_product_shade_01a_housing	Rice Straw Shade
+Item_cd_product_shade_01a_housing_index0001	Straw Shade
+Item_cd_product_shade_02d_housing	Large Stone Shade with Vent Window
+Item_cd_product_shade_02d_housing_index0001	Large Black Stone Shade with Vent Window
+Item_cd_product_shade_02d_housing_index0002	Large Ochre Shade with Vent Window
+Item_cd_product_shade_02d_housing_index0003	Large Teal Shade with Vent Window
+Item_cd_product_shade_02d_housing_index0004	Large Ancient Tree Ventilated Shade
+Item_cd_products_farm_gate_01_housing	Roofed Rough Wooden Door
+Item_cd_products_farm_gate_01_housing_index0001	Roofed Rough Dark Wooden Gate
+Item_cd_spot_mus_attach_01_housing	Small Plank Shade
+Item_cd_spot_mus_attach_01_housing_index0001	Small Dark Plank Shade
+Item_cd_spot_troll_academy_bench_01_housing	Patterned Stone Bench
+Item_cd_spot_troll_academy_bench_01_housing_index0001	Darkly Patterned Stone Bench
+Item_cd_spot_troll_academy_bench_01_housing_index0002	Red Patterned Stone Bench
+Item_cd_statue_wooden_horse_01_housing	Lovingly Carved Wooden Horse
+Item_cd_statue_wooden_horse_01_housing_index0001	Lovingly Carved Dark Wooden Horse
+Item_chocolate_product_index01	Red Chocolate
+Item_chocolate_product_index02	Yellow Chocolate
+Item_chocolate_product_index03	Blue Chocolate
 Item_closet_01	Large Dark Timberton Wardrobe
 Item_closet_01_index01	Large Bright Timberton Wardrobe
 Item_closet_02	Timberham Wardrobe
+Item_clothes_0001_housing	Tailor's Shop
 Item_craft_medicine_01_housing	Cauldron
+Item_craft_smith_0001_housing	Smithy
 Item_dff_luxuryfurniture_bed_0001	Whitesand Bed
 Item_dff_luxuryfurniture_bed_01	Cozy Bed
 Item_dff_luxuryfurniture_bed_02	Crimson Bed
 Item_dff_luxuryfurniture_bed_03	White Bed
 Item_dff_luxuryfurniture_bed_04	Lord's Bed
+Item_dogcushion_0001	Sunset-Touched Puppy Cushion
+Item_dogcushion_0001_index01	Dewlit Vineyard Puppy Cushion
+Item_dogcushion_0002_index02	Ancient Tree's Breath Puppy Cushion
+Item_dogcushion_0002_index03	Lavender Remembrance Puppy Cushion
 Item_dpf_fountain_01	Lion Head Fountain
 Item_dpf_fountain_02	Stone Pagoda Fountain
 Item_dpf_fountain_02_desert	Redsand Stone Pagoda Fountain
@@ -2775,7 +3270,17 @@ Item_dresser_03	Dark Timberton Cabinet
 Item_dresser_03_index01	Bright Timberton Cabinet
 Item_dresser_04	Timberham Drawer
 Item_drinkingfountain_01	Brookfield Fountain
+Item_drug_product_index01	Complete Elixir
+Item_drug_product_index02	Red Elixir
+Item_drug_product_index03	Yellow Elixir
+Item_festival_barbeque_01	Barbecue Grill Set
+Item_festival_barbeque_box_meat_02	Barbecue Meat Box
+Item_festival_firework_01	Firecracker
+Item_festival_stage_01	Striped Teal Wooden Stage
+Item_festival_stage_01_index01	Striped Red Wooden Stage
 Item_fountain_statue_01	Sculpted Fish Fountain
+Item_ghostship_cannon_0001	Gloom Dead Naval Cannon
+Item_ghostship_cannon_0002	Gloom Dead Prow Cannon
 Item_gimmick_abyss_quest_kuku_seal_01	Magnetic Power Core
 Item_gimmick_abysscore_0001	Abyss Cell: No. 1
 Item_gimmick_abysscore_0002	Abyss Cell: No. 2
@@ -2799,6 +3304,19 @@ Item_gimmick_attach_mechanical_powerplant_0001	Electrical Component
 Item_gimmick_attach_nuclear_fusion_core_01	Tenebrum Magnetic Core
 Item_gimmick_basecamp_warehouse_box_0002	Private Storage
 Item_gimmick_birdfeeder_0001	Sotdae of Bond
+Item_gimmick_box_open_07	Crude Timber Box
+Item_gimmick_box_open_08	Crude Plank Box
+Item_gimmick_box_open_09	Sturdy Timber Box
+Item_gimmick_box_open_10	Sturdy Plank Crate
+Item_gimmick_box_open_11	Meat Box
+Item_gimmick_box_open_11_index0001	Seafood Box
+Item_gimmick_box_open_11_index0003	Crops Box
+Item_gimmick_breakable_ex_dff_table_07	Crude Square Four-Seater Table
+Item_gimmick_breakable_ex_dff_table_08	Clothed Four-Seater Table
+Item_gimmick_breakable_in_dff_chair_01_housing_index0001	Large Rugged Wooden Bench
+Item_gimmick_breakable_in_dff_chair_06_housing_index0001	Rugged Wooden Bench
+Item_gimmick_carriagehouse_0001_housing	Wagonmaster
+Item_gimmick_circus_ferriswheel_0001_housing	Tricolor Ferris Wheel
 Item_gimmick_collection_prop_Ceramic_0021	Ocher Jar
 Item_gimmick_collection_prop_Ceramic_0023	Milky White Jar
 Item_gimmick_collection_prop_Ceramic_0033	Patterned Long-Necked Jar
@@ -2812,10 +3330,16 @@ Item_gimmick_collection_prop_Ceramic_0048	Reddish-Brown Jar
 Item_gimmick_collection_prop_Ceramic_0049	Earth-Colored Jar
 Item_gimmick_collectionstorage_0001	Collectibles Chest
 Item_gimmick_craft_anvil_01	Anvil
+Item_gimmick_craft_blastfurnace_02	Modified Blast Furnace
+Item_gimmick_craft_blastfurnace_02_index0001	Blast Furnace
 Item_gimmick_craft_cook_campfire_04	Field Pot
 Item_gimmick_craft_cook_campfire_05	Bonfire
+Item_gimmick_craft_cook_oven_0003	Bright Wooden Cooking Station
+Item_gimmick_craft_cook_oven_0003_index0001	Dark Wooden Cooking Station
 Item_gimmick_craft_cook_oven_03_housing	Cooking Pot
 Item_gimmick_craft_cook_oven_04_housing	Cooking Griddle
+Item_gimmick_craft_cook_oven_05_housing	Multipurpose Cooking Pot
+Item_gimmick_craft_sewing_01_housing	Loom
 Item_gimmick_dff_luxuryfurniture_cabinet_0001	Whitesand Storage
 Item_gimmick_dff_luxuryfurniture_cabinet_01	Intricate Floral Vine Cabinet
 Item_gimmick_dff_luxuryfurniture_cabinet_02	Brave Warrior's Storage
@@ -2830,11 +3354,22 @@ Item_gimmick_dff_luxuryfurniture_stool_01	Luxurious Gilded Side Chair
 Item_gimmick_dff_luxuryfurniture_table_0001	Whitesand Arched Corridor Table
 Item_gimmick_dff_luxuryfurniture_table_01	Arched Corridor Table
 Item_gimmick_dff_luxuryfurniture_table_02	Dark Lion Head Table
+Item_gimmick_ex_dpf_dogcushion_0002	Lullaby of Waves Puppy Cushion
+Item_gimmick_ex_dpf_dogcushion_0002_index01	Lotus Leaf Fragrance Puppy Cushion
+Item_gimmick_fences_wood_set01_06_p02_housing	Long Woven Wooden Fence
+Item_gimmick_fences_wood_set01_06_p02_housing_index0001	Long Woven Dark Wooden Fence
+Item_gimmick_fences_wood_set08_02_housing	Pointed Plank Fence
+Item_gimmick_fences_wood_set08_02_housing_index0001	Pointed Dark Plank Fence
+Item_gimmick_fences_wood_set16_01_housing	Neat Plank Fence
+Item_gimmick_fences_wood_set16_01_housing_index0001	Neat Dark Plank Fence
+Item_gimmick_fences_wood_set18_08_p20_housing	Reinforced Wooden Fence
+Item_gimmick_fences_wood_set18_08_p20_housing_index0001	Reinforced Dark Wooden Fence
 Item_gimmick_foodstorage_0001	Kuku Cooler
 Item_gimmick_foodstorage_0002	Enhanced Kuku Cooler
 Item_gimmick_gemstone_hanger_top_chandelier_0103	Icy White Starcluster Light
 Item_gimmick_gemstone_hanger_top_chandelier_0103_index01	Twilight Starcluster Light
 Item_gimmick_gemstone_hanger_top_chandelier_0103_index02	Lilac Starcluster Light
+Item_gimmick_graymane_wood_totem_0001	Greymane Totem
 Item_gimmick_hanger_side_lamp_0001	Icy White Wall Lantern
 Item_gimmick_hanger_side_lamp_0001_index01	Twilight Wall Lantern
 Item_gimmick_hanger_side_lamp_0001_index02	Lilac Wall Lantern
@@ -2844,13 +3379,18 @@ Item_gimmick_hanger_top_lamp_0001_index02	Lilac Lampshade
 Item_gimmick_hanger_top_lamp_0003	Icy White Drop Light
 Item_gimmick_hanger_top_lamp_0003_index01	Twilight Drop Light
 Item_gimmick_hanger_top_lamp_0003_index02	Lilac Drop Light
+Item_gimmick_horsehouse_0001_housing	Stable
 Item_gimmick_in_dff_chair_0002	Double-Patterned Whitesand Chair
-Item_gimmick_in_dff_chair_0003	Whitesand Fabric Chair
+Item_gimmick_in_dff_chair_0003	Premium Whitesand Bench
+Item_gimmick_in_dff_chair_0005	Oak Barrel Stool
+Item_gimmick_in_dff_chair_0006	Captain's Chair of Dignity
+Item_gimmick_in_dff_chair_53	Throne of the Northern Warrior
 Item_gimmick_in_dff_desk_0001	Whitesand Side Table
 Item_gimmick_in_dff_dressingtable_0001	Whitesand Dressing Table
 Item_gimmick_in_dff_set_chair_0001	Whitesand Fabric Chair
 Item_gimmick_in_dff_stand_0001	Small Whitesand Table
 Item_gimmick_in_dff_table_0002	Large Whitesand Fabric Table
+Item_gimmick_in_dff_table_16	Waiting Table
 Item_gimmick_in_dpf_carpet_0001	Round Twilight Floral Carpet
 Item_gimmick_in_dpf_carpet_0002	Mist-woven Carpet
 Item_gimmick_in_dpf_carpet_0003	Frost-woven Carpet
@@ -2872,14 +3412,42 @@ Item_gimmick_in_dpf_carpet_0013	Wide Dawndrop Garden Carpet
 Item_gimmick_in_dpf_carpet_0014	Round Wide Mist-woven Carpet
 Item_gimmick_in_dpf_carpet_0015	Wide Multicolor Knotted Carpet
 Item_gimmick_in_dpf_carpet_0016	Round Wide Moonlit Garden Carpet
-Item_gimmick_in_dpf_stool_0001	Arched Whitesand Table
+Item_gimmick_in_dpf_carpet_0017	Captain's Carpet of Dignity
+Item_gimmick_in_dpf_stool_0001	Whitesand Arched Table
+Item_gimmick_island_warehouse_box_0001	Island Storage
 Item_gimmick_item_tool_book_0001	Book
 Item_gimmick_item_tool_bookstand_0001	Book Stand
+Item_gimmick_jail_metal_spawn_01	Iron Prison Cell
 Item_gimmick_jukebox_0001	Faust's Music Box
+Item_gimmick_lamp_marni_streetstand_01	Marni's Streetlight
+Item_gimmick_lamp_marni_streetstand_01_housing_index0001	Marni's Dark Streetlight
+Item_gimmick_lamp_marni_streetstand_02	Marni's Battery Streetlight
+Item_gimmick_lamp_marni_streetstand_02_index0001	Marni's Dark Battery Streetlight
+Item_gimmick_lamp_side_marni_01	Marni Side Streetlight
 Item_gimmick_lamp_streetlamp_0001	Cold Streetlight
 Item_gimmick_lamp_streetlamp_0001_index01	Warm Streetlight
 Item_gimmick_lamp_streetlamp_0001_index02	Soft Streetlight
+Item_gimmick_lamp_streetlamp_06	Helms Iron Streetlight
+Item_gimmick_lamp_streetlamp_06_on_housing_index0001	Dark Helms Iron Streetlight
+Item_gimmick_management_clothier_table_01	Sewing Workstation
+Item_gimmick_management_dye_vat_01	Red Dye Vat
+Item_gimmick_management_dye_vat_02	Yellow Dye Vat
+Item_gimmick_management_dye_vat_03	Blue Dye Vat
+Item_gimmick_management_pass_table_0001	Crude Serving Station
+Item_gimmick_management_pass_table_0001_index0001	Clothed Serving Station
+Item_gimmick_management_spinning_wool_01	Spinning Wheel
 Item_gimmick_nature_rock_dissolve_stone_core_01	Abyss Cell: No. 0
+Item_gimmick_pavilion_housing_0002	Small Crude Wooden Shade
+Item_gimmick_pavilion_housing_0002_index0001	Small Crude Red Wooden Shade
+Item_gimmick_pavilion_housing_0004	Stone Vine Shade
+Item_gimmick_pavilion_housing_0004_index0001	Vine Black Stone Shade
+Item_gimmick_pavilion_housing_0004_index0002	Sandstone Lattice Shade
+Item_gimmick_pavilion_housing_0005	Stone Roof Shade
+Item_gimmick_pavilion_housing_0005_index0001	Blackstone Roof Shade
+Item_gimmick_pavilion_housing_0005_index0002	Red Brown Roof Shade
+Item_gimmick_pavilion_housing_0006	Small Stone Roof Shade
+Item_gimmick_pavilion_housing_0006_index0001	Small Arched Black Stone Shade
+Item_gimmick_pavilion_housing_0006_index0002	Small Red Brown Shade
 Item_gimmick_puzzle_antumbra_tokamak_01_parts01	Sanctum of Penitence Fusion Reactor Core
 Item_gimmick_puzzle_antumbra_tokamak_01_parts01_index01	Sanctum of Expiation Fusion Reactor Core
 Item_gimmick_puzzle_antumbra_tokamak_01_parts01_index03	Sanctum of Renunciation Fusion Reactor Core
@@ -2984,23 +3552,66 @@ Item_gimmick_sotdae_set_0007	Red-Crowned Crane Sotdae
 Item_gimmick_sotdae_set_0008	Stone Nest Sotdae
 Item_gimmick_sotdae_set_0009	Sotdae
 Item_gimmick_sotdae_set_0010	Twin-Branched Sotdae
+Item_gimmick_toilet_0001	Portable Wooden Toilet
+Item_gimmick_toilet_hide_01	Supply Storage
 Item_gimmick_tool_FlowerHanger_01	Wooden Pororin Hanging Planter
 Item_gimmick_tool_FlowerHanger_02	Wooden Florindale Hanging Planter
+Item_gimmick_tool_automata_monkey_0001	Clanging Mischievous Monkey
 Item_gimmick_tool_blacksmithstone	Grindstone
+Item_gimmick_tool_dryingstand_Barrel_0001	Net-Suspended Wooden Barrel
+Item_gimmick_tool_dryingstand_barrel_0001_hellhound	Net-Suspended Dark Wooden Barrel
+Item_gimmick_tool_saw_0001	Crude Saw
+Item_gimmick_tool_saw_0001_lv1	Sharp Saw
+Item_gimmick_tool_scarecrow_0001	Iron Armor Training Scarecrow
+Item_gimmick_tool_scarecrow_0002	Training Burlap Sack Scarecrow
+Item_gimmick_tool_scarecrow_0003	Training Oak Barrel Scarecrow
+Item_gimmick_tool_scarecrow_0004	Dark Training Burlap Sack Scarecrow
+Item_gimmick_tool_windmill_dem_01	Wooden Cabin Windmill
+Item_gimmick_tool_windmill_dem_01_index0001	Dark Wooden Cabin Windmill
+Item_gimmick_tool_windmill_desert_05_housing	Large Urdavah Spiral Windmill
+Item_gimmick_tool_windmill_desert_05_housing_index0001	Large Urdavah Sandstone Spiral Windmill
+Item_gimmick_tool_windmill_desert_05a_housing	Urdavah Spiral Windmill
+Item_gimmick_tool_windmill_desert_05a_housing_index0001	Urdavah Sandstone Spiral Windmill
+Item_gimmick_tool_windmill_desert_05b_housing	Small Urdavah Spiral Windmill
+Item_gimmick_tool_windmill_desert_05b_housing_index0001	Small Urdavah Sandstone Spiral Windmill
+Item_gimmick_tool_windmill_desert_06_index0001	Giant Urdavah Windmill Tower
+Item_gimmick_tool_windmill_sandcrawler_01	Small Rusty Metal Windmill
+Item_gimmick_tool_windmill_sandcrawler_02	Rusty Metal Windmill
+Item_gimmick_tool_windmill_sandcrawler_03	Large Rusty Metal Windmill
+Item_gimmick_tower_wooden_02_break_kew	Castle Log Watchtower
 Item_gimmick_tumbleweed_0001	Tumbleweed
+Item_gimmick_watcher_01_sandcrawler_housing	Mechanical Surveillance Device
 Item_gimmick_well_0001	Wooden Roof Well
 Item_gimmick_well_0001_index01	Red Wooden Roof Well
 Item_gimmick_well_0002	Brick Roof Well
 Item_gimmick_well_0003	Thatched Roof Well
 Item_gimmick_well_0004	Well
 Item_gimmick_well_0004_index01	Redsand Well
+Item_gimmick_wood_bench_0001	Crude Wooden Stand
+Item_gimmick_wood_bench_0002	Sturdy Wooden Rack
 Item_hanger_streetlamp_flowerpot_01	Wooden Gerbera Hanging Planter
 Item_hanger_streetlamp_flowerpot_02	Wooden Violet Hanging Planter
 Item_hanger_streetlamp_flowerpot_03	Wooden Purple Gerbera Hanging Planter
 Item_hanger_streetlamp_flowerpot_04	Redtree Violet Hanging Planter
 Item_in_dff_bed_06	Dark Timberham Bed
 Item_in_dff_bed_06_dem	Bright Timberham Bed
+Item_in_dff_ocean_bed_0001	Captain's Bed of Dignity
+Item_in_dff_set_bookcase_0001	Rowboat Bookshelf
+Item_in_dff_table_0003	Shoreline Memories Table
+Item_in_dpf_seahorsedeco_0001	Seahorse Statue
+Item_in_dpfo_shipdeco_0001	Golden Bottled Ship
+Item_in_dpw_fishdeco_0001	Fisherman's Pride
+Item_in_dpw_shipanchor_0001	Fancy Gilded Anchor
+Item_in_dpw_shiphandle_0001	Fancy Gilded Ship's Wheel
+Item_kusunsla_hanglamp_01_off	Firefly Lantern
+Item_kusunsla_stand_01_off	Firefly Jar Lantern
+Item_lamp_brazier_01_on	Round Stone Brazier
+Item_lamp_brazier_01_on_index0001	Round Dark Stone Brazier
+Item_lamp_brazier_01_on_index0002	Red Round Stone Brazier
 Item_lamp_brazier_02_on	Quad-Base Crown of Thorns Brazier
+Item_lamp_dungeon_firepot_01_desert_on	Sandstone Brazier
+Item_lamp_dungeon_firepot_01_on	Grey Stone Brazier
+Item_lamp_dungeon_firepot_01_on_index0001	Blackstone Brazier
 Item_lamp_firepot_01_on	Tripod Brazier
 Item_lamp_firepot_03_on	Tall Quad-Base Brazier
 Item_lamp_firepot_04_on	Short Quad-Base Brazier
@@ -3011,11 +3622,139 @@ Item_lamp_standtorch_02_on	Tripod Guardian Torch
 Item_lamp_streetlamp_03	Wooden Streetlight
 Item_lamp_streetlamp_03_index01	Red Wooden Streetlight
 Item_lamp_streetlamp_03_index02	Bright Wooden Streetlight
+Item_marnigolem_scarecrow_01	Training Mechanical Dummy
+Item_me_00_str_cliffarmory_100_0001	Camp Weapons Storage
+Item_me_00_str_cliffcamp_000_0001	Camp Garrison
+Item_me_00_str_cliffcamp_000_0002	Camp Garrison
+Item_me_00_str_cliffcamp_100_0001	Camp Garrison
+Item_me_00_str_clifffood_100_0001	Camp Food Storage
+Item_me_00_str_cliffhotel_300_0001	Camp Inn
+Item_me_00_str_cliffhouse_000_0001	Camp Barracks
+Item_me_00_str_cliffhouse_000_0002	Camp Barracks
+Item_me_00_str_cliffhouse_100_0001	Camp Barracks
+Item_me_00_str_cliffhouse_200_0001	Camp Barracks
+Item_me_00_str_cliffhouse_300_0001	Camp Barracks
+Item_me_00_str_cliffmoney_000_0001	Camp Funds Storage
+Item_me_00_str_cliffstone_001_0001	Camp Stone Storage
+Item_me_00_str_clifftrade_200_0001	Camp Trade Goods Storage
+Item_me_00_str_cliffwood_000_0001	Camp Timber Warehouse
+Item_me_00_str_door_set_000_0001	Wooden Interior Door
+Item_me_00_str_door_set_000_0002	Iron Nail Interior Door
+Item_me_00_str_door_set_000_0003	Iron Interior Wooden Door
+Item_me_00_str_door_set_000_0004	Bright Plank Interior Door
+Item_me_00_str_door_set_000_0004_index0001	Dark Plank Interior Door
+Item_me_00_str_door_set_000_0005	Palatial Wooden Interior Door
+Item_me_00_str_door_set_000_0006	Palatial Wooden Front Door
+Item_me_00_str_door_set_000_0007	Dark Wooden Front Door
+Item_me_00_str_door_set_000_0008	Church Wooden Front Door
+Item_me_00_str_door_set_000_0009	Dark Log Side Door
+Item_me_00_str_door_set_000_0009_index0001	Bright Log Side Door
+Item_me_00_str_door_set_000_0010	Sun Crest Wooden Side Door
+Item_me_00_str_door_set_000_0011	Wooden Mesh Side Door
+Item_me_00_str_door_set_000_0012	Wooden Windowed Side Door
+Item_me_00_str_door_set_000_0013	Iron-Windowed Side Door
+Item_me_00_str_door_set_000_0014	Bright Wooden Side Door
+Item_me_00_str_door_set_000_0014_index0001	Red Wooden Side Door
+Item_me_00_str_door_set_000_0015	Rustic Wood Side Door
+Item_me_00_str_door_set_000_0016	Iron Side Door
+Item_me_00_str_door_set_000_0017	Iron Lattice Side Door
+Item_me_00_str_door_set_002_0001	Large Church Main Gate
+Item_me_00_str_door_set_002_0002	Large Palatial Main Gate
+Item_me_00_str_door_set_002_0003	Large Manor Main Gate
+Item_me_00_str_door_set_002_0004	Large Fort Main Gate
+Item_me_00_str_fence_003_0001	Sturdy Roof Brick Fence
+Item_me_00_str_fence_003_0001_index0001	Sturdy Red Roofed Brick Fence
+Item_me_00_str_fence_003_0002	Timber-Framed Roofed Stone Fence
+Item_me_00_str_fence_003_0002_index0001	Timber-Framed Roofed Sandstone Fence
+Item_me_00_str_fence_003_0003	Lattice Timber Fence
+Item_me_00_str_fence_003_0003_index0001	Slatted Dark Wooden Fence
+Item_me_00_str_fence_003_0004	Round-Cover Stone Fence
+Item_me_00_str_fence_003_0004_index0001	Round-Cover Sandstone Fence
+Item_me_00_str_fence_003_0005	Timber-Reinforced Stone Fence
+Item_me_00_str_fence_003_0005_index0001	Reinforced Wooden Sandstone Fence
+Item_me_00_str_fencepole_003_0001	Timber-Framed Roofed Stone Fence Pillar
+Item_me_00_str_fencepole_003_0001_index0001	Timber-Framed Roofed Sandstone Fence Pillar
+Item_me_00_str_fencepole_003_0002	Sturdy Roofed Brick Fence Pillar
+Item_me_00_str_fencepole_003_0002_index0001	Sturdy Red Roofed Brick Fence Pillar
+Item_me_00_str_fencepole_003_0003	Round Covered Stone Fence Pillar
+Item_me_00_str_fencepole_003_0003_index0001	Round-Cover Sandstone Fence Pillar
+Item_me_00_str_mod_castle_stair_000_0001_index0001	Large Stone Staircase
+Item_me_00_str_sawmill_000_0001	Crude Wooden Shade
+Item_me_00_str_sawmill_000_0001_index0001	Crude Red Wooden Shade
+Item_me_00_str_sawmill_000_0002	Green Cover Wooden Shade
+Item_me_00_str_tent_000_0001	Dark Desert Restaurant Tent
+Item_me_00_str_window_set_001_0001	Wooden Manor Window
+Item_me_00_str_window_set_001_0001_index0001	Green Wooden Manor Window
+Item_me_00_str_window_set_001_0002	Iron Manor Window
+Item_me_00_str_window_set_001_0003	Bright Church Glass Window
+Item_me_00_str_window_set_001_0003_index0001	Dark Church Glass Window
+Item_me_00_str_window_set_001_0004	Arched Bright Wooden Window
+Item_me_00_str_window_set_001_0004_index0001	Arched Dark Wooden Window
+Item_me_00_str_window_set_001_0005	Arched Iron-Barred Window
+Item_me_00_str_window_set_001_0006	Star-Decorated Wooden Window
+Item_me_00_str_window_set_002_0001	Small Square Window
+Item_me_00_str_window_set_003_0001	Large Church Glass Window
+Item_me_00_str_window_set_004_0001	Paned Wooden Manor Window
+Item_me_00_str_window_set_004_0002	Wooden Manor Square Window
+Item_me_00_str_window_set_004_0003	Iron Manor Glass Window
+Item_me_00_str_window_set_005_0001	Bright Wooden Window
+Item_me_00_str_window_set_005_0001_index0001	Dark Wooden Window
+Item_me_00_str_window_set_005_0001_index0002	Rustic Wood Window
+Item_me_00_str_window_set_005_0001_index0003	Red Wooden Window
+Item_me_00_str_window_set_005_0002	Bright Plank Window
+Item_me_00_str_window_set_005_0002_index0001	Dark Plank Window
+Item_me_00_str_window_set_005_0003	Paned Wooden Window
+Item_me_00_str_window_set_005_0004	Bright Wooden Lattice Window
+Item_me_00_str_window_set_005_0004_index0001	Dark Wooden Lattice Window
+Item_me_00_str_window_set_005_0004_index0002	Rustic Wooden Lattice Window
+Item_me_00_str_window_set_005_0004_index0003	Red Wooden Lattice Window
+Item_me_00_str_window_set_006_0001	Red Wooden Awning Window
+Item_me_00_str_window_set_007_0001	Red Wooden Arcade Window
+Item_me_00_str_window_set_008_0001	Arched Rustic Wooden Lattice Window
+Item_me_00_str_window_set_008_0001_index0001	Arched Red Wooden Lattice Window
+Item_megastructure_carousel_01_housing	Striped Tent Carousel
+Item_product_prop_brewery_barrel_07	Oak Beer Barrel
 Item_puzzle_troll_lake_pillar_01_part_01	Kharonso Ruins Pillar: No. 1
 Item_puzzle_troll_lake_pillar_02_part_01	Kharonso Ruins Pillar: No. 2
 Item_puzzle_troll_lake_pillar_03_part_01	Kharonso Ruins Pillar: No. 3
 Item_puzzle_troll_lake_pillar_04_part_01	Kharonso Ruins Pillar: No. 4
+Item_ship_cannon_0001	Iron Naval Cannon
+Item_ship_cannon_0007	Bright Iron Prow Cannon
+Item_ship_cannon_0007_index0001	Dark Iron Prow Cannon
+Item_ship_cannon_0009_TurtleShip	Turtle Head Prow Cannon
+Item_ship_cannon_0010_TurtleShip	Dragon Head Prow Cannon
+Item_ship_cannon_0011	Captain's Bow Cannon
+Item_ship_cannon_0012	Admiral's Bow Cannon
+Item_ship_cannon_0013	Steel Naval Cannon
+Item_ship_cannon_0014	Reinforced Steel Naval Cannon
+Item_straw_05	Neat Pile of Hay
+Item_switch_firebellows_01	Wood and Leather Bellows
+Item_switch_firebellows_01_index0001	Dark Wood and Leather Bellows
+Item_tent_crimsondesert_tommaso_obj_woodpole_07_red	Crimson Desert Pole Tent
+Item_tent_crimsondesert_tommaso_obj_woodpole_07_red_index0001	Dark Crimson Desert Pole Tent
+Item_tent_shops_marketplace_02	Market Stall Canopy
+Item_tent_shops_marketplace_02_index0001	Dark Market Stall Canopy
+Item_tent_tom_woodpole_04_01	Desert Pole Shade Tent
 Item_troll_academy_Core	Dimensional Fusion Experimental Power Core
+Item_troll_academy_torchlight_01_on	Ancient Runic Stone Sconce
+Item_troll_academy_torchlight_01_on_housing_index0001	Dark Ancient Runic Stone Sconce
+Item_troll_academy_torchlight_01_on_housing_index0002	Red Ancient Runic Stone Sconce
+Item_turtleship_cannon_0001	Dragon Naval Cannon
+Item_wagon_base_0001	Wandering Merchant's Cargo Hold
+Item_wagon_base_0002	Meticulous Carpenter's Cargo Hold
+Item_wagon_base_0003	Seasoned Comrade's Cargo Hold
+Item_wagon_base_0004	Rugged Traveler's Cargo Hold
+Item_wagon_base_0005	The Laughing Marionette's Cargo Hold
+Item_wagon_base_0006	Renowned Magnate's Cargo Hold
+Item_wagon_base_0007	Elegant Noble's Cargo Hold
+Item_wagon_base_0008	Noble Delegation's Cargo Hold
+Item_wagon_wheel_0001	Seasoned Comrade's Wheel
+Item_wagon_wheel_0002	Meticulous Carpenter's Wheel
+Item_wagon_wheel_0003	The Laughing Marionette's Wheel
+Item_wagon_wheel_0004	Renowned Magnate's Wheel
+Item_wagon_wheel_0005	Wandering Merchant's Wheel
+Item_wagon_wheel_0006	Elegant Noble's Wheel
+Item_wagon_wheel_0007	Noble Delegation's Wheel
 Itemgimmick_lamp_side_candle_0001	Icy White Twin Wall Lamp
 Itemgimmick_lamp_side_candle_0001_index01	Twilight Twin Wall Lamp
 Itemgimmick_lamp_side_candle_0001_index02	Lilac Twin Wall Lamp
@@ -3041,6 +3780,10 @@ Japchae	Pan-Fried Vegetables
 Japchae_Large	Satisfying Pan-Fried Vegetables
 Japchae_Medium	Filling Pan-Fried Vegetables
 Japchae_XLarge	Hearty Pan-Fried Vegetables
+Jellyfish_Salad	Jellyfish Salad
+Jellyfish_Salad_Large	Satisfying Jellyfish Salad
+Jellyfish_Salad_Medium	Filling Jellyfish Salad
+Jellyfish_Salad_XLarge	Hearty Jellyfish Salad
 Jemel_OneHandPistol	Jemel Pistol
 Jeonju_Bibimbap	Mixed Harvest Bowl
 Jeonju_Bibimbap_Large	Satisfying Mixed Harvest Bowl
@@ -3144,6 +3887,16 @@ Kinov_Fabric_Armor	Keanoff Cloth Armor	Male
 Kinross_PlateArmor_Armor	Kinross Plate Armor	Male
 Kinross_PlateArmor_Armor_I	Kinross Plate Armor	Male
 Kintun_ChainMail_Armor	Mortain Chain Mail	Male
+KitchenKnife_OneHandDagger	Kitchen Knife
+KitchenKnife_OneHandDagger_II	Novice Cook's Kitchen Knife
+KitchenKnife_OneHandDagger_III	Apprentice Cook's Kitchen Knife
+KitchenKnife_OneHandDagger_IV	Skilled Cook's Kitchen Knife
+KitchenKnife_OneHandDagger_IX	Maestro's Kitchen Knife
+KitchenKnife_OneHandDagger_V	Expert Cook's Kitchen Knife
+KitchenKnife_OneHandDagger_VI	Sous-Chef's Kitchen Knife
+KitchenKnife_OneHandDagger_VII	Head Chef's Kitchen Knife
+KitchenKnife_OneHandDagger_VIII	Grandmaster's Kitchen Knife
+KitchenKnife_OneHandDagger_X	Master's Kitchen Knife
 Kite_Metal_OneHandShield	Shield of a Blossoming Spring Day
 Kitee_OneHandShield	Kite Shield
 Kliff_Earring	Greymane's Earring
@@ -3162,6 +3915,7 @@ Kordaav_Leather_Armor	Kordaav Leather Armor	Male
 Kordaav_Leather_Gloves	Kordaav Leather Gloves	Male
 Kordaav_OneHandMace	Kordaav Mace
 Korean_PlateArmor_Armor	Corinne Plate Armor	Male
+Kraken_OneHandRapier	Depthbinder Rapier
 Kramer_TwoHandHammer	Helms Greathammer
 Kriella_Fabric_Armor	Kriella Cloth Armor
 Kriella_Fabric_Gloves	Kriella Cloth Wristband
@@ -3214,6 +3968,16 @@ Lacusane_PlateArmor_Armor	Lacusane Plate Armor	Female
 Ladete_Leather_Gloves	Layddete Leather Gloves	Male
 Ladete_Plate_Boots	Icewing Plate Boots	Male
 Ladis_Fabric_Helm	Raditz Cloth Cap	Male
+Ladle_OneHandMace	Ladle
+Ladle_OneHandMace_II	Novice Cook's Ladle
+Ladle_OneHandMace_III	Apprentice Cook's Ladle
+Ladle_OneHandMace_IV	Skilled Cook's Ladle
+Ladle_OneHandMace_IX	Maestro's Ladle
+Ladle_OneHandMace_V	Expert Cook's Ladle
+Ladle_OneHandMace_VI	Sous-Chef's Ladle
+Ladle_OneHandMace_VII	Head Chef's Ladle
+Ladle_OneHandMace_VIII	Grandmaster's Ladle
+Ladle_OneHandMace_X	Master's Ladle
 Ladran_Fabric_Armor	Ladran Cloth Armor	Male
 Laehbern_PlateArmor_Helm	Laehbern Plate Helm	Male
 Lafty_Leather_Gloves	Leffri's Leather Gloves	Male
@@ -3296,6 +4060,13 @@ Legend_Giant_Bull_Report	Giant White Bison Sighting
 Legend_GoldenCarp_Report	Sighting of the Golden Carp
 Legend_GoldenTench_Report	Golden Tench Sighting
 Legend_Golden_Coelacanth_Report	Sighting of the Golden Coelacanth
+Legend_Golden_Jewel_Beetle	Sighting of the Golden Jewel Beetle
+Legend_Golden_Rhinoceros_Beetle	Sighting of the Golden Rhinoceros Beetle
+Legend_Knowledge_Golden_Butterfly	Sighting of the Golden Butterfly
+Legend_Knowledge_Ocean_GoldMarlin_Report	Sighting of the Golden Striped Marlin
+Legend_Knowledge_Ocean_GoldShark_Report	Sighting of the Golden Shark
+Legend_Knowledge_Ocean_PinkMantaRay_Report	Sighting of the Pink Manta Ray
+Legend_Knowledge_Ocean_Pink_Dolphin_Report	Sighting of the Pink Dolphin
 Legend_LeeburtheShadowWolf_Report	Sighting of the Black Fang
 Legend_Macaw_Parrot_Report	Sighting of the Hyacinth Macaw
 Legend_Machine_Eagle_Report	Sighting of the Iron Eagle
@@ -3350,6 +4121,7 @@ Legendary_Moonhead_TwoHandGiantSpear	Grasping Moon
 Legendary_Ogre_Ring	Ogre's Ring
 Legendary_Orc_Plate_Glove	Frozen Heart Plate Gloves	Male
 Legendary_OwenCraber_TwoHandGiantSpear	Frostfang
+Legendary_Satyros_TwoHandGiantSpear	Satyros Spear
 Legendary_Shakatu_OneHandDagger	Goblin King's Treasure Dagger
 Legendary_SkullKnight_OneHandShield	Balgran Shield
 Legendary_Solid_Bringer_TwoHandedWarHamme	Sanguine Knell
@@ -3371,12 +4143,16 @@ Leopard_Pattern_Leather_Armor	Leopard Print Leather Armor	Male
 Lepra_Leather_Boots	Lepra Leather Boots	Male
 Lercent_Leather_Gloves	Lercent Leather Gloves	Male
 Letter_Azureian_Secret	Countess Azerian's Secret Letter
+Letter_Discreet_Message	Secret Letter
 Letter_Elimores_Secret	Countess Azerian's Letter
 Letter_Go_To_ScolaStone	Alustin's Letter
+Letter_Secret_Directive	Secret Orders
+Letter_Strategic_Sabotage	Assembly Sabotage Plan
 Letter_TraderLetter	Undelivered Trader's Letter
 Letter_Valgash	Valgash's Letter
 Letter_Visione_MotherLetter	Letter from a Mother
 Letter_Wolfmolar_Mountain_WifeLetter	A Wife's Letter
+Leviathan_Scale	Leviakan Scale
 Levibb_Fabric_Armor	Ruvib Cloth Armor	Male
 Liberry_OneHandRapier	Liberre Rapier
 License_Operation_CopperPaperBank	Personal Bond Strongbox Permit
@@ -3531,6 +4307,7 @@ Lyfellen_OneHandMace	Frozen Soul
 Lyfellen_PlateArmor_Helm	Lyfellen Plate Helm	Male
 Lyfellen_TwoHandAxe	Incomplete Masterpiece
 Mache_Leather_Gloves	Mache Leather Gloves	Male
+MachineGun_Backpack	Machine Gun Pack
 Machnan_Fabric_Armor	Maknan Cloth Armor	Male
 Machnynn_Fabric_Armor	Marknin Cloth Armor	Male
 Machrah_Fabric_Armor	Marka Cloth Armor	Male
@@ -3555,8 +4332,21 @@ Makan_PlateArmor_Armor	Ferman Plate Armor	Male
 Makan_PlateArmor_Cloak	Ferman Plate Cloak	Male
 Makutan_PlateArmor_Helm	Ator's Will Helm	Male
 Makutan_PlateArmor_Helm_II	Troll Maccutan Plate Helm
+Malachite	Malachite
+Management_Reward_Clothier	Golden Scissors Medal
+Management_Reward_Forge	Precision Forging Handbook
+Management_Reward_Pub	Master's Secret to Managing Ingredients
+Management_Reward_Sawmill	Woodworking Artisan's Seal
+Manganese	Manganese
 Manios_PlateArmor_Armor	Manios Plate Armor	Male
 Mant_PlateArmor_Armor	Mant Plate Armor	Female
+Map_Fragment_Crim_Antumbra_Temple	Silent Burial Ground Survey Records
+Map_Fragment_Crim_MileStone	Remnants of Paradise Survey Records
+Map_Fragment_Crim_Village_1	Faraj Survey Records
+Map_Fragment_Crim_Village_2	Maddin Survey Records
+Map_Fragment_Crim_Village_3	Yasmin Survey Records
+Map_Fragment_Crim_Village_4	Lukumiya Survey Records
+Map_Fragment_Crim_Village_5	Hazran Survey Records
 Marathion_Leather_Boots	Marrada Leather Boots	Female
 Marcree_Fabric_Armor	Makri Cloth Armor	Male
 Marcs_PlateArmor_Armor	Malacs Plate Armor	Male
@@ -3770,6 +4560,7 @@ Moonhead_PlateArmor_Helm_Waning	New Moon Reaper Plate Helm	Male
 Moonhead_Plate_Boots	Half Moon Reaper Plate Boots	Male
 Moonhead_Plate_Boots_Full	Full Moon Reaper Plate Boots	Male
 Moonhead_Plate_Boots_Waning	New Moon Reaper Plate Boots	Male
+Moonstone_Ring	Moonstone Ring
 Morgren_Fabric_Armor	Morgren Cloth Armor	Male
 Mornington_Fabric_Gloves	Mornington Cloth Gloves	Male
 Mornington_Leather_Boots	Mornington Leather Boots	Male
@@ -3797,6 +4588,12 @@ Muscan_Ghost_Fist	Muskan's Upper Body Clone	Male
 Muscan_Ghost_Fist_I	Muskan's Lower Body Clone	Male
 Muscan_PlateArmor_Armor	Muskan Armor	Male
 Muscan_PlateArmor_Gloves	Champion's Plate Gloves	Male
+Musket_Leather_Armor	Naval Officer's Armor	Male
+Musket_Leather_Helm	Naval Officer's Hat	Male
+Mussel_Soup	Mussel Soup
+Mussel_Soup_Large	Satisfying Mussel Soup
+Mussel_Soup_Medium	Filling Mussel Soup
+Mussel_Soup_XLarge	Hearty Mussel Soup
 Mynein_OneHandRapier	Gilliam Rapier
 Myrenenn_Fabric_Armor	Myrnen Cloth Armor	Male
 Mysterm_Leather_Boots	Mistum Leather Boots	Male
@@ -3834,6 +4631,7 @@ NoName_Wiseman_Leather_Cloak	Nameless Sage's Leather Cloak	Male
 NoName_Wiseman_Leather_Gloves_I	Nameless Sage's Leather Gloves	Male
 Noble_Fabric_Armor	Noble Cloth Armor	Male
 Noble_Leather_Helm	Noble's Hat	Male
+Noble_Onyx_Earring	Elegant Black Amber Earring
 Noble_Retainer_Leather_Gloves	Private Soldier's Leather Gloves	Male
 Noble_Retainer_PlateArmor_Armor	Sungrove Standard Plate Armor	Male
 Noble_Retainer_PlateArmor_Armor_I	Marshell Soldier's Plate Armor	Male
@@ -3876,7 +4674,7 @@ NoticePaper_Finale_GoblinSandfang	News of the Sandfang Marauders' Defeat
 NoticePaper_Finale_HyenabossSkevald	News of Skevald the Carrion King's Defeat
 NoticePaper_Finale_LeeburtheShadowWolf	News of the Black Fang's Defeat
 NoticePaper_Finale_Muscan	News of the Bonepit
-NoticePaper_Finale_SkullKnight	News of Skull Knight's Demise
+NoticePaper_Finale_SkullKnight	News of the Skull Knight's Defeat
 NoticePaper_Finale_Timberton	Harris's Letter
 NoticePaper_Finale_WhiteHorn	News of White Horn's Defeat
 NoticePaper_Her_CaveSound	Strange Noises from the Cave
@@ -3927,6 +4725,7 @@ NoticePaper_Skill_UnArmedCombination	Request from the Communal Training Grounds
 NoticePaper_Skill_Wrestle_AirBodySlam	Hernand Constabulary Warning Notice No. 103
 NoticePaper_Skill_Wrestle_GrabSpinThrow	Pailune Anonymous Jottings No. 77
 NoticePaper_Skill_Wrestle_Lariat	Call for Challengers: Black Bear
+NoticePaper_TimberhamSawmill	Timberham Sawmill Management Contract Notice
 NoticePaper_Village_Muiquun	Request to Punish Outlaws in Muiquun
 Noyvarn_Leather_Armor	Noyvarn Leather Armor	Male
 Nureumjeok	Mixed Skewers
@@ -3943,10 +4742,16 @@ Oakten_Leather_Boots	Oakten Leather Boots	Male
 Oathring_OneHandShield	Oath Ring Shield
 Oats	Oats
 Obit_Leather_Boots	Orbit Leather Boots	Male
+Obsidian	Obsidian
+Ocean_Treasure_PlateArmor_Armor	Forsaken Oath Plate Armor	Male
+Ocean_Treasure_PlateArmor_Boots	Forsaken Oath Plate Boots	Male
+Ocean_Treasure_PlateArmor_Gloves	Forsaken Oath Plate Gloves	Male
+Ocean_Treasure_PlateArmor_Helm	Forsaken Oath Plate Helm	Male
 Odori_Fabric_Armor	Odorrey Cloth Armor	Male
 Oharah_Leather_Armor	Ohara Leather Armor	Male
 Oil_Barrel	Oil Canister
 Oil_Sprayer_BackPack	Lubricant Sprayer
+OldNaval_Fabric_Helm	Old Navy Hat	Male
 Old_HorseArmor_Saddle	Shabby Horse Saddle
 Old_Kliff_OneHandSword	Fated Shadow
 Old_Kliff_PlateArmor_Armor	Goyen's Plate Armor	Male
@@ -3954,6 +4759,7 @@ Old_Kliff_PlateArmor_Cloak	Goyen's Cloak	Male
 Old_Kliff_PlateArmor_Gloves	Goyen's Plate Gloves	Male
 Old_Kliff_Plate_Boots	Goyen's Plate Boots	Male
 Old_Necklace	Worn Necklace
+Old_Pailune_Leather_Armor	Greymane Apprentice Combat Armor	Male
 Old_Ring	Worn Ring
 Old_Wood_Doll_II	Old Wooden Doll
 Old_Wood_OneHandShield	Bekker Shield
@@ -3964,6 +4770,8 @@ Onion	Onion
 Oongka_Basic_Leather_Armor	Ashen Wolf's Leather Armor	Male
 Oongka_Basic_Leather_Cloak	Ashen Wolf's Leather Cloak	Male
 Oongka_Basic_Leather_Gloves	Ashen Wolf's Leather Gloves	Male
+Oongka_Glasses	Oongka's Circlet	Male
+Oongka_OneHandCannon_I	Enhanced Fatum Blaster	Male
 Oongka_PlateArmor_Armor_II	Valortread Plate Armor	Male
 Oongka_PlateArmor_Armor_III	Belkandor Plate Armor	Male
 Oongka_PlateArmor_Boots_II	Valortread Plate Boots	Male
@@ -4027,6 +4835,7 @@ Orjekel_HorseArmor_Armor	Varnian Barding
 Orjekel_HorseArmor_Helm	Varnian Champron
 Orjekel_HorseArmor_Saddle	Varnian Saddle
 Orjekel_HorseArmor_Stirrup	Varnian Stirrups
+Ornate_Brass_Earring	Ornate Brass Earring
 Ort_Fabric_Armor	Ort Cloth Armor	Male
 Orthu_Fabric_Armor	Orthu Cloth Armor	Male
 Orton_Fabric_Armor	Orton Cloth Armor	Male
@@ -4118,6 +4927,9 @@ Paper_Adelina_II	Training Field Note
 Paper_Aldred	Eldred's Note
 Paper_Aldred_I	Farmer's Note
 Paper_Aldred_II	Provisioner's Shop Note
+Paper_Anamorphic_Adventurer	Adventurer Constellation Poster
+Paper_Anamorphic_Key	Key Constellation Poster
+Paper_Anamorphic_Shield	Shield Constellation Poster
 Paper_Beatrice	Bea's Note
 Paper_BoundbyLies	Wronged Man's Note
 Paper_BoundbyLies_I	Note at a Man's House
@@ -4135,6 +4947,7 @@ Paper_Drianna_I	Watchtower Note
 Paper_Eliza	Elise's Note
 Paper_Eliza_I	Note from the Shopping Street
 Paper_Engineer_Working_Memo	Note of a Mechanic's Grumblings
+Paper_Enhanced_HandCannon	Enhanced Blaster Blueprint
 Paper_FieldVoice	Excavation Site Manager's Note
 Paper_FieldVoice_I	Foreman's Note
 Paper_Find_Tolstein	Report on Beighen
@@ -4166,6 +4979,42 @@ Paper_Lenard_I	Assistant's Note
 Paper_Maiden	Maidon's Note
 Paper_Maiden_I	Harbor Manager's Note
 Paper_Maiden_II	Note from the Bank
+Paper_Ocean_ArtDealer_GiftNote	Thoughts on a Gift in Return
+Paper_Ocean_Boris_Accusation	Letter of Accusation
+Paper_Ocean_Dragnar_Circus	Flyer for the Canceled Circus
+Paper_Ocean_Estra_FraudWarning	Swindler Warning Notice
+Paper_Ocean_Geologist_Research	Geologist's Note
+Paper_Ocean_Giant_JellyFish_Skin	Sunfish Feed and Preferences
+Paper_Ocean_Giant_Salamander_Leather	Poster Piece
+Paper_Ocean_GoldenShark_Memoir	A Fisherman's Recollections
+Paper_Ocean_GreatCoral_Research	Great Coral Reef Ecological Survey Log
+Paper_Ocean_Hernand_Graffiti_927	Hernand Anonymous Jottings No. 927
+Paper_Ocean_Hydrothermal_Research	Hydrothermal Vents Ecology Research Records
+Paper_Ocean_Item_Rare_Collect_sea_blackcoral	A Regular's Letter
+Paper_Ocean_Item_Rare_Collect_sea_goldencoral	Grandmother's Golden Coral
+Paper_Ocean_Letter_AresielToRiselia	Areciel's Letter to Lyselia
+Paper_Ocean_Letter_BariToElowen	Bari's Letter to Elowen
+Paper_Ocean_Letter_ElowenToAresiel	Elowen's Letter to Areciel
+Paper_Ocean_Letter_RiseliaToBari	Lyselia's Letter to Bari
+Paper_Ocean_Letter_SilviaToElowen	Sylvia's Letter to Elowen
+Paper_Ocean_MalachiteOre	My Ailing Mother
+Paper_Ocean_Manganese	Note Attached to the Research Materials
+Paper_Ocean_MonsterShark_Witness	Monster Shark Sighting
+Paper_Ocean_Nirakan_OldNote	Old Note
+Paper_Ocean_Pragma_Notice	Garnet Purchase Notice
+Paper_Ocean_Quartz	Thoughts on the Shiny Ore
+Paper_Ocean_Razanui_Witness	Sightings on Razanui Island
+Paper_Ocean_RockySeabed_Research	Rocky Reef Ecology Research Records
+Paper_Ocean_Saeon_Petition	Saeon Island Conservation Petition
+Paper_Ocean_Satyros_Recruitment	Satyros Island Treasure Hunter Recruitment Notice
+Paper_Ocean_Sea_Kelp	Notice for Kelp Gatherers
+Paper_Ocean_Seapineapple	Someone's Lost Grocery List
+Paper_Ocean_Sorcerer_FrogNote	Frog Observation Note
+Paper_Ocean_Vergel_Madman	Poster Scribbled by a Madman
+Paper_Ocean_WolfTracker_Survival	An Account of Surviving the Wolf Trackers
+Paper_Ocean_Xamaca_Harvest	To Those Gathering on Xamaca Island
+Paper_Ocean_ambergris	Letter to a Lover
+Paper_Ocean_hydrothermalmineral	Investigation Proposal to the Hydrothermal Mineral Deposits
 Paper_Omar	Omar's Note
 Paper_Omar_I	Varnia Entrance Note
 Paper_RacingStage	Researcher's Note
@@ -4179,6 +5028,8 @@ Paper_Sniks	Nix's Note
 Paper_Sniks_I	Note from the Freesword Barracks
 Paper_StonemireRuins_Report_2	Stonemire Ruins Record No. 2
 Paper_StonemireRuins_Report_3	Stonemire Ruins Record No. 3
+Paper_TreasureMap_Diamond	Diamond Map
+Paper_TreasureMap_Kudzu	Skyroot Map
 Paper_Ugmum	Ugmon's Note
 Paper_VegetableBox	Produce Order Form
 Paper_WhiteCrow_Witch_Letter	White Crow's Letter
@@ -4188,6 +5039,10 @@ Paphneil_PlateArmor_Cloak	Scorchflame Plate Cloak	Male
 Parachu_OneHandAxe	Parashu Axe
 Paralyze_OneHandSword	Sword of Wayward Woods
 Parastis_PlateArmor_Helm	Parasis Plate Helm	Male
+Parboiled_Seafood	Assorted Parboiled Seafood
+Parboiled_Seafood_Large	Satisfying Assorted Parboiled Seafood
+Parboiled_Seafood_Medium	Filling Assorted Parboiled Seafood
+Parboiled_Seafood_XLarge	Hearty Assorted Parboiled Seafood
 Parmen_PlateArmor_Gloves	Ferman Plate Gloves	Male
 Parsley	Parsley
 Parvel_Giant_TwoHandGiantBastard	Parvel Greatsword	Female
@@ -4277,17 +5132,42 @@ Persein_Leather_Gloves	Persein Leather Gloves	Male
 Persein_Leather_Gloves_I	Persein Leather Gloves	Male
 Perseus_Leather_Gloves	Perseus Leather Gloves	Male
 Pervin_Bomb	Perwin Explosive
+PetArmor_Angler_Armor_Cat	Feline Fishing Outfit
+PetArmor_Angler_Armor_Dog	Canine Fishing Outfit
+PetArmor_Angler_Helm_Cat	Feline Fishing Hat
+PetArmor_Angler_Helm_Dog	Canine Fishing Hat
+PetArmor_Cook_Armor_Cat	Feline Cook's Cloth Outfit
+PetArmor_Cook_Armor_Dog	Canine Cook's Cloth Outfit
+PetArmor_Cook_Helm_Cat	Feline Cook's Cloth Hat
+PetArmor_Cook_Helm_Dog	Canine Cook's Cloth Hat
+PetArmor_Diving_Armor_Cat	Feline Charter's Diving Suit
+PetArmor_Diving_Armor_Dog	Canine Charter's Diving Suit
+PetArmor_Diving_Helm_Cat	Feline Charter's Diving Helm
+PetArmor_Diving_Helm_Dog	Canine Charter's Diving Helm
 PetArmor_Fabric_Helm_WyvernBaby	Small Wyvern Aviator Hat
 PetArmor_Helm_Cucubirdbaby	Small Kuku Bird Eggshell
 PetArmor_Marni_Armor	Cat Visionette Neckerchief
 PetArmor_Marni_Helm	Cat Visionette
 PetArmor_Musket_Armor_Cat	Uniform Cat Outfit
 PetArmor_Musket_Helm_Cat	Uniform Cat Hat
+PetArmor_Pirate_Helm_parrot	Parrot Pirate Hat
 PetArmor_Plate_Armor_Cat	Cat Plate Armor
 PetArmor_Plate_Armor_Dog	Puppy Plate Armor
 PetArmor_Plate_Helm_Cat	Cat Plate Helm
 PetArmor_Plate_Helm_Dog	Puppy Plate Helm
 PetArmor_Rescue_Armor_Dog	Rescue Puppy Outfit
+PetArmor_Rudion_Plate_Armor_Cat	Feline Ludeon Plate Outfit
+PetArmor_Rudion_Plate_Armor_Dog	Canine Ludeon Plate Outfit
+PetArmor_Rudion_Plate_Helm_Cat	Feline Ludeon Plate Hat
+PetArmor_Rudion_Plate_Helm_Dog	Canine Ludeon Plate Hat
+PetArmor_Scholarstone_Armor_Cat	Feline Scholastone Honorary Scholar Outfit
+PetArmor_Scholarstone_Armor_Dog	Canine Scholastone Honorary Scholar Outfit
+PetArmor_Scholarstone_Helm_Cat	Feline Scholastone Honorary Scholar Cap
+PetArmor_Scholarstone_Helm_Dog	Canine Scholastone Honorary Scholar Cap
+PetArmor_Workwear_Armor_Cat	Feline Worker's Cloth Outfit
+PetArmor_Workwear_Armor_Dog	Canine Worker's Cloth Outfit
+PetArmor_Workwear_Helm_Cat	Feline Worker's Cloth Hat
+PetArmor_Workwear_Helm_Dog	Canine Worker's Cloth Hat
 PetArmor_backpack_Armor_Cat	Peddler Cat Outfit
 PetArmor_backpack_Helm_Cat	Peddler Cat Hat
 Pet_Attackable_Amulet	Sigil of Valor
@@ -4323,10 +5203,15 @@ Pirate_Fabric_Armor_I	Pirate Cloth Armor	Male
 Pirate_Fabric_Armor_II	Dancing Catfish Cloth Armor	Male
 Pirate_Fabric_Armor_III	Pirate Cloth Armor	Male
 Pirate_Fabric_Armor_IV	Pirate Cloth Armor	Male
+Pirate_Fabric_Armor_V	Sea Reaver's Combat Suit
 Pirate_King_Leather_Helm	Pirate King Hat	Male
+Pirate_Lantern	Pirate Lantern
+Pirate_Leather_Helm_V	Sea Reaver's Hat	Male
+Pirate_OneHandSword	Pirate's Sword
 Pirate_PlateArmor_Gloves	Pirate Plate Gloves	Male
 Pirate_PlateArmor_Gloves_I	Pirate Plate Gloves	Male
 Pirate_Vice_Captain_Armor	The Singing Catfish Vice Captain's Armor	Male
+Pirate_eyepatch	Pirate Eyepatch	Male
 Pirin_Leather_Armor	Pirin Leather Armor	Male
 Pisoniano_Leather_Armor	Pisonia Leather Armor	Male
 Pitspec_PlateArmor_Armor	Unyielding Warrior's Plate Armor	Male
@@ -4336,6 +5221,10 @@ Plant_Collect_BackPack	Kuku Gardening Pack
 Plune_Leather_Armor	Plune Leather Armor	Male
 Poison_Arrow	Poison Arrow
 Poison_Stick	Soporific Blowpipe
+Politics_Fabric_Armor	Demenissian Council Robes	Female
+Politics_Fabric_Cloak	Demenissian Council Cloak	Female
+Politics_Gloves	Demenissian Council Gloves	Female
+Politics_Leather_Boots	Demenissian Council Boots	Female
 Pomegranate	Pomegranate
 Pomegranate_Seed	Pomegranate Seed
 Porcell_Fabric_Gloves_I	Porcell Cloth Gloves	Male
@@ -4348,22 +5237,41 @@ Possesion_Insam	Ginseng
 Possesion_Myurdin_Leather_Armor	Umbra's Hierophany Leather Armor	Male
 Possesion_Myurdin_Leather_Gloves	Umbra's Hierophany Leather Gloves	Male
 Pot_Head	Jar
+Pot_Lid_OneHandShield	Jar Lid
+Pot_Lid_OneHandShield_II	Novice Cook's Jar Lid
+Pot_Lid_OneHandShield_III	Apprentice Cook's Jar Lid
+Pot_Lid_OneHandShield_IV	Skilled Cook's Jar Lid
+Pot_Lid_OneHandShield_IX	Maestro's Jar Lid
+Pot_Lid_OneHandShield_V	Expert Cook's Jar Lid
+Pot_Lid_OneHandShield_VI	Sous-Chef's Jar Lid
+Pot_Lid_OneHandShield_VII	Head Chef's Jar Lid
+Pot_Lid_OneHandShield_VIII	Grandmaster's Jar Lid
+Pot_Lid_OneHandShield_X	Master's Jar Lid
 Potato	Potato
 Potion_StatBuff_Tier1_0001	Freya's Lesser Elixir
 Potion_StatBuff_Tier1_0002	Apollonia's Lesser Elixir
 Potion_StatBuff_Tier1_0003	Meliara's Lesser Elixir
 Potion_StatBuff_Tier1_0004	Haiden's Lesser Elixir
 Potion_StatBuff_Tier1_0005	Astrid's Lesser Elixir
+Potion_StatBuff_Tier1_0007	Luftis's Lesser Elixir
+Potion_StatBuff_Tier1_0008	Fluva's Lesser Elixir
+Potion_StatBuff_Tier1_0009	Lucaris's Lesser Elixir
 Potion_StatBuff_Tier2_0001	Freya's Elixir
 Potion_StatBuff_Tier2_0002	Apollonia's Elixir
 Potion_StatBuff_Tier2_0003	Meliara's Elixir
 Potion_StatBuff_Tier2_0004	Haiden's Elixir
 Potion_StatBuff_Tier2_0005	Astrid's Elixir
+Potion_StatBuff_Tier2_0007	Luftis's Elixir
+Potion_StatBuff_Tier2_0008	Fluva's Elixir
+Potion_StatBuff_Tier2_0009	Lucaris's Elixir
 Potion_StatBuff_Tier3_0001	Freya's Greater Elixir
 Potion_StatBuff_Tier3_0002	Apollonia's Greater Elixir
 Potion_StatBuff_Tier3_0003	Meliara's Greater Elixir
 Potion_StatBuff_Tier3_0004	Haiden's Greater Elixir
 Potion_StatBuff_Tier3_0005	Astrid's Greater Elixir
+Potion_StatBuff_Tier3_0007	Luftis's Greater Elixir
+Potion_StatBuff_Tier3_0008	Fluva's Greater Elixir
+Potion_StatBuff_Tier3_0009	Lucaris's Greater Elixir
 PowerDraw_Gloves	Strongbow Gloves	Male
 Prani_PlateArmor_Helm	Prani Plate Helm	Male
 Premium_Stone	Flawless Stone
@@ -4411,6 +5319,7 @@ Pyogo_Mushroom_BackPack	Oakwood Mushroom Pack
 Pyogo_Mushroom_Tea	Oakwood Mushroom Tea
 Pypho_Fabric_Armor	Paifo Cloth Armor	Male
 Pyrantha_Fabric_Armor	Pyrantha Cloth Armor	Male
+QuartzOre	Shiny Ore
 Querunty_Leather_Boots	Quent Leather Boots	Male
 Querville_Leather_Boots	Kervel Leather Boots	Male
 Quest_Bloodcoronation_CampDocument_I	Informant's First Letter
@@ -4418,6 +5327,7 @@ Quest_Bloodcoronation_CampDocument_II	Informant's Second Letter
 Quest_Bloodcoronation_CampDocument_III	Informant's Third Letter
 Quest_Bloodcoronation_Document	Report on Myurdin's Whereabouts
 Quest_Book_Mansion_I	Book
+Quest_Book_MarnisMansion_I	Marni and the Secret Chamber
 Quest_BrokenVisionPro_Bremer	Broken Visione	Male
 Quest_BrokenVisionPro_Ibano	Broken Visione	Male
 Quest_BrokenVisionPro_MasterGrundir_Diary	Broken Visione	Male
@@ -4481,9 +5391,11 @@ Quest_MarchellByron_Letter	B's Secret Letter
 Quest_Order_Delkin_Pot	Stone Jar
 Quest_Paper_AbyssTeleport	White Crow's Letter
 Quest_Paper_Antumbra_Contract	Pact of Antumbra
+Quest_Paper_Antumbra_Plan	Pact of Antumbra
 Quest_Paper_Askelund_Judgment	Fort Askelund Written Judgment
 Quest_Paper_Balthazar_Memo	Balthazar's Note
 Quest_Paper_Bankruptcy_Document	Notice of Bankruptcy
+Quest_Paper_Bari_Witch_LoveStory	Bari's Letter
 Quest_Paper_Bastion_Secret	Bastier's Secret Letter
 Quest_Paper_Beighen_Notice	Beighen Poster
 Quest_Paper_BioExperiment_Blueprint	H.A.L.L. Bio-Capsule Design
@@ -4512,6 +5424,8 @@ Quest_Paper_Crim_Sniks	Nix's Poster
 Quest_Paper_Crim_Thibault	Tibo's Poster
 Quest_Paper_Crim_Thomas	Thomas's Poster
 Quest_Paper_Crim_Zara	Zara's Poster
+Quest_Paper_CroggtheCatfishman_Journal	Sir Catfish's Journal
+Quest_Paper_CroggtheCatfishman_Letter	A note Rohan Cooper kept tucked inside his coat.
 Quest_Paper_Crowman_Adoptation	Damaged Consent to Adoption
 Quest_Paper_Cult_Order	Directive of the Order
 Quest_Paper_Damian_AirJump	Letter for Damiane
@@ -4548,6 +5462,9 @@ Quest_Paper_Dem_Palga	Palgar's Poster
 Quest_Paper_Dem_Trollmag	Trolmagg's Poster
 Quest_Paper_Dem_Zarkon	Zargon's Poster
 Quest_Paper_DemenissPolice	Demeniss Tribunal
+Quest_Paper_Demeniss_Musket_Leader_Diary	Rohan Cooper's Journal
+Quest_Paper_Demeniss_Musket_Leader_Letter	Rohan Cooper's Letter
+Quest_Paper_Diary_Fragment	A Page from a Servant's Diary
 Quest_Paper_Dismissal_Document	Discharge Order
 Quest_Paper_DrugFactory_I	Ingredient Dispenser Instructions
 Quest_Paper_DrugFactory_II	Washer Instructions
@@ -4560,7 +5477,9 @@ Quest_Paper_EmptyIII	Simple Poster
 Quest_Paper_EmptyIV	Simple Poster
 Quest_Paper_Empty_I	Simple Poster
 Quest_Paper_Empty_II	Simple Poster
+Quest_Paper_Fire_Report	Manor Fire Investigation Report
 Quest_Paper_Foodstorage	Kuku Cooler Blueprint
+Quest_Paper_GoblinMarketCertificate	Goldleaf Goods Verification Form
 Quest_Paper_Gregor_Letter	Records of Tributes to Gregor
 Quest_Paper_Gregor_Record	Letter Regarding Tributes to Gregor
 Quest_Paper_HeavyFoodstorage	Enhanced Kuku Cooler Blueprint
@@ -4620,25 +5539,35 @@ Quest_Paper_Merrick_Letter	Merrick's Letter
 Quest_Paper_Merrick_SeizureList	Merrick Seizure List
 Quest_Paper_Military_Notice	Soldier Recruitment Post
 Quest_Paper_MineFortress_Blueprint	Storm Crusher Blueprint
+Quest_Paper_Modesty_Witch_LoveStory	Lyselia's Letter
 Quest_Paper_MoonScribbles_01	Child's Moon Doodle
 Quest_Paper_MoonScribbles_02	Child's Moon Doodle
 Quest_Paper_MoonScribbles_03	Child's Moon Doodle
+Quest_Paper_Mysterious_Plan	A Certain Plan
 Quest_Paper_Nature	Lost Letter
 Quest_Paper_Navy_Inquiry_Report	Internal Naval Investigation Records
+Quest_Paper_NoEntry_Order	Mainlander Entry Ban
 Quest_Paper_NoblePropertyList	Noble House's Assets List
 Quest_Paper_Orc_TechnicalList	Orc Technician List
+Quest_Paper_Order_Document	Kharzek's Directive
+Quest_Paper_Power_Witch_LoveStory	Areciel's Letter
 Quest_Paper_Progression	Alustin's Letter
 Quest_Paper_Propagation	Wisdom Between Donation and Fruition
 Quest_Paper_Recipe_KuKu_Pot_RoketBag	Letter from Grimnir
 Quest_Paper_Seizure_Tag	Seizure Notice
 Quest_Paper_Sentry_Journal	A Guard's Memoir
+Quest_Paper_Servant_Memoir	A Servant's Memoir
+Quest_Paper_Slave_Contract	Slave Contract
 Quest_Paper_Stamina	Lost Letter
+Quest_Paper_Tank_Request	Siege Weapon Commission Request
 Quest_Paper_TaxStatement	Tax Notice
 Quest_Paper_Torn_Order	Torn Subjugation Order
 Quest_Paper_UltimateWeapon_Blueprint_01	Ultimate Weapon Interior Blueprint
 Quest_Paper_UltimateWeapon_Blueprint_02	Ultimate Weapon Exterior Blueprint
 Quest_Paper_Verdict_Treason	Treason Verdict
+Quest_Paper_Void_Knight	Plans for the Vessel of the Void
 Quest_Paper_Ward_List	Consent to Adoption
+Quest_Paper_Wisdom_Witch_LoveStory	Elowen's Letter
 Quest_Paper_Wyvern_Species_Memo	Wyvern Traits
 Quest_Paper_Zoo_Flyer	Wildlife Park Flyer
 Quest_PendantInSnow_Letter	Letter to Younger Brother
@@ -4707,11 +5636,26 @@ Quest_WantedPaper_0108	Bounty Notice - Jonathan
 Quest_WantedPaper_0109	Bounty Notice - Frank
 Quest_WantedPaper_0110	Bounty Notice - Broll
 Quest_WantedPaper_Arsonist_TheFaceless	Bounty Notice - The Masked Liberator
+Quest_WantedPaper_PirateShip_0001	Pirate Ship Alert - The Black Bloom
+Quest_WantedPaper_PirateShip_0002	Pirate Ship Warning - The Crimson Shield
+Quest_WantedPaper_PirateShip_0003	Pirate Ship Warning - The Vengeance
+Quest_WantedPaper_PirateShip_0004	Pirate Ship Warning - Faunus
+Quest_WantedPaper_PirateShip_0005	Pirate Ship Alert - The Grim Wind
+Quest_WantedPaper_PirateShip_0006	Pirate Ship Alert - The Scarlet Widow
+Quest_WantedPaper_PirateShip_0007	Pirate Ship Alert - The Bloodied Stake
+Quest_WantedPaper_PirateShip_0008	Pirate Ship Alert - The Devils' Plunder
+Quest_WantedPaper_PirateShip_0009	Pirate Ship Alert - The Black Curved Blade
+Quest_WantedPaper_PirateShip_0010	Pirate Ship Alert - The Sea's Vengeance
+Quest_WantedPaper_PirateShip_0011	Pirate Ship Alert - The Death Blossom
+Quest_WantedPaper_PirateShip_0012	Pirate Ship Alert - The Siren's Cry
+Quest_WantedPaper_PirateShip_0013	Pirate Ship Alert - The Sea Claw
+Quest_WantedPaper_PirateShip_0014	Pirate Ship Alert - The Drunken Catfish
 Quest_WantedPaper_Traitor_Hit_List	Traitor Hit List
 Quest_Witch_Token_I	Witch's Token
 Quest_Witch_Token_II	Witch's Token
 Quest_Witch_Token_III	Witch's Token
 Quest_Witch_Token_IV	Witch's Token
+Quest_Wood_Branch_01	Branch	Male
 Quiver	Replenishing Arrows
 Qunicks_Leather_Armor	Kenecks Leather Armor	Male
 Rabbid_Fabric_Helm	Raveed Cloth Cap	Male
@@ -4728,6 +5672,7 @@ Raging_Tempests_Leader_PlateArmor_Helm	Raging Tempest's Plate Helm
 Raging_Tempests_Leader_Plate_Boots	Raging Tempest's Plate Boots
 Rahelm_Fabric_Helm	Rahelm Cloth Headband	Female
 Rakhir_Fabric_Gloves	Rakhir Cloth Wristband	Male
+Rakkli_Leather_Cloak	Rakkli Leather Cloak	Male
 Rakkli_PlateArmor_Armor	Rakkli Plate Armor	Male
 Rakuzen_Leather_Boots	Rezzcan Leather Boots	Male
 Ramastern_Leather_Boots	Ramastern Leather Boots	Male
@@ -4765,6 +5710,7 @@ Rayhorn_TwoHandSword	Rhett's Longsword
 Rayra_Fabric_Helm	Leila Cloth Cap	Female
 Rayra_Leather_Gloves	Leila Leather Gloves	Female
 Reak_Leather_Armor	Reak Leather Armor
+Recipe_Abalone_Porridge	Recipe: Abalone Porridge
 Recipe_Beef_Bone_Soup	Recipe: Meat Stew
 Recipe_Berry_Juice	Recipe: Fruit Juice
 Recipe_BoiledPork	Recipe: Boiled Meat
@@ -4783,10 +5729,44 @@ Recipe_Book_FabricArmor_II	Cloth Armors of the World, Vol. II
 Recipe_Book_FabricArmor_III	Cloth Armors of the World, Vol. III
 Recipe_Book_FabricArmor_IV	Cloth Armors of the World, Vol. IV
 Recipe_Book_FishingRod_II	Fine Fishing Rod Blueprint
+Recipe_Book_HousingObject_Basic	From the Ground Up
+Recipe_Book_HousingObject_Border	One Last Detail
+Recipe_Book_HousingObject_Chimney	Building a Maintenance-Free Chimney
+Recipe_Book_HousingObject_Door_Entrance	A Welcoming Front Door
+Recipe_Book_HousingObject_Door_MainGate	A Grand Door for a Grand House
+Recipe_Book_HousingObject_Door_MetalSide	The Locked Iron Gate
+Recipe_Book_HousingObject_Door_WoodInterior	Dividing Spaces with Interior Doors
+Recipe_Book_HousingObject_Door_WoodSide	Long-Lasting Wooden Doors
+Recipe_Book_HousingObject_Fence_Stone	The Hundred-Year Wall
+Recipe_Book_HousingObject_Fence_Wood	One Axe for a Fence
+Recipe_Book_HousingObject_Finish_Stone_I	Cairn's Apprentice Mason's Guide
+Recipe_Book_HousingObject_Finish_Stone_II	Building with Hernand Stones
+Recipe_Book_HousingObject_Finish_Stone_III	A Stonemason's Stonework
+Recipe_Book_HousingObject_Finish_Wood_I	Why Craftsmen Seek Timberham
+Recipe_Book_HousingObject_Finish_Wood_II	Beighen's Wood and Walls
+Recipe_Book_HousingObject_Finish_Wood_III	Dizzying Gap Between the Planks
+Recipe_Book_HousingObject_Finish_Wood_IV	The Fifth Furniture-Stacking Competition
+Recipe_Book_HousingObject_PatternWallPaper	A Hundred Patterns for Walls
+Recipe_Book_HousingObject_Pillar	Pillars of Pywel
+Recipe_Book_HousingObject_Plaster	The Art of Plastering
+Recipe_Book_HousingObject_Roof_Brick	Building Brick Roofs
+Recipe_Book_HousingObject_Stair_Stone	Building Stone Steps
+Recipe_Book_HousingObject_Stair_Wood	Fixing Creaky Stairs
+Recipe_Book_HousingObject_Window_Arch	The Art of Curves
+Recipe_Book_HousingObject_Window_Cathedral	A Window Open to Solumen
+Recipe_Book_HousingObject_Window_Estate	Good Windows, Better Homes
+Recipe_Book_HousingObject_Window_Wood	Wooden Windows of the South
 Recipe_Book_LeatherArmor_I	Leather Armors of the World, Vol. I
 Recipe_Book_LeatherArmor_II	Leather Armors of the World, Vol. II
 Recipe_Book_LeatherArmor_III	Leather Armors of the World, Vol. III
 Recipe_Book_LeatherArmor_IV	Leather Armors of the World, Vol. IV
+Recipe_Book_Management_Clothier_I	Tricolor Fabric
+Recipe_Book_Management_Forge_I	The Tireless Forge's Secret
+Recipe_Book_Management_Pub_I	For the Chef by the Fire
+Recipe_Book_Management_Pub_II	Popular Restaurants' Secret
+Recipe_Book_Management_Sawmill_I	Building with Planks
+Recipe_Book_Management_Sawmill_II	A Carpenter's Guide to Sawmill Expansion
+Recipe_Book_Management_WaitingTable	The Courtesy of Waiting
 Recipe_Book_OneHandShield_I	Shields of the World, Vol. I
 Recipe_Book_OneHandShield_II	Shields of the World, Vol. II
 Recipe_Book_OneHandShield_III	Shields of the World, Vol. III
@@ -4818,17 +5798,27 @@ Recipe_Book_TwoHandWeapon_II	Two-Handed Weapons of the World, Vol. II
 Recipe_Book_TwoHandWeapon_III	Two-Handed Weapons of the World, Vol. III
 Recipe_Book_TwoHandWeapon_IV	Two-Handed Weapons of the World, Vol. IV
 Recipe_Book_Varnia	Varnian Equipment Blueprint
+Recipe_Book_WarRobot_Backpack_04	Ancient Marine Exploration Pack Blueprint
+Recipe_Book_WarRobot_Body_04	Ancient Marine Exploration Plating Blueprint
+Recipe_Book_WarRobot_Foot_04	Ancient Marine Exploration Footwear Blueprint
 Recipe_Book_Wells_HorseArmor	Wells Military Tack Blueprint
+Recipe_Book_me_00_str_wallpaper_000_0004_index0005	Moonlit Silver Blossoms
+Recipe_Book_me_00_str_wallpaper_000_0004_index0006	Furnishing the Throne Room
+Recipe_Book_me_00_str_wallpaper_000_0004_index0007	Child Sleeping Beneath the Clouds
 Recipe_Braised_Fish	Recipe: Braised Fish
 Recipe_Braised_Fish_Vegetable	Recipe: Braised Fish and Vegetables
 Recipe_Braised_Meat	Recipe: Braised Meat
 Recipe_Braised_Meat_Fish	Recipe: Braised Meat and Fish
 Recipe_Braised_Meat_Vegetable	Recipe: Braised Ribs
 Recipe_Braised_Vegetable	Recipe: Pickled Vegetables
+Recipe_Cheese_GrilledClams	Recipe: Grilled Cheese Clams
 Recipe_Chocolate	Recipe: Chocolate
 Recipe_Deactived_Abyss_Artifact	Blueprint: Faded Abyss Artifact
 Recipe_DeerAntler_Fruit_Tea	Recipe: Antler Tea
 Recipe_DeerAntler_Soup	Recipe: Longhorn Soup
+Recipe_Diving_BackPack_02	Blueprint: Explorer's Breathing Device
+Recipe_Diving_Propulsion_BackPack	Blueprint: Propulsion-Type Breathing Device
+Recipe_Diving_Propulsion_BackPack_I	Blueprint: Enhanced Propulsion-Type Breathing Device
 Recipe_Fish_Bulgogi	Recipe: Pan-Fried Marinated Fish
 Recipe_Fish_Fruit_Porridge	Recipe: Steamed Fish
 Recipe_Fish_Porridge	Recipe: Fish Porridge
@@ -4841,6 +5831,7 @@ Recipe_Fruit_Porridge	Recipe: Fruit Punch
 Recipe_Fruit_Wine	Recipe: Wine
 Recipe_Full_Course_of_Braised_Fish	Recipe: Assorted Braised Fish
 Recipe_GoldBar	Alchemy Formula: Gold Bar
+Recipe_GrilledClams	Recipe: Grilled Clams
 Recipe_Grilled_Meat_Fish	Recipe: Grilled Meat and Fish
 Recipe_Gungjung_Tteokbokki	Recipe: Pan-Fried Rice Cakes
 Recipe_Haemuljjim	Recipe: Steamed Seafood
@@ -4851,6 +5842,15 @@ Recipe_Item_Collection_Prop_Automata_0001	Blueprint: Clanging Little Knight
 Recipe_Item_Collection_Prop_Automata_0002	Blueprint: Clanging Red Jester
 Recipe_Item_Collection_Prop_Automata_0003	Blueprint: Clanging King
 Recipe_Item_Collection_Prop_Automata_0004	Blueprint: VZ-O and Z-One
+Recipe_Item_Item_in_dpf_seahorsedeco_0001	Blueprint: Seahorse Statue
+Recipe_Item_Item_in_dpfo_shipdeco_0001	Blueprint: Golden Bottled Ship
+Recipe_Item_Item_in_dpw_fishdeco_0001	Blueprint: Fisherman's Pride
+Recipe_Item_Item_in_dpw_shipanchor_0001	Blueprint: Fancy Gilded Anchor
+Recipe_Item_Item_in_dpw_shiphandle_0001	Blueprint: Fancy Gilded Ship's Wheel
+Recipe_Item_Lamp_stand_ocean_0001	Blueprint: Octopus-legged Candlestick
+Recipe_Item_Lamp_stand_ocean_0002	Blueprint: Pearl Remembrance Lamp
+Recipe_Item_Lamp_stand_ocean_0003	Blueprint: Blue Coral Lamp
+Recipe_Item_Lamp_stand_ocean_0004	Blueprint: Moonshell Cluster
 Recipe_Item_Skill_AbyssGear_AbsoluteDefense_LV1	Gear Blueprint: Piercing Bloom
 Recipe_Item_Skill_AbyssGear_AbyssGrass_Immune	Gear Blueprint: Abyssal Assimilation
 Recipe_Item_Skill_AbyssGear_AddCriticalRateByMaterialKey_FabricArmor_LV1	Gear Blueprint: Shred
@@ -4860,17 +5860,22 @@ Recipe_Item_Skill_AbyssGear_AddFrendly_LV1	Gear Blueprint: Solidarity
 Recipe_Item_Skill_AbyssGear_AddKillSkillLevel_LV1	Gear Blueprint: Energy Drain
 Recipe_Item_Skill_AbyssGear_AddMoneyDropRate_LV1	Gear Blueprint: Fortune
 Recipe_Item_Skill_AbyssGear_AdditionalThief_LV1	Gear Blueprint: Ledgermain
+Recipe_Item_Skill_AbyssGear_AncientPeople_ChargeShot	Gear Blueprint: Rushing Wind
+Recipe_Item_Skill_AbyssGear_AntumbraArchon	Gear Blueprint: Revelation's End
 Recipe_Item_Skill_AbyssGear_Antumbra_Spear	Gear Blueprint: Warden of Darkness
 Recipe_Item_Skill_AbyssGear_Antumbra_TwoHandRod	Gear Blueprint: Dark Crescent
+Recipe_Item_Skill_AbyssGear_ArmorGoblin	Gear Blueprint: Ashen Blitz
 Recipe_Item_Skill_AbyssGear_ArrowRain_LV1	Gear Blueprint: Arrow Rain
 Recipe_Item_Skill_AbyssGear_AtorDrone_LV1	Gear Blueprint: Ator's Orb
 Recipe_Item_Skill_AbyssGear_Attack_HPRecover_LV1	Gear Blueprint: Life Transference
 Recipe_Item_Skill_AbyssGear_Attack_MPRecover_LV1	Gear Blueprint: Spirit Transference
 Recipe_Item_Skill_AbyssGear_Attack_SPRecover_LV1	Gear Blueprint: Stamina Transference
+Recipe_Item_Skill_AbyssGear_AwakenCaliburn	Gear Blueprint: Judicator of Ruin
 Recipe_Item_Skill_AbyssGear_Bastier	Gear Blueprint: Flames of Judgment
 Recipe_Item_Skill_AbyssGear_BlockAmmoConsume_LV1	Gear Blueprint: Infinite Arrows
 Recipe_Item_Skill_AbyssGear_Boss_AdditionalDamage_LV1	Gear Blueprint: Malicebane
 Recipe_Item_Skill_AbyssGear_Catfish_BodySlam_LV1	Gear Blueprint: Rising Torrent
+Recipe_Item_Skill_AbyssGear_CircusMachine	Gear Blueprint: Trial by Fire
 Recipe_Item_Skill_AbyssGear_CollectDrop_Animal_LV1	Gear Blueprint: Blessing of the Beast
 Recipe_Item_Skill_AbyssGear_CollectDrop_Log_LV1	Gear Blueprint: Blessing of the Forest
 Recipe_Item_Skill_AbyssGear_CollectDrop_Ore_LV1	Gear Blueprint: Blessing of the Earth
@@ -4891,6 +5896,8 @@ Recipe_Item_Skill_AbyssGear_DAM_UP_RotationBash	Gear Blueprint: Momentum
 Recipe_Item_Skill_AbyssGear_DarkChase_LV1	Gear Blueprint: Greysoul Howling
 Recipe_Item_Skill_AbyssGear_DarkenRobe_LV1	Gear Blueprint: Wound of Darkness
 Recipe_Item_Skill_AbyssGear_DogClaw_LV1	Gear Blueprint: Hound's Claws
+Recipe_Item_Skill_AbyssGear_DrylandsGolem	Gear Blueprint: Guardian's Gaze
+Recipe_Item_Skill_AbyssGear_EchoStrom	Gear Blueprint: Storm's Echo
 Recipe_Item_Skill_AbyssGear_EnergyBurst_LV1	Gear Blueprint: Kinetic Burst
 Recipe_Item_Skill_AbyssGear_EnlightenmentWave_LV1	Gear Blueprint: Karmic Pulse
 Recipe_Item_Skill_AbyssGear_EquipDropRate_LV1	Gear Blueprint: Disarm
@@ -4906,22 +5913,33 @@ Recipe_Item_Skill_AbyssGear_FrostSpike_LV1	Gear Blueprint: Frost Spike
 Recipe_Item_Skill_AbyssGear_Hyena_PoisonImmune	Gear Blueprint: Heart of the Serpent
 Recipe_Item_Skill_AbyssGear_Immune_Bismuth	Gear Blueprint: Heart of Stone
 Recipe_Item_Skill_AbyssGear_ImpBoss	Gear Blueprint: Howling of Chaos
+Recipe_Item_Skill_AbyssGear_Incarnation	Gear Blueprint: Ascended Incarnate
 Recipe_Item_Skill_AbyssGear_Karanda	Gear Blueprint: Pillar of Wind
+Recipe_Item_Skill_AbyssGear_Karanda_Feather	Gear Blueprint: Unfurled Feathers
 Recipe_Item_Skill_AbyssGear_LanFord	Gear Blueprint: Parting Gift
+Recipe_Item_Skill_AbyssGear_LanFord_ChargeShot	Gear Blueprint: Focus Fire
 Recipe_Item_Skill_AbyssGear_LandMash_LV1	Gear Blueprint: Groundsurge
 Recipe_Item_Skill_AbyssGear_Leebur	Gear Blueprint: Shadow Claw
 Recipe_Item_Skill_AbyssGear_LightningBreath_LV1	Gear Blueprint: Orbs of Lightning
 Recipe_Item_Skill_AbyssGear_LightningStab_LV1	Gear Blueprint: Storm Fang
+Recipe_Item_Skill_AbyssGear_Ludvig_OneArmed	Gear Blueprint: Writhebolt
 Recipe_Item_Skill_AbyssGear_Machine_AdditionalDamage_LV1	Gear Blueprint: Steelbane
+Recipe_Item_Skill_AbyssGear_MarniKnight_Spear	Gear Blueprint: Power Overload
 Recipe_Item_Skill_AbyssGear_Merrick	Gear Blueprint: Order from Above
+Recipe_Item_Skill_AbyssGear_Merrick_DefenceCounter	Gear Blueprint: Radiant Flash
+Recipe_Item_Skill_AbyssGear_MirageFlurry	Gear Blueprint: Mirage Cascade
 Recipe_Item_Skill_AbyssGear_Muscan	Gear Blueprint: The Showstopper
 Recipe_Item_Skill_AbyssGear_Ogre	Gear Blueprint: Colossal Might
+Recipe_Item_Skill_AbyssGear_Ogre_GroundEdge	Gear Blueprint: Earthen Wedge
 Recipe_Item_Skill_AbyssGear_PhantomStab_LV1	Gear Blueprint: Abyssal Rays
 Recipe_Item_Skill_AbyssGear_Praevus	Gear Blueprint: Ancient Wrath
 Recipe_Item_Skill_AbyssGear_Primus	Gear Blueprint: Ancient Reckoning
 Recipe_Item_Skill_AbyssGear_Priscus	Gear Blueprint: Ancient Retribution
 Recipe_Item_Skill_AbyssGear_QueenSpider	Gear Blueprint: Queen's Fangs
+Recipe_Item_Skill_AbyssGear_RedNightmare	Gear Blueprint: Venomous Fangs
 Recipe_Item_Skill_AbyssGear_ReduceCraftMaterial_LV1	Gear Blueprint: Efficiency
+Recipe_Item_Skill_AbyssGear_Satyros	Gear Blueprint: Eclipsed Thorn
+Recipe_Item_Skill_AbyssGear_ScrapQueenGoblin	Gear Blueprint: Magnetic Burst
 Recipe_Item_Skill_AbyssGear_Skevald	Gear Blueprint: Putrid Touch
 Recipe_Item_Skill_AbyssGear_SkillPointExp_LV1	Gear Blueprint: Aptitude
 Recipe_Item_Skill_AbyssGear_SmashStorm_LV1	Gear Blueprint: Tempest of Destruction
@@ -4944,8 +5962,29 @@ Recipe_Item_Stat_AbyssGear_MoveSpeedRate_LV1	Gear Blueprint: Haste
 Recipe_Item_Stat_AbyssGear_MpRegen_LV1	Gear Blueprint: Composure
 Recipe_Item_Stat_AbyssGear_StaminaRegen_LV1	Gear Blueprint: Vigor
 Recipe_Item_Stat_AbyssGear_SwimSpeedRate_LV1	Gear Blueprint: Surge
+Recipe_Item_Wagon_Base_Seat_0001	Blueprint: Meticulous Carpenter's Wagon Seat
+Recipe_Item_Wagon_Base_Seat_0002	Blueprint: The Laughing Marionette's Wagon Seat
+Recipe_Item_Wagon_Base_Seat_0003	Blueprint: Seasoned Comrade's Wagon Seat
+Recipe_Item_Wagon_Base_Seat_0004	Blueprint: Noble Delegation's Wagon Seat
+Recipe_Item_Wagon_Base_Seat_0005	Blueprint: Wandering Merchant's Wagon Seat
+Recipe_Item_Wagon_Base_Seat_0006	Blueprint: Renowned Magnate's Wagon Seat
+Recipe_Item_Wagon_Base_Seat_0007	Blueprint: Eccentric Doctor's Wagon Seat
+Recipe_Item_Wagon_Base_Seat_0008	Blueprint: Eccentric Lord's Wagon Seat
+Recipe_Item_Wagon_Base_Seat_0009	Blueprint: Elegant Noble's Wagon Seat
+Recipe_Item_Wagon_Base_lantern_0001	Blueprint: Wagon Lantern
+Recipe_Item_cattower_0001_in	Blueprint: Small Pororin Cat Watchtower
+Recipe_Item_cattower_0002_in	Blueprint: Small Marni Cat Watchtower
+Recipe_Item_cattower_0003	Blueprint: Pororin Cat Haven
+Recipe_Item_cattower_0003_in	Blueprint: Small Cat Watchtower
+Recipe_Item_cattower_0004	Blueprint: Medium Cat Watchtower
+Recipe_Item_cattower_0005	Blueprint: Large Cat Watchtower
+Recipe_Item_cattower_0007	Blueprint: Cat Watchtower
 Recipe_Item_catwheel_01	Blueprint: Pororin Cat Wheel
 Recipe_Item_catwheel_02	Blueprint: Marni Cat Wheel
+Recipe_Item_dogcushion_0001	Blueprint: Sunset-Touched Puppy Cushion
+Recipe_Item_dogcushion_0001_index01	Blueprint: Dewlit Vineyard Puppy Cushion
+Recipe_Item_dogcushion_0002_index02	Blueprint: Ancient Tree's Breath Puppy Cushion
+Recipe_Item_dogcushion_0002_index03	Blueprint: Lavender Remembrance Puppy Cushion
 Recipe_Item_dpf_fountain_01	Blueprint: Lion Head Fountain
 Recipe_Item_dpf_fountain_02	Blueprint: Stone Pagoda Fountain
 Recipe_Item_dpf_fountain_02_desert	Blueprint: Redsand Stone Pagoda Fountain
@@ -4953,9 +5992,15 @@ Recipe_Item_dpf_fountain_06	Blueprint: Silent Gazer Fountain
 Recipe_Item_dpf_fountain_09	Blueprint: Leaf Fountain
 Recipe_Item_drinkingfountain_01	Blueprint: Brookfield Fountain
 Recipe_Item_fountain_statue_02	Blueprint: Sculpted Fish Fountain
+Recipe_Item_gimmick_circus_ferriswheel_0001_housing	Blueprint: Tricolor Ferris Wheel
 Recipe_Item_gimmick_craft_anvil_01	Blueprint: Anvil
 Recipe_Item_gimmick_craft_cook_campfire_04	Blueprint: Field Pot
 Recipe_Item_gimmick_craft_cook_campfire_05	Blueprint: Bonfire
+Recipe_Item_gimmick_ex_dpf_dogcushion_0002	Blueprint: Lullaby of Waves Puppy Cushion
+Recipe_Item_gimmick_ex_dpf_dogcushion_0002_index01	Blueprint: Lotus Leaf Fragrance Puppy Cushion
+Recipe_Item_gimmick_in_dff_chair_0005	Blueprint: Oak Barrel Stool
+Recipe_Item_gimmick_in_dff_chair_0006	Blueprint: Captain's Chair of Dignity
+Recipe_Item_gimmick_in_dff_chair_53	Blueprint: Throne of the Northern Warrior
 Recipe_Item_gimmick_in_dpf_carpet_0001	Blueprint: Round Twilight Floral Carpet
 Recipe_Item_gimmick_in_dpf_carpet_0002	Blueprint: Mist-woven Carpet
 Recipe_Item_gimmick_in_dpf_carpet_0003	Blueprint: Frost-woven Carpet
@@ -4971,10 +6016,17 @@ Recipe_Item_gimmick_in_dpf_carpet_0013	Blueprint: Wide Dawndrop Garden Carpet
 Recipe_Item_gimmick_in_dpf_carpet_0014	Blueprint: Round Wide Mist-woven Carpet
 Recipe_Item_gimmick_in_dpf_carpet_0015	Blueprint: Wide Multicolor Knotted Carpet
 Recipe_Item_gimmick_in_dpf_carpet_0016	Blueprint: Round Wide Moonlit Garden Carpet
+Recipe_Item_gimmick_in_dpf_carpet_0017	Blueprint: Captain's Carpet of Dignity
 Recipe_Item_gimmick_jukebox_0001	Blueprint: Faust's Music Box
+Recipe_Item_gimmick_lamp_marni_streetstand_01	Blueprint: Marni's Streetlight
+Recipe_Item_gimmick_lamp_marni_streetstand_01_housing_index0001	Blueprint: Marni's Dark Streetlight
+Recipe_Item_gimmick_lamp_marni_streetstand_02	Blueprint: Marni's Battery Streetlight
+Recipe_Item_gimmick_lamp_marni_streetstand_02_index0001	Blueprint: Marni's Dark Battery Streetlight
 Recipe_Item_gimmick_lamp_streetlamp_0001	Blueprint: Cold Streetlight
 Recipe_Item_gimmick_lamp_streetlamp_0001_index01	Blueprint: Warm Streetlight
 Recipe_Item_gimmick_lamp_streetlamp_0001_index02	Blueprint: Soft Streetlight
+Recipe_Item_gimmick_lamp_streetlamp_06	Blueprint: Helms Iron Streetlight
+Recipe_Item_gimmick_lamp_streetlamp_06_on_housing_index0001	Blueprint: Dark Helms Iron Streetlight
 Recipe_Item_gimmick_sotdae_set_0001	Blueprint: Rope Sotdae
 Recipe_Item_gimmick_sotdae_set_0002	Blueprint: Pheasant Sotdae
 Recipe_Item_gimmick_sotdae_set_0003	Blueprint: Four-Way Sotdae
@@ -4987,6 +6039,7 @@ Recipe_Item_gimmick_sotdae_set_0009	Blueprint: Sotdae
 Recipe_Item_gimmick_sotdae_set_0010	Blueprint: Twin-Branched Sotdae
 Recipe_Item_gimmick_tool_FlowerHanger_01	Blueprint: Wooden Pororin Hanging Planter
 Recipe_Item_gimmick_tool_FlowerHanger_02	Blueprint: Wooden Florindale Hanging Planter
+Recipe_Item_gimmick_tool_automata_monkey_0001	Blueprint: Clanging Mischievous Monkey
 Recipe_Item_gimmick_tool_blacksmithstone	Blueprint: Grindstone
 Recipe_Item_gimmick_well_0001	Blueprint: Wooden Roof Well
 Recipe_Item_gimmick_well_0001_index01	Blueprint: Red Wooden Roof Well
@@ -4998,6 +6051,9 @@ Recipe_Item_hanger_streetlamp_flowerpot_01	Blueprint: Wooden Gerbera Hanging Pla
 Recipe_Item_hanger_streetlamp_flowerpot_02	Blueprint: Wooden Violet Hanging Planter
 Recipe_Item_hanger_streetlamp_flowerpot_03	Blueprint: Wooden Purple Gerbera Hanging Planter
 Recipe_Item_hanger_streetlamp_flowerpot_04	Blueprint: Redtree Violet Hanging Planter
+Recipe_Item_in_dff_ocean_bed_0001	Blueprint: Captain's Bed of Dignity
+Recipe_Item_in_dff_set_bookcase_0001	Blueprint: Rowboat Bookshelf
+Recipe_Item_in_dff_table_0003	Blueprint: Shoreline Memories Table
 Recipe_Item_lamp_brazier_02_on	Blueprint: Quad-Base Crown of Thorns Brazier
 Recipe_Item_lamp_firepot_01_on	Blueprint: Tripod Brazier
 Recipe_Item_lamp_firepot_03_on	Blueprint: Tall Quad-Base Brazier
@@ -5009,9 +6065,32 @@ Recipe_Item_lamp_standtorch_02_on	Blueprint: Tripod Guardian Torch
 Recipe_Item_lamp_streetlamp_03	Blueprint: Wooden Streetlight
 Recipe_Item_lamp_streetlamp_03_index01	Blueprint: Red Wooden Streetlight
 Recipe_Item_lamp_streetlamp_03_index02	Blueprint: Bright Wooden Streetlight
+Recipe_Item_megastructure_carousel_01_housing	Blueprint: Striped Tent Carousel
+Recipe_Item_ship_cannon_0010_TurtleShip	Blueprint: Dragon Head Prow Cannon
+Recipe_Item_ship_cannon_0012	Blueprint: Admiral's Bow Cannon
+Recipe_Item_troll_academy_torchlight_01_on	Blueprint: Ancient Runic Stone Sconce
+Recipe_Item_troll_academy_torchlight_01_on_housing_index0001	Blueprint: Dark Ancient Runic Stone Sconce
+Recipe_Item_troll_academy_torchlight_01_on_housing_index0002	Blueprint: Red Ancient Runic Stone Sconce
+Recipe_Item_wagon_base_0001	Blueprint: Wandering Merchant's Cargo Hold
+Recipe_Item_wagon_base_0002	Blueprint: Meticulous Carpenter's Cargo Hold
+Recipe_Item_wagon_base_0003	Blueprint: Seasoned Comrade's Cargo Hold
+Recipe_Item_wagon_base_0004	Blueprint: Rugged Traveler's Cargo Hold
+Recipe_Item_wagon_base_0005	Blueprint: The Laughing Marionette's Cargo Hold
+Recipe_Item_wagon_base_0006	Blueprint: Renowned Magnate's Cargo Hold
+Recipe_Item_wagon_base_0007	Blueprint: Elegant Noble's Cargo Hold
+Recipe_Item_wagon_base_0008	Blueprint: Noble Delegation's Cargo Hold
+Recipe_Item_wagon_wheel_0001	Blueprint: Seasoned Comrade's Wheel
+Recipe_Item_wagon_wheel_0002	Blueprint: Meticulous Carpenter's Wheel
+Recipe_Item_wagon_wheel_0003	Blueprint: The Laughing Marionette's Wheel
+Recipe_Item_wagon_wheel_0004	Blueprint: Renowned Magnate's Wheel
+Recipe_Item_wagon_wheel_0005	Blueprint: Wandering Merchant's Wheel
+Recipe_Item_wagon_wheel_0006	Blueprint: Elegant Noble's Wheel
+Recipe_Item_wagon_wheel_0007	Blueprint: Noble Delegation's Wheel
 Recipe_Japchae	Recipe: Pan-Fried Vegetables
+Recipe_Jellyfish_Salad	Recipe: Jellyfish Salad
 Recipe_Jeonju_Bibimbap	Recipe: Mixed Harvest Bowl
 Recipe_Kimbap	Recipe: Battered Harvest Roll
+Recipe_ManilaClams_NoodleSoup	Recipe: Knife-Cut Clam Noodles
 Recipe_Meat_Fish_Fruit_Sanjeok	Recipe: Assorted Meat and Fish Skewers
 Recipe_Meat_Fish_Grain_Sanjeok	Recipe: Grilled Meat Steak
 Recipe_Meat_Fish_Porridge	Recipe: Meat and Fish Porridge
@@ -5021,6 +6100,7 @@ Recipe_Meat_Fruit_Porridge	Recipe: Pan-Fried Marinated Meat
 Recipe_Meat_Porridge	Recipe: Clear Soup
 Recipe_Meat_Sanjeok	Recipe: Meat Skewers
 Recipe_Meat_Vegetable_Porridge	Recipe: Meat and Vegetable Porridge
+Recipe_Mussel_Soup	Recipe: Mussel Soup
 Recipe_Nureumjeok	Recipe: Mixed Skewers
 Recipe_Pan_fried_Fish_Fruit_Pancake	Recipe: Seafood Stew
 Recipe_Pan_fried_Fish_Grain_Pancake	Recipe: Fishball Soup
@@ -5037,14 +6117,72 @@ Recipe_Pan_fried_Meat_Vegetable_Pancake	Recipe: Steamed Eggs
 Recipe_Pan_fried_Vegetable_Fruit_Pancake	Recipe: Vegetable Rice Cake
 Recipe_Pan_fried_Vegetable_Grain_Pancake	Recipe: Grain Soup
 Recipe_Pan_fried_Vegetable_Pancake	Recipe: Battered Vegetables
+Recipe_Paper_HousingObject_Barricade	The First Bulwark
+Recipe_Paper_HousingObject_Canopy_I	A Rest in the Shade
+Recipe_Paper_HousingObject_Canopy_II	Shade Stronger Than Rainstorms
+Recipe_Paper_HousingObject_Canopy_III	Nature's Humble Shade
+Recipe_Paper_HousingObject_Canopy_IV	Stone That Weathers the Ages
+Recipe_Paper_HousingObject_Cart_I	Easing Daily Life
+Recipe_Paper_HousingObject_Cart_II	Reliable Porter
+Recipe_Paper_HousingObject_Flowerbed_000_0101	Golden Front Yard
+Recipe_Paper_HousingObject_Flowerbed_000_0102	Garden of Morning Dew
+Recipe_Paper_HousingObject_Flowerbed_000_0103	Flowerbeds of Sunsets
+Recipe_Paper_HousingObject_Flowerbed_001_0101	Sunflower-Lined Path
+Recipe_Paper_HousingObject_Flowerbed_001_0102	Flowers Along the Waters
+Recipe_Paper_HousingObject_Flowerbed_001_0103	A Red-Blossomed Path
+Recipe_Paper_HousingObject_Flowerbed_002_0101	Sunlit Plot of Land
+Recipe_Paper_HousingObject_Flowerbed_002_0102	Small Garden Beneath the Giant Tree
+Recipe_Paper_HousingObject_Flowerbed_002_0103	Beside the Tall Tree
+Recipe_Paper_HousingObject_Flowerbed_003_0101	Corner-Brightening Blooms
+Recipe_Paper_HousingObject_Flowerbed_003_0102	Everblue Corners
+Recipe_Paper_HousingObject_Flowerbed_003_0103	Thorned Corners
+Recipe_Paper_HousingObject_Flowerbed_004_0101	Sunlight Around the Bend
+Recipe_Paper_HousingObject_Flowerbed_004_0102	A Sea of Blooms
+Recipe_Paper_HousingObject_Flowerbed_004_0103	Sunset at the Edges
+Recipe_Paper_HousingObject_Flowerbed_005_0101	Golden Colony
+Recipe_Paper_HousingObject_Flowerbed_005_0102	Waves in the Wind
+Recipe_Paper_HousingObject_Flowerbed_005_0103	A Blaze of Red Blossoms
+Recipe_Paper_HousingObject_GraymaneFlag	An Unbreakable Will
+Recipe_Paper_HousingObject_Map	Homes Without Dead Ends
+Recipe_Paper_HousingObject_Pinwheel	The Wind's Passing
+Recipe_Paper_HousingObject_Straw_I	Sun-Dried Fodder
+Recipe_Paper_HousingObject_Straw_II	Flower-Scented Grass
+Recipe_Paper_HousingObject_Straw_III	Where the Honey Mead Matures
+Recipe_Paper_HousingObject_Straw_IV	Barren Hill Honeybee Shelter
+Recipe_Paper_HousingObject_Tent	A Night Anywhere
+Recipe_Paper_HousingObject_Tent_Desert	Shade on the Sand
+Recipe_Paper_HousingObject_Tent_Graymane	Greymanes' Camp
+Recipe_Paper_HousingObject_Tent_Military	The Tent Behind the Front
+Recipe_Paper_HousingObject_Tent_Trade	Drawn to the Tent
+Recipe_Paper_HousingObject_Tower	A Sparrow's Perch
+Recipe_Paper_HousingObject_Tower_Canopy	Shelter Under a Canopy
+Recipe_Paper_HousingObject_Tower_Fortress	The Stone Sentinel
+Recipe_Paper_HousingObject_Tower_Machine	Strength from Earth and Wind
+Recipe_Paper_HousingObject_Tower_Nest	High-Nesting Birds
+Recipe_Paper_HousingObject_Tower_Nobility	Watchtowers of Three Factions
+Recipe_Paper_HousingObject_Tower_North	Shielded Watchtower
+Recipe_Paper_HousingObject_Tower_Siege	Take Aim from Above
+Recipe_Paper_HousingObject_Tower_Tribe	For the Lone Watch
+Recipe_Paper_HousingObject_Tower_Windmill	The Windwatch Tower
+Recipe_Paper_HousingObject_Windmill_Dem	Where Only the Wind Lingers
+Recipe_Paper_HousingObject_Windmill_SandCrawler	Crimson Wasteland's Rusted Pillars
 Recipe_Paphneil_PlateArmor_Armor	Blueprint: Scorchflame Plate Armor
+Recipe_Parboiled_Seafood	Recipe: Assorted Parboiled Seafood
+Recipe_PetArmor_Diving_Armor	Blueprint: Charter Assistant's Diving Suit
+Recipe_PetArmor_Diving_Helm	Blueprint: Charter Assistant's Diving Helm
 Recipe_Platinum	Alchemy Formula: Platinum
+Recipe_Potion_Breath_LV1	Alchemy Formula: Luftis's Lesser Elixir
+Recipe_Potion_Breath_LV2	Alchemy Formula: Luftis's Elixir
+Recipe_Potion_Breath_LV3	Alchemy Formula: Luftis's Greater Elixir
 Recipe_Potion_DDD_LV1	Alchemy Formula: Freya's Lesser Elixir
 Recipe_Potion_DDD_LV2	Alchemy Formula: Freya's Elixir
 Recipe_Potion_DDD_LV3	Alchemy Formula: Freya's Greater Elixir
 Recipe_Potion_DPV_LV1	Alchemy Formula: Apollonia's Lesser Elixir
 Recipe_Potion_DPV_LV2	Alchemy Formula: Apollonia's Elixir
 Recipe_Potion_DPV_LV3	Alchemy Formula: Apollonia's Greater Elixir
+Recipe_Potion_ElementResist_LV1	Alchemy Formula: Lucaris's Lesser Elixir
+Recipe_Potion_ElementResist_LV2	Alchemy Formula: Lucaris's Elixir
+Recipe_Potion_ElementResist_LV3	Alchemy Formula: Lucaris's Greater Elixir
 Recipe_Potion_HP_LV1	Alchemy Formula: Meliara's Lesser Elixir
 Recipe_Potion_HP_LV2	Alchemy Formula: Meliara's Elixir
 Recipe_Potion_HP_LV3	Alchemy Formula: Meliara's Greater Elixir
@@ -5054,13 +6192,29 @@ Recipe_Potion_MP_LV3	Alchemy Formula: Haiden's Greater Elixir
 Recipe_Potion_SP_LV1	Alchemy Formula: Astrid's Lesser Elixir
 Recipe_Potion_SP_LV2	Alchemy Formula: Astrid's Elixir
 Recipe_Potion_SP_LV3	Alchemy Formula: Astrid's Greater Elixir
+Recipe_Potion_SwimSpeed_LV1	Alchemy Formula: Fluva's Lesser Elixir
+Recipe_Potion_SwimSpeed_LV2	Alchemy Formula: Fluva's Elixir
+Recipe_Potion_SwimSpeed_LV3	Alchemy Formula: Fluva's Greater Elixir
 Recipe_Pyogo_Mushroom_Tea	Recipe: Oakwood Mushroom Tea
 Recipe_RevivalItem	Alchemy Formula: Refined Palmar Pill
 Recipe_RevivalItemPartialRecovery	Alchemy Formula: Palmar Pill
+Recipe_Riding_Big_Monster_ship_02	The Drunken Catfish Blueprint
+Recipe_Riding_Big_Player_ship_PanokSeon	Unfinished Ship Blueprint
+Recipe_Riding_Big_Player_ship_PanokSeon_I	Unfinished Ship Blueprint Part 1
+Recipe_Riding_Big_Player_ship_PanokSeon_II	Unfinished Ship Blueprint Part 2
+Recipe_Riding_Player_Big_Ship_TurtleShip	Mysterious Ship Blueprint
+Recipe_Riding_Player_Big_Ship_TurtleShip_I	Mysterious Ship Blueprint Part 1
+Recipe_Riding_Player_Big_Ship_TurtleShip_II	Mysterious Ship Blueprint Part 2
+Recipe_Riding_Player_Big_Ship_TurtleShip_III	Mysterious Ship Blueprint Part 3
+Recipe_Riding_Player_Big_Ship_TurtleShip_IV	Mysterious Ship Blueprint Part 4
+Recipe_Riding_ghost_Big_Ship_01	Phantom Ship Blueprint
 Recipe_Roast_Chicken	Recipe: Salt-Roasted Bird Meat
 Recipe_Roast_Fish	Recipe: Salt-Roasted Fish
 Recipe_SamGyeTang	Recipe: Bird Soup
+Recipe_SeaPineapple_Bibimbap	Recipe: Sea Pineapple Rice Bowl
+Recipe_SeaString_Seasoned	Recipe: Seasoned Red Seaweed
 Recipe_Seafood_Soup	Recipe: Seafood Soup
+Recipe_Seaweed_Soup	Recipe: Seaweed Soup
 Recipe_Sinseollo	Recipe: Harvest Soup
 Recipe_Songyi_Mushroom_Tea	Recipe: Pine Mushroom Tea
 Recipe_Ssari_Mushroom_Tea	Recipe: Coral Mushroom Tea
@@ -5075,6 +6229,44 @@ Recipe_Tteokgalbi	Recipe: Grilled Meat Patties
 Recipe_Vegetable_Fruit_Porridge	Recipe: Harvest Roll
 Recipe_Vegetable_Juice	Recipe: Vegetable Juice
 Recipe_Vegetable_Porridge	Recipe: Vegetable Porridge
+Recipe_item_bigship_sail_open_0001_index03	Blueprint: Large Deathbound Sail
+Recipe_item_bigship_sail_open_0001_index04	Blueprint: The Black Bloom Pirates' Large Sail
+Recipe_item_bigship_sail_open_0001_index05	Blueprint: The Crimson Shield Pirates' Large Sail
+Recipe_item_bigship_sail_open_0001_index06	Blueprint: The Vengeance Pirates' Large Sail
+Recipe_item_bigship_sail_open_0001_index07	Blueprint: Faunus Pirates' Large Sail
+Recipe_item_bigship_sail_open_0001_index08	Blueprint: The Grim Wind Pirates' Large Sail
+Recipe_item_bigship_sail_open_0001_index09	Blueprint: The Scarlet Widow Pirates' Large Sail
+Recipe_item_bigship_sail_open_0001_index10	Blueprint: The Bloodied Stake Pirates' Large Sail
+Recipe_item_bigship_sail_open_0001_index11	Blueprint: The Devils' Plunder Pirates' Large Sail
+Recipe_item_bigship_sail_open_0001_index12	Blueprint: The Black Curved Blade Pirates' Large Sail
+Recipe_item_bigship_sail_open_0001_index24	Blueprint: Large Tidewish Sail
+Recipe_item_bigship_sail_open_0001_index26	Blueprint: Large Delesyian Naval Sail
+Recipe_item_bigship_sail_open_0002	Blueprint: Large Wraithdrift Sail
+Recipe_item_hugeship_sail_open_0001_index02	Blueprint: Giant Golden Compass Sail
+Recipe_item_ship_bowdeco_0004	Blueprint: Skyborne Beast Figurehead
+Recipe_item_ship_bowdeco_0005	Blueprint: Steam and Clockwork Figurehead
+Recipe_item_ship_bowdeco_0006	Blueprint: Chain-Breaking Wolf Figurehead
+Recipe_item_ship_bowdeco_0007	Blueprint: Long-Horned Fish Figurehead
+Recipe_item_ship_cannon_0003	Blueprint: Gilded Naval Cannon
+Recipe_item_ship_cannon_0005	Blueprint: Sea King's Naval Cannon
+Recipe_item_ship_sail_open_0001	Blueprint: Pearlescent Voyage Sail
+Recipe_item_ship_sail_open_0001_index03	Blueprint: Windborne Sail
+Recipe_item_ship_sail_open_0001_index05	Blueprint: The Death Blossom Pirates' Medium Sail
+Recipe_item_ship_sail_open_0001_index06	Blueprint: The Sea's Vengeance Pirates' Medium Sail
+Recipe_item_ship_sail_open_0001_index07	Blueprint: Red Checkered Sail
+Recipe_item_ship_sail_open_0001_index08	Blueprint: Gently Curved Sail
+Recipe_item_ship_sail_open_0001_index09	Blueprint: Silver Crescent Sail
+Recipe_item_ship_sail_open_0001_index11	Blueprint: Greymane Sail
+Recipe_item_ship_sail_open_0001_index12	Blueprint: Hernandian Sail
+Recipe_item_ship_sterndecor_0004	Blueprint: Skyborne Beast Stern
+Recipe_item_ship_sterndecor_0005	Blueprint: Steam and Clockwork Stern
+Recipe_item_ship_sterndecor_0006	Blueprint: Long-Horned Fish Stern
+Recipe_item_ship_teleporter_0001	Blueprint: Ship Teleportation Device
+Recipe_item_smallship_sail_open_0001_index04	Blueprint: The Siren's Cry Pirates' Small Sail
+Recipe_item_smallship_sail_open_0001_index08	Blueprint: The Sea Claw Pirates' Small Sail
+Recipe_item_smallship_sail_open_0001_index14	Blueprint: Pirates' Sail
+Recipe_item_turtleship_sail_open_0001_index01	Blueprint: Bluewake Sail
+Recipe_item_turtleship_sail_open_0001_index02	Blueprint: Four Taegeuk Sail
 Recipe_king_LostPeople_PlateArmor_Armor	Blueprint: Frostcursed Plate Armor
 Reckleeman_TwoHandSword	Balton Longsword
 Recle_OneHandTowerShield	Rekel Large Shield
@@ -5272,6 +6464,7 @@ Rusty_TwoHandHammer	Bekker Greathammer
 Ruthie_Leather_Boots	Ruthie Leather Boots	Male
 Rybee_PlateArmor_Helm	Rahbae Plate Helm	Male
 Rybee_PlateArmor_Helm_I	Modified Rahbae Plate Helm	Male
+Sacred_Oath_Earring	Earring of Sacred Oath
 Salami_Leather_Boots	Salmae Leather Shoes	Male
 Salami_Leather_Gloves	Salmae Leather Wristband	Male
 Salash_Fabric_Armor	Salash Cloth Armor	Male
@@ -5325,10 +6518,19 @@ ScrapMetal_BackPack_I	Scrap Metal Pack
 ScrapMetal_BackPack_II	Scrap Metal Pack	Male
 ScrapMetal_BackPack_III	Scrap Metal Pack
 ScrapQueen_Goblin_TwoHandSpear	Harkan's Spear
+SeaPineapple_Bibimbap	Sea Pineapple Rice Bowl
+SeaPineapple_Bibimbap_Large	Satisfying Sea Pineapple Rice Bowl
+SeaPineapple_Bibimbap_Medium	Filling Sea Pineapple Rice Bowl
+SeaPineapple_Bibimbap_XLarge	Hearty Sea Pineapple Rice Bowl
+SeaString_Seasoned	Seasoned Red Seaweed
+SeaString_Seasoned_Large	Satisfying Seasoned Red Seaweed
+SeaString_Seasoned_Medium	Filling Seasoned Red Seaweed
+SeaString_Seasoned_XLarge	Hearty Seasoned Red Seaweed
 Seafood_Soup	Seafood Soup
 Seafood_Soup_Large	Satisfying Seafood Soup
 Seafood_Soup_Medium	Filling Seafood Soup
 Seafood_Soup_XLarge	Hearty Seafood Soup
+Seahorse_TwoHandedWarHammer	Seahorse Staff
 Seal_Epistle	Sealed Letter
 Sealed_Abyss_Artifact_0001	Sealed Abyss Artifact
 Sealed_Abyss_Artifact_0002	Sealed Abyss Artifact
@@ -5471,15 +6673,30 @@ Sealed_Abyss_Artifact_0138	Sealed Abyss Artifact
 Sealed_Abyss_Artifact_0139	Sealed Abyss Artifact
 Sealed_Abyss_Artifact_0140	Sealed Abyss Artifact
 Sealed_Abyss_Artifact_0141	Sealed Abyss Artifact
-Sealed_Abyss_Artifact_0142	Sealed Abyss Artifact
-Sealed_Abyss_Artifact_0143	Sealed Abyss Artifact
-Sealed_Abyss_Artifact_0144	Sealed Abyss Artifact
-Sealed_Abyss_Artifact_0145	Sealed Abyss Artifact
-Sealed_Abyss_Artifact_0146	Sealed Abyss Artifact
-Sealed_Abyss_Artifact_0147	Sealed Abyss Artifact
-Sealed_Abyss_Artifact_0148	Sealed Abyss Artifact
-Sealed_Abyss_Artifact_0149	Sealed Abyss Artifact
-Sealed_Abyss_Artifact_0150	Sealed Abyss Artifact
+Sealed_Abyss_Artifact_0201_Ocean	Sealed Abyss Artifact
+Sealed_Abyss_Artifact_0202_Ocean	Sealed Abyss Artifact
+Sealed_Abyss_Artifact_0203_Ocean	Sealed Abyss Artifact
+Sealed_Abyss_Artifact_0204_Ocean	Sealed Abyss Artifact
+Sealed_Abyss_Artifact_0205_Ocean	Sealed Abyss Artifact
+Sealed_Abyss_Artifact_0206_Ocean	Sealed Abyss Artifact
+Sealed_Abyss_Artifact_0207_Ocean	Sealed Abyss Artifact
+Sealed_Abyss_Artifact_0208_Ocean	Sealed Abyss Artifact
+Sealed_Abyss_Artifact_0209_Ocean	Sealed Abyss Artifact
+Sealed_Abyss_Artifact_0210_Ocean	Sealed Abyss Artifact
+Sealed_Abyss_Artifact_0211_Ocean	Sealed Abyss Artifact
+Sealed_Abyss_Artifact_0212_Ocean	Sealed Abyss Artifact
+Sealed_Abyss_Artifact_0213_Ocean	Sealed Abyss Artifact
+Sealed_Abyss_Artifact_0214_Ocean	Sealed Abyss Artifact
+Sealed_Abyss_Artifact_0215_Ocean	Sealed Abyss Artifact
+Sealed_Abyss_Artifact_0216_Ocean	Sealed Abyss Artifact
+Sealed_Abyss_Artifact_0217_Ocean	Sealed Abyss Artifact
+Sealed_Abyss_Artifact_0218_Ocean	Sealed Abyss Artifact
+Sealed_Abyss_Artifact_0219_Ocean	Sealed Abyss Artifact
+Sealed_Abyss_Artifact_0220_Ocean	Sealed Abyss Artifact
+Seaweed_Soup	Seaweed Soup
+Seaweed_Soup_Large	Satisfying Seaweed Soup
+Seaweed_Soup_Medium	Filling Seaweed Soup
+Seaweed_Soup_XLarge	Hearty Seaweed Soup
 Seidin_Leather_Armor	Seiden Leather Armor	Male
 Sein_Leather_Boots	Sein Leather Boots	Male
 Senian_ChainMail_Armor	Senian Chain Mail	Male
@@ -5506,6 +6723,10 @@ Sherwooden_Fabric_Armor	Sherwood Cloth Armor	Male
 Shield_Flag_IV	Damaged Medium Calphadean Banner Pike
 ShinyStone_02	Shiny Rock
 Short_Horn	Short Horn
+Shortneckclam_NoodleSoup	Knife-Cut Clam Noodles
+Shortneckclam_NoodleSoup_Large	Satisfying Knife-Cut Clam Noodles
+Shortneckclam_NoodleSoup_Medium	Filling Knife-Cut Clam Noodles
+Shortneckclam_NoodleSoup_XLarge	Hearty Knife-Cut Clam Noodles
 Shotgun_Bullet	Buckshot Bullet
 Sian_Fabric_Helm	Sian Cloth Cap	Male
 Sicillion_Leather_Armor	Sicillion Leather Armor	Male
@@ -5518,6 +6739,7 @@ Silvarin_Fabric_Cloak	Silvarin Cloth Cloak	Male
 SilverArmor_PlateArmor_Gloves	Silver Plate Gloves	Male
 SilverArmor_PlateArmor_Helm	Inquisitor's Plate Helm	Male
 SilverOre	Silver Ore
+SilverWave_TwoHandSword	Silverwave Longsword
 Silver_Armor_OneHandMace	Mace of Betrayal
 Silver_Armor_OneHandTowerShield	Shield of Betrayal
 Silver_Bullet	Silver Bullet
@@ -5525,6 +6747,7 @@ Silver_Pack	Full Silver Pouch
 Silver_PlateArmor_Armor	Unyielding Hero's Plate Armor	Male
 Silver_PlateArmor_Cloak	Unyielding Hero's Plate Cloak	Male
 Silver_Vizione_Stand_TwoHandSpear	Silver Visione Stand
+Silvercrusher_OneHandMace	Silverbreaker Mace
 Sinseollo	Harvest Soup
 Sinseollo_Large	Satisfying Harvest Soup
 Sinseollo_Medium	Filling Harvest Soup
@@ -5577,9 +6800,12 @@ Songyi_Mushroom_BackPacK	Pine Mushroom Pack
 Songyi_Mushroom_Tea	Pine Mushroom Tea
 Soron_Leather_Armor	Soron Leather Armor	Male
 SoulKnight_OneHandSword	Shackle of Might
+Soul_OneHandSword	Soul Sword
 Soul_TwoHandSpear	Soul Spear
 Soulknight_Sprit_OneHandSword	Specter Sword
 Soulknight_Sprit_OneHandTowerShield	Shield of the Phantom
+Soulmate_Helm	Fedora of Fate	Male
+Soulmate_Ring	Soulmate Ring
 Sound_OneHandShield	Shield of Ringing
 South_Wanderer_Troll_OneHandCrossBow	Southern Wandering Troll's Crossbow
 Spada_OneHandSword	Spada Sword
@@ -5593,6 +6819,7 @@ Spider	Spider
 Spider_Poison	Poison
 Spider_Web	Spider Web
 Spiken_Fabric_Armor	Spiken Cloth Armor	Male
+Spiral_TwoHandGiantSpear	Spiral Spear
 Spital_PlateArmor_Armor	Spiddle Plate Armor	Male
 Spital_PlateArmor_Armor_I	Spiddle Plate Armor
 Spital_PlateArmor_Armor_II	Blacksteel Spiddle Plate Armor	Male
@@ -5620,6 +6847,7 @@ StoreWitchHint_Book	Witches of Pywel
 Storm_Cliff_Flag	Small Dancing Catfish Pirates' Banner Pike
 Storm_Cliff_Flag_I	Small Dancing Catfish Pirates' Banner Pike
 Storm_Cliff_Flag_II	Medium Dancing Catfish Pirates' Banner Pike
+Storm_TwoHandedWarHammer	Tempest Warhammer
 Stratton_Leather_Gloves	Stratton Leather Gloves	Male
 Straw_Fabric_Helm	Straw Bale Helm	Male
 Strawberry	Strawberry
@@ -5630,6 +6858,10 @@ Stugrub_TwoHandSword	Tardik Longsword
 Stugrup_Leather_Armor	Stugrub Leather Armor	Male
 Sugar	Sugar
 SungroveManor_HomeKey	Sungrove Manor Key
+Sunken_Bluewave_PlateArmor_Armor	Sunken Azuretide Plate Armor	Female
+Sunken_Bluewave_PlateArmor_Boots	Sunken Azuretide Plate Boots	Female
+Sunken_Bluewave_PlateArmor_Gloves	Sunken Azuretide Plate Gloves	Female
+Sunken_Bluewave_PlateArmor_Helm	Sunken Azuretide Plate Helm	Female
 Surasang_00	Grand Meal
 Surasang_00_Taro	Refreshing Grand Meal
 Surasang_00_jijeongta	Aromatic Grand Meal
@@ -5651,6 +6883,7 @@ Surasang_05_opuntia	Fancy Meal
 Sven_Fabric_Armor	Sven's Cloth Armor	Male
 SweetPotato	Sweet Potato
 Sword_DelesyiaInstitute_Clue_CrimDagger	Sharp Dagger
+Swordbreaker_OneHandSword	Swordbreaker
 Syritina_Fabric_Armor	Sirenta Cloth Armor	Male
 Tachan_PlateArmor_Armor	Takhan Plate Armor	Male
 Taebaerae_Leather_Armor	Tarabe Leather Armor	Male
@@ -5713,6 +6946,7 @@ Technician_BackPack	Technician's Pack
 Telford_Fabric_Armor	Telford Cloth Armor	Male
 Telin_Fabric_Armor	Telin Cloth Armor	Male
 Tenacity_PlateArmor_Helm	Sentinel of Tenacity Helm	Male
+Tent_Splithorn_01	Fancy Purple Tent
 Tesslit_Leather_Boots	Tesslit Leather Boots	Male
 Tesslit_Leather_Gloves	Pavis Leather Gloves	Male
 Tesslit_Leather_Gloves_I	Large Pavis Leather Gloves
@@ -5736,6 +6970,7 @@ TestSword	TestSword
 TestTwoHandAxe	TestTwoHandAxe
 Test_OneHandAxe	Test OneHandAxe
 Test_OneHandMace	Test OneHandMace
+Test_OneHandSpeargun	Harpoon Gun
 Testarmor	Testarmor	Male
 TheFaceless_Helm	The Mask of Liberation	Female
 ThiefGloves	Great Thief's Gloves	Male
@@ -5786,8 +7021,10 @@ Tolkane_Fabric_Armor	Tolkane Cloth Armor	Male
 Tomaso_Soldiers_TwoHandSpear	Tommaso Guard's Dagger-Tipped Spear
 Tomato	Tomato
 Tomato_Seed	Tomato Seed
+Tool_Binoculars	Binoculars
 Torben_Fabric_Helm	Torben Cloth Cap	Male
 Torch	Torch
+Torel_Royel_Epistle	Edict of King Thorel
 Tormand_ChainMail_Armor	Tormand Chain Mail	Male
 Torphel_TwoHandAxe	Hellhounds Chopping Axe
 Torrance_Leather_Armor	Torrance Leather Armor	Male
@@ -5815,10 +7052,19 @@ Trade_Ceramics_03	Ceramic
 Trade_Ceramics_PackedInVehicle	Packaged Ceramic
 Trade_Cheese_03	Well-Aged Cheese
 Trade_Cheese_PackedInVehicle	Packaged Cheese
+Trade_Collection_Lamp_stand_ocean_0001_PackedInVehicle	Packaged Octopus-legged Candlestick
+Trade_Collection_Lamp_stand_ocean_0002_PackedInVehicle	Packaged Pearl Remembrance Lamp
+Trade_Collection_Lamp_stand_ocean_0003_PackedInVehicle	Packaged Blue Coral Lamp
 Trade_Compass	Compass
 Trade_Compass_PackedInVehicle	Packaged Compass
 Trade_Coolant	Coolant
 Trade_Coolant_PackedInVehicle	Packaged Coolant
+Trade_DeluxeMusselBox	Finest Mussel
+Trade_DeluxeMusselBox_PackedInVehicle	Packaged Finest Mussel
+Trade_DeluxeScallopBox	Finest Scallop
+Trade_DeluxeScallopBox_PackedInVehicle	Packaged Finest Scallop
+Trade_DeluxeSeaPineappleBox	Finest Sea Pineapple
+Trade_DeluxeSeaPineappleBox_PackedInVehicle	Packaged Finest Sea Pineapple
 Trade_FishMeat_03	Fish Meat
 Trade_FishMeat_PackedInVehicle	Packaged Fish Meat
 Trade_FlintSet	Flint Kit
@@ -5851,6 +7097,8 @@ Trade_Ivory_03	Finely Crafted Ivory
 Trade_Ivory_PackedInVehicle	Packaged Ivory
 Trade_Jade_03	Jade
 Trade_Jade_PackedInVehicle	Packaged Jade
+Trade_KelpBundle	Kelp Bundle
+Trade_KelpBundle_PackedInVehicle	Packaged Kelp Bundle
 Trade_LightningWood	Lightning-Struck Jujube Tree
 Trade_LightningWood_PackedInVehicle	Packaged Lightning-Struck Jujube Tree
 Trade_MillennialSnowGinseng	Eversnow Root
@@ -5869,6 +7117,8 @@ Trade_PearlLacquerware_PackedInVehicle	Packaged Nacre Lacquer
 Trade_Pearl_PackedInVehicle	Packaged Pearl
 Trade_Pepper_02	Pepper
 Trade_Pepper_PackedInVehicle	Packaged Black Pepper
+Trade_PremiumAbaloneBox	Special Abalone
+Trade_PremiumAbaloneBox_PackedInVehicle	Packaged Special Abalone
 Trade_PremiumOil	Premium Lubricant
 Trade_PremiumOil_PackedInVehicle	Packaged Premium Lubricant
 Trade_RitualBowl	Ceremonial Bowl
@@ -5885,6 +7135,8 @@ Trade_ScorpionAmber	Scorpion in Amber
 Trade_ScorpionAmber_PackedInVehicle	Packaged Scorpion in Amber
 Trade_Scripture	The Code of Solumen
 Trade_Scripture_PackedInVehicle	Packaged Code of Solumen
+Trade_SeaweedBundle	Red Seaweed Bundle
+Trade_SeaweedBundle_PackedInVehicle	Packaged Red Seaweed Bundle
 Trade_Silk_02	Silk
 Trade_Silk_PackedInVehicle	Packaged Silk
 Trade_SpiritMushroom	Divine Mushroom
@@ -5968,6 +7220,7 @@ Trudy_Leather_Armor	Trudy Leather Armor	Male
 Trumpet_OneHandShotgun	Trumpet Shotgun
 Trust_PlateArmor_Helm	Sentinel of Trust Helm	Male
 Tryah_Fabric_Armor	Tryah Cloth Armor	Male
+Tryah_Fabric_Armor_I	Desert Combat Priest's Cloth Armor	Male
 Tteokgalbi	Grilled Meat Patties
 Tteokgalbi_Large	Satisfying Grilled Meat Patties
 Tteokgalbi_Medium	Filling Grilled Meat Patties
@@ -5979,6 +7232,7 @@ Turacon_OneHandMusket	Leofric Musket
 Turcadian_TwoHandHammer	Bonepit Greathammer
 Turden_OneHandMace	The Grove's Thorn
 Turtle_BackPack	Turtle Pack
+Turtle_OneHandShield	Rampart Tortoiseshell
 Tutan_Fabric_Armor	Tutan Cloth Armor	Male
 Twelgh_Leather_Armor	Twell Leather Armor	Male
 Twich_Earring	Purple Scout Earring
@@ -6096,6 +7350,7 @@ Veroon_Leather_Gloves	Behrun Leather Bracers	Male
 Vertical_PlateArmor_Armor	Serroa Plate Armor	Male
 Very_Small_Copper_Pack	Paltry Copper Pouch
 Vex_Fabric_Armor	Vex Cloth Armor	Male
+Veyrfin_OneHandSword	Veyrfin Sword
 Victorialis	Wild Garlic
 Vigil_OneHandMace	Crude Club
 Vilancia_OneHandPistol	Vilancia Pistol
@@ -6151,6 +7406,7 @@ Visione_Chip_Alustin_Journal_0040	Archive Entry #100
 Visione_Chip_Alustin_Journal_0041	Archive Entry #106
 Visione_Chip_Alustin_Journal_0042	Archive Entry #107
 Visione_Chip_AnchorForest	Abandoned Anchor
+Visione_Chip_AnotherMarni	Meeting Marni in Another Dimension
 Visione_Chip_AntumbraAltar	Antumbra's Ritual Site
 Visione_Chip_AntumbraFanatic	Suspicious Religion
 Visione_Chip_ArcheryRange	Vellua Hill Archery Range
@@ -6179,6 +7435,7 @@ Visione_Chip_BursadaIslandRuins	Remote Ruins
 Visione_Chip_CarnageStreet	Bloodstained Street
 Visione_Chip_CaveEntrance	Mysterious Cave Entrance
 Visione_Chip_CliffUnderHome	Settlement Beneath the Cliff
+Visione_Chip_Colette	Suspicious Traces
 Visione_Chip_CrowdedBranch	Branch of Birds
 Visione_Chip_Crowmanribentain	Crow's Ambush
 Visione_Chip_CryingRock	Weeping Rocks
@@ -6410,6 +7667,7 @@ Visione_Chip_MaidsTales	Stories of the Maids
 Visione_Chip_Mansion_Byron_Memory	Memory of Byron's Manor
 Visione_Chip_Mansion_Marseille_Memory_I	Azerian's Whereabouts
 Visione_Chip_Mansion_Marseille_Memory_II	Bastier's Co-conspirators
+Visione_Chip_MarniDrone_Butler	Uninvited Guest
 Visione_Chip_MarniFirstMeet	Secret of the Helm
 Visione_Chip_Marnisecretplace	Marni's Secret Laboratory
 Visione_Chip_MentalCareRoom	Mental Reconditioning
@@ -6552,21 +7810,25 @@ Wants_Leather_Gloves	Wentz Leather Gloves	Male
 WarRobot_Backpack_01	A.T.A.G. Thrusterpack Mk I
 WarRobot_Backpack_02	A.T.A.G. Thrusterpack Mk II
 WarRobot_Backpack_03	A.T.A.G. Thrusterpack Mk III
+WarRobot_Backpack_04	A.T.A.G. Marine Exploration Pack Equipment
 WarRobot_Body_01	A.T.A.G. Plating Mk I
 WarRobot_Body_02	A.T.A.G. Plating Mk II
 WarRobot_Body_03	A.T.A.G. Plating Mk III
+WarRobot_Body_04	A.T.A.G. Marine Exploration Plating Equipment
 WarRobot_Cannon_01	A.T.A.G. Cannon
 WarRobot_Fist_01	A.T.A.G. Fist
 WarRobot_FlameThrower_01	A.T.A.G. Flamespitter
 WarRobot_Foot_01	A.T.A.G. Boots Mk I
 WarRobot_Foot_02	A.T.A.G. Boots Mk II
 WarRobot_Foot_03	A.T.A.G. Boots Mk III
+WarRobot_Foot_04	A.T.A.G. Marine Exploration Foot Equipment
 WarRobot_Gatling_01	A.T.A.G. Machine Gun
 WarRobot_Laser_01	A.T.A.G. Laser
 WarRobot_RepairTool_01_L	A.T.A.G. Pincers
 WarRobot_RepairTool_01_R	A.T.A.G. Welder
 Warblick_Fabric_Armor	Warblick Cloth Armor	Male
 Warren_Beynon_Leather_Boots	Warren Beynon's Leather Boots	Male
+Warrior_Axe_Earring	Warrior's Axe Earring
 Warstein_Fabric_Armor	Warstein Cloth Armor	Male
 Warthog_Armor	Warthog Saddle
 Watcher_BackPack	Watcher Pack
@@ -6591,6 +7853,10 @@ Weasel_Leather_Cloak	Weasel Leather Cloak	Male
 Weasel_Leather_Gloves	Weasel Leather Gloves	Male
 WeatherWeaver_Necklace	Rainstorm Necklace
 WeatherWeaver_Sunny_Necklace	Radiant Necklace
+Weddingattire_Fabric_Armor	Wedding Attire
+Weddingattire_Fabric_Boots	Wedding Footwear
+Weddingattire_Fabric_Gloves	Wedding Gloves
+Weddingattire_Fabric_Helm	Wedding Veil
 Weeren_PlateArmor_Gloves	Weirren Plate Gloves	Male
 Wegalawn_Leather_Gloves	Vicaron Leather Gloves	Female
 WellsDungeon_Key	Thornbriar Dungeon Key
@@ -6699,6 +7965,10 @@ Woodbrock_Leather_Boots	Woodbrock Leather Boots	Male
 Woodys_Leather_Gloves	Wyrdins Leather Gloves	Male
 Wooeun_Leather_Boots	Wattern Leather Greaves	Male
 Wool	Fleece
+Workwear_Fabric_Armor	Architect's Cloth Workwear	Male
+Workwear_Fabric_Helm	Architect's Cloth Hat	Male
+Workwear_Leather_Boots	Architect's Leather Boots	Male
+Workwear_Leather_Gloves	Architect's Leather Gloves	Male
 Worstern_Leather_Gloves	Weiston Leather Gloves	Male
 Wurten_Leather_Armor	Buellen Leather Armor	Male
 Wusian_Fabric_Armor	Ushreen Cloth Armor	Male
@@ -6722,6 +7992,8 @@ Ziggurat_Leather_Helm_II	Chemists' Mask Leather Helm	Male
 Ziggurat_Leather_Helm_III	Chemists' Iron Mask Leather Helm	Male
 Zinianne_Fabric_Armor	Zynian Cloth Armor	Male
 Zoo_Entry_Ticket	Wildlife Park Ticket
+ambergris	Ambergris
+anchor_OneHandMace	Chain Anchor Mace
 barnia_Flag_I	Small Varnian Banner Pike
 barnia_Flag_II	Medium Varnian Banner Pike
 book_folktales_Aircastle	The Flying Fortress of Death
@@ -6739,14 +8011,22 @@ book_folktales_Gwen_Kraver	Tale of the Witch's Runt
 book_folktales_Hemon_Beindel	Tale of the Insatiable Hound
 book_folktales_Imp_Banquet	Benevolence of the Despoiled Beast
 book_folktales_Kailok	The Calf That Cleaved Horns
+book_folktales_LandSpider_ScrapQueen	Harkan's Research Journal
 book_folktales_Ludvig_OneArmed	The Left Arm of Betrayal
 book_folktales_Muskan	The Emperor of Sand and Stone
 book_folktales_Myurdin	Tale of the Renegade Bear
 book_folktales_Nuclear	The Forbidden Gateway
+book_folktales_Satyros_BloodSoakedBook	Bloodsoaked Book
+book_folktales_Satyros_OldBook	Old Book
+book_folktales_Satyros_SouthIsland	Southern Island Travelogue
 book_folktales_Seraphim	Tale of the Wish-Eater
 book_folktales_Sizlek	Tale of the Restless Master
 book_folktales_Tarandus	Tale of the Sightless Apothecary
 book_folktales_Varnia_Dragon	Wings of Virtue
+book_folktales_Wild_Imp_Boss	Reggis Training Log
+book_folktales_Witch_Mineral_Encyclopedia	Bari's Guide to Pywel Minerals
+book_folktales_Witch_Plant_Encyclopedia	Elowen's Guide to Pywel Flowers
+booster_Plate_Boots	Booster Boots	Male
 burrowingtoad	Burrowing Toad
 cacao_Seed	Cacao Seed
 carmabirdsaurus_Armor	Raptor Saddle
@@ -6762,9 +8042,23 @@ demenissnobility_Flag_III	Small Demenissian Noble's Banner
 demenissnobility_Flag_IV	Medium Demenissian Noble's Banner Pike
 demenissnobility_Flag_V	Medium Demenissian Noble's Banner Pike
 demenissnobility_Flag_VI	Medium Demenissian Noble's Banner Pike
+dev_ocean_qa1	TEMP
+dev_ocean_qa2	TEMP
+dev_ocean_qa3	TEMP
+dev_ocean_qa4	TEMP
+dev_ocean_qa5	TEMP
+dev_ocean_qa6	TEMP
+dev_ocean_qa7	TEMP
+dev_ocean_qa8	TEMP
+dev_ocean_qa9	TEMP
 diereuben_Leather_Gloves	Dirrebin Leather Bracers	Male
 dragonkiller_Flag_I	Small Flame Knights Banner Pike
 dragonkiller_Flag_II	Medium Flame Knights Banner Pike
+flag_graymane_01_stand_03	Patterned Greymane Banner Pike
+flag_graymane_01_stand_04	Small Patterned Greymane Banner Pike
+flag_graymane_stand_03_0001	Large Greymane Banner Pike
+flag_graymane_stand_04_0001	High Greymane Banner Pike
+flag_graymane_stand_05_0001	Greymane Tripod Pole Banner Pike
 fort_Flag_I	Small Dusksongs Banner Pike
 fort_Flag_II	Small Faceless Banner Pike
 fort_Flag_III	Small Twilight Messengers Banner Pike
@@ -6772,27 +8066,238 @@ fort_Flag_IV	Medium Dusksongs Banner Pike
 fort_Flag_V	Medium Faceless Banner Pike
 fort_Flag_VI	Medium Twilight Messengers Banner Pike
 frog	Poison Frog
+gimmick_cart_grain_01	Camp Wagon
+gimmick_cart_handcart_01	Wooden Wheelbarrow
+gimmick_cart_handcart_02	Fence Wheelbarrow
+gimmick_cart_handcart_04	Open Wheelbarrow
+gimmick_cart_handcart_05	Woven Wheelbarrow
+gimmick_cart_middle_01	Medium Cargo Wheelbarrow
+gimmick_cart_middle_02	Small Cargo Wheelbarrow
+gimmick_cart_middle_03	Medium Cargo Wagon
+gimmick_cart_middle_04	Square Wheelbarrow
+gimmick_cart_middle_05	Banquet Carriage
+gimmick_cart_middle_06	Small Cargo Wagon
+gimmick_cart_waterbottle_01	Small Water Supply Wagon
+gimmick_cart_waterbottle_03	Medium Water Supply Wagon
+gimmick_cart_waterbottle_03_01	Church Water Supply Wagon
+gimmick_cart_woodencarriage_01	Wooden Transport Wagon
+gimmick_cart_woodencarriage_02	Mountain Wagon
+gimmick_cart_woodencarriage_03	Long-Distance Wagon
+gimmick_cart_woodencarriage_04	Long-Distance Covered Wagon
+gimmick_cart_woodencarriage_05	Large-Wheeled Freight Wagon
+gimmick_spot_wolfrider_watchtower_0001	Satyros Watchtower
+gimmick_spot_wolfrider_watchtower_0002	Covered Satyros Watchtower
+gimmick_tent_imperialtrade_0004	Teal-Patterned Trading Tent
+gimmick_tent_imperialtrade_1004	Golden-Patterned Trader's Tent
+gimmick_tent_imperialtrade_2004	Jade-Patterned Trading Tent
+gimmick_tent_imperialtrade_3003	Gold-Embroidered Round Tent
+gimmick_tent_imperialtrade_3004	Gold-Embroidered Trading Tent
 gimmick_tool_kinetic_barbell_0001	Kinetic Counterweight
 gimmick_tool_kinetic_barbell_0002	Kinetic Knight
 gimmick_tool_kinetic_boat_0001	Kinetic Boat
 gimmick_tool_kinetic_circle_0001	Kinetic Circle
 gimmick_tool_kinetic_dolphin_0001	Kinetic Dolphin Family
 gimmick_tool_kinetic_dolphin_0002	Kinetic Dolphin
+gimmick_tower_module_a_ballista_0001	Iron Wall Ballista Arrow Watchtower
+gimmick_tower_module_a_barricade_0001	Power Defender's Watchtower
+gimmick_tower_module_a_barricade_0001_index30	Reworked Power Defender's Watchtower
+gimmick_tower_module_a_basic_0001	Multipurpose Square Watchtower
+gimmick_tower_module_a_basic_0003	Sturdy Northern Sentry Watchtower
+gimmick_tower_module_a_cannon_0001	Large Stone Garrison Watchtower
+gimmick_tower_module_a_cannon_0001_index30	Reworked Large Stone Garrison Watchtower
+gimmick_tower_module_a_cannon_0002	Stone Garrison Watchtower
+gimmick_tower_module_a_cannon_0002_index30	Reworked Castle Wall Defender's Watchtower
+gimmick_tower_module_a_crane_0004	Sturdy Yellow Canopied Watchtower
+gimmick_tower_module_a_crane_0005	Light Yellow Canopied Watchtower
+gimmick_tower_module_a_firebreathing_0001	Makeshift Power Watchtower
+gimmick_tower_module_a_firebreathing_0002	Reworked Power Watchtower
+gimmick_tower_module_a_firebreathing_0002_index30	Power Watchtower
+gimmick_tower_module_a_light_0001	Watcher's Watchtower
+gimmick_tower_module_a_north_0001	Dark Northern Hanging Watchtower
+gimmick_tower_module_a_north_0001_index80	Northern Hanging Sentry Watchtower
+gimmick_tower_module_a_north_0002	Northern Hanging Watchtower
+gimmick_tower_module_a_north_0002_index01	Red Northern Hanging Watchtower
+gimmick_tower_module_a_north_0002_index80	Northern Guillotine Watchtower
+gimmick_tower_module_a_north_0003	Dark Northern Sentry Watchtower
+gimmick_tower_module_a_north_0003_index01	Red Northern Sentry Watchtower
+gimmick_tower_module_a_north_0003_index80	Northern Sentry Watchtower
+gimmick_tower_module_a_north_0005	Large Dark Northern Ventilated Watchtower
+gimmick_tower_module_a_north_0005_index80	Large Northern Ventilated Watchtower
+gimmick_tower_module_a_north_0007	Dark Northern Ventilated Watchtower
+gimmick_tower_module_a_north_0007_index01	Red Northern Ventilated Watchtower
+gimmick_tower_module_a_north_0007_index80	Northern Ventilation Watchtower
+gimmick_tower_module_a_singijeon_0002	Ballista Watchtower
+gimmick_tower_module_a_tribe_0001	Deer Antler Watchtower
+gimmick_tower_module_a_windmill_0001	Windmill Watchtower
+gimmick_tower_module_b_Strawbundle_0004	Spiked Thatched Watchtower
+gimmick_tower_module_b_ballista_0001	Ballista Defender's Watchtower
+gimmick_tower_module_b_ballista_0002	Dark Ballista Defender's Watchtower
+gimmick_tower_module_b_ballista_0002_index01	Red Ballista Defender's Watchtower
+gimmick_tower_module_b_cannon_0001	Flamespitter Watchtower
+gimmick_tower_module_b_capsule_0004	Bird's Nest Watchtower
+gimmick_tower_module_b_crane_0002	Yellow Canopied Watchtower
+gimmick_tower_module_b_windmill_0001	Windmill Watchtower
+gimmick_tower_module_c_ballista_0001	Ballista Watchtower
+gimmick_tower_module_c_ballista_0001_index30	Reworked Ballista Watchtower
+gimmick_tower_module_c_barricade_0002	Defender's Spire
+gimmick_tower_module_c_barricade_0002_index30	Reworked Defender's Spire
+gimmick_tower_module_c_cannon_0001	Artillery Watchtower
+gimmick_tower_module_c_cannon_0001_index30	Reworked Artillery Watchtower
+gimmick_tower_wooden_10	Red Tent Watchtower
+gimmick_tower_wooden_10_caliburn	Yellow Tent Watchtower
+gimmick_tower_wooden_15	Makeshift Watchtower
+gimmick_tower_wooden_set13_02	Round Ponytail Watchtower
+gimmick_tower_wooden_set13_03	Ponytail Watchtower
+gimmick_tower_wooden_set13_06	Straight Ponytail Watchtower
+gimmick_tower_wooden_set13_08	Covered Garrison Watchtower
+gimmick_tower_wooden_set14_01	Round Ponytail Watchtower
+gimmick_tower_wooden_set14_07	Supported Palisade Outpost Watchtower
+gimmick_tower_wooden_set15	Small Sotdae Watchtower
+gimmick_tower_wooden_set15_01	Sotdae Watchtower
+gimmick_tower_wooden_set15_02	Large Sotdae Watchtower
+gimmick_tower_wooden_set16	Small Sentry Watchtower
+gimmick_tower_wooden_set16_01	Sentry Watchtower
+gimmick_tower_wooden_set16_02	Large Sentry Watchtower
+gimmick_tower_wooden_set16_02_index01	Large Dark Brown Sentry Watchtower
+gimmick_tower_wooden_set17	Small Cylindrical Watchtower
+gimmick_tower_wooden_set17_01	Cylindrical Watchtower
+gimmick_tower_wooden_set17_02	Large Cylindrical Watchtower
 grape_BackPack	Grape Pack
 grape_Seed	Grape Seed
 graymane_Flag_I	Tiny Greymane Banner Pike
 graymane_Flag_II	Small Greymane Banner Pike
 graymane_Flag_III	Medium Greymane Banner Pike
 greenfrog	Tree Frog
+hellhound_wood_tower_01	Dark Sparrow Watchtower
+hellhound_wood_tower_02	Dark Umber Sparrow Watchtower
+hydrothermalmineral	Hydrothermal Mineral Deposit
+item_BigShip_sail_open_0001_index17	Large Greymane Sail
+item_BigShip_sail_open_0001_index18	Large Hernandian Sail
+item_BigShip_sail_open_0001_index19	Large Demenissian Sail
+item_BigShip_sail_open_0001_index20	Large Delesyian Sail
 item_Collection_Prop_Luxury_0001_index01	Moonlit Frost Unicorn Statue
 item_Collection_Prop_Luxury_0002	Noonday Radiance Dolphin Statue
 item_Collection_Prop_Luxury_0002_index01	Dawnstill Dolphin Statue
 item_Collection_Prop_Luxury_0004	Kinetic Legendary Fisherman of Time
 item_Collection_Prop_Luxury_0008_index01	Chalice of Moondrop
 item_Collection_prop_Luxury_0003_index01	Faded Past Blue Whale Statue
+item_Ship_sail_open_0001_index05	The Death Blossom Pirates' Medium Sail
+item_Ship_sail_open_0001_index06	The Sea's Vengeance Pirates' Medium Sail
+item_Ship_sail_open_0001_index07	Medium Red Checkered Sail
+item_Ship_sail_open_0001_index08	Medium Gently Curved Sail
+item_Ship_sail_open_0001_index09	Medium Silver Crescent Sail
+item_Ship_sail_open_0001_index10	Dark Crimson Pirates' Medium Sail
+item_Ship_sail_open_0001_index11	Medium Greymane Sail
+item_Ship_sail_open_0001_index12	Medium Hernandian Sail
+item_Ship_sail_open_0001_index13	Medium Demenissian Sail
+item_Ship_sail_open_0001_index14	Medium Delesyian Sail
+item_Ship_sail_open_0001_index15	Black Pirates' Medium Sail
+item_SmallShip_sail_open_0001_index04	The Siren's Cry Pirates' Small Sail
+item_SmallShip_sail_open_0001_index05	Scorched Pirates' Small Sail
+item_SmallShip_sail_open_0001_index06	Small Red Checkered Sail
+item_SmallShip_sail_open_0001_index07	Small Gently Curved Sail
+item_SmallShip_sail_open_0001_index08	The Sea Claw Pirates' Small Sail
+item_SmallShip_sail_open_0001_index09	Small Delesyian Sail
+item_SmallShip_sail_open_0001_index10	Small Greymane Sail
+item_SmallShip_sail_open_0001_index11	Small Hernandian Sail
+item_SmallShip_sail_open_0001_index12	Small Demenissian Sail
+item_SmallShip_sail_open_0001_index13	Crimson Pirates' Small Sail
+item_SmallShip_sail_open_0001_index14	Black Stripe Pirates' Small Sail
+item_SmallShip_sail_open_0001_index15	Black Pirates' Small Sail
+item_SmallShip_sail_open_0001_index16	Small Silver Crescent Sail
+item_barricade_gaurd_02	Log Palisade Wall
+item_barricade_wood_05	Wooden Palisade Wall
+item_barricade_wood_06	Long Palisade Wall
+item_barricade_wood_07	Iron Bar Palisade Wall
+item_bigship_bowdeco_0001	Large Gentle Wave Figurehead
+item_bigship_bowdeco_0002	Large Fair Wind Figurehead
+item_bigship_bowdeco_0004	Large Skyborne Beast Figurehead
+item_bigship_bowdeco_0005	Large Steam and Clockwork Figurehead
+item_bigship_bowdeco_0006	Large Chain-Breaking Wolf Figurehead
+item_bigship_bowdeco_0007	Large Phantom Figurehead
+item_bigship_bowdeco_0008	Large Long-Horned Fish Figurehead
+item_bigship_sail_open_0001	Large Pearlescent Voyage Sail
+item_bigship_sail_open_0001_index01	Large Tideblessed Sail
+item_bigship_sail_open_0001_index02	Large Tidesworn Sail
+item_bigship_sail_open_0001_index03	Large Deathbound Sail
+item_bigship_sail_open_0001_index04	The Black Bloom Pirates' Large Sail
+item_bigship_sail_open_0001_index05	The Crimson Shield Pirates' Large Sail
+item_bigship_sail_open_0001_index06	The Vengeance Pirates' Large Sail
+item_bigship_sail_open_0001_index07	Faunus Pirates' Large Sail
+item_bigship_sail_open_0001_index08	The Grim Wind Pirates' Large Sail
+item_bigship_sail_open_0001_index09	The Scarlet Widow Pirates' Large Sail
+item_bigship_sail_open_0001_index10	The Bloodied Stake Pirates' Large Sail
+item_bigship_sail_open_0001_index11	The Devils' Plunder Pirates' Large Sail
+item_bigship_sail_open_0001_index12	The Black Curved Blade Pirates' Large Sail
+item_bigship_sail_open_0001_index21	Large Windborne Sail
+item_bigship_sail_open_0001_index22	Large Gently Curved Sail
+item_bigship_sail_open_0001_index23	Large Silver Crescent Sail
+item_bigship_sail_open_0001_index24	Large Tidewish Sail
+item_bigship_sail_open_0001_index25	Large Red Checkered Sail
+item_bigship_sail_open_0001_index26	Large Delesyian Naval Sail
+item_bigship_sail_open_0002	Large Wraithdrift Sail
+item_bigship_sterndecor_0002	Large Gentle Wave Stern
+item_bigship_sterndecor_0003	Large Fair Wind Stern
+item_bigship_sterndecor_0004	Large Skyborne Beast Stern
+item_bigship_sterndecor_0005	Large Steam and Clockwork Stern
+item_bigship_sterndecor_0007	Large Phantom Stern
+item_bigship_sterndecor_0008	Large Long-Horned Fish Stern
+item_bush_broad_oxycedrus_02_housing	Thorny Juniper
+item_bush_broad_oxycedrus_03_housing	Lush Thorny Juniper
+item_bush_conospermum_01_housing	White Downy Tree
+item_bush_conospermum_yellow_01_housing	Yellow Downy Tree
+item_bush_continuous_coggygria_01_housing	Purple Mist Tree
+item_bush_dappled_willow_01_housing	Dappled Willow
+item_bush_lacette_01_housing	Redleaf Tree
+item_farm_fan_propeller_01_combi	Wooden Pinwheel
+item_farm_fan_propeller_02_combi	Large-Bladed Pinwheel
+item_farm_fan_propeller_03_combi	Small-Bladed Pinwheel
+item_gimmick_tree_cd_palm_sabal_01_housing	Palm Tree
+item_hugeship_sail_open_0001	Giant Pearlescent Voyage Sail
+item_hugeship_sail_open_0001_index01	Sir Catfish Giant Sail
+item_hugeship_sail_open_0001_index02	Giant Golden Compass Sail
+item_mantlet_01	Rolling Mantlet
+item_mantlet_03	Rolling Siege Mantlet
+item_mantlet_04	Stationary Siege Mantlet
+item_ship_bowdeco_0001	Medium Gentle Wave Figurehead
+item_ship_bowdeco_0002	Medium Fair Wind Figurehead
+item_ship_bowdeco_0004	Medium Skyborne Beast Figurehead
+item_ship_bowdeco_0005	Medium Steam and Clockwork Figurehead
+item_ship_bowdeco_0006	Medium Chain-Breaking Wolf Figurehead
+item_ship_bowdeco_0007	Medium Long-Horned Fish Figurehead
+item_ship_cannon_0003	Gilded Naval Cannon
+item_ship_cannon_0005	Sea King's Naval Cannon
+item_ship_sail_open_0001	Medium Pearlescent Voyage Sail
+item_ship_sail_open_0001_index01	Medium Tideblessed Sail
+item_ship_sail_open_0001_index02	Medium Tidesworn Sail
+item_ship_sail_open_0001_index03	Medium Windborne Sail
+item_ship_sail_open_0001_index04	Medium Fair Wind Sail
+item_ship_sterndecor_0002	Medium Gentle Wave Stern
+item_ship_sterndecor_0003	Medium Fair Wind Stern
+item_ship_sterndecor_0004	Medium Skyborne Beast Stern
+item_ship_sterndecor_0005	Medium Steam and Clockwork Stern
+item_ship_sterndecor_0006	Medium Long-Horned Fish Stern
+item_ship_teleporter_0001	Ship Teleportation Device
+item_smallship_sail_open_0001	Small Pearlescent Voyage Sail
+item_smallship_sail_open_0001_index01	Small Tideblessed Sail
+item_smallship_sail_open_0001_index02	Small Tidesworn Sail
+item_smallship_sail_open_0001_index03	Small Windborne Sail
+item_tree_broad_hickory_pignut_04_housing	Pignut Hickory
+item_tree_broad_maple_03_red_housing	Red Maple Tree
+item_tree_broad_oak_white_hero_01_housing	White Oak
+item_tree_out_cypress_italian_hero_01_housing	Juniper
+item_tree_out_cypress_italian_hero_03_housing	Long Juniper
+item_tree_out_evergreenspindle_01_housing	Evergreen Tree
+item_turtleship_sail_open_0001	Cotton Sail
+item_turtleship_sail_open_0001_index01	Bluewake Sail
+item_turtleship_sail_open_0001_index02	Four Taegeuk Sail
+item_weed_broad_rose_03_housing	Rose
+item_weed_cd_cornusglabrata_03_housing	White Dogwood
 king_LostPeople_PlateArmor_Armor	Frostcursed Plate Armor
 king_LostPeople_PlateArmor_Armor_Upgrade	Kuku Ice-Resistant Armor
 king_LostPeople_PlateArmor_Cloak	Frostcursed Plate Cloak	Male
+lamp_standstone_01_antumbra_troll_on	Icy White Crystal Light
+lamp_standstone_01_antumbra_troll_on_index0001	Sandstone Icy White Crystal Light
 lilian_Leather_Boots	Lilian Leather Boots	Male
 marni_Flag_I	Small Marni Banner Pike
 marni_Flag_II	Medium Marni Banner Pike
@@ -6810,7 +8315,59 @@ riding_Leather_Helm	Leather Riding Hat	Male
 scorpion	Scorpion
 silence_Flag_I	Small Heavy Silence Banner Pike
 silence_Flag_II	Medium Heavy Silence Banner Pike
+snakerelic_0001	Serpent Relic
+tent_aka_03	Round White Tent
+tent_aka_03_caliburn	Circular Yellow Brown Field Tent
+tent_aka_03a	Teal Striped Tent
+tent_aka_04	Command Post Tent
+tent_aka_04a	Patterned Red Garrison Tent
+tent_aka_09_housing	Gilded Blue Cover
+tent_aka_10_housing	Colorful Double Cover
+tent_aka_12_housing	Crude Double Tent
+tent_common_19	Yellow Brown Round Tent
+tent_common_shield_02	Calphade Tent
+tent_common_shield_07	Red Encampment Tent
+tent_desert_mercenary_03	Circular Desert Freesword Tent
+tent_desert_mercenary_04	Desert Freesword Tent
+tent_desert_merchant_02	Desert Merchant Guild Tent
+tent_desert_merchant_02a	Patterned Desert Merchant Guild Tent
+tent_graymane_01	Greymane Dwelling Tent
+tent_graymane_02	Large Greymane Tent
+tent_graymane_02_lv5	Large Patterned Greymane Tent
+tent_graymane_02_lv5_index01	Large Bright Greymane Patterned Tent
+tent_graymane_03	Large Greymane Encampment Tent
+tent_graymane_04	Greymane Field Tent
+tent_graymane_04_lv5	Patterned Greymane Field Tent
+tent_graymane_07	Greymane Encampment Tent
+tent_graymane_07_lv5	Patterned Greymane Encampment Tent
+tent_graymane_10	Greymane Makeshift Tent
+tent_graymane_10_lv5	Greymane Makeshift Patterned Tent
+tent_shops_trade_02	Merchant Makeshift Tent
 toad	Toad
 tommaso_Flag_I	Small Tommaso Banner Pike
 tommaso_Flag_II	Medium Tommaso Banner Pike
+troll_academy_stand_lamp_01_on	Beacon of Knowledge
+troll_academy_stand_lamp_01_on_index0001	Sandstone Beacon of Knowledge
+troll_lamp_streetlamp_01_on	Guide Stone Lantern
+troll_lamp_streetlamp_01_on_index0001	Sandstone Guide Stone Lantern
+wood_tower_01	Sparrow Watchtower
+wood_tower_01_index01	Dark Sparrow Watchtower
+wood_tower_01a	Anvil Hill Watchtower
+wood_tower_01a_kwe	Dark Brown Sparrow Watchtower
+wood_tower_02	Light Dark Brown Sparrow Watchtower
+wood_tower_02a_kwe	Dark Umber Light Watchtower
+wood_tower_03	Pointed-Roof Watchtower
+wood_tower_04	Ventilated Roof Watchtower
+wood_tower_04_index01	Red Ventilated Watchtower
+wood_tower_05	Small Sparrow Watchtower
+wood_tower_06	Guard Post
+wood_tower_06_kwe	Dark Guard Post
+wood_tower_06_nobility_01	Sunglow Lions' Watchtower
+wood_tower_06_nobility_02	Bright Yellow Moon Hounds' Watchtower
+wood_tower_06_nobility_03	Blue Crystal Birds' Watchtower
+wood_tower_07	Sharp Pointed-Roof Watchtower
+wood_tower_middle_01	Octagonal Watchtower
+wood_tower_middle_01_ivy	Ivy Octagonal Watchtower
+wood_tower_pail_04	Dark Ventilated Watchtower
+wood_tower_pail_04_kwe	Dark Brown Ventilated Watchtower
 wyvern_Armor	Wyvern Saddle
