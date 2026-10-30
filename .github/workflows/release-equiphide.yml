@@ -20,11 +20,20 @@ on:
         description: "Version title (e.g., 'Feature Update')"
         required: false
         type: string
+      nexus_description:
+        description: "Nexus file note (appended after the install-steps line; truncated to fit 255 chars total)"
+        required: false
+        type: string
       prerelease:
         description: "Is this a pre-release?"
         required: false
         default: false
         type: boolean
+
+# Releases share one version header and tag namespace, so two runs must not interleave.
+concurrency:
+  group: release-equiphide
+  cancel-in-progress: false
 
 jobs:
   build-and-release:
@@ -186,8 +195,10 @@ jobs:
           git push origin "${{ env.VERSION_TAG }}"
         shell: bash
 
-      - name: Prepare release body
+      - name: Prepare release body and Nexus metadata
         id: prepare-release
+        env:
+          NEXUS_DESC_INPUT: ${{ inputs.nexus_description }}
         run: |
           $changelog = Get-Content -Path "changelog_body.txt" -Raw
 
@@ -242,6 +253,26 @@ jobs:
 
           Set-Content -Path "release_body.txt" -Value $releaseBody -Encoding UTF8
           echo "RELEASE_BODY_PATH=release_body.txt" >> $env:GITHUB_OUTPUT
+
+          # Nexus accepts a 255-character file note, BBCode tags included, and a plain one-entry-per-line
+          # changelog. The note opens with the install pointer, and the optional input fills what is left.
+          $lead = 'See the description for installation steps.'
+          $note = ("$env:NEXUS_DESC_INPUT" -replace "`r`n", "`n").Trim()
+          $nexusDescription = $lead
+          $remaining = 255 - $lead.Length - 2
+          if ($note -ne '' -and $remaining -gt 0) {
+            $nexusDescription = "$lead`n`n" + $note.Substring(0, [Math]::Min($note.Length, $remaining))
+          }
+          $nexusChangelog = (($changelog -split "`r?`n") |
+            ForEach-Object { ($_.Trim() -replace '^[-*+]\s+', '') } |
+            Where-Object { $_ -ne '' }) -join "`n"
+          $delimiter = "NEXUS_$([guid]::NewGuid().ToString('N'))"
+          "NEXUS_DESCRIPTION<<$delimiter" >> $env:GITHUB_OUTPUT
+          $nexusDescription >> $env:GITHUB_OUTPUT
+          $delimiter >> $env:GITHUB_OUTPUT
+          "NEXUS_CHANGELOG<<$delimiter" >> $env:GITHUB_OUTPUT
+          $nexusChangelog >> $env:GITHUB_OUTPUT
+          $delimiter >> $env:GITHUB_OUTPUT
         shell: pwsh
 
       - name: Create Release
@@ -254,6 +285,29 @@ jobs:
           draft: false
           prerelease: ${{ inputs.prerelease }}
           token: ${{ secrets.RELEASE_TOKEN }}
+
+      # The NEXUSMODS_API_KEY secret is the account key. Each file ID and the v3 mod ID come from that file's
+      # "Advanced" modal on the Nexus Files tab. An unset file ID skips its upload, and mod_id is needed only for
+      # the changelog. The archive is extracted into the game folder by hand, so mod manager downloads stay off.
+      # Skipped on pre-releases.
+      - name: Publish to Nexus Mods
+        if: ${{ !inputs.prerelease && vars.NEXUSMODS_EQUIPHIDE_FILE_ID != '' }}
+        uses: Nexus-Mods/upload-action@c96019556046053aa26044b44396cd38929daf23 # v1.0.0-beta.10
+        with:
+          api_key: ${{ secrets.NEXUSMODS_API_KEY }}
+          file_id: ${{ vars.NEXUSMODS_EQUIPHIDE_FILE_ID }}
+          filename: ${{ env.ARTIFACT_NAME }}
+          version: ${{ env.NEW_VERSION }}
+          display_name: Gear Hider - Equipment Visibility Toggle
+          description: ${{ steps.prepare-release.outputs.NEXUS_DESCRIPTION }}
+          category: main
+          archive_existing_version: false
+          primary_mod_manager_download: false
+          allow_mod_manager_download: false
+          show_requirements_pop_up: true
+          update_mod_version: true
+          mod_id: ${{ vars.NEXUSMODS_EQUIPHIDE_MOD_ID }}
+          changelog: ${{ vars.NEXUSMODS_EQUIPHIDE_MOD_ID != '' && steps.prepare-release.outputs.NEXUS_CHANGELOG || '' }}
 
       # Only archive the changelog if this is NOT a pre-release
       - name: Archive NEXT_CHANGELOG.md
