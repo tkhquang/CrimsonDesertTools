@@ -1,4 +1,5 @@
-## Crimson Desert 2.04.00 support
+## [Title for next release]
 
-- Updated the mod to work with Crimson Desert version 2.04.00
-- Made the mod more tolerant of future game updates
+- New feature
+- Bug fix
+- Improvement
