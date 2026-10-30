@@ -25,6 +25,7 @@
 #include <stop_token>
 #include <cmath>
 #include <cstring>
+#include <string_view>
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
@@ -284,33 +285,90 @@ namespace Transmog
 
     // Helpers
 
-    static HWND find_game_hwnd()
+    /// Extended styles of a window that floats over the game, as this overlay does, not one the game presents into.
+    static constexpr LONG_PTR OVERLAY_EX_STYLES =
+        WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW;
+
+    /// Most log lines the render loop writes for a change of game window, so two windows trading focus cannot flood it.
+    static constexpr int MAX_GAME_WINDOW_LOGS = 5;
+
+    /// True when @p hwnd belongs to this process, whichever window it is. A null window never does.
+    static bool is_own_process_window(HWND hwnd) noexcept
     {
+        DWORD pid = 0;
+        GetWindowThreadProcessId(hwnd, &pid);
+        return pid == GetCurrentProcessId();
+    }
+
+    /**
+     * @brief Whether a window can be the one the game presents into.
+     * @details The process can own several large visible windows, and an overlay from another mod sits above the game
+     *          in z-order, so an enumeration reaches it first. Tracking such a window keeps the foreground test in the
+     *          render loop false for good, and this overlay then never shows.
+     * @param hwnd Candidate window. Null is refused.
+     * @param reject_overlays Also refuse @ref OVERLAY_EX_STYLES.
+     */
+    static bool is_game_window(HWND hwnd, bool reject_overlays) noexcept
+    {
+        if (!hwnd || hwnd == s_overlay_hwnd || !is_own_process_window(hwnd) || !IsWindowVisible(hwnd))
+            return false;
+        RECT rc{};
+        GetClientRect(hwnd, &rc);
+        if ((rc.right - rc.left) < 640 || (rc.bottom - rc.top) < 480)
+            return false;
+        char cls[128]{};
+        GetClassNameA(hwnd, cls, sizeof(cls));
+        if (strcmp(cls, "SplashWindow") == 0)
+            return false;
+        return !reject_overlays || (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & OVERLAY_EX_STYLES) == 0;
+    }
+
+    /**
+     * @brief Pick the game window: the foreground one when it qualifies, else the first plain window in z-order.
+     * @return The window, an overlay-styled one as the last resort, or null when the process owns no candidate.
+     */
+    static HWND find_game_hwnd() noexcept
+    {
+        const HWND foreground = GetForegroundWindow();
+        if (is_game_window(foreground, true))
+            return foreground;
+
         struct Ctx
         {
-            HWND result;
-        } ctx{nullptr};
+            HWND plain;
+            HWND any;
+        } ctx{nullptr, nullptr};
         EnumWindows(
             [](HWND hwnd, LPARAM lp) -> BOOL
             {
-                DWORD pid = 0;
-                GetWindowThreadProcessId(hwnd, &pid);
-                if (pid != GetCurrentProcessId() || !IsWindowVisible(hwnd))
+                auto *found = reinterpret_cast<Ctx *>(lp);
+                if (!found->any && is_game_window(hwnd, false))
+                    found->any = hwnd;
+                if (!is_game_window(hwnd, true))
                     return TRUE;
-                RECT rc{};
-                GetClientRect(hwnd, &rc);
-                if ((rc.right - rc.left) < 640 || (rc.bottom - rc.top) < 480)
-                    return TRUE;
-                char cls[128]{};
-                GetClassNameA(hwnd, cls, sizeof(cls));
-                if (strcmp(cls, "SplashWindow") == 0)
-                    return TRUE;
-                reinterpret_cast<Ctx *>(lp)->result = hwnd;
+                found->plain = hwnd;
                 return FALSE;
             },
             reinterpret_cast<LPARAM>(&ctx)
         );
-        return ctx.result;
+        return ctx.plain ? ctx.plain : ctx.any;
+    }
+
+    /// Record a change of game window. The class and size name the window in a bug report.
+    static void log_game_window_change(const char *reason, HWND hwnd) noexcept
+    {
+        char cls[128]{};
+        GetClassNameA(hwnd, cls, sizeof(cls));
+        RECT rc{};
+        GetClientRect(hwnd, &rc);
+        (void)DMK::log().try_log(
+            DMK::LogLevel::Warning,
+            "[dx_overlay] {}: now on '{}' {}x{}",
+            reason,
+            std::string_view{cls},
+            rc.right - rc.left,
+            rc.bottom - rc.top
+        );
     }
 
     // Overlay WndProc
@@ -473,6 +531,7 @@ namespace Transmog
         // Previous frame's drawn rect, so we can union it with this frame's rect and clear pixels that ImGui vacated
         // (popup closed, tooltip dismissed, etc.) - ULWI's prcDirty only refreshes inside the supplied rect.
         RECT prev_dirty{0, 0, 0, 0};
+        int game_window_logs = 0;
 
         // Render loop
         while (!stop.stop_requested() && !s_shutdown_requested.load(std::memory_order_acquire))
@@ -484,13 +543,32 @@ namespace Transmog
                 DispatchMessageW(&msg);
             }
 
+            // A closed window ends the session only when the process has no other candidate.
             if (!IsWindow(s_game_hwnd))
-                break;
+            {
+                const HWND replacement = find_game_hwnd();
+                if (!replacement)
+                    break;
+                log_game_window_change("Game window closed", replacement);
+                s_game_hwnd = replacement;
+            }
 
             // Only show the overlay when the game is the foreground window (or our overlay itself is focused). Hide
-            // otherwise so the overlay does not linger over other apps when alt-tabbed.
+            // otherwise so the overlay does not linger over other apps when alt-tabbed. Any window of this process
+            // counts, because a compare against the tracked handle stays false when the tracked pick is wrong.
             const HWND fg = GetForegroundWindow();
-            const bool game_active = (fg == s_game_hwnd || fg == s_overlay_hwnd);
+            const bool game_active = is_own_process_window(fg);
+
+            // The foreground window is the one the player sees, so it replaces the tracked one.
+            if (fg != s_game_hwnd && is_game_window(fg, true))
+            {
+                if (game_window_logs < MAX_GAME_WINDOW_LOGS)
+                {
+                    ++game_window_logs;
+                    log_game_window_change("Foreground game window changed", fg);
+                }
+                s_game_hwnd = fg;
+            }
 
             const bool want_visible = game_active && s_overlay_visible.load(std::memory_order_relaxed);
 
@@ -513,6 +591,21 @@ namespace Transmog
                         SWP_NOACTIVATE
                     );
                     s_last_game_rect = ngr;
+
+                    // A different window can have a different size, and the composite copies s_width x s_height.
+                    RECT client{};
+                    GetClientRect(s_game_hwnd, &client);
+                    const UINT client_w = static_cast<UINT>(client.right);
+                    const UINT client_h = static_cast<UINT>(client.bottom);
+                    if (client_w != 0 && client_h != 0 && (client_w != s_width || client_h != s_height))
+                    {
+                        if (!create_targets(client_w, client_h))
+                        {
+                            logger.error("[dx_overlay] Render targets failed after a window size change");
+                            break;
+                        }
+                        prev_dirty = RECT{0, 0, 0, 0};
+                    }
                 }
 
                 if (!IsWindowVisible(s_overlay_hwnd))
