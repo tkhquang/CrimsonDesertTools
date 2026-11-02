@@ -2,6 +2,12 @@
 
 All notable changes to the CrimsonDesertEquipHide mod will be documented in this file.
 
+## [0.10.1] - [Title for next release]
+
+- New feature
+- Bug fix
+- Improvement
+
 ## [0.10.0] - Crimson Desert 2.04.00 support
 
 - Updated the mod to work with Crimson Desert version 2.04.00
@@ -303,6 +309,7 @@ All notable changes to the CrimsonDesertEquipHide mod will be documented in this
 - Customizable part lists per category via INI configuration
 - Configurable init delay and log level
 
+[0.10.1]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/equip-hide/v0.10.1
 [0.10.0]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/equip-hide/v0.10.0
 [0.9.1]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/equip-hide/v0.9.1
 [0.9.0]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/equip-hide/v0.9.0
