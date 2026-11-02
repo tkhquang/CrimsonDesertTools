@@ -31,6 +31,7 @@
 #include "helm_audio_filter.hpp"
 
 #include <cdcore/anchors.hpp>
+#include <cdcore/auto_reload.hpp>
 #include <cdcore/controlled_char.hpp>
 
 #include <DetourModKit/abi/wheel_host.h>
@@ -174,7 +175,7 @@ namespace Transmog
         {
             // Atomic flags update silently through their per-setter callbacks. The watcher does not drive any
             // game-state work. A re-apply or a clear of transmog still requires a hotkey or an in-game action.
-            const auto status = DMK::config::enable_auto_reload(
+            CDCore::start_auto_reload(
                 std::chrono::milliseconds{250},
                 [](bool content_changed)
                 {
@@ -185,11 +186,6 @@ namespace Transmog
                         logger.info("INI auto-reload: skipped (no content delta)");
                 }
             );
-            if (status != DMK::config::AutoReloadStatus::Started &&
-                status != DMK::config::AutoReloadStatus::AlreadyRunning)
-            {
-                DMK::log().warning("INI auto-reload could not start (status enum {})", static_cast<int>(status));
-            }
         }
     }
 
@@ -1178,7 +1174,7 @@ namespace Transmog
         }
 
         // Disable the INI watcher up front so an in-flight save event cannot fire setters during the state tear-down.
-        DMK::config::disable_auto_reload();
+        CDCore::stop_auto_reload();
 
         // Retract this mod's visuals through the ORDINARY clear path, the one a preset switch uses, and block until
         // the game thread has run it. It must happen here, before the flag below: the worker and the frame hook both

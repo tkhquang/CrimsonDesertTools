@@ -27,6 +27,7 @@ if(NOT TARGET DetourModKit)
 endif()
 
 add_library(CrimsonDesertCore STATIC
+    src/auto_reload.cpp
     src/controlled_char.cpp
     src/indexed_string_table.cpp
 )

@@ -1,5 +1,3 @@
-## [Title for next release]
+## INI auto-reload reliability
 
-- New feature
-- Bug fix
-- Improvement
+- INI auto-reload now retries in the background if it fails to start during game launch
