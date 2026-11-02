@@ -65,6 +65,7 @@ namespace EquipHide
         {"CD_MainWeapon_Sword_IN_R_Aux", Category::OneHandWeapons},
         // 2H Weapons
         {"CD_TwoHandWeapon_Sword",       Category::TwoHandWeapons},
+        {"CD_TwoHandWeapon_Sword_IN",    Category::TwoHandWeapons},
         {"CD_TwoHandWeapon_Axe",         Category::TwoHandWeapons},
         {"CD_TwoHandWeapon_Axe_Aux",     Category::TwoHandWeapons},
         {"CD_TwoHandWeapon_Mace",        Category::TwoHandWeapons},
@@ -75,6 +76,7 @@ namespace EquipHide
         {"CD_TwoHandWeapon_Thrower",     Category::TwoHandWeapons},
         {"CD_TwoHandWeapon_Spear",       Category::TwoHandWeapons},
         {"CD_TwoHandWeapon_Alebard",     Category::TwoHandWeapons},
+        {"CD_TwoHandWeapon_Pike",        Category::TwoHandWeapons},
         {"CD_MainWeapon_Pike",           Category::TwoHandWeapons},
         {"CD_TwoHandWeapon_Rod",         Category::TwoHandWeapons},
         {"CD_TwoHandWeapon_Flail",       Category::TwoHandWeapons},
@@ -857,12 +859,14 @@ namespace EquipHide
     static std::atomic<CategoryMask> s_hidden_mask{0};
     static std::atomic<CategoryMask> s_preset_hidden_mask{0};
     static std::atomic<CategoryMask> s_active_preset_mask{0};
+    static std::atomic<CategoryMask> s_enabled_mask{0};
 
     void update_hidden_mask()
     {
         CategoryMask hidden = 0;
         CategoryMask preset_hidden = 0;
         CategoryMask active_preset = 0;
+        CategoryMask enabled_categories = 0;
 
         for (std::size_t i = 0; i < CATEGORY_COUNT; ++i)
         {
@@ -870,6 +874,9 @@ namespace EquipHide
             const bool enabled = st.enabled.load(std::memory_order_relaxed);
             const bool is_hidden = st.hidden.load(std::memory_order_relaxed);
             const auto bit = CategoryMask{1} << i;
+
+            if (enabled)
+                enabled_categories |= bit;
 
             if (is_user_preset(static_cast<Category>(i)))
             {
@@ -890,6 +897,12 @@ namespace EquipHide
         s_active_preset_mask.store(active_preset, std::memory_order_relaxed);
         s_preset_hidden_mask.store(preset_hidden, std::memory_order_relaxed);
         s_hidden_mask.store(hidden, std::memory_order_relaxed);
+        s_enabled_mask.store(enabled_categories, std::memory_order_relaxed);
+    }
+
+    bool is_any_category_enabled(CategoryMask mask) noexcept
+    {
+        return (mask & s_enabled_mask.load(std::memory_order_relaxed)) != 0;
     }
 
     bool is_any_category_hidden(CategoryMask mask) noexcept

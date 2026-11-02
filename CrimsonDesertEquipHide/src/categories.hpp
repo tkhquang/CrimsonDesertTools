@@ -186,6 +186,9 @@ namespace EquipHide
     /** @brief Returns true if ANY category in the given bitmask is currently hidden. */
     [[nodiscard]] bool is_any_category_hidden(CategoryMask mask) noexcept;
 
+    /** @brief Returns true if ANY category in the given bitmask has Enabled = true. */
+    [[nodiscard]] bool is_any_category_enabled(CategoryMask mask) noexcept;
+
     /**
      * @brief Returns true if ANY category in the bitmask is hidden FOR a specific protagonist idx.
      * @details Looks up a per-character classification map keyed on char_idx (0=Kliff, 1=Damiane, 2=Oongka). Each
