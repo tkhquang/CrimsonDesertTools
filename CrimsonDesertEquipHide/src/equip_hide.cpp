@@ -14,6 +14,7 @@
 #include "visibility_write.hpp"
 
 #include <cdcore/anchors.hpp>
+#include <cdcore/auto_reload.hpp>
 #include <cdcore/controlled_char.hpp>
 
 #include <DetourModKit/abi/wheel_host.h>
@@ -41,9 +42,12 @@
 
 namespace EquipHide
 {
-    // Indexed by truncated part hash. The gate-skip lock (the In/Out selector forced to Out) stops PartInOut from a
-    // re-run of the transition dispatch after the first vis=2 frame.
-    static uint8_t s_hide_locked[0x10000]{};
+    // Indexed by protagonist slot, then truncated part hash. The gate-skip lock (the In/Out selector forced to Out)
+    // stops PartInOut from a re-run of the transition dispatch after the first vis=2 frame. Each protagonist needs its
+    // own row: a part hash is shared across actors, so one protagonist's lock in a shared row skips the first publish
+    // of every other actor and leaves their part visible. A roster change clears the array, so a slot never inherits
+    // another protagonist's locks.
+    static uint8_t s_hide_locked[MAX_PROTAGONISTS][0x10000]{};
 
     // Brief guard window after any hotkey toggle. It stops a cascade from another armor slot (shield or helm) from a
     // brief hide of the legs.
@@ -199,7 +203,7 @@ namespace EquipHide
             // s_activeMap. rebuild_part_lookup() rebuilds from the stored per-category strings, honors per-character
             // overrides, and atomically publishes the new buffer, so the mid-hook and direct-write paths see edited
             // part lists on the next tick.
-            const auto status = DMK::config::enable_auto_reload(
+            CDCore::start_auto_reload(
                 std::chrono::milliseconds{250},
                 [](bool content_changed)
                 {
@@ -222,11 +226,6 @@ namespace EquipHide
                     logger.info("INI auto-reload: setters applied, visibility scheduled");
                 }
             );
-            if (status != DMK::config::AutoReloadStatus::Started &&
-                status != DMK::config::AutoReloadStatus::AlreadyRunning)
-            {
-                DMK::log().warning("INI auto-reload could not start (status enum {})", static_cast<int>(status));
-            }
         }
     }
 
@@ -270,9 +269,10 @@ namespace EquipHide
                 static uint32_t s_deb_tick = 0;
                 if ((++s_deb_tick & 0x3F) == 0 && (steady_ms() - s_equip_pending) > 500)
                 {
-                    for (int i = 0; i < 0x10000; ++i)
-                        if (s_hide_locked[i] == 1)
-                            s_hide_locked[i] = 2;
+                    for (auto &slot_locks : s_hide_locked)
+                        for (auto &lock : slot_locks)
+                            if (lock == 1)
+                                lock = 2;
                     s_equip_pending = 0;
                 }
             }
@@ -334,7 +334,6 @@ namespace EquipHide
 
         const bool cascade_on = flag_cascade_fix().load(std::memory_order_relaxed);
         const auto hash_idx = static_cast<uint16_t>(part_hash);
-        const bool is_chest = (mask & category_bit(Category::Chest)) != 0;
 
         // Protect legs from cascade during the brief window after a hotkey toggle. Without this guard, a shield
         // show/hide triggers a re-evaluation that flashes the pants.
@@ -352,37 +351,23 @@ namespace EquipHide
             }
         }
 
-        // Chest lock state machine, evaluated before the player filter. 0 = unlocked, the first frame lets the gate
-        // pass. 1 = locked, the handler forces the skip-gate selector and the engine publishes no decision.
-        // 2 = re-equip, the handler forces vis=0 so the In pass recreates the scene nodes.
-        if (cascade_on && is_chest && s_hide_locked[hash_idx] && is_any_category_hidden(mask))
-        {
-            if (s_hide_locked[hash_idx] == 2)
-            {
-                write_vis_byte(part_in_out, 0);
-                s_hide_locked[hash_idx] = 0;
-                return;
-            }
-            write_vis_byte(part_in_out, 2);
-            DMK::hook::gpr(ctx, DMK::hook::Gpr::R9) = SELECTOR_SKIP_GATE;
-            return;
-        }
-
         // a1 visibility-control context, the decision function's first argument. check_player_filter() gates the
-        // pointer itself, so this site needs no separate plausibility check.
+        // pointer itself, so this site needs no separate plausibility check. The chest lock below runs after this
+        // filter, so another actor that shares a part hash never reads or sets a protagonist's lock.
         const auto a1 = DMK::hook::gpr(ctx, DMK::hook::Gpr::Rcx);
         if (!check_player_filter(a1))
             return;
 
-        // Per-character override resolution. The cascade and chest-lock paths above gate engine-wide state and
-        // intentionally use the GLOBAL classify_part / is_any_category_hidden masks. This block keeps the actual vis=2
-        // write per-character, so an INI override that excludes a hash for one protagonist does not get hidden by the
-        // mid-hook on that protagonist's frames.
+        // Per-character override resolution. The cascade path above gates engine-wide state and intentionally uses
+        // the GLOBAL classify_part / is_any_category_hidden masks. This block keeps the chest lock and the actual
+        // vis=2 write per-character, so an INI override that excludes a hash for one protagonist does not get hidden
+        // by the mid-hook on that protagonist's frames.
         //
         // The vis-ctrl scan is O(n) where n is at most MAX_PROTAGONISTS, so the added cost is a handful of relaxed
         // atomic loads + one extra flat-table lookup per call. Relaxed ordering is sufficient: the resolve poll thread
         // publishes consistent (vis_ctrls[i], vis_char_idx[i]) pairs on each pass, and a torn read produces at worst
         // one stale per-char idx for a single frame, well within the existing swap-detect timing tolerance.
+        int slot = -1;
         int char_idx = -1;
         {
             auto &ps = player_state();
@@ -391,6 +376,7 @@ namespace EquipHide
             {
                 if (ps.vis_ctrls[i].load(std::memory_order_relaxed) == a1)
                 {
+                    slot = i;
                     char_idx = ps.vis_char_idx[i].load(std::memory_order_relaxed);
                     break;
                 }
@@ -407,22 +393,37 @@ namespace EquipHide
                 return; // hash excluded from this character's effective Parts
         }
 
-        if (is_any_category_hidden_for(char_mask, char_idx))
+        const bool hidden = is_any_category_hidden_for(char_mask, char_idx);
+
+        // Only a tracked slot owns a lock row. A slot of -1 takes the plain vis write below.
+        uint8_t *const chest_lock = (cascade_on && slot >= 0 && (char_mask & category_bit(Category::Chest)) != 0)
+                                        ? &s_hide_locked[slot][hash_idx]
+                                        : nullptr;
+
+        if (!hidden)
         {
-            write_vis_byte(part_in_out, 2);
-            if (cascade_on && is_chest)
-            {
-                // A locked frame must not publish a second transition, so close the gate instead of re-arming it.
-                if (s_hide_locked[hash_idx])
-                    DMK::hook::gpr(ctx, DMK::hook::Gpr::R9) = SELECTOR_SKIP_GATE;
-                else
-                    s_hide_locked[hash_idx] = 1;
-            }
+            if (chest_lock)
+                *chest_lock = 0;
+            return;
         }
-        else
+
+        // Chest lock state machine. 0 = unlocked, the first frame lets the gate pass. 1 = locked, the handler forces
+        // the skip-gate selector and the engine publishes no decision. 2 = re-equip, the handler forces vis=0 so the
+        // In pass recreates the scene nodes.
+        if (chest_lock && *chest_lock == 2)
         {
-            if (cascade_on && is_chest)
-                s_hide_locked[hash_idx] = 0;
+            write_vis_byte(part_in_out, 0);
+            *chest_lock = 0;
+            return;
+        }
+
+        write_vis_byte(part_in_out, 2);
+        if (chest_lock)
+        {
+            if (*chest_lock == 1)
+                DMK::hook::gpr(ctx, DMK::hook::Gpr::R9) = SELECTOR_SKIP_GATE;
+            else
+                *chest_lock = 1;
         }
     }
 
@@ -868,7 +869,7 @@ namespace EquipHide
         // steps drains the async queue, so a hang inside a step still surfaces every line the prior step emitted.
         logger.info("{} shutdown: step 1 disable_auto_reload", MOD_NAME);
         // Disable the INI watcher up front so an in-flight save event cannot fire setters during the state teardown.
-        DMK::config::disable_auto_reload();
+        CDCore::stop_auto_reload();
         logger.flush();
 
         logger.info("{} shutdown: step 2 signal stop", MOD_NAME);

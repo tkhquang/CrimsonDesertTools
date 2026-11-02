@@ -255,12 +255,18 @@ namespace EquipHide
                 }
                 else
                 {
-                    // Always force vis=0 for a visible part. A cached orig_vis value cannot be restored verbatim: the
-                    // engine writes its own state into this byte (sample values 0xE6, 0xF6 observed in trace) with
-                    // the hidden bit (0x02) set, so a restore of the cached value keeps the part hidden.
+                    // A disabled category leaves the engine's byte alone unless this module hid the part. The byte can
+                    // hold the part's Visible="Out" state (2), and a forced 0 shows that part on its stow socket.
+                    auto it = orig_vis.find(key);
+                    if (it == orig_vis.end() && !is_any_category_enabled(mask))
+                        continue;
+
+                    // Force vis=0 for a visible part in an enabled category. A cached orig_vis value cannot be
+                    // restored verbatim: the engine writes its own state into this byte (sample values 0xE6, 0xF6
+                    // observed in trace) with the hidden bit (0x02) set, so a restore of the cached value keeps the
+                    // part hidden.
                     if (!DMK::memory::write_in_place<std::uint8_t>(DMK::Address{vis_addr}, std::uint8_t{0}))
                         continue;
-                    auto it = orig_vis.find(key);
                     if (it != orig_vis.end())
                     {
                         v_restored.push_back({hash, it->second});
