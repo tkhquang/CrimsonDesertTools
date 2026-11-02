@@ -2534,6 +2534,92 @@ namespace Transmog
     };
 
     /**
+     * @brief ComponentParamSlot - get-or-create one entry of a scene component's parameter-slot table.
+     *
+     * Signature `void *f(void **table, uint32_t slot)`. The body reads `table[slot]` and returns a live entry after it
+     * clears the entry's dirty state. An empty entry gets an allocation through a switch over the slot kinds. Every
+     * caller loads `table` from `component+0x228` and null-checks the returned slot, never the table.
+     *
+     * Body layout, as the three rows below sign it:
+     *
+     *   entry   prologue, `rbx = table`, `edi = slot`, `rsi = table[slot]`, `test rsi,rsi`, `je <create>`
+     *   +0x20   live entry: `cmp byte [rsi+0x48],3`, a vtable call, a locked counter bump, `mov byte [rsi+0x48],0`
+     *   +0x4D   create: bound check on the slot kind
+     *   +0x56   a byte index table and a dword offset table off the image base, then an indirect jump into one
+     *           allocator case per kind
+     *
+     * param_slot_guard hooks the entry and returns null for a null table. See param_slot_guard.hpp for the crash path.
+     */
+    inline const Candidate COMPONENT_PARAM_SLOT_CANDIDATES[] = {
+        // P1 - the full prologue through the slot read and its null test. Entry-anchored. The row stops before the
+        // `je <create>`, because its rel8 form turns into rel32 when the create path moves. The row wildcards the frame
+        // size, which the compiler owns. The `[rcx+rdi*8]` slot read carries the uniqueness.
+
+        // 48 89 5C 24 10   mov [rsp+0x10], rbx
+        // 48 89 6C 24 18   mov [rsp+0x18], rbp
+        // 56               push rsi
+        // 57               push rdi
+        // 41 56            push r14
+        // 48 83 EC ??      sub rsp, imm8
+        // 48 8B D9         mov rbx, rcx
+        // 8B FA            mov edi, edx
+        // 48 8B 34 F9      mov rsi, [rcx+rdi*8]
+        // 48 85 F6         test rsi, rsi
+        Candidate::direct(
+            "ComponentParamSlot_P1_PrologueThroughSlotRead",
+            Pattern::literal(
+                "48 89 5C 24 10 48 89 6C 24 18 56 57 41 56 48 83 EC ?? 48 8B D9 8B FA 48 8B 34 F9 48 85 F6"
+            )
+        ),
+
+        // P2 - the live-entry block at entry+0x20, past every stolen span of an inline hook on the entry. It shares no
+        // bytes with P1. The dirty test, the vtable call through `rdx`, the locked 16-bit counter bump indexed by the
+        // call result, and the dirty-flag clear make it unique. A `[2-6]` gap spans the `jne` over the call, because
+        // the compiler owns its width. The row wildcards the low half of the vtable slot offset and of the counter
+        // array offset. Walk back 0x20 to the entry. Re-measure it whenever the prologue changes.
+
+        // 80 7E 48 03            cmp byte [rsi+0x48], 0x3
+        // [2-6]                  jne <clear>
+        // 48 8B 0E               mov rcx, [rsi]
+        // 48 8B 91 ?? ?? 00 00   mov rdx, [rcx+d32]       ; vtable slot
+        // 48 8B CE               mov rcx, rsi
+        // FF D2                  call rdx
+        // 0F B6 C8               movzx ecx, al
+        // 66 F0 FF 84 4B ?? ?? 00 00   lock inc word [rbx+rcx*2+d32]
+        // C6 46 48 00            mov byte [rsi+0x48], 0x0
+        // 48 8B C6               mov rax, rsi
+        Candidate::direct(
+            "ComponentParamSlot_P2_LiveEntryDirtyClear",
+            Pattern::literal(
+                "80 7E 48 03 [2-6] 48 8B 0E 48 8B 91 ?? ?? 00 00 48 8B CE FF D2 0F B6 C8 66 F0 FF 84 4B ?? ?? 00 00 "
+                "C6 46 48 00 48 8B C6"
+            ),
+            -0x20
+        ),
+
+        // P3 - the create path's slot-kind dispatch at entry+0x56, after the bound check on the slot kind. It shares no
+        // bytes with P1 or P2. The row starts past the bound check, so a new slot kind that raises the bound leaves it
+        // intact. The byte index table, the dword offset table, and the `xor r14d,r14d` ahead of the indirect jump make
+        // it unique. The row wildcards both table displacements and the image-base displacement. Walk back 0x56 to the
+        // entry. Re-measure it on every patch.
+
+        // 8B C2                        mov eax, edx
+        // 4C 8D 05 ?? ?? ?? ??         lea r8, [image base]
+        // 41 0F B6 84 00 ?? ?? ?? ??   movzx eax, byte [r8+rax+d32]   ; slot kind -> case index
+        // 41 8B 8C 80 ?? ?? ?? ??      mov ecx, [r8+rax*4+d32]        ; case index -> case RVA
+        // 49 03 C8                     add rcx, r8
+        // 45 33 F6                     xor r14d, r14d
+        // FF E1                        jmp rcx
+        Candidate::direct(
+            "ComponentParamSlot_P3_SlotKindDispatch",
+            Pattern::literal(
+                "8B C2 4C 8D 05 ?? ?? ?? ?? 41 0F B6 84 00 ?? ?? ?? ?? 41 8B 8C 80 ?? ?? ?? ?? 49 03 C8 45 33 F6 FF E1"
+            ),
+            -0x56
+        ),
+    };
+
+    /**
      * @enum AnchorId
      * @brief Every address the mod resolves at startup. The enumerator order IS the registry table order.
      * @warning Index the results through these enumerators and never through a literal: inserting a row otherwise
@@ -2599,6 +2685,8 @@ namespace Transmog
         FrameUpdate,
         /// Enclosing function of the frame-time HUD format literal, the string-xref witness for FrameUpdate (code).
         FrameUpdateXref,
+        /// Component parameter-slot get-or-create entry, the param-slot guard hook site (code).
+        ComponentParamSlot,
         /// Vtable of HOST_SCOPE_VFUNC1_BIND_TYPE, the RTTI witness for HostScopeVfunc1 (data, .rdata).
         HostScopeVfunc1Vtable,
         /// Vtable of HOST_SCOPE_VFUNC2_BIND_TYPE, the RTTI witness for HostScopeVfunc2 (data, .rdata).

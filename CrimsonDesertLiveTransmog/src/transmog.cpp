@@ -10,6 +10,7 @@
 #include "generated/dye_color_table.hpp"
 #include "game_thread.hpp"
 #include "socket_mesh_override.hpp"
+#include "param_slot_guard.hpp"
 #include "prefab_wrapper_swap.hpp"
 #include "constants.hpp"
 #include "indexed_string_table.hpp"
@@ -1053,6 +1054,11 @@ namespace Transmog
         // install() logs its own failure. A failure here leaves every transmogged slot rendering its real item, so
         // the log line is the only signal and the mod stays up.
         (void)socket_mesh_override::install(s_hooks);
+
+        // An interaction effect can find a transmogged part where it expects its own item's part, and that part has no
+        // parameter table. install() logs its own failure. Without the guard, an interaction in transmogged
+        // Gadget_Gloves crashes the game. See param_slot_guard.hpp.
+        (void)param_slot_guard::install(s_hooks);
 
         // Helm-audio filter. It intervenes at the passive-skill REGISTRATION boundary, BEFORE the muffle tag enters
         // the character's skill registry, so no downstream Wwise / RTPC / Switch path ever observes it. The combined
