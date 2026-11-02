@@ -104,6 +104,7 @@ set(COMMON_SOURCES
     src/prefab_wrapper_swap.cpp
     src/game_thread.cpp
     src/socket_mesh_override.cpp
+    src/param_slot_guard.cpp
     src/helm_audio_filter.cpp
     src/color_override/host_scope.cpp
     src/dye_record_inject.cpp
