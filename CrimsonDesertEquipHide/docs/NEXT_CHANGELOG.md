@@ -1,3 +1,5 @@
-## Crimson Desert 2.04.06 compatibility
+## [Title for next release]
 
-- Works with Crimson Desert version 2.04.06, no changes needed
+- New feature
+- Bug fix
+- Improvement
