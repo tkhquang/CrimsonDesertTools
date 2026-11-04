@@ -1217,9 +1217,9 @@ namespace Transmog
         prefab_wrapper_swap::shutdown();
 
         // Newest-first teardown of every hook this mod owns (PartAddShow, the frame hook, the socket-mesh override
-        // and the rest). Each detour body snapshots its trampoline pointer at entry and bails to
-        // a benign default if the snapshot is null, which defends the brief drain window between restore and DLL
-        // unmap.
+        // and the rest). A counted hook drains inside clear(): it switches its relay off and waits until no thread
+        // runs its detour. A raw detour has caller-owned quiescence, so a game thread already inside one finishes
+        // during the dev loader's post-shutdown quiescence, before the unmap.
         //
         // A hook that cannot prove it restored its target pins its backend, and that pin books one leak against
         // LeakSubsystem::HookManager, so the delta across the clear IS the unmap authorization the dev loader needs.

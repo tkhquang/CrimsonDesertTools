@@ -1635,7 +1635,7 @@ Diving_PlateArmor_Helm_01	Charter's Diving Helm	Male
 Diving_PlateArmor_Helm_02	Charter's Light Diving Helm	Female
 Diving_PlateArmor_Helm_03	Marine Charter's Diving Helm	Male
 Diving_PlateArmor_Helm_04	Marine Charter's Light Diving Helm	Female
-Diving_Propulsion_BackPack	Propulsion-Type Breathing Device
+Diving_Propulsion_BackPack	Propulsion Breathing Device
 Diving_Propulsion_BackPack_I	Enhanced Propulsion Breathing Device
 Dohahn_Fabric_Armor	Dohann Cloth Armor	Male
 Dollette_Fabric_Armor	Dollette Cloth Armor	Male
@@ -3133,7 +3133,7 @@ Item_cd_crimsondesert_tommaso_str_attachbuilding_02_01_housing	Small White Stone
 Item_cd_crimsondesert_tommaso_str_attachbuilding_02_01_housing_index0001	Small Black Stone Pillar Shelter
 Item_cd_crimsondesert_tommaso_str_attachbuilding_02_01_housing_index0002	Small Sandstone Pillar Shelter
 Item_cd_ex_dpf_dryinglaundry_01_housing	Rough Tree Branch Clothesline
-Item_cd_ex_dpf_dryinglaundry_01_housing_index0001	Rough Dark Tree Branch Clothesline
+Item_cd_ex_dpf_dryinglaundry_01_housing_index0001	Rugged Tree Branch Clothesline
 Item_cd_ex_dpf_flowerpot_16_housing	Palm Tree Pot
 Item_cd_ex_dpf_flowerpot_21_housing	Small Tree Pot
 Item_cd_ex_dpf_flowerpot_23_housing	Laurel Pot
@@ -3204,7 +3204,7 @@ Item_cd_ex_dpt_flowerbed_set_005_0103_housing	Wide Vibrant Red Edge Flowerbed
 Item_cd_ex_dpt_flowerbed_set_005_0103_housing_index0001	Wide Lavish Red Edge Flowerbed
 Item_cd_ex_dpt_flowerbed_set_005_0103_housing_index0002	Wide Vibrant Sunkissed Red Corner Flowerbed
 Item_cd_in_dff_bench_01_housing	Rustic Plank Bench
-Item_cd_in_dff_bench_01_housing_index0001	Rough Plank Bench
+Item_cd_in_dff_bench_01_housing_index0001	Weathered Plank Bench
 Item_cd_in_dff_chair_09a_housing	Rustic Wooden Armchair
 Item_cd_in_dff_chair_09a_housing_index0001	Weathered Wooden Armchair
 Item_cd_in_dff_standing_table_02_housing	Crude Wooden Table
@@ -3231,7 +3231,7 @@ Item_cd_product_shade_02d_housing_index0002	Large Ochre Shade with Vent Window
 Item_cd_product_shade_02d_housing_index0003	Large Teal Shade with Vent Window
 Item_cd_product_shade_02d_housing_index0004	Large Ancient Tree Ventilated Shade
 Item_cd_products_farm_gate_01_housing	Roofed Rough Wooden Door
-Item_cd_products_farm_gate_01_housing_index0001	Roofed Rough Dark Wooden Gate
+Item_cd_products_farm_gate_01_housing_index0001	Roofed Rugged Wooden Door
 Item_cd_spot_mus_attach_01_housing	Small Plank Shade
 Item_cd_spot_mus_attach_01_housing_index0001	Small Dark Plank Shade
 Item_cd_spot_troll_academy_bench_01_housing	Patterned Stone Bench
@@ -4725,7 +4725,7 @@ NoticePaper_Skill_UnArmedCombination	Request from the Communal Training Grounds
 NoticePaper_Skill_Wrestle_AirBodySlam	Hernand Constabulary Warning Notice No. 103
 NoticePaper_Skill_Wrestle_GrabSpinThrow	Pailune Anonymous Jottings No. 77
 NoticePaper_Skill_Wrestle_Lariat	Call for Challengers: Black Bear
-NoticePaper_TimberhamSawmill	Timberham Sawmill Management Contract Notice
+NoticePaper_TimberhamSawmill	Timberham Sawmill For Lease
 NoticePaper_Village_Muiquun	Request to Punish Outlaws in Muiquun
 Noyvarn_Leather_Armor	Noyvarn Leather Armor	Male
 Nureumjeok	Mixed Skewers
@@ -4784,6 +4784,7 @@ Oongka_PlateArmor_Helm_II	Valortread Plate Helm	Male
 Oongka_PlateArmor_Helm_III	Belkandor Plate Helm	Male
 Oongka_Plate_Glove	Brass Warden's Plate Gloves	Male
 Oongka_Rocket_BackPack	Kuku Rocket Pack	Male
+Oongka_Rocket_BackPack_II	Skyway Rocket Pack	Male
 Oongka_Rocket_Helm	Kuku Rocket Helmet - Equipped by Default	Male
 Ophenber_PlateArmor_Helm	Offenberg Plate Helm	Male
 Optionary_Beekeeping_Cloak	Beekeeping Cloak	Male
@@ -5655,7 +5656,7 @@ Quest_Witch_Token_I	Witch's Token
 Quest_Witch_Token_II	Witch's Token
 Quest_Witch_Token_III	Witch's Token
 Quest_Witch_Token_IV	Witch's Token
-Quest_Wood_Branch_01	Branch	Male
+Quest_Wood_Branch_01	Tree Branch	Male
 Quiver	Replenishing Arrows
 Qunicks_Leather_Armor	Kenecks Leather Armor	Male
 Rabbid_Fabric_Helm	Raveed Cloth Cap	Male
@@ -5817,8 +5818,8 @@ Recipe_Deactived_Abyss_Artifact	Blueprint: Faded Abyss Artifact
 Recipe_DeerAntler_Fruit_Tea	Recipe: Antler Tea
 Recipe_DeerAntler_Soup	Recipe: Longhorn Soup
 Recipe_Diving_BackPack_02	Blueprint: Explorer's Breathing Device
-Recipe_Diving_Propulsion_BackPack	Blueprint: Propulsion-Type Breathing Device
-Recipe_Diving_Propulsion_BackPack_I	Blueprint: Enhanced Propulsion-Type Breathing Device
+Recipe_Diving_Propulsion_BackPack	Blueprint: Propulsion Breathing Device
+Recipe_Diving_Propulsion_BackPack_I	Blueprint: Enhanced Propulsion Breathing Device
 Recipe_Fish_Bulgogi	Recipe: Pan-Fried Marinated Fish
 Recipe_Fish_Fruit_Porridge	Recipe: Steamed Fish
 Recipe_Fish_Porridge	Recipe: Fish Porridge
@@ -7059,12 +7060,12 @@ Trade_Compass	Compass
 Trade_Compass_PackedInVehicle	Packaged Compass
 Trade_Coolant	Coolant
 Trade_Coolant_PackedInVehicle	Packaged Coolant
-Trade_DeluxeMusselBox	Finest Mussel
-Trade_DeluxeMusselBox_PackedInVehicle	Packaged Finest Mussel
-Trade_DeluxeScallopBox	Finest Scallop
-Trade_DeluxeScallopBox_PackedInVehicle	Packaged Finest Scallop
-Trade_DeluxeSeaPineappleBox	Finest Sea Pineapple
-Trade_DeluxeSeaPineappleBox_PackedInVehicle	Packaged Finest Sea Pineapple
+Trade_DeluxeMusselBox	Premium Mussels
+Trade_DeluxeMusselBox_PackedInVehicle	Packaged Premium Mussels
+Trade_DeluxeScallopBox	Premium Scallops
+Trade_DeluxeScallopBox_PackedInVehicle	Packaged Premium Scallops
+Trade_DeluxeSeaPineappleBox	Premium Sea Pineapples
+Trade_DeluxeSeaPineappleBox_PackedInVehicle	Packaged Premium Sea Pineapples
 Trade_FishMeat_03	Fish Meat
 Trade_FishMeat_PackedInVehicle	Packaged Fish Meat
 Trade_FlintSet	Flint Kit
@@ -7810,18 +7811,18 @@ Wants_Leather_Gloves	Wentz Leather Gloves	Male
 WarRobot_Backpack_01	A.T.A.G. Thrusterpack Mk I
 WarRobot_Backpack_02	A.T.A.G. Thrusterpack Mk II
 WarRobot_Backpack_03	A.T.A.G. Thrusterpack Mk III
-WarRobot_Backpack_04	A.T.A.G. Marine Exploration Pack Equipment
+WarRobot_Backpack_04	A.T.A.G. Marine Exploration Pack
 WarRobot_Body_01	A.T.A.G. Plating Mk I
 WarRobot_Body_02	A.T.A.G. Plating Mk II
 WarRobot_Body_03	A.T.A.G. Plating Mk III
-WarRobot_Body_04	A.T.A.G. Marine Exploration Plating Equipment
+WarRobot_Body_04	A.T.A.G. Marine Exploration Plating
 WarRobot_Cannon_01	A.T.A.G. Cannon
 WarRobot_Fist_01	A.T.A.G. Fist
 WarRobot_FlameThrower_01	A.T.A.G. Flamespitter
 WarRobot_Foot_01	A.T.A.G. Boots Mk I
 WarRobot_Foot_02	A.T.A.G. Boots Mk II
 WarRobot_Foot_03	A.T.A.G. Boots Mk III
-WarRobot_Foot_04	A.T.A.G. Marine Exploration Foot Equipment
+WarRobot_Foot_04	A.T.A.G. Marine Exploration Feet
 WarRobot_Gatling_01	A.T.A.G. Machine Gun
 WarRobot_Laser_01	A.T.A.G. Laser
 WarRobot_RepairTool_01_L	A.T.A.G. Pincers

@@ -29,6 +29,7 @@
 #include <format>
 #include <functional>
 #include <mutex>
+#include <new>
 #include <optional>
 #include <span>
 #include <stop_token>
@@ -249,7 +250,16 @@ namespace Transmog::prefab_wrapper_swap
     static std::unordered_map<std::uintptr_t, int> s_body_to_char;
 
     using StructCopyFn = std::int64_t(__fastcall *)(std::int64_t, std::int64_t);
-    static StructCopyFn s_orig = nullptr;
+
+    // Trampoline of the record-copy hook, and the "hook installed" flag for the apply paths. It is published before
+    // the hook arms and stays published until the hook stack retires the hook, so every call that reaches the
+    // detour can run the engine copy.
+    //
+    // The copy is a move constructor: its caller appends a record as `slot = &array[count]; copy(slot, &local);
+    // ++count`, and the count rises whether the copy ran or not. A detour that skips the original therefore leaves
+    // an unconstructed record behind. The caller later copies that record, reads its NULL wrapper and faults on the
+    // refcount increment.
+    static std::atomic<StructCopyFn> s_orig{nullptr};
 
     // Per-character target wrapper sets (parallel to s_swap_map_per_char). Used by the secondary-bind hook to detect
     // "is this record one of our substituted ones?" It compares the entry's wrapper-ptr at +0 against the union of all
@@ -2526,7 +2536,7 @@ namespace Transmog::prefab_wrapper_swap
     // character's wrapper pointers, and a bind against those installs that character's mesh.
     std::size_t ensure_armed_for_slot_apply() noexcept
     {
-        if (!s_orig)
+        if (s_orig.load(std::memory_order_acquire) == nullptr)
             return 0; // hook not installed
         if (!has_any_selection())
             return 0; // nothing selected - leave the current state alone
@@ -2547,7 +2557,7 @@ namespace Transmog::prefab_wrapper_swap
     std::size_t reactivate_with_selections() noexcept
     {
         auto &logger = DMK::log();
-        if (!s_orig)
+        if (s_orig.load(std::memory_order_acquire) == nullptr)
             return 0; // hook not installed - nothing to do
         if (s_active.load(std::memory_order_acquire))
         {
@@ -2983,11 +2993,16 @@ namespace Transmog::prefab_wrapper_swap
         return result;
     }
 
-    static std::int64_t __fastcall on_struct_copy(std::int64_t a1, std::int64_t a2)
+    /**
+     * @brief Counted detour for the record copy. It substitutes the source wrapper of a protagonist part, then runs
+     *        the engine copy.
+     * @param caller Return of the game call. It names the game caller in diagnostics, because `_ReturnAddress()`
+     *        names the counted thunk here.
+     * @return The engine copy's result. Every path runs the engine copy exactly once (see @ref s_orig).
+     */
+    static std::int64_t on_struct_copy(DMK::hook::CallerFrame caller, std::int64_t a1, std::int64_t a2) noexcept
     {
-        const auto trampoline = s_orig;
-        if (!trampoline)
-            return 0;
+        const auto trampoline = s_orig.load(std::memory_order_acquire);
 
         // Cheap guards before any indirect read.
         if (!s_active.load(std::memory_order_acquire))
@@ -3077,7 +3092,14 @@ namespace Transmog::prefab_wrapper_swap
                                 std::find(s_census_rej_seen.begin(), s_census_rej_seen.end(), rej_hash) ==
                                     s_census_rej_seen.end())
                             {
-                                s_census_rej_seen.push_back(rej_hash);
+                                // The census is telemetry: a failed allocation drops the record, never the copy.
+                                try
+                                {
+                                    s_census_rej_seen.push_back(rej_hash);
+                                }
+                                catch (const std::bad_alloc &)
+                                {
+                                }
                                 if (s_census_rej_seen.size() >= CENSUS_REJ_CAP)
                                     s_census_rej_full.store(true, std::memory_order_relaxed);
                             }
@@ -3103,7 +3125,13 @@ namespace Transmog::prefab_wrapper_swap
                         if (s_census_seen.size() < CENSUS_SEEN_CAP &&
                             std::find(s_census_seen.begin(), s_census_seen.end(), src_hash) == s_census_seen.end())
                         {
-                            s_census_seen.push_back(src_hash);
+                            try
+                            {
+                                s_census_seen.push_back(src_hash);
+                            }
+                            catch (const std::bad_alloc &)
+                            {
+                            }
                             if (s_census_seen.size() >= CENSUS_SEEN_CAP)
                                 s_census_seen_full.store(true, std::memory_order_relaxed);
                         }
@@ -3127,13 +3155,16 @@ namespace Transmog::prefab_wrapper_swap
                             matched_key = src_hash;
                         }
                         else
-                            DMK::log().warning(
+                        {
+                            (void)DMK::log().try_log(
+                                DMK::LogLevel::Warning,
                                 "[prefab-swap] hash collision ignored: wrapper \"{}\" hashes to the same value as "
                                 "\"{}\" (0x{:08X}) - not substituting",
                                 nm,
                                 it->second.src_name,
                                 src_hash
                             );
+                        }
                     }
                 }
             }
@@ -3150,13 +3181,14 @@ namespace Transmog::prefab_wrapper_swap
             const auto n = s_guard_rejects.fetch_add(1, std::memory_order_relaxed);
             if (n < 20)
             {
-                DMK::log().warning(
+                (void)DMK::log().try_log(
+                    DMK::LogLevel::Warning,
                     "[prefab-swap] GUARD: refused substitution - dest 0x{:X} is not on the calling thread's stack "
                     "(src=0x{:X} ra=0x{:X}). The stack-temporary invariant does not hold on this path; skipping the "
                     "write so nothing persistent can be touched.",
                     static_cast<std::uintptr_t>(a2),
                     src_wrapper,
-                    reinterpret_cast<std::uintptr_t>(_ReturnAddress())
+                    reinterpret_cast<std::uintptr_t>(caller.return_address())
                 );
             }
             return trampoline(a1, a2);
@@ -3181,7 +3213,15 @@ namespace Transmog::prefab_wrapper_swap
         {
             std::scoped_lock ck(s_census_mtx);
             if (std::find(s_census_hit_keys.begin(), s_census_hit_keys.end(), matched_key) == s_census_hit_keys.end())
-                s_census_hit_keys.push_back(matched_key);
+            {
+                try
+                {
+                    s_census_hit_keys.push_back(matched_key);
+                }
+                catch (const std::bad_alloc &)
+                {
+                }
+            }
         }
 
         const auto sc = s_subst_count.fetch_add(1, std::memory_order_relaxed);
@@ -3195,7 +3235,8 @@ namespace Transmog::prefab_wrapper_swap
             const auto tgt_hash =
                 DMK::memory::read<std::uint32_t>(DMK::Address{static_cast<std::uintptr_t>(tgt_wrapper) + 0x0C})
                     .value_or(0);
-            DMK::log().info(
+            (void)DMK::log().try_log(
+                DMK::LogLevel::Info,
                 "[prefab-swap] SWAP src=0x{:X} -> tgt=0x{:X} (subst #{}) srcName=\"{}\" srcHash=0x{:08X} "
                 "tgtName=\"{}\" tgtHash=0x{:08X}",
                 src_wrapper,
@@ -3213,11 +3254,18 @@ namespace Transmog::prefab_wrapper_swap
 
         // Track the dest so deactivate_for_clear can reverse-write the original Kliff wrapper, restoring engine state
         // to a form LT's auth-table-driven tear_down can walk cleanly.
+        // An allocation failure leaves this dest out of the reverse-write, as a full log does.
         {
             std::scoped_lock lk(s_subst_log_mtx);
             if (s_subst_log.size() < MAX_SUBST_LOG)
             {
-                s_subst_log.push_back({static_cast<std::uintptr_t>(a1), src_wrapper});
+                try
+                {
+                    s_subst_log.push_back({static_cast<std::uintptr_t>(a1), src_wrapper});
+                }
+                catch (const std::bad_alloc &)
+                {
+                }
             }
         }
 
@@ -3660,13 +3708,13 @@ namespace Transmog::prefab_wrapper_swap
             return false;
         }
 
-        auto struct_copy = DMK::hook::inline_at(
-            DMK::hook::InlineRequest{
-                .name = "PrefabWrapperSwap_StructCopy",
-                .target = DMK::Address{addr},
-            },
-            &on_struct_copy
-        );
+        // The counted form owns the teardown drain. The engine runs this copy on its job threads, including the
+        // rebuild that the shutdown clear starts, so a raw detour gives no proof that every call left the Logic DLL
+        // before the hook retires.
+        auto struct_copy = DMK::hook::inline_at<&on_struct_copy>(DMK::hook::InlineRequest{
+            .name = "PrefabWrapperSwap_StructCopy",
+            .target = DMK::Address{addr},
+        });
         if (!struct_copy)
         {
             logger.warning("[prefab-swap] hook creation failed at 0x{:X}: {}", addr, struct_copy.error().message());
@@ -3675,11 +3723,11 @@ namespace Transmog::prefab_wrapper_swap
 
         // Publish the trampoline BEFORE enable() arms the patch, so no game thread can enter the detour while its
         // original pointer is still null.
-        s_orig = struct_copy->original<StructCopyFn>();
+        s_orig.store(struct_copy->original<StructCopyFn>(), std::memory_order_release);
         if (auto armed = struct_copy->enable(); !armed)
         {
             logger.warning("[prefab-swap] hook could not be armed at 0x{:X}: {}", addr, armed.error().message());
-            s_orig = nullptr;
+            s_orig.store(nullptr, std::memory_order_release);
             return false;
         }
         hooks.push(std::move(*struct_copy));
@@ -3922,8 +3970,9 @@ namespace Transmog::prefab_wrapper_swap
             }
         }
 
+        // Deactivate only. s_orig stays published: the hook stays armed until the caller's hook stack retires it, and
+        // the counted drain there waits for every copy that is already inside the detour (see s_orig).
         s_active.store(false, std::memory_order_release);
-        s_orig = nullptr;
         {
             std::scoped_lock lk(s_subst_log_mtx);
             s_subst_log.clear();
@@ -3945,10 +3994,6 @@ namespace Transmog::prefab_wrapper_swap
             s.clear();
         s_call_count.store(0, std::memory_order_relaxed);
         s_subst_count.store(0, std::memory_order_relaxed);
-
-        // Reset AppearanceTableLoader capture state. Do NOT null the lookup function pointers - they are
-        // trampoline-resolved addresses and HookManager owns the trampoline lifetime. The next init() re-resolves
-        // them.
     }
 
     void notify_apply_starting(const std::uint16_t (&itemIds)[5])
@@ -4002,7 +4047,7 @@ namespace Transmog::prefab_wrapper_swap
             }
         }
 
-        if (!s_orig)
+        if (s_orig.load(std::memory_order_acquire) == nullptr)
             return; // hook not installed - nothing to do
 
         // Decide between "this apply has fakes to install" and "this is a cleanup-only pass" based on `itemIds`, NOT on
