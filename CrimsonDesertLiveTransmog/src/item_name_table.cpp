@@ -70,7 +70,7 @@ namespace Transmog
     // The builder does not hardcode the "none" value. It resolves it statistically at catalog-build time: the value
     // that appears in the clear majority of items IS the sentinel. This self-heals across future game updates as long
     // as base items keep their statistical dominance of the catalog.
-    static constexpr std::ptrdiff_t DESC_VARIANT_META_OFFSET = 0xE8;
+    static constexpr std::ptrdiff_t DESC_VARIANT_META_OFFSET = 0xF4;
 
     // Item-name wrapper: a pointer to the wrapper whose first qword is the internal name's char*. It moves when the
     // descriptor head changes shape. A stale value reads a packed scalar, every descriptor fails the plausibility
@@ -391,9 +391,9 @@ namespace Transmog
     // consecutive ptr_array entries), so a candidate past the stride reads the NEIGHBOR's field, passes every shape
     // check, and classifies each item by the next item's groups.
     /// Qword, base of the u16 group-value array.
-    static constexpr std::ptrdiff_t DESC_ITEM_GROUP_DATA_OFFSET = 0x1F0;
+    static constexpr std::ptrdiff_t DESC_ITEM_GROUP_DATA_OFFSET = 0x1F8;
     /// Dword element count.
-    static constexpr std::ptrdiff_t DESC_ITEM_GROUP_COUNT_OFFSET = 0x1F8;
+    static constexpr std::ptrdiff_t DESC_ITEM_GROUP_COUNT_OFFSET = 0x200;
     static constexpr std::size_t MAX_ITEM_GROUPS_PER_ITEM = 64;
 
     // The registry is a pa::StaticInfoManager2 like iteminfo - same count and def-array offsets - and its holder

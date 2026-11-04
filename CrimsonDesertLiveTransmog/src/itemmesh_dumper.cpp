@@ -47,7 +47,7 @@ namespace Transmog
         constexpr ptrdiff_t OFF_REGISTRY_ARRAY = 0x58;
 
         constexpr ptrdiff_t OFF_NAME = 0x00;
-        constexpr ptrdiff_t OFF_META_SUB = 0x108;
+        constexpr ptrdiff_t OFF_META_SUB = 0x110;
 
         // The engine stores strings behind a "StringRef" descriptor: {char* ptr @+0x00, u32 len @+0x08}. The
         // characters are always heap-allocated, down to strings only a few characters long, so there is no inline/SSO
@@ -86,7 +86,7 @@ namespace Transmog
         // Keep the probe window inside one descriptor. The descriptors sit back to back in memory, so a window that
         // runs past the descriptor size scores the NEIGHBOR's list, which has the same shape and resolves real
         // meshes - for the wrong item. Measure the stride between consecutive iteminfo entries before widening it.
-        constexpr ptrdiff_t OFF_DESC_VARIANT_ENTRIES_NOMINAL = 0x230;
+        constexpr ptrdiff_t OFF_DESC_VARIANT_ENTRIES_NOMINAL = 0x238;
         constexpr ptrdiff_t OFF_DESC_VARIANT_PROBE_LOW = 0x180;
         constexpr ptrdiff_t OFF_DESC_VARIANT_PROBE_HIGH = 0x270;
         constexpr ptrdiff_t OFF_DESC_VARIANT_COUNT_DELTA = 0x08; // count sits immediately after the pointer
@@ -707,23 +707,25 @@ namespace Transmog
 
         /**
          * @brief Resolve the variant-list offset once per session, and self-heal across a descriptor reshape.
-         * @details The probe tries the nominal value first, which is what a healthy build uses. When a patch moves
-         *          the field, the probe walks a bounded window and adopts the first offset that validates on several
-         *          DIFFERENT items - several, because one item can carry a neighboring field that passes by
-         *          coincidence. Drift reaches the log as a WARNING even though it self-corrected, so patch day is
-         *          visible rather than silent.
+         * @details The probe scores every offset in the window over one descriptor sample and adopts the offset that
+         *          validates on the most items. A tie keeps the nominal value. The first offset that validates is not
+         *          safe: the item-group vector sits below the list with the same {data, count} head. On some items
+         *          the bytes past its u16 array look like a mesh pointer, so the group vector clears a small
+         *          threshold. The real list validates on every item with body variants and wins by a wide margin.
+         *          Drift reaches the log as a WARNING even though it self-corrected, so patch day is visible rather
+         *          than silent.
          */
         ptrdiff_t resolve_variant_list_offset(uintptr_t item_arr, uint32_t itemCount, uint32_t stringCount) noexcept
         {
             auto &logger = DMK::log();
-            constexpr uint32_t probe_samples = 8;    // distinct items an offset must satisfy
-            constexpr uint32_t probe_scan_cap = 512; // descriptors examined before giving up
+            constexpr uint32_t probe_samples = 8;     // minimum items the winning offset must satisfy
+            constexpr uint32_t probe_scan_cap = 2048; // descriptors scored per offset
 
             const auto score = [&](ptrdiff_t off) noexcept
             {
                 uint32_t hits = 0;
                 bool ok = false;
-                for (uint32_t id = 0; id < (std::min)(itemCount, probe_scan_cap) && hits < probe_samples; ++id)
+                for (uint32_t id = 0; id < (std::min)(itemCount, probe_scan_cap); ++id)
                 {
                     const uintptr_t desc = read_qword_safe(item_arr + static_cast<uintptr_t>(id) * 8, ok);
                     if (!ok || !DMK::memory::is_plausible_ptr(DMK::Address{desc}))
@@ -734,35 +736,73 @@ namespace Transmog
                 return hits;
             };
 
-            if (score(OFF_DESC_VARIANT_ENTRIES_NOMINAL) >= probe_samples)
-                return OFF_DESC_VARIANT_ENTRIES_NOMINAL;
-
+            ptrdiff_t best_off = 0;
+            uint32_t best_hits = 0;
+            uint32_t runner_up_hits = 0;
+            const uint32_t nominal_hits = score(OFF_DESC_VARIANT_ENTRIES_NOMINAL);
+            if (nominal_hits >= probe_samples)
+            {
+                best_off = OFF_DESC_VARIANT_ENTRIES_NOMINAL;
+                best_hits = nominal_hits;
+            }
+            else
+            {
+                runner_up_hits = nominal_hits;
+            }
             for (ptrdiff_t off = OFF_DESC_VARIANT_PROBE_LOW; off <= OFF_DESC_VARIANT_PROBE_HIGH; off += 8)
             {
                 if (off == OFF_DESC_VARIANT_ENTRIES_NOMINAL)
                     continue;
-                if (score(off) >= probe_samples)
+                const uint32_t hits = score(off);
+                if (hits > best_hits && hits >= probe_samples)
                 {
-                    (void)logger.try_log(
-                        DMK::LogLevel::Warning,
-                        "[itemmesh] variant list DRIFTED: nominal {:#x} no longer validates, using {:#x} "
-                        "({:+#x}). Update OFF_DESC_VARIANT_ENTRIES_NOMINAL in itemmesh_dumper.cpp.",
-                        OFF_DESC_VARIANT_ENTRIES_NOMINAL,
-                        off,
-                        off - OFF_DESC_VARIANT_ENTRIES_NOMINAL
-                    );
-                    return off;
+                    runner_up_hits = (std::max)(runner_up_hits, best_hits);
+                    best_hits = hits;
+                    best_off = off;
+                }
+                else if (hits > runner_up_hits)
+                {
+                    runner_up_hits = hits;
                 }
             }
 
-            (void)logger.try_log(
-                DMK::LogLevel::Warning,
-                "[itemmesh] variant list NOT FOUND in {:#x}..{:#x} - per-item mesh derivation is "
-                "disabled, so targets fall back to the carrier's own visual.",
-                OFF_DESC_VARIANT_PROBE_LOW,
-                OFF_DESC_VARIANT_PROBE_HIGH
-            );
-            return 0;
+            if (best_off == 0)
+            {
+                (void)logger.try_log(
+                    DMK::LogLevel::Warning,
+                    "[itemmesh] variant list NOT FOUND in {:#x}..{:#x} - per-item mesh derivation is "
+                    "disabled, so targets fall back to the carrier's own visual.",
+                    OFF_DESC_VARIANT_PROBE_LOW,
+                    OFF_DESC_VARIANT_PROBE_HIGH
+                );
+                return 0;
+            }
+
+            if (best_off != OFF_DESC_VARIANT_ENTRIES_NOMINAL)
+            {
+                (void)logger.try_log(
+                    DMK::LogLevel::Warning,
+                    "[itemmesh] variant list DRIFTED: nominal {:#x} scored {}, using {:#x} ({:+#x}, scored {}, "
+                    "runner-up {}). Update OFF_DESC_VARIANT_ENTRIES_NOMINAL in itemmesh_dumper.cpp.",
+                    OFF_DESC_VARIANT_ENTRIES_NOMINAL,
+                    nominal_hits,
+                    best_off,
+                    best_off - OFF_DESC_VARIANT_ENTRIES_NOMINAL,
+                    best_hits,
+                    runner_up_hits
+                );
+            }
+            else
+            {
+                (void)logger.try_log(
+                    DMK::LogLevel::Debug,
+                    "[itemmesh] variant list at nominal {:#x} (scored {}, runner-up {})",
+                    best_off,
+                    best_hits,
+                    runner_up_hits
+                );
+            }
+            return best_off;
         }
 
         /**
