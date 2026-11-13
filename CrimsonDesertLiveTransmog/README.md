@@ -24,10 +24,14 @@
 ## Requirements
 
 - Crimson Desert (PC, Steam)
-- ASI Loader (e.g. [Ultimate ASI Loader](https://github.com/ThirteenAG/Ultimate-ASI-Loader/releases))
+- ASI Loader (installed by DMM, or e.g. [Ultimate ASI Loader](https://github.com/ThirteenAG/Ultimate-ASI-Loader/releases) for a manual install)
 - ReShade is **optional**. If installed, the transmog UI registers as a ReShade addon tab. If not, the mod provides its own standalone overlay window.
 
 ## Installation
+
+**With [Definitive Mod Manager (DMM)](https://www.nexusmods.com/crimsondesert/mods/633):** install through the Nexus **Mod Manager Download** button. DMM installs the ASI Loader for you, so skip to [Step 3](#step-3-launch-and-play).
+
+**Manually:** follow Steps 1 and 2.
 
 ### Step 1: Install an ASI Loader
 
@@ -46,8 +50,6 @@ Download the **x64** build of [Ultimate ASI Loader](https://github.com/ThirteenA
 > **Note:** If you are using a newer version of Ultimate ASI Loader and the log file is not generated, try the **win64** (x64) build from [v9.1.0](https://github.com/ThirteenAG/Ultimate-ASI-Loader/releases/tag/v9.1.0) instead.
 
 ### Step 2: Install the mod
-
-Install with [Definitive Mod Manager (DMM)](https://www.nexusmods.com/crimsondesert/mods/633) through the Nexus **Mod Manager Download** button, or manually:
 
 1. Download the latest release from the [GitHub Releases page](https://github.com/tkhquang/CrimsonDesertTools/releases)
 2. Extract **all** of the following into your `bin64` folder:

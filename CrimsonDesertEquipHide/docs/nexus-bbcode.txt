@@ -33,12 +33,16 @@ If the built-in options cover your needs, you no longer need this mod for those 
 [size=5]Requirements[/size]
 [list]
 [*] Crimson Desert (Steam version)
-[*] ASI Loader (e.g. [url=https://github.com/ThirteenAG/Ultimate-ASI-Loader/releases]Ultimate ASI Loader[/url])
+[*] ASI Loader (installed by DMM, or e.g. [url=https://github.com/ThirteenAG/Ultimate-ASI-Loader/releases]Ultimate ASI Loader[/url] for a manual install)
 [/list]
 
 [line]
 
 [size=5]Installation[/size]
+
+[b]With [url=https://www.nexusmods.com/crimsondesert/mods/633]Definitive Mod Manager (DMM)[/url]:[/b] install through the [b]Mod Manager Download[/b] button. DMM installs the ASI Loader for you, so skip to Step 3.
+
+[b]Manually:[/b] follow Steps 1 and 2.
 
 [size=4]Step 1: Install an ASI Loader[/size]
 You need an ASI Loader to load [b].asi[/b] mods. If you already have one (e.g. from another mod), skip to Step 2.
@@ -55,7 +59,6 @@ Download the [b]x64[/b] build of [url=https://github.com/ThirteenAG/Ultimate-ASI
 [b]Note:[/b] If you are using a newer version of Ultimate ASI Loader and the log file is not generated, try the [b]win64[/b] (x64) build from [url=https://github.com/ThirteenAG/Ultimate-ASI-Loader/releases/tag/v9.1.0]v9.1.0[/url] instead.
 
 [size=4]Step 2: Install the mod[/size]
-Install with [url=https://www.nexusmods.com/crimsondesert/mods/633]Definitive Mod Manager (DMM)[/url] through the [b]Mod Manager Download[/b] button, or manually:
 1. Download the latest release from the files section
 2. Extract [b]CrimsonDesertEquipHide.asi[/b] and [b]CrimsonDesertEquipHide.ini[/b] into your [b]bin64[/b] folder
 
