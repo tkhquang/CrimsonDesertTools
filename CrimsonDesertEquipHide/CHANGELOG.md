@@ -2,6 +2,14 @@
 
 All notable changes to the CrimsonDesertEquipHide mod will be documented in this file.
 
+## [0.11.0] - Crimson Desert 2.05.00 support
+
+- Updated the mod to work with Crimson Desert version 2.05.00
+- Fixed heavy stutter when a game update stops the mod from finding the controlled character
+- Fixed hiding failing on every character when another mod ships an outdated part file
+- Fixed the chest flashing on Kliff and Oongka with `CascadeFix` on while Damiane is controlled and has her own `Parts` list
+- `BaldFix` now follows each character's own `Parts` list, not only the controlled character's
+
 ## [0.10.2] - Fixed chest hiding for companions
 
 - Fixed the chest staying visible on other characters when `CascadeFix` is on, because a chest hidden on one character blocked the hide on the rest
@@ -317,6 +325,7 @@ All notable changes to the CrimsonDesertEquipHide mod will be documented in this
 - Customizable part lists per category via INI configuration
 - Configurable init delay and log level
 
+[0.11.0]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/equip-hide/v0.11.0
 [0.10.2]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/equip-hide/v0.10.2
 [0.10.1]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/equip-hide/v0.10.1
 [0.10.0]: https://github.com/tkhquang/CrimsonDesertTools/releases/tag/equip-hide/v0.10.0
