@@ -288,8 +288,7 @@ jobs:
 
       # The NEXUSMODS_API_KEY secret is the account key. Each file ID and the v3 mod ID come from that file's
       # "Advanced" modal on the Nexus Files tab. An unset file ID skips its upload, and mod_id is needed only for
-      # the changelog. The archive is extracted into the game folder by hand, so mod manager downloads stay off.
-      # Skipped on pre-releases.
+      # the changelog. The main file allows mod manager downloads so DMM can install it. Skipped on pre-releases.
       - name: Publish to Nexus Mods
         if: ${{ !inputs.prerelease && vars.NEXUSMODS_EQUIPHIDE_FILE_ID != '' }}
         uses: Nexus-Mods/upload-action@c96019556046053aa26044b44396cd38929daf23 # v1.0.0-beta.10
@@ -302,8 +301,8 @@ jobs:
           description: ${{ steps.prepare-release.outputs.NEXUS_DESCRIPTION }}
           category: main
           archive_existing_version: false
-          primary_mod_manager_download: false
-          allow_mod_manager_download: false
+          primary_mod_manager_download: true
+          allow_mod_manager_download: true
           show_requirements_pop_up: true
           update_mod_version: true
           mod_id: ${{ vars.NEXUSMODS_EQUIPHIDE_MOD_ID }}
