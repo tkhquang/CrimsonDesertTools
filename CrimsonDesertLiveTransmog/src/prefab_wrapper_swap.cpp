@@ -8,6 +8,7 @@
 #include "real_part_tear_down.hpp"
 #include "shared_state.hpp"
 #include "slot_metadata.hpp"
+#include "static_info_manager.hpp"
 #include "transmog.hpp"
 #include "transmog_map.hpp"
 
@@ -53,15 +54,12 @@ namespace Transmog::prefab_wrapper_swap
 
     // Constants
     //
-    // StringInfo registry (pa::StringInfoManager, a pa::StaticInfoManager2<> subclass):
-    //   +0x08 count u32, +0x58 array_ptr (QWORD entry-ptrs)
+    // StringInfo registry (pa::StringInfoManager, a pa::StaticInfoManager2<> subclass). Its count and row array are
+    // the shared base layout owned by static_info_manager.hpp. Each row's definition pointer names one entry below.
     //
-    // The array_ptr offset moves whenever the pa::StaticInfoManager2 base changes width. The count at +0x08 and the
-    // per-entry layout below sit ahead of the growth point, so they stay put. A stale array_ptr offset fails SILENTLY:
-    // the neighboring offset also dereferences to a valid heap pointer (a filename string blob), so the plausibility
-    // guard below does not trip and the walk emits garbage instead of a bail. Verify this offset against live memory
-    // on patch day. Do NOT blanket-apply a base-width change to every registry. Sibling registries move their
-    // container fields independently, and one can shrink while this one grows.
+    // A stale container offset fails SILENTLY: the neighboring offset also dereferences to a valid heap pointer, so
+    // the plausibility guard below does not trip and the walk emits garbage instead of a bail. Verify the layout
+    // against live memory on patch day.
     // Per-entry layout:
     //   +0x00 the StringInfo sentinel (resolved into s_string_info_vtable: the engine's static empty wrapper),
     //   +0x08 u32 name hash, +0x10 wrapper-ptr
@@ -76,10 +74,6 @@ namespace Transmog::prefab_wrapper_swap
     //   +0x14 mode flag, +0x15 tombstone
 
     // Layout / sanity constants (compile-time only, not patchable).
-    /// u32 entry count.
-    constexpr std::size_t STRING_INFO_COUNT_OFF = 0x08;
-    /// Qword base of the entry-ptr array.
-    constexpr std::size_t STRING_INFO_ARRAY_OFF = 0x58;
     constexpr std::size_t ENTRY_SENTINEL_OFF = 0x00;
     constexpr std::size_t ENTRY_HASH_OFF = 0x08;
     constexpr std::size_t WRAPPER_PTR_OFF = 0x10;
@@ -812,24 +806,29 @@ namespace Transmog::prefab_wrapper_swap
             }
         }
         const auto count =
-            DMK::memory::read<std::uint32_t>(DMK::Address{registry_ptr + STRING_INFO_COUNT_OFF}).value_or(0);
+            DMK::memory::read<std::uint32_t>(DMK::Address{registry_ptr + static_info::COUNT_OFFSET}).value_or(0);
         const auto array_ptr =
-            DMK::memory::read<std::uint64_t>(DMK::Address{registry_ptr + STRING_INFO_ARRAY_OFF}).value_or(0);
+            DMK::memory::read<std::uint64_t>(DMK::Address{registry_ptr + static_info::ENTRY_ARRAY_OFFSET}).value_or(0);
         if (count < MIN_PLAUSIBLE_COUNT || count > MAX_PLAUSIBLE_COUNT ||
             !DMK::memory::is_plausible_ptr(DMK::Address{array_ptr}))
             return 0;
 
-        // Bulk-copy entry-pointer array so the inner loop reads from process memory without a per-element SEH frame.
-        // Falls back to per-entry SEH reads if the bulk copy faults.
-        std::vector<std::uintptr_t> entry_ptrs;
-        const std::size_t array_bytes = static_cast<std::size_t>(count) * sizeof(std::uintptr_t);
+        // Bulk-copy the row array so the inner loop reads from process memory without a per-element SEH frame. Falls
+        // back to per-row SEH reads if the bulk copy faults. The copy holds whole rows, so an entry pointer sits at
+        // every ROW_WORDS-th qword.
+        constexpr std::size_t ROW_WORDS = static_info::ENTRY_STRIDE / sizeof(std::uintptr_t);
+        constexpr std::size_t ROW_DEF_WORD = static_cast<std::size_t>(static_info::DEF_OFFSET) / sizeof(std::uintptr_t);
+        static_assert(static_info::ENTRY_STRIDE % sizeof(std::uintptr_t) == 0);
+        static_assert(static_cast<std::size_t>(static_info::DEF_OFFSET) % sizeof(std::uintptr_t) == 0);
+        std::vector<std::uintptr_t> row_words;
+        const std::size_t array_bytes = static_cast<std::size_t>(count) * static_info::ENTRY_STRIDE;
         bool bulk_ok = false;
         if (array_bytes > 0)
         {
-            entry_ptrs.resize(count);
+            row_words.resize(static_cast<std::size_t>(count) * ROW_WORDS);
             bulk_ok = DMK::memory::read_into(
                           DMK::Address{array_ptr},
-                          std::span{reinterpret_cast<std::byte *>(entry_ptrs.data()), array_bytes}
+                          std::span{reinterpret_cast<std::byte *>(row_words.data()), array_bytes}
             )
                           .has_value();
         }
@@ -873,8 +872,9 @@ namespace Transmog::prefab_wrapper_swap
         for (std::uint32_t i = 0; i < count; ++i)
         {
             const std::uintptr_t entry_ptr =
-                bulk_ok ? entry_ptrs[i]
-                        : DMK::memory::read<std::uint64_t>(DMK::Address{array_ptr + 8ULL * i}).value_or(0);
+                bulk_ok
+                    ? row_words[static_cast<std::size_t>(i) * ROW_WORDS + ROW_DEF_WORD]
+                    : DMK::memory::read<std::uint64_t>(DMK::Address{static_info::def_slot(array_ptr, i)}).value_or(0);
             if (!DMK::memory::is_plausible_ptr(DMK::Address{entry_ptr}))
                 continue;
             ++scanned;

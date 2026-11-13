@@ -4,6 +4,7 @@
 #include "item_name_table.hpp"
 #include "prefab_wrapper_swap.hpp"
 #include "shared_state.hpp"
+#include "static_info_manager.hpp"
 #include "transmog_map.hpp"
 
 #include <DetourModKit.hpp>
@@ -35,16 +36,13 @@ namespace Transmog
         // process. Neither carries an AOB cascade: a per-manager accessor is a byte-identical template clone that
         // differs only in its RIP displacement, so a global pattern can never be unique. The iteminfo holder
         // therefore comes from ItemNameTable's bounded call-graph walk, and the stringinfo holder IS the
-        // StringInfoRegistry slot. Both holders dereference to a registry struct with the standard
-        // `+0x08 = u32 count`, `+0x58 = QWORD entry-array` layout.
+        // StringInfoRegistry slot. Both holders dereference to a registry struct with the shared
+        // pa::StaticInfoManager2 layout that static_info_manager.hpp owns. Every row index goes through
+        // static_info::def_slot.
         //
-        // The entry-array offset moves whenever the pa::StaticInfoManager2<> base changes width. The count sits ahead
-        // of the growth point and stays put, so usually only the array offset needs a new value. A stale array offset
-        // fails SILENTLY: the neighboring offset also holds a valid heap pointer, to a different small-stride array,
-        // so no plausibility guard trips and the walk yields nothing useful. On patch day, verify both offsets against
-        // live memory.
-        constexpr ptrdiff_t OFF_REGISTRY_COUNT = 0x08;
-        constexpr ptrdiff_t OFF_REGISTRY_ARRAY = 0x58;
+        // A stale container offset fails SILENTLY: the neighboring offset also holds a valid heap pointer, so no
+        // plausibility guard trips and the walk yields nothing useful. On patch day, verify the layout against live
+        // memory.
 
         constexpr ptrdiff_t OFF_NAME = 0x00;
         constexpr ptrdiff_t OFF_META_SUB = 0x110;
@@ -337,7 +335,7 @@ namespace Transmog
             std::size_t added = 0;
             for (uint32_t i = 0; i < stringCount; ++i)
             {
-                const uintptr_t wrap = read_qword_safe(string_arr + i * 8ull, ok);
+                const uintptr_t wrap = read_qword_safe(static_info::def_slot(string_arr, i), ok);
                 if (!ok || !wrap)
                     continue;
                 const std::string s = read_wrapper_string(wrap);
@@ -727,7 +725,7 @@ namespace Transmog
                 bool ok = false;
                 for (uint32_t id = 0; id < (std::min)(itemCount, probe_scan_cap); ++id)
                 {
-                    const uintptr_t desc = read_qword_safe(item_arr + static_cast<uintptr_t>(id) * 8, ok);
+                    const uintptr_t desc = read_qword_safe(static_info::def_slot(item_arr, id), ok);
                     if (!ok || !DMK::memory::is_plausible_ptr(DMK::Address{desc}))
                         continue;
                     if (variant_list_shape_ok(desc, off, stringCount))
@@ -845,7 +843,7 @@ namespace Transmog
                 const uint16_t slot = static_cast<uint16_t>(handle & 0xFFFFu);
                 if (slot == 0xFFFF || slot >= stringCount)
                     continue;
-                const uintptr_t wrap = read_qword_safe(string_arr + static_cast<uintptr_t>(slot) * 8, ok);
+                const uintptr_t wrap = read_qword_safe(static_info::def_slot(string_arr, slot), ok);
                 std::string mesh = to_lower(read_wrapper_string(wrap));
                 if (mesh.empty() || !starts_with_asset_prefix(mesh) || mesh.find("dropitem") != std::string::npos)
                     continue;
@@ -900,10 +898,10 @@ namespace Transmog
                     stringinfo_holder_addr ? read_qword_safe(stringinfo_holder_addr, ok) : 0;
                 if (iteminfo_mgr && stringinfo_mgr)
                 {
-                    s_item_count = read_u32_safe(iteminfo_mgr + OFF_REGISTRY_COUNT, ok);
-                    s_item_arr = read_qword_safe(iteminfo_mgr + OFF_REGISTRY_ARRAY, ok);
-                    s_string_count = read_u32_safe(stringinfo_mgr + OFF_REGISTRY_COUNT, ok);
-                    s_string_arr = read_qword_safe(stringinfo_mgr + OFF_REGISTRY_ARRAY, ok);
+                    s_item_count = read_u32_safe(iteminfo_mgr + static_info::COUNT_OFFSET, ok);
+                    s_item_arr = read_qword_safe(iteminfo_mgr + static_info::ENTRY_ARRAY_OFFSET, ok);
+                    s_string_count = read_u32_safe(stringinfo_mgr + static_info::COUNT_OFFSET, ok);
+                    s_string_arr = read_qword_safe(stringinfo_mgr + static_info::ENTRY_ARRAY_OFFSET, ok);
                     s_ready = s_item_arr && s_string_arr && s_item_count && s_string_count;
                 }
             }
@@ -918,7 +916,7 @@ namespace Transmog
             return {};
 
         bool ok = false;
-        const uintptr_t desc = read_qword_safe(item_arr + static_cast<uint64_t>(item_id) * 8, ok);
+        const uintptr_t desc = read_qword_safe(static_info::def_slot(item_arr, item_id), ok);
         if (!ok || !DMK::memory::is_plausible_ptr(DMK::Address{desc}))
             return {};
 
@@ -974,8 +972,8 @@ namespace Transmog
         // accessors are byte-identical template clones that differ only in their RIP displacement, so a global
         // pattern cut from one matches every manager at once. The iteminfo holder comes from ItemNameTable's bounded
         // call-graph walk, and the stringinfo holder IS the StringInfoRegistry slot - the same global under two
-        // names. One indirection yields the registry struct (header, then the count at OFF_REGISTRY_COUNT, then the
-        // entry array at OFF_REGISTRY_ARRAY).
+        // names. One indirection yields the registry struct, whose count and row array static_info_manager.hpp
+        // describes.
         const uintptr_t iteminfo_holder_addr = ItemNameTable::instance().iteminfo_holder_addr();
         const uintptr_t stringinfo_holder_addr = anchor_address(AnchorId::StringInfoRegistry);
         if (!iteminfo_holder_addr || !stringinfo_holder_addr)
@@ -1002,10 +1000,10 @@ namespace Transmog
             );
             return;
         }
-        const uint32_t itemCount = read_u32_safe(iteminfo_mgr + OFF_REGISTRY_COUNT, ok);
-        const uintptr_t item_arr = read_qword_safe(iteminfo_mgr + OFF_REGISTRY_ARRAY, ok);
-        const uint32_t stringCount = read_u32_safe(stringinfo_mgr + OFF_REGISTRY_COUNT, ok);
-        const uintptr_t string_arr = read_qword_safe(stringinfo_mgr + OFF_REGISTRY_ARRAY, ok);
+        const uint32_t itemCount = read_u32_safe(iteminfo_mgr + static_info::COUNT_OFFSET, ok);
+        const uintptr_t item_arr = read_qword_safe(iteminfo_mgr + static_info::ENTRY_ARRAY_OFFSET, ok);
+        const uint32_t stringCount = read_u32_safe(stringinfo_mgr + static_info::COUNT_OFFSET, ok);
+        const uintptr_t string_arr = read_qword_safe(stringinfo_mgr + static_info::ENTRY_ARRAY_OFFSET, ok);
         logger.info(
             "[itemprefab] iteminfo: count={} arr=0x{:X}  stringinfo: count={} arr=0x{:X}",
             itemCount,
@@ -1068,7 +1066,7 @@ namespace Transmog
         uint32_t skipped = 0;
         for (uint32_t id = 0; id < itemCount; ++id)
         {
-            const uintptr_t desc = read_qword_safe(item_arr + id * 8ull, ok);
+            const uintptr_t desc = read_qword_safe(static_info::def_slot(item_arr, id), ok);
             if (!desc)
             {
                 ++skipped;
@@ -1103,7 +1101,7 @@ namespace Transmog
                 ++skipped;
                 continue;
             }
-            const uintptr_t wrap = read_qword_safe(string_arr + slot * 8ull, ok);
+            const uintptr_t wrap = read_qword_safe(static_info::def_slot(string_arr, slot), ok);
             const std::string full = read_wrapper_string(wrap);
             if (full.empty())
             {

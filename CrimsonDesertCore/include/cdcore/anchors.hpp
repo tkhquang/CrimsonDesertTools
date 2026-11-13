@@ -479,7 +479,7 @@ namespace CDCore::anchors
         //   mov [rip+disp32], reg         ; <- publishes the manager, slot +0
         //   lea reg2, [reg+subobj]
         //   mov [rip+disp32], reg2        ; sibling slot +8
-        //   lea reg2, [reg+subobj]
+        //   lea reg2, [reg+subobj]  OR  mov reg2, [rbp+local]
         //   mov [rip+disp32], reg2        ; sibling slot +16
         //   movzx eax, byte [rbp+X]
         //   mov [rip+disp32], al          ; state flag, sibling slot +24
@@ -495,8 +495,12 @@ namespace CDCore::anchors
         // re-derive them from. The publish register is likewise compiler-owned, which is why the store's REX and
         // ModRM and the leas' base register are wildcards too.
         //
-        // What carries the match is the instruction skeleton: a publish store of the incoming pointer, two `lea`+store
-        // pairs publishing sub-pointers into consecutive global slots, then a byte-sized state flag into the fourth. No
+        // The second sibling's source is compiler-owned as well: it is either a second `lea` off the manager or a
+        // reload of the same sub-pointer from a frame local (`mov rax,[rbp+disp32]`). Both are 7 bytes and both open
+        // on `4? 8?`, so that instruction keeps only its REX nibble and its opcode's high nibble.
+        //
+        // What carries the match is the instruction skeleton: a publish store of the incoming pointer, two stores that
+        // publish sub-pointers into consecutive global slots, then a byte-sized state flag into the fourth. No
         // other publish block in the image emits that tail. Every wildcarded instruction keeps a fixed length, so the
         // disp32 of the publish store stays at match+3 and the instruction ends at match+7. require_unique keeps the
         // row honest if a future build duplicates the shape.
@@ -504,14 +508,14 @@ namespace CDCore::anchors
         // 4? 89 ?? ?? ?? ?? ??   mov [rip+d32], reg
         // 4? 8D ?? ?? ?? ?? ??   lea reg, [reg+d32]
         // 48 89 05 ?? ?? ?? ??   mov [rip+d32], rax
-        // 4? 8D ?? ?? ?? ?? ??   lea reg, [reg+d32]
+        // 4? 8? ?? ?? ?? ?? ??   lea reg, [reg+d32] / mov reg, [rbp+d32]
         // 48 89 05 ?? ?? ?? ??   mov [rip+d32], rax
         // 0F B6 85 ?? ?? ?? ??   movzx eax, byte [rbp+d32]
         // 88 05                  mov [rip+d32], al (truncated)
         Candidate::rip_relative(
             "ClientActorManagerGlobal_P1_PublishStore",
             Pattern::literal(
-                "4? 89 ?? ?? ?? ?? ?? 4? 8D ?? ?? ?? ?? ?? 48 89 05 ?? ?? ?? ?? 4? 8D ?? ?? ?? ?? ?? "
+                "4? 89 ?? ?? ?? ?? ?? 4? 8D ?? ?? ?? ?? ?? 48 89 05 ?? ?? ?? ?? 4? 8? ?? ?? ?? ?? ?? "
                 "48 89 05 ?? ?? ?? ?? 0F B6 85 ?? ?? ?? ?? 88 05"
             ),
             3,
@@ -519,7 +523,7 @@ namespace CDCore::anchors
         ),
 
         // P2 - the only READ of the slot: the same lazy-init function later leas it as an outbound argument.
-        //   <loop tail: add rsi,0x10 ; sub r14,1 ; jne>
+        //   <loop tail: lea rcx,[rcx+0x10] ; sub r8,1 ; jne ; jmp over the zeroing xor ; xor ebx,ebx>
         //   lea rdx, cs:[rip+slot]        ; 48 8D 15 + disp32, the resolved instruction, marked with `|`
         //   lea rcx, [rbp+disp8]          ; 48 8D 4D + disp8
         //   call helper ; nop
@@ -528,13 +532,20 @@ namespace CDCore::anchors
         //
         // Both halves of the window earn their length. The post-call tail is needed because the leading lea/lea/call
         // shape alone matches many unrelated sites, and the leading loop tail is needed because the
-        // lea/lea/call/nop/vpxor block itself occurs TWICE in this function. The loop-tail `jne` sits in a `[2-6]`
-        // bounded gap, so a rel8-to-rel32 widening keeps the row alive; the resolver adds the gap width before it
-        // applies the `|` marker, so the marker still lands on the lea.
+        // lea/lea/call/nop/vpxor block itself occurs TWICE in this function. The other copy (which loads a NEIGHBORING
+        // global) is entered straight from its loop's `jne`. Only this one is reached through a short `jmp` over a
+        // register-zeroing `xor`, and that jmp/xor pair is what the row discriminates on.
         //
-        // 48 83 C6 10            add rsi, 0x10
-        // 49 83 EE 01            sub r14, 0x1
+        // The loop's pointer step, its counter and the zeroed register are compiler-owned, so the row keeps only the
+        // REX and ModRM high nibbles of each and the immediates the loop's element size fixes. The `jne` sits in a
+        // `[2-6]` bounded gap, so a rel8-to-rel32 widening keeps the row alive. The resolver adds the gap width before
+        // it applies the `|` marker, so the marker still lands on the lea.
+        //
+        // 48 8D 4? 10            lea rcx, [rcx+0x10]
+        // 4? 83 E? 01            sub r8, 0x1
         // [2-6]                  jne <rel8 or rel32>
+        // EB 02                  jmp <over the xor>
+        // 33 ??                  xor ebx, ebx
         // 48 8D 15 ?? ?? ?? ??   lea rdx, [rip+d32]   <- result offset
         // 48 8D 4D ??            lea rcx, [rbp-d8]
         // E8 ?? ?? ?? ??         call <rel32>
@@ -544,8 +555,8 @@ namespace CDCore::anchors
         Candidate::rip_relative(
             "ClientActorManagerGlobal_P2_LeaCallBodyDisp8",
             Pattern::literal(
-                "48 83 C6 10 49 83 EE 01 [2-6] | 48 8D 15 ?? ?? ?? ?? 48 8D 4D ?? E8 ?? ?? ?? ?? 90 C6 44 24 ?? 00 "
-                "C5 F9 EF C0"
+                "48 8D 4? 10 4? 83 E? 01 [2-6] EB 02 33 ?? | 48 8D 15 ?? ?? ?? ?? 48 8D 4D ?? E8 ?? ?? ?? ?? 90 "
+                "C6 44 24 ?? 00 C5 F9 EF C0"
             ),
             3,
             7

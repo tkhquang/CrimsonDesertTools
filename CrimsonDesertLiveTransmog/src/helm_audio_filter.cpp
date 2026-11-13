@@ -37,13 +37,12 @@ namespace Transmog::helm_audio_filter
                                                           char,
                                                           std::int64_t);
 
-        // Engine's u16-tag -> skill record resolver. It takes the tag by value in edx (the registrar loads it with
-        // `movzx edx, word [a3]`, and rcx is never read) and indexes the SkillInfoManager entry array at manager+0x58,
-        // then returns the record pointer. An out-of-range or unbound tag yields the manager's default record
-        // instead. The returned record carries the per-level entry table at SKILL_RECORD_LEVEL_TABLE_OFFSET. The
-        // entry-array displacement tracks the pa::StaticInfoManager2 layout and moves whenever that base changes
-        // width, so verify it against live memory on patch day.
-        using SkillTagResolverFn = std::int64_t (*)(std::int64_t, std::uint32_t);
+        // Engine's u16-tag -> skill record resolver. It takes a POINTER to the tag in rcx (the registrar passes `a3`
+        // straight through) and indexes the SkillInfoManager row array (static_info_manager.hpp), then returns the
+        // record pointer. An out-of-range or unbound tag yields the manager's default record instead. The returned
+        // record carries the per-level entry table at SKILL_RECORD_LEVEL_TABLE_OFFSET. The calling convention changes
+        // between builds together with SKILL_TAG_RESOLVER_BODY_AOB, so verify both against live memory on patch day.
+        using SkillTagResolverFn = std::int64_t (*)(const std::uint16_t *);
 
         // Skill record -> per-level entry table. The registrar reads the same field right after its own resolver
         // call (`mov rdx,[rax+disp8]`). A stale value here fails silently: no record's chain reaches the
@@ -275,7 +274,7 @@ namespace Transmog::helm_audio_filter
         // the entry's vtable, and returns true iff the entry's class is `pa::GameAudioEffectBuffData`.
         //
         // Chain:
-        //   record       = skill_tag_resolver(0, *a3)         // engine resolver
+        //   record       = skill_tag_resolver(a3)             // engine resolver
         //   level_table  = *(record + SKILL_RECORD_LEVEL_TABLE_OFFSET)
         //   inner_arr    = *(level_table + 0x00)              // first inner ptr
         //   first_entry  = *(inner_arr + 0x00)                // level 1 entry #1
@@ -304,11 +303,12 @@ namespace Transmog::helm_audio_filter
             // iteminfo refresh can publish a stale pointer mid-equip. The trampoline detour is reached from arbitrary
             // equip threads. Our own SEH frame around the call is cheaper than a proof of the engine's invariants, and
             // a fault here then passes through to the registrar instead of a crash.
-            // The tag read sits inside the same frame, since a3 is the pointer a torn refresh can leave stale.
+            // The resolver reads the tag through a3 inside the same frame, since a3 is the pointer a torn refresh can
+            // leave stale.
             std::int64_t record = 0;
             __try
             {
-                record = resolver(0, *a3);
+                record = resolver(a3);
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
@@ -832,7 +832,7 @@ namespace Transmog::helm_audio_filter
                 ++scanned;
                 const auto match = reinterpret_cast<std::uintptr_t>(hit);
 
-                // mov rbx,[rip+disp32]: the 2-byte tag move, then 48 8B 1D + disp32. disp32 sits at body offset
+                // mov rcx,[rip+disp32]: the 4-byte tag capture, then 48 8B 0D + disp32. disp32 sits at body offset
                 // +DispOffset. The mov ends at +InstrEnd, which is the RIP base for it. resolve_rip_relative adds
                 // the base and the displacement exactly the same way, reads the disp32 under the fault guard, and
                 // rejects an implausible target before it reaches the host-image screen below.

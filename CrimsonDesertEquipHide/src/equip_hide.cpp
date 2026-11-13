@@ -315,12 +315,16 @@ namespace EquipHide
             return;
         const auto part_hash = *hash_read;
 
-        if (!needs_classification(part_hash))
+        // Gate on every protagonist's Parts, not the controlled one's. A per-character override that empties a
+        // category for the controlled protagonist (`[Chest:Damiane] Parts = NONE`) otherwise drops the other
+        // protagonists' frames here, before the per-character lookup below. The mid-hook then neither writes vis=2 nor
+        // holds the chest lock for them, so the engine re-shows what the direct write hid, and the part flashes.
+        if (!needs_classification_any(part_hash))
             return;
 
+        // The controlled protagonist's view. The cascade guard below and untracked actors use it. A tracked
+        // protagonist is reclassified through its own map after the player filter.
         const auto mask = classify_part(part_hash);
-        if (mask == 0)
-            return;
 
         // PartInOut struct pointer, the decision function's third argument. The hooked `movzx r11d, byte [r8+0x20]`
         // reads the visibility byte through it and the branch after the exclusion walk reads its transition byte at
@@ -337,7 +341,9 @@ namespace EquipHide
 
         // Protect legs from cascade during the brief window after a hotkey toggle. Without this guard, a shield
         // show/hide triggers a re-evaluation that flashes the pants.
-        if (cascade_on)
+        // Only a hash in the controlled view counts down the guard window, so another protagonist's frames cannot
+        // spend it before the controlled protagonist's legs re-evaluate.
+        if (cascade_on && mask != 0)
         {
             auto guard = s_flush_guard.load(std::memory_order_relaxed);
             if (guard > 0 && s_flush_guard.compare_exchange_strong(guard, guard - 1, std::memory_order_relaxed))
@@ -387,11 +393,9 @@ namespace EquipHide
         // legacy behavior and falls back to the global mask computed earlier.
         CategoryMask char_mask = mask;
         if (char_idx >= 0 && char_idx < static_cast<int>(CHAR_IDX_COUNT))
-        {
             char_mask = classify_part_for(part_hash, char_idx);
-            if (char_mask == 0)
-                return; // hash excluded from this character's effective Parts
-        }
+        if (char_mask == 0)
+            return; // hash excluded from this character's effective Parts, or untracked and not in the controlled view
 
         const bool hidden = is_any_category_hidden_for(char_mask, char_idx);
 

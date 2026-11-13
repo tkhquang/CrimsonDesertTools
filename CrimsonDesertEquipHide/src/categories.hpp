@@ -180,6 +180,15 @@ namespace EquipHide
      */
     [[nodiscard]] bool needs_classification(uint32_t hash) noexcept;
 
+    /**
+     * @brief Pre-filter for hooks that see every protagonist: true if the hash is classified for ANY of them.
+     * @details needs_classification() answers for the controlled protagonist only, so a per-character Parts override
+     *          that empties a category for that protagonist makes it reject the other protagonists' hashes in that
+     *          category. A caller that resolves the frame's protagonist afterwards gates on this one and then
+     *          classifies through classify_part_for().
+     */
+    [[nodiscard]] bool needs_classification_any(uint32_t hash) noexcept;
+
     /** @brief Returns true if a specific category is currently hidden (and enabled). */
     [[nodiscard]] bool is_category_hidden(Category cat) noexcept;
 

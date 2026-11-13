@@ -56,8 +56,10 @@ namespace CDCore
          * @details The engine can intern a slot part name without the `CD_` prefix (`MainWeapon_Sword_R` for
          *          `CD_MainWeapon_Sword_R`), while the callers' part lists, INI files and presets use the prefixed
          *          spelling. When set, an entry that lacks the prefix is offered to this predicate under its PREFIXED
-         *          spelling and, if accepted, reported under that key. An entry interned with the prefix always wins
-         *          over an aliased one. Left null, the scan matches the prefix only.
+         *          spelling and, if accepted, reported under that key. When both spellings of one name are interned,
+         *          the unprefixed entry wins and the scan logs the collision once. The engine's part names carry no
+         *          prefix, so a prefixed twin comes from stale data such as an outdated mod prefab. A win for that
+         *          twin retargets the part for every character. Left null, the scan matches the prefix only.
          * @note Called from the scanning thread for every unprefixed entry, so it must be cheap and thread-safe.
          */
         bool (*accept_unprefixed)(std::string_view prefixed_name) = nullptr;

@@ -114,17 +114,17 @@ namespace Transmog
         /**
          * @brief Read the live descriptor pointer for an item.
          *
-         * Dereferences the iteminfo global cached during build(), walks `*(global_ptr + ITEMINFO_PTR_ARRAY_OFFSET)`
-         * (ptr_array) and returns `ptr_array[item_id*8]`. Returns 0 on any fault or if the catalog is not yet built.
-         * Thread-safe. It reads only and never mutates.
+         * Dereferences the iteminfo global cached during build(), walks to its row array (ptr_array) and returns the
+         * definition pointer of row `item_id` (static_info::def_slot). Returns 0 on any fault or if the catalog is not
+         * yet built. Thread-safe. It reads only and never mutates.
          */
         [[nodiscard]] uintptr_t descriptor_of(uint16_t item_id) const noexcept;
 
         /**
-         * @brief Live ptr_array base and entry count.
+         * @brief Live row-array base and entry count.
          *
          * Returns {ptr_array, count}. Either or both can be 0 if the catalog global is not yet initialized. Callers
-         * MUST verify both > 0 before indexing.
+         * MUST verify both > 0 before an index, and index rows through static_info::def_slot.
          */
         struct CatalogInfo
         {

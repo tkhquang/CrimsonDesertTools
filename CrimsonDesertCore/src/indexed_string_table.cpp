@@ -7,7 +7,10 @@
 #include <excpt.h>
 
 #include <chrono>
+#include <mutex>
+#include <string>
 #include <string_view>
+#include <unordered_set>
 
 namespace CDCore
 {
@@ -21,6 +24,27 @@ namespace CDCore
 
         /** @brief Prologue window the scanner sweeps for the `mov rax, [rip+disp32]` that names the global. */
         constexpr std::size_t RIP_ANCHOR_SEARCH_BYTES = 0x40;
+
+        /**
+         * @brief Collisions already reported, keyed by name and both hashes.
+         * @details The deferred and lazy scans repeat the sweep for the life of the process. The set keeps each
+         *          collision to one warning. A new stale entry for the same name still reports, because its hash is
+         *          part of the key.
+         */
+        std::mutex s_reported_collisions_mutex;
+        std::unordered_set<std::string> s_reported_collisions;
+
+        /** @brief True the first time this exact collision is seen in this process. */
+        bool first_report_of(std::string_view name, std::uint32_t bare_hash, std::uint32_t prefixed_hash)
+        {
+            std::string key{name};
+            key += '@';
+            key += std::to_string(bare_hash);
+            key += '/';
+            key += std::to_string(prefixed_hash);
+            std::lock_guard<std::mutex> lock(s_reported_collisions_mutex);
+            return s_reported_collisions.insert(std::move(key)).second;
+        }
 
         /**
          * @brief Copy entry[hash]'s string into @p buf, but only when it starts with @p prefix.
@@ -151,10 +175,13 @@ namespace CDCore
         const std::string_view read_prefix = alias_unprefixed ? std::string_view{} : prefix;
 
         const auto scan_start = std::chrono::steady_clock::now();
-        std::uint32_t entries = 0;
         std::uint32_t aliased = 0;
         char buf[MAX_STRING_LEN + 1];
         std::string alias_key;
+
+        // Unprefixed entries collect apart from the prefixed ones, so the merge below decides between the two
+        // spellings of one name regardless of which hash the sweep reaches first.
+        std::unordered_map<std::string, std::uint32_t> unprefixed_to_hash;
 
         for (std::uint32_t hash = cfg.table_scan_min; hash <= cfg.table_scan_max; ++hash)
         {
@@ -166,18 +193,43 @@ namespace CDCore
             if (name.starts_with(prefix))
             {
                 name_to_hash[std::string(name)] = hash;
-                ++entries;
                 continue;
             }
 
             alias_key.assign(prefix);
             alias_key.append(name);
-            if (cfg.accept_unprefixed(alias_key) && name_to_hash.try_emplace(alias_key, hash).second)
+            if (cfg.accept_unprefixed(alias_key))
+                unprefixed_to_hash.try_emplace(alias_key, hash);
+        }
+
+        // The unprefixed spelling wins. The engine's own part names carry no prefix, so when both spellings are
+        // interned, the prefixed one came from data that still uses the old names, usually a mod prefab built for an
+        // older game version. That entry carries its own hash, and every character shares the hash table. A win for
+        // the prefixed entry therefore redirects the part for all of them, and the feature stops everywhere at once.
+        for (const auto &[key, hash] : unprefixed_to_hash)
+        {
+            ++aliased;
+            const auto [it, inserted] = name_to_hash.try_emplace(key, hash);
+            if (inserted || it->second == hash)
+                continue;
+
+            const auto prefixed_hash = it->second;
+            it->second = hash;
+            if (first_report_of(key, hash, prefixed_hash))
             {
-                ++entries;
-                ++aliased;
+                logger.warning(
+                    "{}: '{}' is interned both without the prefix (0x{:X}) and with it (0x{:X}). Using 0x{:X}, the "
+                    "engine's part name. The prefixed copy comes from data that still uses the old part names, "
+                    "usually an outdated mod prefab, and items built from that data are not matched",
+                    cfg.log_label,
+                    key,
+                    hash,
+                    prefixed_hash,
+                    hash
+                );
             }
         }
+        const auto entries = name_to_hash.size();
 
         const auto scan_end = std::chrono::steady_clock::now();
         const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(scan_end - scan_start).count();

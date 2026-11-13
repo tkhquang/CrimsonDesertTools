@@ -441,6 +441,14 @@ namespace CDCore
             if (DMK::memory::is_plausible_ptr(DMK::Address{cached}))
                 return cached;
 
+            // A miss is terminal. The ladder signs code in the host image, and that code does not change for the life
+            // of the process, so a scan that found nothing once finds nothing again. Every chain walk reaches this
+            // point, several times per second from each mod, and a whole-image sweep on each walk stalls the game. The
+            // latch turns a broken ladder into one error line and a dead chain instead of a frame-rate collapse.
+            static std::atomic<bool> s_scan_failed{false};
+            if (s_scan_failed.load(std::memory_order_acquire))
+                return 0;
+
             // The scan scope is the host image: faster than a whole-process walk, and immune to a generic-shaped
             // candidate first-matching inside a sibling mod or an overlay. Pages::Executable narrows the byte sweep to
             // code pages, because every rung anchors on an instruction inside the publishing function and an identical
@@ -455,18 +463,28 @@ namespace CDCore
             );
             if (!hit)
             {
-                DMK::log().warning("ClientActorManagerGlobal did not resolve: {}", hit.error().message());
+                if (!s_scan_failed.exchange(true, std::memory_order_acq_rel))
+                {
+                    DMK::log().error(
+                        "ClientActorManagerGlobal did not resolve: {}. Controlled-character detection stays off for "
+                        "this session. Re-derive the ladder for this game build",
+                        hit.error().message()
+                    );
+                }
                 return 0;
             }
 
             const auto addr = hit->address.raw();
             if (!DMK::memory::is_plausible_ptr(DMK::Address{addr}))
             {
-                DMK::log().warning(
-                    "ClientActorManagerGlobal resolved to an implausible slot address {:#x}: the chain stays "
-                    "unresolved",
-                    addr
-                );
+                if (!s_scan_failed.exchange(true, std::memory_order_acq_rel))
+                {
+                    DMK::log().error(
+                        "ClientActorManagerGlobal resolved to an implausible slot address {:#x}: the chain stays "
+                        "unresolved for this session",
+                        addr
+                    );
+                }
                 return 0;
             }
             // Every walk reads the manager through this slot, so the publish must release.

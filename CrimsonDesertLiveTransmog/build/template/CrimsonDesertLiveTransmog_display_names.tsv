@@ -808,12 +808,12 @@ Colbill_Leather_Armor_I	Colbill Leather Armor	Male
 Collection_Lamp_Candle_0001	Icy White Glass Lamp
 Collection_Lamp_Candle_0001_index01	Twilight Glass Lamp
 Collection_Lamp_Candle_0001_index02	Lilac Glass Lamp
-Collection_Lamp_Candle_0002	Icy White Pavilion Glass Lamp
-Collection_Lamp_Candle_0002_index01	Twilight Pavilion Glass Lamp
-Collection_Lamp_Candle_0002_index02	Lilac Pavilion Glass Lamp
-Collection_Lamp_Candle_0003	Icy White Watchtower Glass Lamp
-Collection_Lamp_Candle_0003_index01	Twilight Watchtower Glass Lamp
-Collection_Lamp_Candle_0003_index02	Lilac Watchtower Glass Lamp
+Collection_Lamp_Candle_0002	Icy White Glass Pavilion Lamp
+Collection_Lamp_Candle_0002_index01	Twilight Glass Pavilion Lamp
+Collection_Lamp_Candle_0002_index02	Lilac Glass Pavilion Lamp
+Collection_Lamp_Candle_0003	Icy White Glass Watchtower Lamp
+Collection_Lamp_Candle_0003_index01	Twilight Glass Watchtower Lamp
+Collection_Lamp_Candle_0003_index02	Lilac Glass Watchtower Lamp
 Collection_Lamp_Candle_0004	Icy White Hexagonal Lamp
 Collection_Lamp_Candle_0004_index01	Twilight Hexagonal Lamp
 Collection_Lamp_Candle_0004_index02	Lilac Hexagonal Lamp
@@ -928,7 +928,7 @@ Collection_Prop_Ceramic_0010	Gray Two-Handled Jar
 Collection_Prop_Ceramic_0011	Brown Two-Handled Jar
 Collection_Prop_Ceramic_0012	Red One-Handled Jar
 Collection_Prop_Ceramic_0013	Gray Jar
-Collection_Prop_Ceramic_0014	Ocher Jar
+Collection_Prop_Ceramic_0014	Red Clay Jar
 Collection_Prop_Ceramic_0015	Small Storage Jar
 Collection_Prop_Ceramic_0016	Large Medicine Jar
 Collection_Prop_Ceramic_0017	Cylindrical Jar
@@ -1355,6 +1355,7 @@ Dayseorun_Leather_Gloves	Derrison Leather Gloves	Male
 Deactived_Abyss_Artifact	Faded Abyss Artifact
 Dealinger_Fabric_Armor	Dillinger Cloth Armor	Male
 Dealinger_OneHandTowerShield	Mass-Produced Large Rekel Shield
+Deberon_Fabric_Helm	Devron Cloth Cap	Male
 Deboros_Leather_Armor	Deboros Leather Armor	Male
 Decoy_Human_I	Fake Silver Pouch
 Deekz_Fabric_Armor	Diggs Cloth Armor	Male
@@ -2170,10 +2171,15 @@ Gobialthai_Leather_Gloves	Gobialta Leather Gloves	Male
 Goblin_Boss_OneHandSword	Lightningblade of Greed
 Goblin_Director_House_Key	Overseer's House Key
 Goblin_Fight_PlateArmor_Gloves	Goblin Dueling Plate Gloves	Male
+Goblin_Merchant_Fabric_Armor_III_Emergency	Goldleaves' Cloth Armor	Male
+Goblin_Merchant_Fabric_Armor_IV_Emergency	Nibrak Cloth Armor	Male
 Goblin_Merchant_Fabric_Armor_V	Goldleaves' Cloth Armor	Male
+Goblin_Merchant_Fabric_Armor_VI_Emergency	Goldleaves' Cloth Armor	Male
 Goblin_Merchant_Fabric_Armor_Ⅲ	Goldleaves' Cloth Armor	Male
 Goblin_Merchant_Fabric_Armor_Ⅳ	Nibrak Cloth Armor	Male
 Goblin_Merchant_Fabric_Armor_Ⅵ	Goldleaves' Cloth Armor	Male
+Goblin_Merchant_Fabric_Cloak_IV_Emergency	Goldleaves' Cloth Cloak	Male
+Goblin_Merchant_Fabric_Cloak_VI_Emergency	Goldleaves' Cloth Cloak	Male
 Goblin_Merchant_Fabric_Cloak_Ⅳ	Goldleaves' Cloth Cloak	Male
 Goblin_Merchant_Fabric_Cloak_Ⅵ	Goldleaves' Cloth Cloak	Male
 Goblin_Merchant_Fabric_Helm	Goldleaf Soldier Cloth Headband	Male
@@ -2792,7 +2798,7 @@ Item_Rare_Collect_RazorClam_01	Freshwater Clam
 Item_Rare_Collect_Rubber	Rubber
 Item_Rare_Collect_Scallops	Scallop
 Item_Rare_Collect_Sea_Kelp	Kelp
-Item_Rare_Collect_Sea_String	Red Seaweed
+Item_Rare_Collect_Sea_String	Red Sea Algae
 Item_Rare_Collect_Sea_Weed	Seaweed
 Item_Rare_Collect_Shortneckclam	Clams
 Item_Rare_Collect_Stalactites	Stalactite
@@ -3135,7 +3141,7 @@ Item_cd_crimsondesert_tommaso_str_attachbuilding_02_01_housing_index0002	Small S
 Item_cd_ex_dpf_dryinglaundry_01_housing	Rough Tree Branch Clothesline
 Item_cd_ex_dpf_dryinglaundry_01_housing_index0001	Rugged Tree Branch Clothesline
 Item_cd_ex_dpf_flowerpot_16_housing	Palm Tree Pot
-Item_cd_ex_dpf_flowerpot_21_housing	Small Tree Pot
+Item_cd_ex_dpf_flowerpot_21_housing	Small Potted Tree
 Item_cd_ex_dpf_flowerpot_23_housing	Laurel Pot
 Item_cd_ex_dpf_flowerpot_24_housing	Large Alocasia Pot
 Item_cd_ex_dpf_flowerpot_37_housing	Desert Cactus Pot
@@ -3679,6 +3685,7 @@ Item_me_00_str_fencepole_003_0002_index0001	Sturdy Red Roofed Brick Fence Pillar
 Item_me_00_str_fencepole_003_0003	Round Covered Stone Fence Pillar
 Item_me_00_str_fencepole_003_0003_index0001	Round-Cover Sandstone Fence Pillar
 Item_me_00_str_mod_castle_stair_000_0001_index0001	Large Stone Staircase
+Item_me_00_str_mod_castle_stair_000_0001_index0002	Large Red Stone Staircase
 Item_me_00_str_sawmill_000_0001	Crude Wooden Shade
 Item_me_00_str_sawmill_000_0001_index0001	Crude Red Wooden Shade
 Item_me_00_str_sawmill_000_0002	Green Cover Wooden Shade
@@ -4990,7 +4997,7 @@ Paper_Ocean_Giant_Salamander_Leather	Poster Piece
 Paper_Ocean_GoldenShark_Memoir	A Fisherman's Recollections
 Paper_Ocean_GreatCoral_Research	Great Coral Reef Ecological Survey Log
 Paper_Ocean_Hernand_Graffiti_927	Hernand Anonymous Jottings No. 927
-Paper_Ocean_Hydrothermal_Research	Hydrothermal Vents Ecology Research Records
+Paper_Ocean_Hydrothermal_Research	Hydrothermal Vent Ecological Research Log
 Paper_Ocean_Item_Rare_Collect_sea_blackcoral	A Regular's Letter
 Paper_Ocean_Item_Rare_Collect_sea_goldencoral	Grandmother's Golden Coral
 Paper_Ocean_Letter_AresielToRiselia	Areciel's Letter to Lyselia
@@ -5005,7 +5012,7 @@ Paper_Ocean_Nirakan_OldNote	Old Note
 Paper_Ocean_Pragma_Notice	Garnet Purchase Notice
 Paper_Ocean_Quartz	Thoughts on the Shiny Ore
 Paper_Ocean_Razanui_Witness	Sightings on Razanui Island
-Paper_Ocean_RockySeabed_Research	Rocky Reef Ecology Research Records
+Paper_Ocean_RockySeabed_Research	Rocky Reef Ecology Research Log
 Paper_Ocean_Saeon_Petition	Saeon Island Conservation Petition
 Paper_Ocean_Satyros_Recruitment	Satyros Island Treasure Hunter Recruitment Notice
 Paper_Ocean_Sea_Kelp	Notice for Kelp Gatherers
@@ -5638,15 +5645,15 @@ Quest_WantedPaper_0109	Bounty Notice - Frank
 Quest_WantedPaper_0110	Bounty Notice - Broll
 Quest_WantedPaper_Arsonist_TheFaceless	Bounty Notice - The Masked Liberator
 Quest_WantedPaper_PirateShip_0001	Pirate Ship Alert - The Black Bloom
-Quest_WantedPaper_PirateShip_0002	Pirate Ship Warning - The Crimson Shield
-Quest_WantedPaper_PirateShip_0003	Pirate Ship Warning - The Vengeance
-Quest_WantedPaper_PirateShip_0004	Pirate Ship Warning - Faunus
-Quest_WantedPaper_PirateShip_0005	Pirate Ship Alert - The Grim Wind
-Quest_WantedPaper_PirateShip_0006	Pirate Ship Alert - The Scarlet Widow
-Quest_WantedPaper_PirateShip_0007	Pirate Ship Alert - The Bloodied Stake
-Quest_WantedPaper_PirateShip_0008	Pirate Ship Alert - The Devils' Plunder
-Quest_WantedPaper_PirateShip_0009	Pirate Ship Alert - The Black Curved Blade
-Quest_WantedPaper_PirateShip_0010	Pirate Ship Alert - The Sea's Vengeance
+Quest_WantedPaper_PirateShip_0002	Pirate Ship Alert - The Crimson Shield
+Quest_WantedPaper_PirateShip_0003	Pirate Crew Alert - The Avengers
+Quest_WantedPaper_PirateShip_0004	Pirate Crew Alert - The Faunus
+Quest_WantedPaper_PirateShip_0005	Pirate Crew Alert - The Grim Winds
+Quest_WantedPaper_PirateShip_0006	Pirate Crew Alert - The Scarlet Widows
+Quest_WantedPaper_PirateShip_0007	Pirate Crew Alert - The Bloodied Stakes
+Quest_WantedPaper_PirateShip_0008	Pirate Crew Alert - The Devils' Plunder
+Quest_WantedPaper_PirateShip_0009	Pirate Crew Alert - The Black Curved Blades
+Quest_WantedPaper_PirateShip_0010	Pirate Duo Alert - The Twin Vengeances
 Quest_WantedPaper_PirateShip_0011	Pirate Ship Alert - The Death Blossom
 Quest_WantedPaper_PirateShip_0012	Pirate Ship Alert - The Siren's Cry
 Quest_WantedPaper_PirateShip_0013	Pirate Ship Alert - The Sea Claw
@@ -5677,6 +5684,7 @@ Rakkli_Leather_Cloak	Rakkli Leather Cloak	Male
 Rakkli_PlateArmor_Armor	Rakkli Plate Armor	Male
 Rakuzen_Leather_Boots	Rezzcan Leather Boots	Male
 Ramastern_Leather_Boots	Ramastern Leather Boots	Male
+Ranek_Fabric_Helm	Ranek Cloth Cap	Male
 Ranibider_Leather_Helm	Lanweiter Leather Helm	Male
 Ranubio_Leather_Armor	Ranubio Leather Armor	Male
 Raphtha_PlateArmor_Helm_I	Demenissian Guard's Plate Helm	Male
@@ -5963,7 +5971,6 @@ Recipe_Item_Stat_AbyssGear_MoveSpeedRate_LV1	Gear Blueprint: Haste
 Recipe_Item_Stat_AbyssGear_MpRegen_LV1	Gear Blueprint: Composure
 Recipe_Item_Stat_AbyssGear_StaminaRegen_LV1	Gear Blueprint: Vigor
 Recipe_Item_Stat_AbyssGear_SwimSpeedRate_LV1	Gear Blueprint: Surge
-Recipe_Item_Wagon_Base_Seat_0001	Blueprint: Meticulous Carpenter's Wagon Seat
 Recipe_Item_Wagon_Base_Seat_0002	Blueprint: The Laughing Marionette's Wagon Seat
 Recipe_Item_Wagon_Base_Seat_0003	Blueprint: Seasoned Comrade's Wagon Seat
 Recipe_Item_Wagon_Base_Seat_0004	Blueprint: Noble Delegation's Wagon Seat
@@ -6073,7 +6080,6 @@ Recipe_Item_troll_academy_torchlight_01_on	Blueprint: Ancient Runic Stone Sconce
 Recipe_Item_troll_academy_torchlight_01_on_housing_index0001	Blueprint: Dark Ancient Runic Stone Sconce
 Recipe_Item_troll_academy_torchlight_01_on_housing_index0002	Blueprint: Red Ancient Runic Stone Sconce
 Recipe_Item_wagon_base_0001	Blueprint: Wandering Merchant's Cargo Hold
-Recipe_Item_wagon_base_0002	Blueprint: Meticulous Carpenter's Cargo Hold
 Recipe_Item_wagon_base_0003	Blueprint: Seasoned Comrade's Cargo Hold
 Recipe_Item_wagon_base_0004	Blueprint: Rugged Traveler's Cargo Hold
 Recipe_Item_wagon_base_0005	Blueprint: The Laughing Marionette's Cargo Hold
@@ -6081,7 +6087,6 @@ Recipe_Item_wagon_base_0006	Blueprint: Renowned Magnate's Cargo Hold
 Recipe_Item_wagon_base_0007	Blueprint: Elegant Noble's Cargo Hold
 Recipe_Item_wagon_base_0008	Blueprint: Noble Delegation's Cargo Hold
 Recipe_Item_wagon_wheel_0001	Blueprint: Seasoned Comrade's Wheel
-Recipe_Item_wagon_wheel_0002	Blueprint: Meticulous Carpenter's Wheel
 Recipe_Item_wagon_wheel_0003	Blueprint: The Laughing Marionette's Wheel
 Recipe_Item_wagon_wheel_0004	Blueprint: Renowned Magnate's Wheel
 Recipe_Item_wagon_wheel_0005	Blueprint: Wandering Merchant's Wheel
@@ -6213,7 +6218,7 @@ Recipe_Roast_Chicken	Recipe: Salt-Roasted Bird Meat
 Recipe_Roast_Fish	Recipe: Salt-Roasted Fish
 Recipe_SamGyeTang	Recipe: Bird Soup
 Recipe_SeaPineapple_Bibimbap	Recipe: Sea Pineapple Rice Bowl
-Recipe_SeaString_Seasoned	Recipe: Seasoned Red Seaweed
+Recipe_SeaString_Seasoned	Recipe: Seasoned Red Sea Algae
 Recipe_Seafood_Soup	Recipe: Seafood Soup
 Recipe_Seaweed_Soup	Recipe: Seaweed Soup
 Recipe_Sinseollo	Recipe: Harvest Soup
@@ -6231,15 +6236,15 @@ Recipe_Vegetable_Fruit_Porridge	Recipe: Harvest Roll
 Recipe_Vegetable_Juice	Recipe: Vegetable Juice
 Recipe_Vegetable_Porridge	Recipe: Vegetable Porridge
 Recipe_item_bigship_sail_open_0001_index03	Blueprint: Large Deathbound Sail
-Recipe_item_bigship_sail_open_0001_index04	Blueprint: The Black Bloom Pirates' Large Sail
-Recipe_item_bigship_sail_open_0001_index05	Blueprint: The Crimson Shield Pirates' Large Sail
-Recipe_item_bigship_sail_open_0001_index06	Blueprint: The Vengeance Pirates' Large Sail
+Recipe_item_bigship_sail_open_0001_index04	Blueprint: The Black Bloom's Large Sail
+Recipe_item_bigship_sail_open_0001_index05	Blueprint: The Crimson Shield's Large Sail
+Recipe_item_bigship_sail_open_0001_index06	Blueprint: The Avengers Pirates' Large Sail
 Recipe_item_bigship_sail_open_0001_index07	Blueprint: Faunus Pirates' Large Sail
 Recipe_item_bigship_sail_open_0001_index08	Blueprint: The Grim Wind Pirates' Large Sail
 Recipe_item_bigship_sail_open_0001_index09	Blueprint: The Scarlet Widow Pirates' Large Sail
-Recipe_item_bigship_sail_open_0001_index10	Blueprint: The Bloodied Stake Pirates' Large Sail
+Recipe_item_bigship_sail_open_0001_index10	Blueprint: The Bloodied Stakes Pirates' Large Sail
 Recipe_item_bigship_sail_open_0001_index11	Blueprint: The Devils' Plunder Pirates' Large Sail
-Recipe_item_bigship_sail_open_0001_index12	Blueprint: The Black Curved Blade Pirates' Large Sail
+Recipe_item_bigship_sail_open_0001_index12	Blueprint: The Black Curved Blades Pirates' Large Sail
 Recipe_item_bigship_sail_open_0001_index24	Blueprint: Large Tidewish Sail
 Recipe_item_bigship_sail_open_0001_index26	Blueprint: Large Delesyian Naval Sail
 Recipe_item_bigship_sail_open_0002	Blueprint: Large Wraithdrift Sail
@@ -6252,8 +6257,8 @@ Recipe_item_ship_cannon_0003	Blueprint: Gilded Naval Cannon
 Recipe_item_ship_cannon_0005	Blueprint: Sea King's Naval Cannon
 Recipe_item_ship_sail_open_0001	Blueprint: Pearlescent Voyage Sail
 Recipe_item_ship_sail_open_0001_index03	Blueprint: Windborne Sail
-Recipe_item_ship_sail_open_0001_index05	Blueprint: The Death Blossom Pirates' Medium Sail
-Recipe_item_ship_sail_open_0001_index06	Blueprint: The Sea's Vengeance Pirates' Medium Sail
+Recipe_item_ship_sail_open_0001_index05	Blueprint: The Death Blossom's Medium Sail
+Recipe_item_ship_sail_open_0001_index06	Blueprint: The Twin Vengeances' Medium Sail
 Recipe_item_ship_sail_open_0001_index07	Blueprint: Red Checkered Sail
 Recipe_item_ship_sail_open_0001_index08	Blueprint: Gently Curved Sail
 Recipe_item_ship_sail_open_0001_index09	Blueprint: Silver Crescent Sail
@@ -6263,8 +6268,8 @@ Recipe_item_ship_sterndecor_0004	Blueprint: Skyborne Beast Stern
 Recipe_item_ship_sterndecor_0005	Blueprint: Steam and Clockwork Stern
 Recipe_item_ship_sterndecor_0006	Blueprint: Long-Horned Fish Stern
 Recipe_item_ship_teleporter_0001	Blueprint: Ship Teleportation Device
-Recipe_item_smallship_sail_open_0001_index04	Blueprint: The Siren's Cry Pirates' Small Sail
-Recipe_item_smallship_sail_open_0001_index08	Blueprint: The Sea Claw Pirates' Small Sail
+Recipe_item_smallship_sail_open_0001_index04	A blueprint for the Siren's Cry's Small Sail.
+Recipe_item_smallship_sail_open_0001_index08	Blueprint: The Sea Claw's Small Sail
 Recipe_item_smallship_sail_open_0001_index14	Blueprint: Pirates' Sail
 Recipe_item_turtleship_sail_open_0001_index01	Blueprint: Bluewake Sail
 Recipe_item_turtleship_sail_open_0001_index02	Blueprint: Four Taegeuk Sail
@@ -6523,10 +6528,10 @@ SeaPineapple_Bibimbap	Sea Pineapple Rice Bowl
 SeaPineapple_Bibimbap_Large	Satisfying Sea Pineapple Rice Bowl
 SeaPineapple_Bibimbap_Medium	Filling Sea Pineapple Rice Bowl
 SeaPineapple_Bibimbap_XLarge	Hearty Sea Pineapple Rice Bowl
-SeaString_Seasoned	Seasoned Red Seaweed
-SeaString_Seasoned_Large	Satisfying Seasoned Red Seaweed
-SeaString_Seasoned_Medium	Filling Seasoned Red Seaweed
-SeaString_Seasoned_XLarge	Hearty Seasoned Red Seaweed
+SeaString_Seasoned	Seasoned Red Sea Algae
+SeaString_Seasoned_Large	Satisfying Seasoned Red Sea Algae
+SeaString_Seasoned_Medium	Filling Seasoned Red Sea Algae
+SeaString_Seasoned_XLarge	Hearty Seasoned Red Sea Algae
 Seafood_Soup	Seafood Soup
 Seafood_Soup_Large	Satisfying Seafood Soup
 Seafood_Soup_Medium	Filling Seafood Soup
@@ -6777,7 +6782,7 @@ Small_Copper_Pack	Light Copper Pouch
 Small_Fire_Bomb	Small Explosive
 Small_Mechanical_Powerplant	Small Battery
 Small_Mechanical_Powerplant_Pack	Small Battery
-Small_Silver_Pack	Modest Silver Pouch
+Small_Silver_Pack	Silver Pouch
 Smilodon_Leather_Armor	Smilodon Leather Armor	Male
 Smoke_Bomb	Smoke Bomb
 SnapDragon	Snapdragon
@@ -7136,8 +7141,8 @@ Trade_ScorpionAmber	Scorpion in Amber
 Trade_ScorpionAmber_PackedInVehicle	Packaged Scorpion in Amber
 Trade_Scripture	The Code of Solumen
 Trade_Scripture_PackedInVehicle	Packaged Code of Solumen
-Trade_SeaweedBundle	Red Seaweed Bundle
-Trade_SeaweedBundle_PackedInVehicle	Packaged Red Seaweed Bundle
+Trade_SeaweedBundle	Red Sea Algae Bundle
+Trade_SeaweedBundle_PackedInVehicle	Packaged Red Sea Algae Bundle
 Trade_Silk_02	Silk
 Trade_Silk_PackedInVehicle	Packaged Silk
 Trade_SpiritMushroom	Divine Mushroom
@@ -7666,7 +7671,7 @@ Visione_Chip_LongleafTree_HuntBegin	Beginning of the Hunt
 Visione_Chip_LongleafTree_OmenMisfortune	Signs of Misfortune
 Visione_Chip_MaidsTales	Stories of the Maids
 Visione_Chip_Mansion_Byron_Memory	Memory of Byron's Manor
-Visione_Chip_Mansion_Marseille_Memory_I	Azerian's Whereabouts
+Visione_Chip_Mansion_Marseille_Memory_I	Countess Azerian's Whereabouts
 Visione_Chip_Mansion_Marseille_Memory_II	Bastier's Co-conspirators
 Visione_Chip_MarniDrone_Butler	Uninvited Guest
 Visione_Chip_MarniFirstMeet	Secret of the Helm
@@ -8182,8 +8187,8 @@ item_Collection_Prop_Luxury_0002_index01	Dawnstill Dolphin Statue
 item_Collection_Prop_Luxury_0004	Kinetic Legendary Fisherman of Time
 item_Collection_Prop_Luxury_0008_index01	Chalice of Moondrop
 item_Collection_prop_Luxury_0003_index01	Faded Past Blue Whale Statue
-item_Ship_sail_open_0001_index05	The Death Blossom Pirates' Medium Sail
-item_Ship_sail_open_0001_index06	The Sea's Vengeance Pirates' Medium Sail
+item_Ship_sail_open_0001_index05	The Death Blossom's Medium Sail
+item_Ship_sail_open_0001_index06	The Twin Vengeances' Medium Sail
 item_Ship_sail_open_0001_index07	Medium Red Checkered Sail
 item_Ship_sail_open_0001_index08	Medium Gently Curved Sail
 item_Ship_sail_open_0001_index09	Medium Silver Crescent Sail
@@ -8193,11 +8198,11 @@ item_Ship_sail_open_0001_index12	Medium Hernandian Sail
 item_Ship_sail_open_0001_index13	Medium Demenissian Sail
 item_Ship_sail_open_0001_index14	Medium Delesyian Sail
 item_Ship_sail_open_0001_index15	Black Pirates' Medium Sail
-item_SmallShip_sail_open_0001_index04	The Siren's Cry Pirates' Small Sail
+item_SmallShip_sail_open_0001_index04	The Siren's Cry's Small Sail
 item_SmallShip_sail_open_0001_index05	Scorched Pirates' Small Sail
 item_SmallShip_sail_open_0001_index06	Small Red Checkered Sail
 item_SmallShip_sail_open_0001_index07	Small Gently Curved Sail
-item_SmallShip_sail_open_0001_index08	The Sea Claw Pirates' Small Sail
+item_SmallShip_sail_open_0001_index08	The Sea Claw's Small Sail
 item_SmallShip_sail_open_0001_index09	Small Delesyian Sail
 item_SmallShip_sail_open_0001_index10	Small Greymane Sail
 item_SmallShip_sail_open_0001_index11	Small Hernandian Sail
@@ -8221,15 +8226,15 @@ item_bigship_sail_open_0001	Large Pearlescent Voyage Sail
 item_bigship_sail_open_0001_index01	Large Tideblessed Sail
 item_bigship_sail_open_0001_index02	Large Tidesworn Sail
 item_bigship_sail_open_0001_index03	Large Deathbound Sail
-item_bigship_sail_open_0001_index04	The Black Bloom Pirates' Large Sail
-item_bigship_sail_open_0001_index05	The Crimson Shield Pirates' Large Sail
-item_bigship_sail_open_0001_index06	The Vengeance Pirates' Large Sail
+item_bigship_sail_open_0001_index04	The Black Bloom's Large Sail
+item_bigship_sail_open_0001_index05	The Crimson Shield's Large Sail
+item_bigship_sail_open_0001_index06	The Avengers Pirates' Large Sail
 item_bigship_sail_open_0001_index07	Faunus Pirates' Large Sail
 item_bigship_sail_open_0001_index08	The Grim Wind Pirates' Large Sail
 item_bigship_sail_open_0001_index09	The Scarlet Widow Pirates' Large Sail
-item_bigship_sail_open_0001_index10	The Bloodied Stake Pirates' Large Sail
+item_bigship_sail_open_0001_index10	The Bloodied Stakes Pirates' Large Sail
 item_bigship_sail_open_0001_index11	The Devils' Plunder Pirates' Large Sail
-item_bigship_sail_open_0001_index12	The Black Curved Blade Pirates' Large Sail
+item_bigship_sail_open_0001_index12	The Black Curved Blades Pirates' Large Sail
 item_bigship_sail_open_0001_index21	Large Windborne Sail
 item_bigship_sail_open_0001_index22	Large Gently Curved Sail
 item_bigship_sail_open_0001_index23	Large Silver Crescent Sail

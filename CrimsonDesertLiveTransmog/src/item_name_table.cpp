@@ -2,6 +2,7 @@
 #include "aob_resolver.hpp"
 #include "language_pack.hpp"
 #include "shared_state.hpp"
+#include "static_info_manager.hpp"
 #include "transmog_map.hpp"
 
 #include <DetourModKit.hpp>
@@ -96,22 +97,9 @@ namespace Transmog
     /// Arrows, quest items, anything with no equip slot.
     static constexpr uint16_t TYPE_CODE_NONE = 0xFFFF;
 
-    // iteminfo container layout
-    // These are runtime data offsets, not code, so they cannot be AOB-scanned. If a future patch reshapes the struct,
-    // the catalog walk produces an implausible count or ptr_array and bails at the sanity checks below. Read the live
-    // values off the `mov rax,[rbx+<offset>]` that ItemAccessor uses to reach the array.
-    //
-    // WARNING - the sanity checks do NOT catch a small shift of the array offset. The offset moves when the
-    // pa::StaticInfoManager2 base that iteminfo derives from changes width. A shifted offset still dereferences to a
-    // valid-looking heap pointer, so the is_plausible_ptr guard stays silent and the walk emits garbage item names
-    // instead of failing. The StringInfo registry rides the same base and moves with it (see prefab_wrapper_swap.cpp),
-    // but a change to that base does NOT move every member by the same amount, and it does not always move them in the
-    // same direction. The count offset and the array offset move independently. Verify each one against live memory on
-    // patch day. Do not trust the guards.
-    /// Dword entry count.
-    static constexpr std::ptrdiff_t ITEMINFO_COUNT_OFFSET = 0x08;
-    /// Qword base of the descriptor pointer array.
-    static constexpr std::ptrdiff_t ITEMINFO_PTR_ARRAY_OFFSET = 0x58;
+    // The iteminfo and ItemGroupInfo containers are the pa::StaticInfoManager2 base that static_info_manager.hpp owns.
+    // A small shift of its offsets still dereferences to a valid-looking heap pointer, so the is_plausible_ptr guards
+    // below stay silent and the walk emits garbage item names instead of a failure. Do not trust the guards.
 
     // Safe memory helpers
     //
@@ -454,17 +442,17 @@ namespace Transmog
             if (!ok || !DMK::memory::is_plausible_ptr(DMK::Address{mgr}))
                 continue;
 
-            const uint32_t count = read_u32_safe(mgr + ITEMINFO_COUNT_OFFSET, ok);
+            const uint32_t count = read_u32_safe(mgr + static_info::COUNT_OFFSET, ok);
             if (!ok || count == 0 || count > MAX_GROUP_COUNT)
                 continue;
-            const uintptr_t rows = read_qword_safe(mgr + ITEMINFO_PTR_ARRAY_OFFSET, ok);
+            const uintptr_t rows = read_qword_safe(mgr + static_info::ENTRY_ARRAY_OFFSET, ok);
             if (!ok || !DMK::memory::is_plausible_ptr(DMK::Address{rows}))
                 continue;
 
             const auto sample = (std::min)(static_cast<std::size_t>(count), GROUP_HOLDER_PROBE_ROWS);
             for (std::size_t i = 0; i < sample; ++i)
             {
-                const uintptr_t row = read_qword_safe(rows + i * 8ull, ok);
+                const uintptr_t row = read_qword_safe(static_info::def_slot(rows, i), ok);
                 if (!ok || !DMK::memory::is_plausible_ptr(DMK::Address{row}))
                     continue;
                 if (!read_group_name(row).empty())
@@ -491,10 +479,10 @@ namespace Transmog
         const uintptr_t mgr = read_qword_safe(group_holder, ok);
         if (!ok || !DMK::memory::is_plausible_ptr(DMK::Address{mgr}))
             return table;
-        const uint32_t count = read_u32_safe(mgr + ITEMINFO_COUNT_OFFSET, ok);
+        const uint32_t count = read_u32_safe(mgr + static_info::COUNT_OFFSET, ok);
         if (!ok || count == 0 || count > MAX_GROUP_COUNT)
             return table;
-        const uintptr_t rows = read_qword_safe(mgr + ITEMINFO_PTR_ARRAY_OFFSET, ok);
+        const uintptr_t rows = read_qword_safe(mgr + static_info::ENTRY_ARRAY_OFFSET, ok);
         if (!ok || !DMK::memory::is_plausible_ptr(DMK::Address{rows}))
             return table;
 
@@ -512,7 +500,7 @@ namespace Transmog
         }
         for (uint32_t i = 0; i < count; ++i)
         {
-            const uintptr_t row = read_qword_safe(rows + i * 8ull, ok);
+            const uintptr_t row = read_qword_safe(static_info::def_slot(rows, i), ok);
             if (!ok || !DMK::memory::is_plausible_ptr(DMK::Address{row}))
                 continue;
             const auto name = read_group_name(row);
@@ -696,21 +684,21 @@ namespace Transmog
         }
         const uintptr_t item_accessor = accessor_addr->raw();
 
-        // Locate the `mov rbx, cs:<iteminfo holder>` inside ItemAccessor. A fixed offset is not reliable here either,
+        // Locate the `mov rcx, cs:<iteminfo holder>` inside ItemAccessor. A fixed offset is not reliable here either,
         // so scan a bounded 0x40-byte window of THIS function for the prologue tail that precedes it
         // (NAMETABLE_ITEM_ACCESSOR_ANCHOR). Global uniqueness does not matter, because the scan is locally bounded.
         //
-        // When the prologue tail misses, the first `mov rbx,[rip+disp32]` in the same window is still the holder
-        // load: every member of the resolver family loads its manager into rbx before any other RIP-relative access
+        // When the prologue tail misses, the first `mov rcx,[rip+disp32]` in the same window is still the holder
+        // load: every member of the resolver family loads its manager into rcx before any other RIP-relative access
         // (see SKILL_TAG_RESOLVER_BODY_AOB). The anchored scan stays first because it also pins the instruction's
         // position behind the tag capture.
         const DMK::Region accessor_window{DMK::Address{item_accessor}, 0x40};
         const auto match3 =
             DMK::scan::scan(Transmog::NAMETABLE_ITEM_ACCESSOR_ANCHOR, accessor_window, 1, DMK::scan::Pages::Executable);
-        // The `|` marker points at the start of the `48 8B 1D disp32` instruction: disp32 at +3, total length 7.
+        // The `|` marker points at the start of the `48 8B 0D disp32` instruction: disp32 at +3, total length 7.
         const auto holder =
             match3 ? DMK::scan::resolve_rip_relative(*match3, 3, 7)
-                   : DMK::scan::find_and_resolve_rip_relative(accessor_window, DMK::scan::PREFIX_MOV_RBX_RIP, 7);
+                   : DMK::scan::find_and_resolve_rip_relative(accessor_window, DMK::scan::PREFIX_MOV_RCX_RIP, 7);
         if (!holder)
         {
             (void)logger.try_log(
@@ -725,7 +713,7 @@ namespace Transmog
         {
             (void)logger.try_log(
                 DMK::LogLevel::Warning,
-                "[nametable] ItemAccessor prologue anchor missed ({}); took the first mov-rbx load instead",
+                "[nametable] ItemAccessor prologue anchor missed ({}). Took the first mov-rcx load instead",
                 match3.error().message()
             );
         }
@@ -760,13 +748,13 @@ namespace Transmog
         const uintptr_t global_ptr = read_qword_safe(chain.global_holder, ok);
         if (!ok || !DMK::memory::is_plausible_ptr(DMK::Address{global_ptr}))
             return info;
-        info.count = read_u32_safe(global_ptr + ITEMINFO_COUNT_OFFSET, ok);
+        info.count = read_u32_safe(global_ptr + static_info::COUNT_OFFSET, ok);
         if (!ok || info.count == 0 || info.count > MAX_CATALOG_SIZE)
         {
             info.count = 0;
             return info;
         }
-        info.ptr_array = read_qword_safe(global_ptr + ITEMINFO_PTR_ARRAY_OFFSET, ok);
+        info.ptr_array = read_qword_safe(global_ptr + static_info::ENTRY_ARRAY_OFFSET, ok);
         if (!ok || !DMK::memory::is_plausible_ptr(DMK::Address{info.ptr_array}))
         {
             info.ptr_array = 0;
@@ -781,7 +769,7 @@ namespace Transmog
         if (ci.ptr_array == 0 || item_id >= ci.count)
             return 0;
         bool ok = false;
-        const uintptr_t desc = read_qword_safe(ci.ptr_array + static_cast<uint64_t>(item_id) * 8, ok);
+        const uintptr_t desc = read_qword_safe(static_info::def_slot(ci.ptr_array, item_id), ok);
         return (ok && DMK::memory::is_plausible_ptr(DMK::Address{desc})) ? desc : 0;
     }
 
@@ -808,14 +796,14 @@ namespace Transmog
             return BuildResult::Deferred;
         }
 
-        const uint32_t count = read_u32_safe(global_ptr + ITEMINFO_COUNT_OFFSET, ok);
+        const uint32_t count = read_u32_safe(global_ptr + static_info::COUNT_OFFSET, ok);
         if (!ok || count == 0 || count > MAX_CATALOG_SIZE)
         {
             logger.trace("[nametable] catalog count implausible: {} (globalPtr=0x{:X}) - deferring", count, global_ptr);
             return BuildResult::Deferred;
         }
 
-        const uintptr_t ptr_array = read_qword_safe(global_ptr + ITEMINFO_PTR_ARRAY_OFFSET, ok);
+        const uintptr_t ptr_array = read_qword_safe(global_ptr + static_info::ENTRY_ARRAY_OFFSET, ok);
         if (!ok || !DMK::memory::is_plausible_ptr(DMK::Address{ptr_array}))
         {
             logger.trace(
@@ -903,7 +891,7 @@ namespace Transmog
 
         for (uint32_t id = 0; id < count; ++id)
         {
-            const uintptr_t desc_ptr = read_qword_safe(ptr_array + id * 8ull, ok);
+            const uintptr_t desc_ptr = read_qword_safe(static_info::def_slot(ptr_array, id), ok);
             if (!ok || !DMK::memory::is_plausible_ptr(DMK::Address{desc_ptr}))
                 continue;
 
