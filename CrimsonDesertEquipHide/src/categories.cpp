@@ -417,6 +417,18 @@ namespace EquipHide
     static std::array<uint64_t, BITSET_WORDS> s_classify_bitsets[2]{};
 
     /**
+     * @brief Union of the active-character bitset and every protagonist's per-character map, double-buffered.
+     * @details The active-character bitset only knows the CONTROLLED protagonist's effective Parts. A per-character
+     *          override such as `[Chest:Damiane] Parts = NONE` empties a category for one protagonist, so while that
+     *          protagonist is controlled the other protagonists' hashes in that category are absent from the active
+     *          bitset. A gate on it then drops their frames before the per-character lookup, and with CascadeFix on
+     *          the engine re-shows the part that the direct write hid, every frame. Hooks that see every
+     *          protagonist gate on this union instead.
+     */
+    static std::array<uint64_t, BITSET_WORDS> s_classify_bitsets_any[2]{};
+    static std::atomic<int> s_active_any{0};
+
+    /**
      * @brief Parse a Parts= string and write classification entries into the supplied target map.
      * @details The single token parser behind both builds. The active-map build reports what it resolves, while the
      *          per-character build stays quiet because it re-resolves the same tokens once per protagonist, and an
@@ -763,6 +775,22 @@ namespace EquipHide
         // set_active_character, deferred IndexedString scan completion).
         build_per_char_part_maps();
 
+        // The any-character gate goes last, because it reads both views built above.
+        {
+            const auto write_idx = 1 - s_active_any.load(std::memory_order_relaxed);
+            auto &any = s_classify_bitsets_any[write_idx];
+            any = s_classify_bitsets[s_active_map.load(std::memory_order_relaxed)];
+            for (const auto &map : s_part_maps_per_char)
+            {
+                for (const auto &entry : map)
+                {
+                    if (entry.first < 0x10000)
+                        any[entry.first / 64] |= (1ULL << (entry.first % 64));
+                }
+            }
+            s_active_any.store(write_idx, std::memory_order_release);
+        }
+
         // Per-category TRACE summary. Runs at the tail of every rebuild_part_lookup() caller (init post-scan,
         // deferred-scan converge, lazy-probe progress, set_active_character, INI auto-reload) so the reported counts
         // reflect the part map this call published.
@@ -846,6 +874,14 @@ namespace EquipHide
             return false;
         const auto idx = s_active_map.load(std::memory_order_acquire);
         return (s_classify_bitsets[idx][hash / 64] & (1ULL << (hash % 64))) != 0;
+    }
+
+    bool needs_classification_any(uint32_t hash) noexcept
+    {
+        if (hash >= 0x10000)
+            return false;
+        const auto idx = s_active_any.load(std::memory_order_acquire);
+        return (s_classify_bitsets_any[idx][hash / 64] & (1ULL << (hash % 64))) != 0;
     }
 
     bool is_category_hidden(Category cat) noexcept

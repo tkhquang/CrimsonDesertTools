@@ -75,10 +75,10 @@ namespace Transmog::real_part_tear_down
         //   so a reader who cross-checks against a disassembler database must match the byte pattern in
         //   safe_tear_down(), never a name.
         //
-        // ItemAccessor - the iteminfo id -> descriptor resolver. It takes the item id BY VALUE in edx and never
-        //   reads rcx, the same convention as the rest of the pa::*InfoManager resolver family (see
-        //   SKILL_TAG_RESOLVER_BODY_AOB). An id past the manager's count returns the manager's default descriptor,
-        //   whose item key is 0, so the key check below also rejects an id that names nothing.
+        // ItemAccessor - the iteminfo id -> descriptor resolver. It takes a POINTER to the u16 item id in rcx, the
+        //   same convention as the rest of the pa::*InfoManager resolver family (see SKILL_TAG_RESOLVER_BODY_AOB).
+        //   An id past the manager's count returns the manager's default descriptor, whose item key is 0, so the key
+        //   check below also rejects an id that names nothing.
 
         // SafeTearDown's second argument is the 32-bit item key, never the 16-bit item id. SafeTearDown converts the
         // key back to an id itself, so any other value makes the call a silent no-op: it matches no part, detaches
@@ -86,7 +86,7 @@ namespace Transmog::real_part_tear_down
         using SafeTearDownFn =
             std::int64_t(__fastcall *)(std::int64_t a1, std::uint32_t item_key, std::int16_t slot_tag);
 
-        using ItemAccessorFn = const void *(__fastcall *)(std::int64_t unused, std::uint32_t item_id);
+        using ItemAccessorFn = const void *(__fastcall *)(const std::uint16_t *item_id);
 
         // Descriptor -> u32 item key. SafeTearDown reads the same field off the descriptor ItemAccessor returns. A
         // stale offset fails SILENTLY: every tear-down then passes one constant value, detaches nothing and returns
@@ -103,7 +103,7 @@ namespace Transmog::real_part_tear_down
             const void *desc = nullptr;
             __try
             {
-                desc = accessor(0, item_id);
+                desc = accessor(&item_id);
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {

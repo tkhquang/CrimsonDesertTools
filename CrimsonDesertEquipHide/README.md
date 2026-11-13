@@ -244,7 +244,7 @@ Three ways to set a per-character `Parts` value:
 | Value | Effect |
 | ----- | ------ |
 | section absent, or `Parts =` (empty) | Inherits the base `[CategoryName]` list |
-| `Parts = CD_Xxx, CD_Yyy, ...` | Uses this explicit list when that character is controlled |
+| `Parts = CD_Xxx, CD_Yyy, ...` | Uses this explicit list for that character, controlled or not |
 | `Parts = NONE` | Disables the category for that character (nothing hidden even when the base is enabled) |
 
 ### Example: keep the lantern visible on Damiane

@@ -200,7 +200,7 @@ Each category's [b]Parts[/b] list can be overridden per protagonist by adding a 
 Three ways to set a per-character [b]Parts[/b] value:
 [list]
 [*] Section absent, or [b]Parts =[/b] (empty) - inherits the base [b][CategoryName][/b] list
-[*] [b]Parts = CD_Xxx, CD_Yyy, ...[/b] - uses this explicit list when that character is controlled
+[*] [b]Parts = CD_Xxx, CD_Yyy, ...[/b] - uses this explicit list for that character, controlled or not
 [*] [b]Parts = NONE[/b] - disables the category for that character (nothing hidden even when the base is enabled)
 [/list]
 
