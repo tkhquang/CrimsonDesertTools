@@ -310,8 +310,7 @@ jobs:
 
       # The NEXUSMODS_API_KEY secret is the account key. Each file ID and the v3 mod ID come from that file's
       # "Advanced" modal on the Nexus Files tab. An unset file ID skips its upload, and mod_id is needed only for
-      # the changelog. The archive is extracted into the game folder by hand, so mod manager downloads stay off.
-      # Skipped on pre-releases.
+      # the changelog. The main file allows mod manager downloads so DMM can install it. Skipped on pre-releases.
       - name: Publish to Nexus Mods
         if: ${{ !inputs.prerelease && vars.NEXUSMODS_LIVETRANSMOG_FILE_ID != '' }}
         uses: Nexus-Mods/upload-action@c96019556046053aa26044b44396cd38929daf23 # v1.0.0-beta.10
@@ -324,15 +323,15 @@ jobs:
           description: ${{ steps.prepare-release.outputs.NEXUS_DESCRIPTION }}
           category: main
           archive_existing_version: false
-          primary_mod_manager_download: false
-          allow_mod_manager_download: false
+          primary_mod_manager_download: true
+          allow_mod_manager_download: true
           show_requirements_pop_up: true
           update_mod_version: true
           mod_id: ${{ vars.NEXUSMODS_LIVETRANSMOG_MOD_ID }}
           changelog: ${{ vars.NEXUSMODS_LIVETRANSMOG_MOD_ID != '' && steps.prepare-release.outputs.NEXUS_CHANGELOG || '' }}
 
       # The language pack is an optional file on the same mod page. The main upload above owns the mod version and
-      # the changelog, so this one leaves both alone.
+      # the changelog, so this one leaves both alone. DMM does not install the pack, so mod manager downloads stay off.
       - name: Publish language pack to Nexus Mods
         if: ${{ !inputs.prerelease && vars.NEXUSMODS_LIVETRANSMOG_LANGPACK_FILE_ID != '' && hashFiles(format('release-assets/{0}', env.LANGPACK_NAME)) != '' }}
         uses: Nexus-Mods/upload-action@c96019556046053aa26044b44396cd38929daf23 # v1.0.0-beta.10
@@ -342,7 +341,7 @@ jobs:
           filename: release-assets/${{ env.LANGPACK_NAME }}
           version: ${{ env.NEW_VERSION }}
           display_name: Live Transmog - Language Pack
-          description: 'Optional. Item names in 15 languages, interface in Simplified Chinese. Unzip beside the .asi. [url=https://github.com/tkhquang/CrimsonDesertTools/blob/main/CrimsonDesertLiveTransmog/README.md#contributing-a-translation]Add your language[/url]'
+          description: 'Optional. Item names in 15 languages, interface in Simplified Chinese. Manual install beside the .asi. [url=https://github.com/tkhquang/CrimsonDesertTools/blob/main/CrimsonDesertLiveTransmog/README.md#contributing-a-translation]Add your language[/url]'
           category: optional
           archive_existing_version: false
           primary_mod_manager_download: false

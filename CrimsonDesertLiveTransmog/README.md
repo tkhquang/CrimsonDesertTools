@@ -47,6 +47,8 @@ Download the **x64** build of [Ultimate ASI Loader](https://github.com/ThirteenA
 
 ### Step 2: Install the mod
 
+Install with [Definitive Mod Manager (DMM)](https://www.nexusmods.com/crimsondesert/mods/633) through the Nexus **Mod Manager Download** button, or manually:
+
 1. Download the latest release from the [GitHub Releases page](https://github.com/tkhquang/CrimsonDesertTools/releases)
 2. Extract **all** of the following into your `bin64` folder:
    - `CrimsonDesertLiveTransmog.asi` - the mod binary
@@ -70,7 +72,7 @@ Launch the game. Press **Home** to open the transmog overlay.
 └── ...
 ```
 
-From the optional language pack download, in the same folder:
+From the optional language pack download, in the same folder. The language pack is a **manual install only**, DMM does not support it:
 
 ```text
 ├── CrimsonDesertLiveTransmog_item_localization.pack      (Item names in 15 languages)
@@ -197,7 +199,7 @@ Two settings at the top of the Transmog tab, because they are two different ques
 - **Item Names** - the language of the item names in the picker, from the game's own localization tables, in all 15 languages it ships with.
 - **Interface** - the language of the mod's own text, which exists only where someone has translated it. Defaults to **Auto**, meaning it follows Item Names, so the usual case is still a single choice.
 
-Both come from the optional **language pack** download. Unzip it beside the `.asi`, in the same folder as the INI:
+Both come from the optional **language pack** download. It is a manual install only, DMM does not support it. Unzip it beside the `.asi`, in the same folder as the INI:
 
 - `CrimsonDesertLiveTransmog_item_localization.pack` - item names in all 15 languages. Also the source of the picker's male/female filter.
 - `CrimsonDesertLiveTransmog_interface_translations.json` - the mod's own interface text.

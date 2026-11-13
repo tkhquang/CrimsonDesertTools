@@ -33,14 +33,6 @@
 [/list]
 [line]
 
-[color=red][b]DO NOT INSTALL VIA MOD MANAGERS.[/b][/color] You can if you want, but [color=red][b]don't file a bug report here[/b][/color] if things don't work.
-
-Mod managers often stage [b].asi[/b] files into their own subfolders. Ultimate ASI Loader scans subdirectories recursively, so the [b].asi[/b] keeps loading even after the manager reports the mod as "disabled" or "uninstalled". Common symptom: transmog still applies after you think the mod is gone.
-
-[b]Install manually[/b] by following the Installation steps below. [b]To uninstall,[/b] delete [b]CrimsonDesertLiveTransmog.asi[/b] and [b]CrimsonDesertLiveTransmog.ini[/b] directly from [b]bin64[/b] (not via the manager). If a manager moved your files into a subfolder like [b]bin64/plugins/[/b] or [b]bin64/backup/[/b], delete them from that subfolder too.
-
-[line]
-
 [size=5]Installation[/size]
 
 [size=4]Step 1 -Install an ASI Loader[/size]
@@ -57,6 +49,7 @@ Download the [b]x64[/b] build of [url=https://github.com/ThirteenAG/Ultimate-ASI
 [color=#ff6600][b]Note:[/b][/color] If you are using a newer version of Ultimate ASI Loader and the log file is not generated, try the [b]win64[/b] (x64) build from [url=https://github.com/ThirteenAG/Ultimate-ASI-Loader/releases/tag/v9.1.0]v9.1.0[/url] instead.
 
 [size=4]Step 2 -Install the mod[/size]
+Install with [url=https://www.nexusmods.com/crimsondesert/mods/633]Definitive Mod Manager (DMM)[/url] through the [b]Mod Manager Download[/b] button, or manually:
 [list=1]
 [*]Download the latest release from the Files tab[/*]
 [*]Extract [b]ALL[/b] of the following into your [b]bin64[/b] folder:
@@ -82,7 +75,7 @@ Launch the game. Press [b]Home[/b] to open the transmog overlay and start browsi
 ├── CrimsonDesertLiveTransmog_display_names.tsv      (Item display names, REQUIRED)
 ├── CrimsonDesertLiveTransmog_presets.json           (Auto-generated preset file)
 └── ...[/code]
-From the optional language pack download, in the same folder:
+From the optional language pack download, in the same folder. The language pack is a [b]manual install only[/b], DMM does not support it:
 [code]
 ├── CrimsonDesertLiveTransmog_item_localization.pack      (Item names in 15 languages)
 └── CrimsonDesertLiveTransmog_interface_translations.json (The mod's own interface text)[/code]
@@ -199,7 +192,7 @@ Two settings at the top of the Transmog tab, because they are two different ques
 [*][b]Item Names[/b] - the language of the item names in the picker, from the game's own localization tables, in all 15 languages it ships with[/*]
 [*][b]Interface[/b] - the language of the mod's own text, which exists only where someone has translated it. Defaults to [b]Auto[/b], meaning it follows Item Names, so the usual case is still a single choice[/*]
 [/list]
-Both come from the optional [b]language pack[/b] download. Unzip it beside the [b].asi[/b], in the same folder as the INI:
+Both come from the optional [b]language pack[/b] download. It is a manual install only, DMM does not support it. Unzip it beside the [b].asi[/b], in the same folder as the INI:
 [list]
 [*][b]CrimsonDesertLiveTransmog_item_localization.pack[/b] - item names in all 15 languages, and the source of the picker's male/female filter[/*]
 [*][b]CrimsonDesertLiveTransmog_interface_translations.json[/b] - the mod's own interface text[/*]

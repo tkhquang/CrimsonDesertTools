@@ -45,6 +45,8 @@ Download the **x64** build of [Ultimate ASI Loader](https://github.com/ThirteenA
 
 ### Step 2: Install the mod
 
+Install with [Definitive Mod Manager (DMM)](https://www.nexusmods.com/crimsondesert/mods/633) through the Nexus **Mod Manager Download** button, or manually:
+
 1. Download the latest release from the [GitHub Releases page](https://github.com/tkhquang/CrimsonDesertTools/releases)
 2. Extract `CrimsonDesertEquipHide.asi` and `CrimsonDesertEquipHide.ini` into your `bin64` folder
 
