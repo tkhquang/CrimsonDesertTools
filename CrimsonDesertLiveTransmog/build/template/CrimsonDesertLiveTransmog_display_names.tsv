@@ -2825,29 +2825,29 @@ Item_Sea_Coin	Ancient Relic
 Item_Sea_Coin_Broken	Shattered Ancient Relic
 Item_Sea_Siater	Wharf Roach
 Item_Set_A_Enhance_RestArea	Adventurer's Refinement Inventory Type A
-Item_Set_A_Ocean_Box	The Sea's Treasures - Ingredients
+Item_Set_A_Ocean_Box	Lost Bundle of Ingredients
 Item_Set_A_RestArea	Adventurer's Cooking Inventory Type A
-Item_Set_All_Ocean_Box	The Sea's Treasures - Collection
+Item_Set_All_Ocean_Box	Lost Bundle of Trade Goods
 Item_Set_B_Enhance_RestArea	Adventurer's Refinement Inventory Type B
-Item_Set_B_Ocean_Box	The Sea's Treasures - Fiber
+Item_Set_B_Ocean_Box	Lost Bundle of Textiles
 Item_Set_B_RestArea	Adventurer's Cooking Inventory Type B
 Item_Set_C_Enhance_RestArea	Adventurer's Refinement Inventory Type C
-Item_Set_C_Ocean_Box	The Sea's Treasures - Crafted Ornaments
+Item_Set_C_Ocean_Box	Lost Bundle of Statues
 Item_Set_C_RestArea	Adventurer's Cooking Inventory Type C
 Item_Set_D_Enhance_RestArea	Adventurer's Refinement Inventory Type D
-Item_Set_D_Ocean_Box	The Sea's Treasures - Meat
+Item_Set_D_Ocean_Box	Lost Bundle of Meat
 Item_Set_D_RestArea	Adventurer's Cooking Inventory Type D
 Item_Set_E_Enhance_RestArea	Adventurer's Refinement Inventory Type E
-Item_Set_E_Ocean_Box	The Sea's Treasures - Spices
+Item_Set_E_Ocean_Box	Lost Bundle of Spices
 Item_Set_E_RestArea	Adventurer's Cooking Inventory Type E
 Item_Set_F_Enhance_RestArea	Adventurer's Refinement Inventory Type F
-Item_Set_F_Ocean_Box	The Sea's Treasures - Processed Foods
-Item_Set_G_Ocean_Box	The Sea's Treasures - Delicacies
-Item_Set_H_Ocean_Box	The Sea's Treasures - Premium Goods
-Item_Set_I_Ocean_Box	The Sea's Treasures - Luxury Goods
-Item_Set_J_Ocean_Box	The Sea's Treasures - Artwork
-Item_Set_K_Ocean_Box	The Sea's Treasures - Armor
-Item_Set_L_Ocean_Box	The Sea's Treasures - Munitions
+Item_Set_F_Ocean_Box	Lost Bundle of Processed Food
+Item_Set_G_Ocean_Box	Lost Bundle of Luxury Goods
+Item_Set_H_Ocean_Box	Lost Bundle of Fine Goods
+Item_Set_I_Ocean_Box	Lost Bundle of Luxury Goods
+Item_Set_J_Ocean_Box	Lost Bundle of Artwork
+Item_Set_K_Ocean_Box	Lost Bundle of Armor 
+Item_Set_L_Ocean_Box	Lost Bundle of Military Supplies
 Item_Silkworm_Moth	Silkworm Moth
 Item_Skill_AbyssGear_AbsoluteDefense_LV1	Piercing Bloom
 Item_Skill_AbyssGear_AbyssGrass_Immune	Abyssal Assimilation
@@ -4858,6 +4858,7 @@ Owls_of_the_Mist_Leather_Boots	Mistcloaked Owl Leather Boots
 Owls_of_the_Mist_Leather_Cloak	Mistcloaked Owl Leather Cloak	Male
 Owls_of_the_Mist_PlateArmor_Helm	Mistcloaked Owl Plate Helm	Male
 Owls_of_the_Mist_PlateArmor_Helm_II	Mistcloaked Owl Plate Helm
+PS_Portal_Lantern	Grotevant Lantern
 Paijal_PlateArmor_Helm	Paizel Bone Helm	Male
 Pail_Cup_Oath	Pailunese Chalice of Oaths
 Pailoon_OneHandMace	Savage Woodland Spirit Killer
@@ -5979,7 +5980,6 @@ Recipe_Item_Wagon_Base_Seat_0006	Blueprint: Renowned Magnate's Wagon Seat
 Recipe_Item_Wagon_Base_Seat_0007	Blueprint: Eccentric Doctor's Wagon Seat
 Recipe_Item_Wagon_Base_Seat_0008	Blueprint: Eccentric Lord's Wagon Seat
 Recipe_Item_Wagon_Base_Seat_0009	Blueprint: Elegant Noble's Wagon Seat
-Recipe_Item_Wagon_Base_lantern_0001	Blueprint: Wagon Lantern
 Recipe_Item_cattower_0001_in	Blueprint: Small Pororin Cat Watchtower
 Recipe_Item_cattower_0002_in	Blueprint: Small Marni Cat Watchtower
 Recipe_Item_cattower_0003	Blueprint: Pororin Cat Haven

@@ -35,8 +35,8 @@
  *
  * Muffle-class identification (chain walk via engine RTTI):
  *
- *   record       = skill_tag_resolver(a3)             // engine u16-tag -> skill record resolver
- *   level_table  = *(record + 0x18)                   // per-level table
+ *   record       = skill_lookup(manager, *a3)         // engine SkillInfo row lookup
+ *   level_table  = *(record + 0x30)                   // per-level table
  *   inner_arr    = *(level_table + 0x00)              // first inner ptr
  *   first_entry  = *(inner_arr + 0x00)                // level 1 entry #1
  *   vtable       = *(first_entry + 0x00)              // class vtable
@@ -109,8 +109,9 @@ namespace Transmog::helm_audio_filter
      *      `game_audio_effect_vtable()`)
      *   3. engine player static, the root of the Kliff init-race fallback chain (see `player_static()`). On
      *      AOB failure the hook still installs. Only the first-frame Kliff fallback goes dark.
-     *   4. the engine tag resolver for the chain walk (see `SKILL_TAG_RESOLVER_BODY_AOB`, picked by RTTI class name).
-     *      This one binds lazily on the first registrar call, because its scan needs a live pa::SkillInfoManager.
+     *   4. the engine skill lookup for the chain walk (see `SKILL_MANAGER_LOAD_AOB`, read off the registrar body and
+     *      picked by RTTI class name). This one binds lazily on the first registrar call, because its scan needs a
+     *      live pa::SkillInfoManager.
      *
      * On any required AOB or hook install failure, logs a warning and leaves the feature disabled. The rest of LT
      * continues to load.

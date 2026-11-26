@@ -20,7 +20,7 @@ namespace Transmog
      * @brief Stable string<->id catalog built from the game's item descriptor table (iteminfo).
      *
      * Each item has an internal name string (e.g. "Kliff_PlateArmor_Helm", "Marni_Laser_Helm_Upgrade") stored in a
-     * refcounted string wrapper at descriptor+8. The game bakes these names into its data, and they survive a game
+     * refcounted string wrapper on its manager row. The game bakes these names into its data, and they survive a game
      * patch ORDERS OF MAGNITUDE more often than the raw uint16 item_id (which is a per-record descriptor index that
      * can shift on any content patch).
      *
@@ -136,10 +136,12 @@ namespace Transmog
         /**
          * @brief Address of ItemAccessor (iteminfo id -> descriptor), cached during the build() chain walk.
          *
-         * This function has many byte-identical template-instantiation siblings, so it cannot be AOB-located directly.
-         * `resolve_chain` reaches it through the same bounded-AOB chain the catalog walk uses (SubTranslator anchor ->
-         * item descriptor initializer -> first relative call). Returns 0 if no successful resolve_chain call landed
-         * yet (either before the first build() or after a fatal decoder mismatch).
+         * The engine's iteminfo instance of `def *lookup(Manager *, u32 index)`: it takes the iteminfo manager in rcx
+         * and the item id by value in edx. This function has many byte-identical template-instantiation siblings, so
+         * it cannot be AOB-located directly. `resolve_chain` reaches it through the same bounded-AOB chain the catalog
+         * walk uses (SubTranslator anchor -> item descriptor initializer -> the call right after its iteminfo manager
+         * load). Returns 0 if no successful resolve_chain call landed yet (either before the first build() or after a
+         * fatal decoder mismatch).
          *
          * Thread-safe after a successful build() or deferred-scan retry. The chain walk reads static exe bytes only
          * and does NOT depend on the iteminfo global, so this address becomes valid even on the first
@@ -150,11 +152,11 @@ namespace Transmog
         /**
          * @brief Address of the iteminfo global holder slot, cached during the same build() chain walk.
          *
-         * This is the ONLY way to reach that slot. The engine's per-manager accessors are byte-identical template
-         * clones that differ only in their RIP displacement, so a global AOB cut from one of them matches every
-         * manager at once and can never be unique - and the slot itself has exactly one referencing instruction in
-         * the whole image, which lives inside such a clone. The bounded chain walk sidesteps both problems by
-         * reaching the right clone through the call graph first and only then reading its displacement.
+         * This is the ONLY way to reach that slot. The engine's per-manager lookups are byte-identical template
+         * instances that take their manager in rcx, and every caller loads its manager with the same
+         * `mov rcx,[rip+disp32] ; call` pair, so a global AOB cut from such a call site matches every manager at once
+         * and can never be unique. The bounded chain walk sidesteps that by reaching the iteminfo call site through
+         * the call graph first and only then reading its displacement.
          *
          * Returns 0 before the first successful resolve_chain call. Like item_accessor_addr(), it becomes
          * valid even on a BuildResult::Deferred return, because the walk reads static exe bytes only.

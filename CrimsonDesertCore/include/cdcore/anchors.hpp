@@ -481,8 +481,8 @@ namespace CDCore::anchors
         //   mov [rip+disp32], reg2        ; sibling slot +8
         //   lea reg2, [reg+subobj]  OR  mov reg2, [rbp+local]
         //   mov [rip+disp32], reg2        ; sibling slot +16
-        //   movzx eax, byte [rbp+X]
-        //   mov [rip+disp32], al          ; state flag, sibling slot +24
+        //   movzx reg32, byte [rbp+X]
+        //   mov [rip+disp32], reg8        ; state flag, sibling slot +24
         //
         // Nothing here pins a destination register or a sub-object offset. The REX byte of each of those three
         // instructions is kept as a per-nibble `4?` token: the high nibble is what makes the store and the leas 64-bit
@@ -505,27 +505,32 @@ namespace CDCore::anchors
         // disp32 of the publish store stays at match+3 and the instruction ends at match+7. require_unique keeps the
         // row honest if a future build duplicates the shape.
         //
+        // The flag's carrier register is compiler-owned too. A store from `al`, `cl`, `dl` or `bl` needs no prefix,
+        // while a store from `dil`, `sil`, `bpl` or `spl` needs the empty `40` REX. The movzx keeps only its opcode,
+        // and the flag store opens on a `[0-1]` gap for that optional REX.
+        //
         // 4? 89 ?? ?? ?? ?? ??   mov [rip+d32], reg
         // 4? 8D ?? ?? ?? ?? ??   lea reg, [reg+d32]
         // 48 89 05 ?? ?? ?? ??   mov [rip+d32], rax
         // 4? 8? ?? ?? ?? ?? ??   lea reg, [reg+d32] / mov reg, [rbp+d32]
         // 48 89 05 ?? ?? ?? ??   mov [rip+d32], rax
-        // 0F B6 85 ?? ?? ?? ??   movzx eax, byte [rbp+d32]
-        // 88 05                  mov [rip+d32], al (truncated)
+        // 0F B6 ?? ?? ?? ?? ??   movzx reg32, byte [rbp+d32]
+        // [0-1]                  40 REX, present for dil, sil, bpl or spl
+        // 88                     mov [rip+d32], reg8 (truncated)
         Candidate::rip_relative(
             "ClientActorManagerGlobal_P1_PublishStore",
             Pattern::literal(
                 "4? 89 ?? ?? ?? ?? ?? 4? 8D ?? ?? ?? ?? ?? 48 89 05 ?? ?? ?? ?? 4? 8? ?? ?? ?? ?? ?? "
-                "48 89 05 ?? ?? ?? ?? 0F B6 85 ?? ?? ?? ?? 88 05"
+                "48 89 05 ?? ?? ?? ?? 0F B6 ?? ?? ?? ?? ?? [0-1] 88"
             ),
             3,
             7
         ),
 
         // P2 - the only READ of the slot: the same lazy-init function later leas it as an outbound argument.
-        //   <loop tail: lea rcx,[rcx+0x10] ; sub r8,1 ; jne ; jmp over the zeroing xor ; xor ebx,ebx>
+        //   <loop tail: two pointer steps, +0x20 then +0x10 ; sub r8,1 ; jne>
         //   lea rdx, cs:[rip+slot]        ; 48 8D 15 + disp32, the resolved instruction, marked with `|`
-        //   lea rcx, [rbp+disp8]          ; 48 8D 4D + disp8
+        //   lea rcx, [frame local]        ; rbp disp8 (4 bytes) or rsp disp8 (5 bytes)
         //   call helper ; nop
         //   mov byte [rsp+disp8], 0
         //   vpxor xmm0,xmm0,xmm0
@@ -533,21 +538,22 @@ namespace CDCore::anchors
         // Both halves of the window earn their length. The post-call tail is needed because the leading lea/lea/call
         // shape alone matches many unrelated sites, and the leading loop tail is needed because the
         // lea/lea/call/nop/vpxor block itself occurs TWICE in this function. The other copy (which loads a NEIGHBORING
-        // global) is entered straight from its loop's `jne`. Only this one is reached through a short `jmp` over a
-        // register-zeroing `xor`, and that jmp/xor pair is what the row discriminates on.
+        // global) closes a loop that steps ONE pointer by 0x10. Only this one closes a loop that steps a second
+        // pointer by 0x20 first, and that `+0x20` step is what the row discriminates on.
         //
-        // The loop's pointer step, its counter and the zeroed register are compiler-owned, so the row keeps only the
-        // REX and ModRM high nibbles of each and the immediates the loop's element size fixes. The `jne` sits in a
-        // `[2-6]` bounded gap, so a rel8-to-rel32 widening keeps the row alive. The resolver adds the gap width before
-        // it applies the `|` marker, so the marker still lands on the lea.
+        // The loop's pointer registers and its counter are compiler-owned, so the row keeps only the REX nibbles and
+        // opcodes of each and the immediates the loop's element sizes fix. The `jne` sits in a `[2-6]` bounded gap,
+        // so a rel8-to-rel32 widening keeps the row alive. The resolver adds the gap width before it applies the `|`
+        // marker, so the marker still lands on the lea. The frame-local lea keeps its `4?` ModRM nibble and spans the
+        // SIB and displacement with a `[1-2]` gap, so a frame-shape change between rbp and rsp keeps the row.
         //
-        // 48 8D 4? 10            lea rcx, [rcx+0x10]
+        // 4? 8D ?? 20            lea rdx, [rdx+0x20]
+        // 4? 8D ?? 10            lea rcx, [rcx+0x10]
         // 4? 83 E? 01            sub r8, 0x1
         // [2-6]                  jne <rel8 or rel32>
-        // EB 02                  jmp <over the xor>
-        // 33 ??                  xor ebx, ebx
         // 48 8D 15 ?? ?? ?? ??   lea rdx, [rip+d32]   <- result offset
-        // 48 8D 4D ??            lea rcx, [rbp-d8]
+        // 48 8D 4?               lea rcx, [rsp+d8] (ModRM)
+        // [1-2]                  its SIB and displacement
         // E8 ?? ?? ?? ??         call <rel32>
         // 90                     nop
         // C6 44 24 ?? 00         mov byte [rsp+d8], 0x0
@@ -555,7 +561,7 @@ namespace CDCore::anchors
         Candidate::rip_relative(
             "ClientActorManagerGlobal_P2_LeaCallBodyDisp8",
             Pattern::literal(
-                "48 8D 4? 10 4? 83 E? 01 [2-6] EB 02 33 ?? | 48 8D 15 ?? ?? ?? ?? 48 8D 4D ?? E8 ?? ?? ?? ?? 90 "
+                "4? 8D ?? 20 4? 8D ?? 10 4? 83 E? 01 [2-6] | 48 8D 15 ?? ?? ?? ?? 48 8D 4? [1-2] E8 ?? ?? ?? ?? 90 "
                 "C6 44 24 ?? 00 C5 F9 EF C0"
             ),
             3,

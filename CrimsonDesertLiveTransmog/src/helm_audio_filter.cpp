@@ -37,23 +37,28 @@ namespace Transmog::helm_audio_filter
                                                           char,
                                                           std::int64_t);
 
-        // Engine's u16-tag -> skill record resolver. It takes a POINTER to the tag in rcx (the registrar passes `a3`
-        // straight through) and indexes the SkillInfoManager row array (static_info_manager.hpp), then returns the
-        // record pointer. An out-of-range or unbound tag yields the manager's default record instead. The returned
-        // record carries the per-level entry table at SKILL_RECORD_LEVEL_TABLE_OFFSET. The calling convention changes
-        // between builds together with SKILL_TAG_RESOLVER_BODY_AOB, so verify both against live memory on patch day.
-        using SkillTagResolverFn = std::int64_t (*)(const std::uint16_t *);
+        // Engine's skill row lookup, the SkillInfoManager instance of `def *lookup(Manager *, u32 index)`. It takes the
+        // manager in rcx and the row index by value in edx (the registrar loads the low word of `*a3` into edx), and
+        // indexes the SkillInfoManager row array (static_info_manager.hpp). An out-of-range index returns null. The
+        // returned record carries the per-level entry table at SKILL_RECORD_LEVEL_TABLE_OFFSET. The calling
+        // convention changes between builds together with SKILL_MANAGER_LOAD_AOB, so verify both against live memory
+        // on patch day.
+        using SkillLookupFn = std::int64_t (*)(std::uintptr_t manager, std::uint32_t index);
 
-        // Skill record -> per-level entry table. The registrar reads the same field right after its own resolver
-        // call (`mov rdx,[rax+disp8]`). A stale value here fails silently: no record's chain reaches the
+        // Skill record -> per-level entry table. The registrar reads the same field right after its own lookup call
+        // (`mov rdx,[rcx+disp8]`). A stale value here fails silently: no record's chain reaches the
         // GameAudioEffectBuffData vtable, so every helm passes through unmuffled.
-        constexpr std::ptrdiff_t SKILL_RECORD_LEVEL_TABLE_OFFSET = 0x38;
+        constexpr std::ptrdiff_t SKILL_RECORD_LEVEL_TABLE_OFFSET = 0x30;
 
         PassiveSkillRegistrarFn g_trampoline = nullptr;
-        // Bound lazily on the first registrar invocation (see ensure_skill_tag_resolver). Atomic because arbitrary
-        // equip threads publish and read it. Release/acquire gives a standards-clean happens-before, independent of
-        // which thread won the bind.
-        std::atomic<SkillTagResolverFn> g_skill_tag_resolver{nullptr};
+        // Registrar entry, published by init() before the hook arms. The lookup scan reads the registrar's body.
+        std::uintptr_t g_registrar_entry = 0;
+        // Bound lazily on the first registrar invocation (see ensure_skill_lookup). Atomic because arbitrary equip
+        // threads publish and read it. Release/acquire gives a standards-clean happens-before, independent of which
+        // thread won the bind. The manager slot is stored before the lookup and read after it, so a reader that sees
+        // the lookup also sees the slot.
+        std::atomic<std::uintptr_t> g_skill_manager_slot{0};
+        std::atomic<SkillLookupFn> g_skill_lookup{nullptr};
         // The value stored in the first qword of every `pa::GameAudioEffectBuffData` instance: i.e. the address of
         // vfunc[0]. We compare buff_instance[0] against this value to determine class membership without RTTI walks.
         // Resolved at init via AOB on the vtable header (RTTI metadata ptr + first few vfuncs).
@@ -67,48 +72,58 @@ namespace Transmog::helm_audio_filter
 
         std::atomic<bool> g_init_done{false};
 
-        // Forward declaration. The definition sits at the bottom, next to the other scan logic.
-        [[nodiscard]] std::uintptr_t resolve_skill_tag_resolver();
+        /// The SkillInfo manager slot and its lookup, as resolve_skill_lookup finds them in the registrar body.
+        struct SkillLookupSite
+        {
+            std::uintptr_t manager_slot = 0;
+            std::uintptr_t lookup = 0;
+        };
 
-        // Binds g_skill_tag_resolver lazily on the first audio-classifier call. The bind is terminal.
+        // Forward declaration. The definition sits at the bottom, next to the other scan logic.
+        [[nodiscard]] SkillLookupSite resolve_skill_lookup();
+
+        // Binds g_skill_lookup lazily on the first audio-classifier call. The bind is terminal.
         //
-        // There is exactly one resolution path, and it must stay that way. The engine emits about a hundred
-        // near-identical u16-tag resolvers, one per pa::*InfoManager. They are byte-identical for more than forty
-        // bytes, including the whole prologue, the tag load, the bound check and the entry fetch. The only thing that
-        // separates the SkillInfo resolver from its siblings is which manager global it loads, which lives in a
-        // RIP-relative displacement. A byte signature therefore cannot identify this function without baking that
-        // displacement, and a baked displacement stops matching on the next build that relocates the global. The scan
-        // below matches the shared family shape and then picks the right member by reading the manager's RTTI class
-        // name, which survives relocation.
+        // There is exactly one resolution path, and it must stay that way. The engine emits one byte-identical index
+        // lookup per pa::*InfoManager class, and each takes its manager in rcx, so neither a byte signature nor the
+        // lookup's own body can tell the SkillInfo instance apart. The registrar's body can: it loads the SkillInfo
+        // manager from its global and calls the right instance directly after. The scan below enumerates the manager
+        // loads in the registrar and keeps the one whose global holds a pa::SkillInfoManager, by RTTI class name, which
+        // survives relocation.
         //
-        // Resolution is deferred out of init() on purpose. The scan identifies the resolver through a live
-        // pa::SkillInfoManager, and that singleton does not exist when init() runs, because the mod resolves its
-        // anchors during the save-load window. The hooked registrar is a shared engine routine that also registers
-        // character built-in passives, so the first detour call cannot guarantee a live singleton either. The scan
-        // therefore repeats on every call until it binds. It runs on audio-classifier registrations, which happen on
-        // equip and spawn, never per frame.
+        // Resolution is deferred out of init() on purpose. The RTTI check needs a live pa::SkillInfoManager, and that
+        // singleton does not exist when init() runs, because the mod resolves its anchors during the save-load window.
+        // The hooked registrar is a shared engine routine that also registers character built-in passives, so the
+        // first detour call cannot guarantee a live singleton either. The scan therefore repeats on every call until it
+        // binds. It runs on audio-classifier registrations, which happen on equip and spawn, never per frame.
         //
         // noexcept: callers are noexcept and run on equip threads. The try wrapper swallows a log or allocation throw.
         // The compare-exchange publishes the pointer to acquire-loading readers regardless of whether logging throws
-        // afterwards, and it guarantees a single winner if two equip threads resolve at the same time.
-        void ensure_skill_tag_resolver() noexcept
+        // afterwards, and it guarantees a single winner if two equip threads resolve at the same time. Both winners of
+        // a race resolve the same pair from the same image bytes, so the slot store is idempotent.
+        void ensure_skill_lookup() noexcept
         {
-            if (g_skill_tag_resolver.load(std::memory_order_acquire) != nullptr)
+            if (g_skill_lookup.load(std::memory_order_acquire) != nullptr)
                 return; // already bound, terminal
             try
             {
-                const std::uintptr_t addr = resolve_skill_tag_resolver();
-                if (addr == 0)
+                const auto site = resolve_skill_lookup();
+                if (site.lookup == 0 || site.manager_slot == 0)
                     return; // nothing resolved this call, retry on the next
 
-                SkillTagResolverFn expected = nullptr;
-                if (g_skill_tag_resolver.compare_exchange_strong(
+                g_skill_manager_slot.store(site.manager_slot, std::memory_order_relaxed);
+                SkillLookupFn expected = nullptr;
+                if (g_skill_lookup.compare_exchange_strong(
                         expected,
-                        reinterpret_cast<SkillTagResolverFn>(addr),
+                        reinterpret_cast<SkillLookupFn>(site.lookup),
                         std::memory_order_release,
                         std::memory_order_relaxed
                     ))
-                    DMK::log().info("[helm-audio] skill-tag resolver bound at 0x{:X}", addr);
+                    DMK::log().info(
+                        "[helm-audio] skill lookup bound at 0x{:X} (SkillInfo manager slot 0x{:X})",
+                        site.lookup,
+                        site.manager_slot
+                    );
             }
             catch (...)
             {
@@ -195,10 +210,10 @@ namespace Transmog::helm_audio_filter
 
         // The `a3` record in the engine layout: `{ u32 skill_key, u32 level }`.
         //
-        // The low half of `skill_key` is the catalog index. The resolver reads `movzx reg, word [a3]` and bound-checks
-        // that half against the SkillInfoManager entry count. The high half belongs to the key but takes no part in
-        // the lookup, so the engine never constrains it and the catalog can carry any value there. Report that half
-        // for diagnosis, and never gate on it: it is content, not structure.
+        // The low half of `skill_key` is the catalog index. The registrar reads `movzx edx, word [a3]` and the lookup
+        // bound-checks that half against the SkillInfoManager entry count. The high half belongs to the key but takes
+        // no part in the lookup, so the engine never constrains it and the catalog can carry any value there. Report
+        // that half for diagnosis, and never gate on it: it is content, not structure.
         struct ClassifierProbe
         {
             std::uint32_t skill_key = 0;
@@ -274,7 +289,7 @@ namespace Transmog::helm_audio_filter
         // the entry's vtable, and returns true iff the entry's class is `pa::GameAudioEffectBuffData`.
         //
         // Chain:
-        //   record       = skill_tag_resolver(a3)             // engine resolver
+        //   record       = skill_lookup(*manager_slot, *a3)   // engine lookup
         //   level_table  = *(record + SKILL_RECORD_LEVEL_TABLE_OFFSET)
         //   inner_arr    = *(level_table + 0x00)              // first inner ptr
         //   first_entry  = *(inner_arr + 0x00)                // level 1 entry #1
@@ -293,22 +308,27 @@ namespace Transmog::helm_audio_filter
         // Iteminfo dump cross-check: the muffle helms are those that equip skill 91000 or 91001.
         bool is_audio_muffle_class(std::uint16_t *a3) noexcept
         {
-            // Bind the resolver on first use. The bind retries while unbound. Until a bind holds, pass through.
-            ensure_skill_tag_resolver();
-            const auto resolver = g_skill_tag_resolver.load(std::memory_order_acquire);
-            if (resolver == nullptr || g_game_audio_effect_vtable == 0 || a3 == nullptr)
+            // Bind the lookup on first use. The bind retries while unbound. Until a bind holds, pass through.
+            ensure_skill_lookup();
+            const auto lookup = g_skill_lookup.load(std::memory_order_acquire);
+            if (lookup == nullptr || g_game_audio_effect_vtable == 0 || a3 == nullptr)
                 return false;
 
-            // The resolver is engine code. In theory it is faultless, given the tag pointer's heap origin, but a torn
-            // iteminfo refresh can publish a stale pointer mid-equip. The trampoline detour is reached from arbitrary
-            // equip threads. Our own SEH frame around the call is cheaper than a proof of the engine's invariants, and
-            // a fault here then passes through to the registrar instead of a crash.
-            // The resolver reads the tag through a3 inside the same frame, since a3 is the pointer a torn refresh can
-            // leave stale.
+            const auto manager_slot = g_skill_manager_slot.load(std::memory_order_relaxed);
+            const auto manager = DMK::memory::read<std::uintptr_t>(DMK::Address{manager_slot}).value_or(0);
+            const auto tag = DMK::memory::read<std::uint16_t>(DMK::Address{reinterpret_cast<std::uintptr_t>(a3)});
+            if (!DMK::memory::is_plausible_ptr(DMK::Address{manager}) || !tag)
+                return false;
+            const std::uint32_t index = *tag;
+
+            // The lookup is engine code. In theory it is faultless, given a live manager and a bound-checked index,
+            // but the trampoline detour is reached from arbitrary equip threads. Our own SEH frame around the call is
+            // cheaper than a proof of the engine's invariants, and a fault here then passes through to the registrar
+            // instead of a crash.
             std::int64_t record = 0;
             __try
             {
-                record = resolver(a3);
+                record = lookup(manager, index);
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
@@ -780,108 +800,103 @@ namespace Transmog::helm_audio_filter
             return a2;
         }
 
-        // Resolves the engine's u16-tag -> SkillInfo record resolver in a way meant to survive game updates rather than
-        // pinning it to one build's addresses.
+        // Resolves the SkillInfo manager slot and the engine's skill row lookup in a way meant to survive game updates
+        // rather than pinning them to one build's addresses.
         //
-        // The engine emits a family of pa::*InfoManager index resolvers from one shared template. Their tag capture,
-        // manager load and bound check differ ONLY in the RIP-relative disp32 that names their manager-pointer global.
-        // A signature that bakes that disp32 only matches the build it was captured from, because the linker
-        // recomputes that displacement on every rebuild.
+        // The engine emits one index lookup per pa::*InfoManager class from one shared template, and each instance
+        // takes its manager in rcx, so the lookup itself names no manager. The hooked registrar names it: it loads the
+        // SkillInfo manager from its global into rcx and calls the SkillInfo instance right after, to resolve the very
+        // tag it registers. This scan reads the registrar's body (SKILL_LOOKUP_REGISTRAR_WINDOW bytes from the entry)
+        // for every `mov rcx,[rip+disp32]`, keeps the load whose global holds an object of the MSVC RTTI class
+        // SKILL_INFO_MANAGER_RTTI_NAME, and takes the first `E8` call within SKILL_LOOKUP_CALL_WINDOW bytes after it.
+        // The class name is a source-level identity that outlives recompiles and address reshuffles.
         //
-        // This path instead signs ONLY the opcode/ModRM body shape (every movable operand wildcarded: the manager
-        // disp32 and the forward-jump rel32), then disambiguates the structurally identical hits at runtime by the
-        // MSVC RTTI class name of the manager each resolver references. The class name is a source-level identity that
-        // tends to outlive recompiles and address reshuffles, so this keeps working when the function or its manager
-        // global moves. The SkillInfo resolver is the lowest-address member of the family, so the sweep usually returns
-        // on the first hit. Correctness does not depend on that ordering, because every hit is RTTI-checked.
-        [[nodiscard]] std::uintptr_t resolve_skill_tag_resolver()
+        // The inline hook rewrites only the registrar's first bytes, and the first manager load sits well past them,
+        // so the scan reads unpatched engine code whether or not the hook is armed.
+        [[nodiscard]] SkillLookupSite resolve_skill_lookup()
         {
             auto &log = DMK::log();
 
-            // The two signature inputs - the resolver's opcode body shape (every movable operand wildcarded) and the
-            // target manager's decorated RTTI name - live in aob_resolver.hpp (SKILL_TAG_RESOLVER_BODY_AOB /
-            // SKILL_INFO_MANAGER_RTTI_NAME), next to the other candidate cascades, so all of this mod's signatures stay
-            // in one place. This target has no fallback cascade: the RTTI pick is the only path. The offsets used below
-            // to read the manager disp32 are named there too. The entry comes from the exception table, because the
-            // body's distance from it differs between members of the family.
-            // The pattern is compiled at build time (Pattern::literal is consteval), so there is no parse step to
-            // fail here.
             const auto range = DMK::Region::host();
-            if (range.size == 0)
-                return 0;
+            if (range.size == 0 || g_registrar_entry == 0)
+                return {};
 
-            // unchecked::find_pattern, not scan(): this sweep visits every member of the body-shape family, and
-            // scan() walks the OS page map on every call, which is a startup-time cost its own note warns against
-            // paying in a loop. The raw twin does no page filtering, so the caller owns readability - and the scope
-            // here IS one mapped PE image, every byte of it committed. Page gating also buys nothing at this site:
-            // the query bytes live in this DLL's own .rdata, outside the scanned image, so a match can never be the
-            // query finding itself.
-            const auto *cur = range.base.ptr<const std::byte>();
-            const auto *const end = range.end().ptr<const std::byte>();
-            std::size_t scanned = 0;
+            // unchecked::find_pattern, not scan(): the window is one committed function inside the mapped PE image,
+            // and scan() walks the OS page map on every call, which is a cost its own note warns against paying in a
+            // loop. Page gating also buys nothing at this site: the query bytes live in this DLL's own .rdata, outside
+            // the scanned image, so a match can never be the query finding itself.
+            const auto *cur = reinterpret_cast<const std::byte *>(g_registrar_entry);
+            const auto *const end = cur + ::Transmog::SKILL_LOOKUP_REGISTRAR_WINDOW;
+            std::size_t loads = 0;
 
             while (cur < end)
             {
                 const auto *const hit = DMK::scan::unchecked::find_pattern(
                     DMK::Region{DMK::Address{cur}, static_cast<std::size_t>(end - cur)},
-                    ::Transmog::SKILL_TAG_RESOLVER_BODY_AOB
+                    ::Transmog::SKILL_MANAGER_LOAD_AOB
                 );
                 if (hit == nullptr)
                     break;
 
-                ++scanned;
-                const auto match = reinterpret_cast<std::uintptr_t>(hit);
+                ++loads;
+                const auto site = reinterpret_cast<std::uintptr_t>(hit);
+                cur = hit + 1;
 
-                // mov rcx,[rip+disp32]: the 4-byte tag capture, then 48 8B 0D + disp32. disp32 sits at body offset
-                // +DispOffset. The mov ends at +InstrEnd, which is the RIP base for it. resolve_rip_relative adds
-                // the base and the displacement exactly the same way, reads the disp32 under the fault guard, and
-                // rejects an implausible target before it reaches the host-image screen below.
-                const auto mgr_global = DMK::scan::resolve_rip_relative(
-                    DMK::Address{match},
-                    static_cast<std::size_t>(::Transmog::SKILL_TAG_RESOLVER_DISP_OFFSET),
-                    static_cast<std::size_t>(::Transmog::SKILL_TAG_RESOLVER_INSTR_END)
+                // resolve_rip_relative adds the RIP base and the displacement, reads the disp32 under the fault guard,
+                // and rejects an implausible target before the host-image screen below.
+                const auto slot = DMK::scan::resolve_rip_relative(
+                    DMK::Address{site},
+                    static_cast<std::size_t>(::Transmog::SKILL_MANAGER_LOAD_DISP_OFFSET),
+                    static_cast<std::size_t>(::Transmog::SKILL_MANAGER_LOAD_LENGTH)
                 );
-                if (mgr_global.has_value())
+                // The pointer SLOT lives in the EXE image (.data/.bss). The manager object it points at is on the heap,
+                // and that object's vtable is back inside the image.
+                if (!slot || !range.contains(*slot))
+                    continue;
+                const auto manager = DMK::memory::read<std::uintptr_t>(*slot).value_or(0);
+                const auto vtbl = DMK::memory::read<std::uintptr_t>(DMK::Address{manager}).value_or(0);
+                if (!DMK::rtti::vtable_is_type(DMK::Address{vtbl}, ::Transmog::SKILL_INFO_MANAGER_RTTI_NAME))
+                    continue;
+
+                const auto load_end = site + static_cast<std::uintptr_t>(::Transmog::SKILL_MANAGER_LOAD_LENGTH);
+                const auto lookup = DMK::scan::find_and_resolve_rip_relative(
+                    DMK::Region{DMK::Address{load_end}, ::Transmog::SKILL_LOOKUP_CALL_WINDOW},
+                    DMK::scan::PREFIX_CALL_REL32,
+                    5
+                );
+                if (!lookup || !range.contains(*lookup) ||
+                    !DMK::scan::is_likely_function_prologue(DMK::Address{lookup->raw()}))
                 {
-                    // The pointer SLOT lives in the EXE image (.data/.bss). The manager object it points at is on the
-                    // heap, and that object's vtable is back inside the image.
-                    if (range.contains(*mgr_global))
-                    {
-                        const auto mgr_obj = DMK::memory::read<std::uintptr_t>(*mgr_global).value_or(0);
-                        const auto vtbl = DMK::memory::read<std::uintptr_t>(DMK::Address{mgr_obj}).value_or(0);
-                        if (DMK::rtti::vtable_is_type(DMK::Address{vtbl}, ::Transmog::SKILL_INFO_MANAGER_RTTI_NAME))
-                        {
-                            DWORD64 image_base = 0;
-                            const RUNTIME_FUNCTION *unwind =
-                                RtlLookupFunctionEntry(static_cast<DWORD64>(match), &image_base, nullptr);
-                            const std::uintptr_t entry =
-                                unwind ? static_cast<std::uintptr_t>(image_base + unwind->BeginAddress) : 0;
-                            if (entry != 0 && entry < match &&
-                                DMK::scan::is_likely_function_prologue(DMK::Address{entry}))
-                            {
-                                log.info(
-                                    "[helm-audio] skill-tag resolver resolved via RTTI '{}' at 0x{:X} "
-                                    "(hit #{} of body-shape family)",
-                                    ::Transmog::SKILL_INFO_MANAGER_RTTI_NAME,
-                                    entry,
-                                    scanned
-                                );
-                                return entry;
-                            }
-                        }
-                    }
+                    // A load without its call is a layout change, not a transient state, so the bind retries on every
+                    // registration. Report it once rather than on each equip.
+                    static std::atomic<bool> s_call_miss_reported{false};
+                    if (!s_call_miss_reported.exchange(true, std::memory_order_relaxed))
+                        log.warning(
+                            "[helm-audio] SkillInfo manager load at 0x{:X} has no lookup call within {} bytes",
+                            site,
+                            ::Transmog::SKILL_LOOKUP_CALL_WINDOW
+                        );
+                    return {};
                 }
 
-                cur = hit + 1;
+                log.info(
+                    "[helm-audio] skill lookup resolved via RTTI '{}': load at 0x{:X} (manager load #{} in the "
+                    "registrar), lookup 0x{:X}",
+                    ::Transmog::SKILL_INFO_MANAGER_RTTI_NAME,
+                    site,
+                    loads,
+                    lookup->raw()
+                );
+                return {slot->raw(), lookup->raw()};
             }
 
-            // Expected while the SkillInfoManager singleton is still constructing. ensure_skill_tag_resolver re-scans
-            // on later calls, so a missing hit here is a trace, not a warning.
+            // Expected while the SkillInfoManager singleton is still constructing. ensure_skill_lookup re-scans on
+            // later calls, so a missing hit here is a trace, not a warning.
             log.trace(
-                "[helm-audio] RTTI scan: no SkillInfoManager resolver among {} body-shape matches (will retry)",
-                scanned
+                "[helm-audio] RTTI scan: no SkillInfoManager load among {} manager loads in the registrar (will retry)",
+                loads
             );
-            return 0;
+            return {};
         }
     } // namespace
 
@@ -904,10 +919,11 @@ namespace Transmog::helm_audio_filter
             return false;
         }
 
-        // The engine's tag -> skill record resolver binds lazily on the first registrar detour invocation rather than
-        // here: its RTTI primary needs the pa::SkillInfoManager singleton to be live, which this init pass cannot
-        // guarantee, but which skill registration (the hooked path) does guarantee. A resolve failure there only makes
-        // is_audio_muffle_class pass through, so it never blocks hook installation. See ensure_skill_tag_resolver.
+        // The engine's skill row lookup binds lazily on the first registrar detour invocation rather than here: its
+        // RTTI check needs the pa::SkillInfoManager singleton to be live, which this init pass cannot guarantee, but
+        // which skill registration (the hooked path) does guarantee. A resolve failure there only makes
+        // is_audio_muffle_class pass through, so it never blocks hook installation. See ensure_skill_lookup.
+        g_registrar_entry = target;
 
         // Resolve the pa::GameAudioEffectBuffData vtable. Each instance of that class stores its vtable base in its
         // first qword, so the filter compares buff_instance[0] against g_game_audio_effect_vtable to identify muffle-class
@@ -960,7 +976,7 @@ namespace Transmog::helm_audio_filter
 
         log.info(
             "[helm-audio] inline-hook installed at 0x{:X} "
-            "(audio-vtable=0x{:X}, player-static=0x{:X}); skill-tag resolver bound on first use",
+            "(audio-vtable=0x{:X}, player-static=0x{:X}); skill lookup bound on first use",
             target,
             vtable_addr,
             g_player_static

@@ -4,6 +4,7 @@
 #include "real_part_tear_down.hpp"
 #include "shared_state.hpp"
 #include "slot_metadata.hpp"
+#include "static_info_manager.hpp"
 #include "transmog_map.hpp"
 
 #include <cdcore/controlled_char.hpp>
@@ -75,10 +76,10 @@ namespace Transmog::real_part_tear_down
         //   so a reader who cross-checks against a disassembler database must match the byte pattern in
         //   safe_tear_down(), never a name.
         //
-        // ItemAccessor - the iteminfo id -> descriptor resolver. It takes a POINTER to the u16 item id in rcx, the
-        //   same convention as the rest of the pa::*InfoManager resolver family (see SKILL_TAG_RESOLVER_BODY_AOB).
-        //   An id past the manager's count returns the manager's default descriptor, whose item key is 0, so the key
-        //   check below also rejects an id that names nothing.
+        // ItemAccessor - the iteminfo id -> descriptor lookup, the iteminfo instance of the engine's
+        //   `def *lookup(Manager *, u32 index)` template. It takes the iteminfo manager in rcx and the item id by value
+        //   in edx, the same convention as every pa::*InfoManager lookup (see static_info_manager.hpp). An id past the
+        //   manager's count returns null, so the null check below also rejects an id that names nothing.
 
         // SafeTearDown's second argument is the 32-bit item key, never the 16-bit item id. SafeTearDown converts the
         // key back to an id itself, so any other value makes the call a silent no-op: it matches no part, detaches
@@ -86,24 +87,31 @@ namespace Transmog::real_part_tear_down
         using SafeTearDownFn =
             std::int64_t(__fastcall *)(std::int64_t a1, std::uint32_t item_key, std::int16_t slot_tag);
 
-        using ItemAccessorFn = const void *(__fastcall *)(const std::uint16_t *item_id);
+        using ItemAccessorFn = const void *(__fastcall *)(std::uintptr_t manager, std::uint32_t item_id);
 
-        // Descriptor -> u32 item key. SafeTearDown reads the same field off the descriptor ItemAccessor returns. A
-        // stale offset fails SILENTLY: every tear-down then passes one constant value, detaches nothing and returns
-        // normally, which shows as the same `key=` on every [dispatch] tear_down line.
-        constexpr std::ptrdiff_t DESC_ITEM_KEY_OFFSET = 0x08;
+        // Descriptor -> u32 item key. SafeTearDown reads the same field off the descriptor ItemAccessor returns: the
+        // catalog key that heads every definition (static_info::DEF_KEY_OFFSET). A stale offset fails SILENTLY: every
+        // tear-down then passes one constant value, detaches nothing and returns normally, which shows as the same
+        // `key=` on every [dispatch] tear_down line.
+        constexpr std::ptrdiff_t DESC_ITEM_KEY_OFFSET = Transmog::static_info::DEF_KEY_OFFSET;
 
         /**
          * @brief Resolve an item id to the item key SafeTearDown takes.
-         * @return The key, or 0 when the accessor faults or returns null, or the descriptor holds no key.
+         * @return The key, or 0 when the manager is not live, the accessor faults or returns null, or the descriptor
+         *         holds no key.
          * @note The accessor is engine code reached from the apply worker, so it runs under its own SEH frame.
          */
         std::uint32_t item_key_for(ItemAccessorFn accessor, std::uint16_t item_id) noexcept
         {
+            const auto holder = Transmog::ItemNameTable::instance().iteminfo_holder_addr();
+            const auto manager = DMK::memory::read<std::uintptr_t>(DMK::Address{holder}).value_or(0);
+            if (!DMK::memory::is_plausible_ptr(DMK::Address{manager}))
+                return 0;
+
             const void *desc = nullptr;
             __try
             {
-                desc = accessor(&item_id);
+                desc = accessor(manager, item_id);
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
