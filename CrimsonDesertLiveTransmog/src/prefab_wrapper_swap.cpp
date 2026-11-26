@@ -61,21 +61,22 @@ namespace Transmog::prefab_wrapper_swap
     // the plausibility guard below does not trip and the walk emits garbage instead of a bail. Verify the layout
     // against live memory on patch day.
     // Per-entry layout:
-    //   +0x00 the StringInfo sentinel (resolved into s_string_info_vtable: the engine's static empty wrapper),
-    //   +0x08 u32 name hash, +0x10 wrapper-ptr
+    //   +0x00 u32 name hash (lookup3, the same value as the row key), +0x04 u32 row index, +0x10 wrapper-ptr
     // The name lives in the wrapper. A short-name entry embeds its wrapper inside the entry itself, so its characters
-    // land inside the header copy below. A long-name entry points at an external wrapper.
+    // land inside the header copy below. A long-name entry points at an external wrapper. The row's own name slot
+    // holds the StringInfo sentinel (resolved into s_string_info_vtable: the engine's static empty wrapper), so the
+    // entry's string is reached only through +0x10.
     //
-    // A stale per-entry layout fails SILENTLY: the sentinel compare rejects every entry and the catalog walk reports
-    // vtable-pass=0. Check that counter first on patch day.
+    // A stale per-entry layout fails SILENTLY: the row-index compare rejects every entry and the catalog walk reports
+    // index-pass=0. Check that counter first on patch day.
     //
     // Wrapper layout:
     //   +0x00 string ptr, +0x08 u32 length, +0x0C u32 hash (or WRAPPER_HASH_UNSET), +0x10 refcount i32,
     //   +0x14 mode flag, +0x15 tombstone
 
     // Layout / sanity constants (compile-time only, not patchable).
-    constexpr std::size_t ENTRY_SENTINEL_OFF = 0x00;
-    constexpr std::size_t ENTRY_HASH_OFF = 0x08;
+    constexpr std::size_t ENTRY_HASH_OFF = 0x00;
+    constexpr std::size_t ENTRY_ROW_INDEX_OFF = 0x04;
     constexpr std::size_t WRAPPER_PTR_OFF = 0x10;
     constexpr std::size_t EXT_NAME_MAX = 256;
     // Cap on a loader-resolved prefab name. Used by both name-resolution sites in this file.
@@ -835,10 +836,10 @@ namespace Transmog::prefab_wrapper_swap
 
         const auto walk_start = std::chrono::steady_clock::now();
         std::uint32_t scanned = 0;
-        std::uint32_t vt_matched = 0;
+        std::uint32_t index_matched = 0;
         std::uint32_t pref_matched = 0;
 
-        // Same 128B header copy: covers the sentinel, the hash, the wrapper-ptr, and an embedded short-name wrapper
+        // Same 128B header copy: covers the hash, the row index, the wrapper-ptr, and an embedded short-name wrapper
         // with its characters.
         constexpr std::size_t header_bytes = 0x80;
         alignas(8) std::uint8_t header[header_bytes];
@@ -859,15 +860,6 @@ namespace Transmog::prefab_wrapper_swap
             return ext_len != SIZE_MAX && ext_len > 0;
         };
 
-        // Snapshot the resolved sentinel ONCE per walk - this avoids an atomic load per entry across the whole
-        // registry walk.
-        const auto vtable_sentinel = s_string_info_vtable.load(std::memory_order_acquire);
-        if (!DMK::memory::is_plausible_ptr(DMK::Address{vtable_sentinel}))
-        {
-            logger.warning("[prefab-swap] walk_string_info: StringInfo vtable sentinel not resolved - aborting walk");
-            return 0;
-        }
-
         char buf[EXT_NAME_MAX + 1] = {0};
         for (std::uint32_t i = 0; i < count; ++i)
         {
@@ -886,10 +878,12 @@ namespace Transmog::prefab_wrapper_swap
                      .has_value())
                 continue;
 
-            const std::uintptr_t vtable = *reinterpret_cast<const std::uintptr_t *>(header + ENTRY_SENTINEL_OFF);
-            if (vtable != vtable_sentinel)
+            // An entry names its own row. A stale entry layout or row geometry reads a hash or a pointer half there,
+            // which never equals the index.
+            const std::uint32_t row_index = *reinterpret_cast<const std::uint32_t *>(header + ENTRY_ROW_INDEX_OFF);
+            if (row_index != i)
                 continue;
-            ++vt_matched;
+            ++index_matched;
 
             const std::uintptr_t entry_wrapper = *reinterpret_cast<const std::uintptr_t *>(header + WRAPPER_PTR_OFF);
             const std::uint32_t entry_hash = *reinterpret_cast<const std::uint32_t *>(header + ENTRY_HASH_OFF);
@@ -964,10 +958,10 @@ namespace Transmog::prefab_wrapper_swap
             std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - walk_start)
                 .count();
         logger.debug(
-            "[prefab-swap] StringInfo walk: count={} scanned={} vtable-pass={} prefix-pass={} prefix=\"{}\" ({}ms)",
+            "[prefab-swap] StringInfo walk: count={} scanned={} index-pass={} prefix-pass={} prefix=\"{}\" ({}ms)",
             count,
             scanned,
-            vt_matched,
+            index_matched,
             pref_matched,
             prefix.empty() ? std::string_view{"(none)"} : prefix,
             walk_ms

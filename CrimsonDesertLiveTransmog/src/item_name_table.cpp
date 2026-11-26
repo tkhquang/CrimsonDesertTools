@@ -73,10 +73,9 @@ namespace Transmog
     // as base items keep their statistical dominance of the catalog.
     static constexpr std::ptrdiff_t DESC_VARIANT_META_OFFSET = 0xF4;
 
-    // Item-name wrapper: a pointer to the wrapper whose first qword is the internal name's char*. It moves when the
-    // descriptor head changes shape. A stale value reads a packed scalar, every descriptor fails the plausibility
-    // check, and the catalog builds EMPTY: presets are keyed by name, so nothing resolves.
-    static constexpr std::ptrdiff_t DESC_NAME_WRAPPER_OFFSET = 0x00;
+    // The item's internal name is not on the descriptor. The manager row owns it (static_info::name_slot): a pointer
+    // to the wrapper whose first qword is the name's char*. A stale row geometry reads a packed scalar, every row
+    // fails the plausibility check, and the catalog builds EMPTY: presets are keyed by name, so nothing resolves.
 
     // Item-type code, u16. This is the engine's own equip-slot key: SlotPopulator reads it out of the descriptor to
     // index its EquipTypeInfo table.
@@ -393,11 +392,9 @@ namespace Transmog
     /// Rows sampled per candidate before the probe rejects it.
     static constexpr std::size_t GROUP_HOLDER_PROBE_ROWS = 16;
 
-    // A group row names itself through a {char*, u32 length} wrapper, the same shape an item descriptor's name uses.
-    // The reader accepts only a string of exactly the stated length whose prefix is "ItemGroup", so a stale offset
-    // resolves nothing instead of a neighbor's field.
-    /// Registry row -> name wrapper.
-    static constexpr std::ptrdiff_t GROUP_ROW_NAME_WRAPPER_OFFSET = 0x00;
+    // A group row names itself through a {char*, u32 length} wrapper, the same shape an item's name uses, and the
+    // manager row holds it (static_info::name_slot). The reader accepts only a string of exactly the stated length
+    // whose prefix is "ItemGroup", so a stale offset resolves nothing instead of a neighbor's field.
     static constexpr std::size_t MAX_GROUP_NAME_LEN = 160;
     static constexpr std::string_view GROUP_NAME_PREFIX = "ItemGroup";
 
@@ -405,12 +402,13 @@ namespace Transmog
 
     /**
      * @brief Read one group row's name.
+     * @param name_slot Address of the row's name-wrapper slot (static_info::name_slot).
      * @return The name, or an empty string when the row does not resolve to an "ItemGroup..." name.
      */
-    static std::string read_group_name(uintptr_t row) noexcept
+    static std::string read_group_name(uintptr_t name_slot) noexcept
     {
         bool ok = false;
-        const uintptr_t wrapper = read_qword_safe(row + GROUP_ROW_NAME_WRAPPER_OFFSET, ok);
+        const uintptr_t wrapper = read_qword_safe(name_slot, ok);
         if (!ok || !DMK::memory::is_plausible_ptr(DMK::Address{wrapper}))
             return {};
         const uintptr_t str_ptr = read_qword_safe(wrapper, ok);
@@ -452,10 +450,7 @@ namespace Transmog
             const auto sample = (std::min)(static_cast<std::size_t>(count), GROUP_HOLDER_PROBE_ROWS);
             for (std::size_t i = 0; i < sample; ++i)
             {
-                const uintptr_t row = read_qword_safe(static_info::def_slot(rows, i), ok);
-                if (!ok || !DMK::memory::is_plausible_ptr(DMK::Address{row}))
-                    continue;
-                if (!read_group_name(row).empty())
+                if (!read_group_name(static_info::name_slot(rows, i)).empty())
                     return holder;
             }
         }
@@ -500,10 +495,7 @@ namespace Transmog
         }
         for (uint32_t i = 0; i < count; ++i)
         {
-            const uintptr_t row = read_qword_safe(static_info::def_slot(rows, i), ok);
-            if (!ok || !DMK::memory::is_plausible_ptr(DMK::Address{row}))
-                continue;
-            const auto name = read_group_name(row);
+            const auto name = read_group_name(static_info::name_slot(rows, i));
             if (name.empty())
                 continue;
             const auto mapped = slot_from_group_name(name);
@@ -586,7 +578,7 @@ namespace Transmog
         return s;
     }
 
-    // Cached intermediate addresses from the 4-hop chain, resolved once in the first build() call. Keeps retry cost to
+    // Cached addresses from the chain walk, resolved once in the first build() call. Keeps retry cost to
     // just the catalog walk (and the null-check on the global holder).
     struct ResolvedChain
     {
@@ -665,58 +657,64 @@ namespace Transmog
         }
         const uintptr_t desc_init = desc_init_addr->raw();
 
-        // The first `E8` call inside the item descriptor initializer targets ItemAccessor. The DMK sweep skips a
-        // coincidental 0xE8 whose disp32 lands on an implausible or unreadable target, then continues the sweep, and
-        // it names the concrete failure rather than a silent zero for every miss.
-        const auto accessor_addr = DMK::scan::find_and_resolve_rip_relative(
-            DMK::Region{DMK::Address{desc_init}, 0x180},
-            DMK::scan::PREFIX_CALL_REL32,
-            5
-        );
-        if (!accessor_addr)
+        // The item descriptor initializer resolves its item through the iteminfo manager's index lookup: it loads the
+        // manager from the iteminfo holder into rcx and calls the lookup on the very next instruction. The first such
+        // pair in the initializer is the one that serves the item. Both the holder and the lookup come out of that one
+        // match. The anchored row (NAMETABLE_DESC_INIT_LOOKUP_ANCHOR) also pins the item-id read ahead of the load,
+        // and the loose row (NAMETABLE_DESC_INIT_LOOKUP_LOOSE_ANCHOR) takes the first load-and-call pair on its own.
+        //
+        // The lookup is one template instance per manager class, `def *lookup(Manager *, u32 index)`, byte-identical
+        // across the classes. The call graph is what picks the iteminfo instance, so it is never AOB-located on its
+        // own.
+        const DMK::Region init_window{DMK::Address{desc_init}, 0x180};
+        auto match2 =
+            DMK::scan::scan(Transmog::NAMETABLE_DESC_INIT_LOOKUP_ANCHOR, init_window, 1, DMK::scan::Pages::Executable);
+        if (!match2)
+        {
+            const auto anchored_error = match2.error().message();
+            match2 = DMK::scan::scan(
+                Transmog::NAMETABLE_DESC_INIT_LOOKUP_LOOSE_ANCHOR,
+                init_window,
+                1,
+                DMK::scan::Pages::Executable
+            );
+            if (match2)
+            {
+                (void)logger.try_log(
+                    DMK::LogLevel::Warning,
+                    "[nametable] item-id read ahead of the iteminfo lookup not matched ({}). Took the first "
+                    "manager load and call in the descriptor initializer instead",
+                    anchored_error
+                );
+            }
+        }
+        if (!match2)
         {
             (void)logger.try_log(
                 DMK::LogLevel::Warning,
-                "[nametable] no rel-call found inside the descriptor initializer: {}",
-                accessor_addr.error().message()
+                "[nametable] iteminfo lookup call not found inside the descriptor initializer at 0x{:X}: {}",
+                desc_init,
+                match2.error().message()
+            );
+            return false;
+        }
+
+        // The `|` marker points at the `48 8B 0D disp32` holder load: disp32 at +3, total length 7. The `E8 rel32`
+        // call follows it directly: rel32 at +8, call length 5. resolve_rip_relative reads each displacement under a
+        // fault guard and rejects an implausible target.
+        const auto holder = DMK::scan::resolve_rip_relative(*match2, 3, 7);
+        const auto accessor_addr = DMK::scan::resolve_rip_relative(DMK::Address{match2->raw() + 7}, 1, 5);
+        if (!holder || !accessor_addr)
+        {
+            (void)logger.try_log(
+                DMK::LogLevel::Warning,
+                "[nametable] iteminfo holder or lookup at 0x{:X} did not resolve: {}",
+                match2->raw(),
+                (!holder ? holder.error() : accessor_addr.error()).message()
             );
             return false;
         }
         const uintptr_t item_accessor = accessor_addr->raw();
-
-        // Locate the `mov rcx, cs:<iteminfo holder>` inside ItemAccessor. A fixed offset is not reliable here either,
-        // so scan a bounded 0x40-byte window of THIS function for the prologue tail that precedes it
-        // (NAMETABLE_ITEM_ACCESSOR_ANCHOR). Global uniqueness does not matter, because the scan is locally bounded.
-        //
-        // When the prologue tail misses, the first `mov rcx,[rip+disp32]` in the same window is still the holder
-        // load: every member of the resolver family loads its manager into rcx before any other RIP-relative access
-        // (see SKILL_TAG_RESOLVER_BODY_AOB). The anchored scan stays first because it also pins the instruction's
-        // position behind the tag capture.
-        const DMK::Region accessor_window{DMK::Address{item_accessor}, 0x40};
-        const auto match3 =
-            DMK::scan::scan(Transmog::NAMETABLE_ITEM_ACCESSOR_ANCHOR, accessor_window, 1, DMK::scan::Pages::Executable);
-        // The `|` marker points at the start of the `48 8B 0D disp32` instruction: disp32 at +3, total length 7.
-        const auto holder =
-            match3 ? DMK::scan::resolve_rip_relative(*match3, 3, 7)
-                   : DMK::scan::find_and_resolve_rip_relative(accessor_window, DMK::scan::PREFIX_MOV_RCX_RIP, 7);
-        if (!holder)
-        {
-            (void)logger.try_log(
-                DMK::LogLevel::Warning,
-                "[nametable] iteminfo holder load not resolved within the ItemAccessor prologue at 0x{:X}: {}",
-                item_accessor,
-                holder.error().message()
-            );
-            return false;
-        }
-        if (!match3)
-        {
-            (void)logger.try_log(
-                DMK::LogLevel::Warning,
-                "[nametable] ItemAccessor prologue anchor missed ({}). Took the first mov-rcx load instead",
-                match3.error().message()
-            );
-        }
         chain.global_holder = holder->raw();
         chain.item_accessor = item_accessor;
         chain.resolved = true;
@@ -895,11 +893,11 @@ namespace Transmog
             if (!ok || !DMK::memory::is_plausible_ptr(DMK::Address{desc_ptr}))
                 continue;
 
-            // desc_ptr is reused by two downstream reads (variant_meta and type_code), so it is resolved separately.
-            // Only the wrapper to string pointer hops (desc_ptr -> +DESC_NAME_WRAPPER_OFFSET -> +0x0) are folded into
-            // one guarded walk.
-            static constexpr DMK::memory::ChainStep wrapper_to_string[] = {{DESC_NAME_WRAPPER_OFFSET}, {0x0}};
-            const auto str_slot = DMK::memory::walk(DMK::Address{desc_ptr}, wrapper_to_string);
+            // The name lives on the manager row, not the descriptor. The row's name slot -> wrapper -> char* hops are
+            // folded into one guarded walk.
+            static constexpr DMK::memory::ChainStep wrapper_to_string[] = {{0x0}, {0x0}};
+            const auto str_slot =
+                DMK::memory::walk(DMK::Address{static_info::name_slot(ptr_array, id)}, wrapper_to_string);
             if (!str_slot)
                 continue;
             const auto str_ptr_opt = DMK::memory::read<uintptr_t>(*str_slot);

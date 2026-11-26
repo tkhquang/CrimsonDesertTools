@@ -393,12 +393,18 @@ namespace EquipHide
         // stale on its own. The setup loads the world singleton from a module global, walks it to a large sub-object
         // displacement (in the +0x40000 family that LiveTransmog's LoaderRegistry ladder also walks), and passes an
         // outbound `lea r8,[rbp-X]` result slot. The row wildcards the global's RIP displacement, the sub-object
-        // displacement and the outbound frame slot. The `add rdx,0x40` argument adjustment ahead of the global load is
-        // what makes the window unique image-wide.
+        // displacement and the outbound frame slot.
+        //
+        // A sibling function makes the same rule-eval call twice with the same argument setup, so the setup alone is
+        // NOT unique. What separates this call is where its rdx comes from: createPrefabFromPartPrefab loads it from
+        // the head of a pointer (`mov rdx,[reg]`, no displacement), the sibling from a `+0x10` field (`mov
+        // rdx,[reg+0x10]`). The row opens on that load with the base register wildcarded and the mod bits pinned to
+        // the no-displacement form.
         //
         // Do not extend the row past the call. What follows it is a per-thread flag probe whose slot offset
         // (`mov eax/ecx, 0x1FD`, then `0x1FE`) is renumbered by the build and that a TLS-init call can precede.
         //
+        // 4? 8B 1?               mov rdx, [rsi]
         // 48 83 C2 40            add rdx, 0x40
         // 48 8B 05 ?? ?? ?? ??   mov rax, [rip+d32]
         // 48 8B 08               mov rcx, [rax]
@@ -409,7 +415,7 @@ namespace EquipHide
         Candidate::direct(
             "NpcPfeReturnAddr_P1_RuleEvalCallLandmark",
             Pattern::literal(
-                "48 83 C2 40 48 8B 05 ?? ?? ?? ?? 48 8B 08 4C 8D 45 ?? 48 8B 89 ?? ?? ?? ?? E8 ?? ?? ?? ?? |"
+                "4? 8B 1? 48 83 C2 40 48 8B 05 ?? ?? ?? ?? 48 8B 08 4C 8D 45 ?? 48 8B 89 ?? ?? ?? ?? E8 ?? ?? ?? ?? |"
             )
         ),
     };
@@ -448,8 +454,8 @@ namespace EquipHide
         ),
 
         // L2 - the call, the TLS-init call the engine emits ahead of the per-thread flag probe, then the probe's flag
-        // slot offset and its allocation-size argument. The slot offset's low byte is wildcarded because the build
-        // renumbers it.
+        // slot offset and its allocation-size argument. The build renumbers the slot offset, also across a 0x100
+        // boundary, so the row keeps only the high nibble of its second byte.
         //
         // The TLS-init call stays literal. A `[0-5]` gap in its place lets the TLS-init `E8` open a second match with
         // a zero-width gap, so the row would match twice inside the function and fail require_unique.
@@ -457,11 +463,11 @@ namespace EquipHide
         // E8 ?? ?? ?? ??         call <rel32>
         // |                      result marker, the return address
         // E8 ?? ?? ?? ??         call <rel32>   ; TLS init
-        // B8 ?? 01 00 00         mov eax, 0x1FE
+        // B8 ?? 0? 00 00         mov eax, 0x20E
         // BA 10 00 00 00         mov edx, 0x10
         Candidate::direct(
             "NpcPfeLandmark_L2_CallThenFlagProbe",
-            Pattern::literal("E8 ?? ?? ?? ?? | E8 ?? ?? ?? ?? B8 ?? 01 00 00 BA 10 00 00 00")
+            Pattern::literal("E8 ?? ?? ?? ?? | E8 ?? ?? ?? ?? B8 ?? 0? 00 00 BA 10 00 00 00")
         ),
     };
 

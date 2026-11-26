@@ -44,7 +44,7 @@ namespace Transmog
         // plausibility guard trips and the walk yields nothing useful. On patch day, verify the layout against live
         // memory.
 
-        constexpr ptrdiff_t OFF_NAME = 0x00;
+        // The item's name is on the manager row (static_info::name_slot), not on the descriptor.
         constexpr ptrdiff_t OFF_META_SUB = 0x110;
 
         // The engine stores strings behind a "StringRef" descriptor: {char* ptr @+0x00, u32 len @+0x08}. The
@@ -52,7 +52,7 @@ namespace Transmog
         // form to special-case.
         //
         // Two wrapper shapes reference a StringRef:
-        //   - Item NAME wrappers (desc+OFF_NAME) ARE a StringRef directly.
+        //   - Item NAME wrappers (the row's name slot) ARE a StringRef directly.
         //   - stringinfo ICON wrappers are a larger object that stores a pointer to their StringRef at
         //     OFF_WRAP_DESC. For an inline icon wrapper, that pointer targets a StringRef embedded in the object
         //     itself. For an external one, it targets a StringRef elsewhere on the heap. A dereference of
@@ -1072,7 +1072,7 @@ namespace Transmog
                 ++skipped;
                 continue;
             }
-            const uintptr_t name_wrap = read_qword_safe(desc + OFF_NAME, ok);
+            const uintptr_t name_wrap = read_qword_safe(static_info::name_slot(item_arr, id), ok);
             // The name wrapper IS a StringRef directly (no icon-style +0x18 indirection), so read it as one.
             std::string internal_name = read_string_ref(name_wrap);
             if (internal_name.empty())
